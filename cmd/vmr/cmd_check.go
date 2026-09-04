@@ -15,6 +15,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
+	"vmr/internal/quota"
 	"vmr/internal/router"
 )
 
@@ -434,8 +435,38 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		return
 	}
 	fmt.Fprintln(w, "  quota:")
-	for _, lc := range p.Quota.Limits {
+	// Provider-level bucket/gate roles: a shared Limit's role is judged via
+	// quota.Role against every other Limit that also covers every model
+	// (excluding any restricted-list competitor — see quota.Role's doc
+	// comment), so it's correct as printed. A Limit restricted to exactly
+	// ONE named model is equally resolvable statically — its Scope names
+	// the one model to judge quota.Role against, no live state needed — so
+	// that's precise too. What's left approximated is a wildcard or a
+	// multi-model list: those can genuinely differ per model they cover
+	// (that's the whole point of per-model accounting), so one static line
+	// cannot carry a single correct answer — this falls back to the
+	// full-Limit-set approximation, and a trailing note points at /status
+	// and `vmr status` for the live per-model roles.
+	resolved := make([]core.Limit, len(p.Quota.Limits))
+	for i, lc := range p.Quota.Limits {
+		resolved[i] = lc.Resolved
+	}
+	bi := quota.BucketIndex(resolved)
+	anyApproximated := false // a wildcard or multi-model Limit — the note below is only ever about these
+	for i, lc := range p.Quota.Limits {
 		l := lc.Resolved
+		role := "gate"
+		switch {
+		case !quota.PerModel(l):
+			role = quota.Role(resolved, i, "")
+		case len(l.Models) == 1 && !quota.IsWildcardModels(l.Models):
+			role = quota.Role(resolved, i, l.Models[0])
+		default:
+			anyApproximated = true
+			if i == bi {
+				role = "bucket"
+			}
+		}
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
 		amount := fmt.Sprintf("%g", l.Amount)
 		// A cost-metric amount is denominated in cfg.Pricing.Currency
@@ -444,7 +475,7 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
 			amount += " " + cfg.Pricing.Currency
 		}
-		detail := fmt.Sprintf("every=%s since=%s amount=%s", l.EveryText, since, amount)
+		detail := fmt.Sprintf("role=%s every=%s since=%s amount=%s", role, l.EveryText, since, amount)
 		if len(l.Models) > 0 {
 			detail += " models=" + strings.Join(l.Models, ",")
 		}
@@ -463,6 +494,9 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 			}
 			fmt.Fprintln(w, checkLine(6, "model_multipliers", strings.Join(parts, " ")))
 		}
+	}
+	if anyApproximated {
+		fmt.Fprintln(w, checkLine(4, "note", "a wildcard or multi-model Limit's role can differ per model — /status and vmr status show the live per-model roles"))
 	}
 }
 

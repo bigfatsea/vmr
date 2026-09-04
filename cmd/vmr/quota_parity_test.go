@@ -44,6 +44,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/report"
 	"vmr/internal/respnorm"
@@ -180,6 +181,10 @@ func (r parityRequest) protocolOrDefault() string {
 func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *core.QuotaSpec, rate *core.PricingSpec, now time.Time) float64 {
 	t.Helper()
 	reg := quota.NewRegistry("")
+	// Folded the same way BuildSnapshot mounts it (pricing.FoldSpec) — the
+	// router side of the parity test must drive the router's real entry
+	// point over the router's real endpoint shape.
+	folded := pricing.FoldSpec(rate)
 	for _, r := range reqs {
 		raw, estimated, inSniffed, outSniffed := r.tokenCharge()
 		proto := r.protocolOrDefault()
@@ -187,7 +192,7 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 			if !a.forwarded() {
 				continue // the router only ever charges a forwarded response
 			}
-			ep := &core.Endpoint{AdapterType: proto, Provider: provider, Model: r.model, Quota: spec, PricingRate: rate}
+			ep := &core.Endpoint{AdapterType: proto, Provider: provider, Model: r.model, Quota: spec, PricingRate: folded}
 			router.ChargeResponse(reg, ep, raw, estimated, inSniffed, outSniffed, now)
 		}
 	}
@@ -551,7 +556,8 @@ func TestQuotaParity_TokensMetric_NonIntegerMultiplier(t *testing.T) {
 
 // TestQuotaParity_CostMetric_ReportMatchesRouter covers the third metric.
 // Unlike tokens, the two sides reach their number by genuinely different
-// routes — the router prices at charge time through ep.PricingRate
+// routes — the router prices at charge time through ep.PricingRate (the
+// pre-folded core.Rate BuildSnapshot mounts)
 // (componentCost), the report prices post-hoc through its own
 // pricing.Resolver (cost.go's costFor) — so this pins that both end up on
 // pricing.Rate.Cost with all FOUR components, cache_read included. Dropping
@@ -575,7 +581,8 @@ func TestQuotaParity_CostMetric_ReportMatchesRouter(t *testing.T) {
 		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: 100}
 	spec := &core.QuotaSpec{Limits: []core.Limit{lim}}
 	// Same four per-1M rates costParityYAML declares, as the router would
-	// have resolved them onto the endpoint at BuildSnapshot time.
+	// have resolved them onto the endpoint at BuildSnapshot time (routerCharged
+	// folds the spec through pricing.FoldSpec, the production shape).
 	rate := &core.PricingSpec{Currency: "USD", Base: core.Rate{
 		InFresh: f64p(3), CacheRead: f64p(0.3), CacheWrite: f64p(3.75), Out: f64p(15),
 	}}
@@ -739,10 +746,10 @@ func (r parityRequest) replayChargeFor() (raw quota.Counters, estimated float64,
 // sniffed).
 //
 // The anthropic truncated-after-message_start row is the load-bearing
-// case: replay's chargeReplay used to feed TokenCounters the single
-// `u.In > 0 || u.Out > 0` disjunction, which bills the ~1 placeholder
-// output as EXACT (estimated=0). Both halves now use the per-side rule, so
-// the Out side must be estimated on BOTH sides — the exact thing the old
+// case: replay's chargeReplay used to feed the fold a single merged
+// `u.In > 0 || u.Out > 0` flag, which bills the ~1 placeholder output as
+// EXACT (estimated=0). Both halves now use the per-side rule, so the Out
+// side must be estimated on BOTH sides — the exact thing the old merged
 // disjunction got wrong.
 //
 // The softblock rows are the other load-bearing case: checkSoftBlock exits

@@ -283,7 +283,9 @@ type Config struct {
 	// ResolvedPricing holds every metric:-cost provider+model's fully
 	// resolved pricing.Resolve result, keyed by provider+"\x00"+model —
 	// filled by resolvePricing() during validate(), read by
-	// router.BuildSnapshot to attach core.Endpoint.PricingRate. Not a yaml
+	// router.BuildSnapshot to fold onto core.Endpoint.PricingRate
+	// (pricing.FoldSpec, the pre-folded *core.Rate; this map stays in spec
+	// form so vmr check can still display the override chain). Not a yaml
 	// field: nil when no provider has a metric: cost limit (the common
 	// case — no pricing resolution work was needed at all), non-nil
 	// (possibly still empty) otherwise.

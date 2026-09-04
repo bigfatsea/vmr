@@ -13,6 +13,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/config"
 	"vmr/internal/core"
+	"vmr/internal/pricing"
 	"vmr/internal/strategy"
 )
 
@@ -203,7 +204,10 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m
 				SoftBlockFailover:   effSoftBlockFailover,
 				StickyTTL:           stickyTTL,
 				Quota:               quotaSpecs[providerName],
-				PricingRate:         cfg.ResolvedPricing[providerName+"\x00"+upstreamModel],
+				// Folded once here, read as a plain value on the hot path —
+				// the override chain never re-resolves per request (see
+				// core.Endpoint.PricingRate's doc comment).
+				PricingRate: pricing.FoldSpec(cfg.ResolvedPricing[providerName+"\x00"+upstreamModel]),
 			}
 			// Precompute HealthKey()/Name() once, here, before ep is
 			// ever reachable from a concurrently-read Snapshot (see

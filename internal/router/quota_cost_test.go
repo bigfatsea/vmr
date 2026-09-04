@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"vmr/internal/core"
-	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
 )
@@ -28,22 +27,20 @@ func costLimit(amount float64) core.Limit {
 	}
 }
 
-// fullRate builds a core.PricingSpec whose Base is fully priced — attached
-// to a hand-built core.Endpoint.PricingRate in these unit tests (bypassing
-// config.validate()'s resolution pipeline, which is exercised end-to-end by
+// fullRate builds a fully-priced core.Rate — attached to a hand-built
+// core.Endpoint.PricingRate in these unit tests, the same pre-folded shape
+// pricing.FoldSpec produces at BuildSnapshot time (the spec-side resolution
+// pipeline that feeds it is exercised end-to-end by
 // TestServe_EndToEnd_MetricCost_ChargesRealCost below).
-func fullRate() *core.PricingSpec {
-	return &core.PricingSpec{
-		Base:     core.Rate{InFresh: f(1.0), CacheRead: f(0.1), CacheWrite: f(1.25), Out: f(4.0)},
-		Currency: "USD",
-	}
+func fullRate() *core.Rate {
+	return &core.Rate{InFresh: f(1.0), CacheRead: f(0.1), CacheWrite: f(1.25), Out: f(4.0)}
 }
 
 // --- componentCost: the base(cost) formula itself ---
 
 func TestComponentCost_AllComponentsPriced(t *testing.T) {
 	d := quota.Counters{Fresh: 1_000_000, CacheRead: 1_000_000, CacheWrite: 1_000_000, Out: 1_000_000}
-	rate := pricing.Rate{InFresh: f(1.0), CacheRead: f(0.1), CacheWrite: f(1.25), Out: f(4.0)}
+	rate := &core.Rate{InFresh: f(1.0), CacheRead: f(0.1), CacheWrite: f(1.25), Out: f(4.0)}
 	got := componentCost(d, rate)
 	want := 1.0 + 0.1 + 1.25 + 4.0
 	if got != want {
@@ -53,10 +50,21 @@ func TestComponentCost_AllComponentsPriced(t *testing.T) {
 
 func TestComponentCost_MissingComponent_TreatsAsZero(t *testing.T) {
 	d := quota.Counters{Fresh: 1_000_000, CacheRead: 1_000_000}
-	rate := pricing.Rate{InFresh: f(2.0)} // CacheRead deliberately nil
+	rate := &core.Rate{InFresh: f(2.0)} // CacheRead deliberately nil
 	got := componentCost(d, rate)
 	if got != 2.0 {
 		t.Fatalf("componentCost = %v, want 2.0 (missing cache_read price contributes 0, defensive floor)", got)
+	}
+}
+
+// TestComponentCost_NilRate_TreatsAsZero pins the nil-receiver floor: an
+// endpoint with no pricing resolved (Endpoint.PricingRate == nil) prices
+// everything 0 — the same shape EffectiveRate(nil-spec) used to produce —
+// never a panic.
+func TestComponentCost_NilRate_TreatsAsZero(t *testing.T) {
+	d := quota.Counters{Fresh: 1_000_000, Out: 1_000_000}
+	if got := componentCost(d, nil); got != 0 {
+		t.Fatalf("componentCost(d, nil) = %v, want 0 (defensive floor)", got)
 	}
 }
 
@@ -102,7 +110,7 @@ func TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange(t *tes
 	l := costLimit(1000)
 
 	// "Now": a 50%-off promo is active on this endpoint's PricingRate.
-	promoRate := &core.PricingSpec{Base: core.Rate{InFresh: f(2.0), CacheRead: f(0.2), CacheWrite: f(2.0), Out: f(8.0)}}
+	promoRate := &core.Rate{InFresh: f(2.0), CacheRead: f(0.2), CacheWrite: f(2.0), Out: f(8.0)}
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{l}}, PricingRate: promoRate}
 	creq := &core.CanonicalRequest{}
 
@@ -122,7 +130,7 @@ func TestChargeCost_TimeInvariance_HistoricalCostSurvivesLaterPriceChange(t *tes
 	// operator edits config.yaml and hot-reloads). This is modeled here as
 	// simply mutating ep.PricingRate — chargeQuota already ran, and
 	// nothing about the STORED historical value should move.
-	ep.PricingRate = &core.PricingSpec{Base: core.Rate{InFresh: f(4.0), CacheRead: f(0.4), CacheWrite: f(4.0), Out: f(16.0)}} // full price, no promo
+	ep.PricingRate = &core.Rate{InFresh: f(4.0), CacheRead: f(0.4), CacheWrite: f(4.0), Out: f(16.0)} // full price, no promo
 
 	usedAfterPriceChange, _ := rt.Quota.Used("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
 	if usedAfterPriceChange.Cost != usedAtChargeTime.Cost {
@@ -149,9 +157,9 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 	used, estTokens := rt.Quota.Used("p1", "cost/1mo", quota.PeriodStart(l, chargeNow))
 	if estTokens != 0 {
 		// bucket.Estimated is a requests/tokens-only accumulator; a cost
-		// Limit's degraded-estimate signal is money, tracked via
-		// EstimatedCostFor. The cost branch must not feed a token figure
-		// into Charge's `estimated` param (B6).
+		// Limit's degraded-estimate signal is money, tracked as the bucket's
+		// EstimatedCost (ChargeCost in, Snapshot out). The cost branch must not
+		// feed a token figure into Charge's `estimated` param (B6).
 		t.Fatalf("bucket.Estimated = %v, want 0 for a metric: cost charge", estTokens)
 	}
 	if used.Cost <= 0 {
@@ -166,8 +174,9 @@ func TestChargeCost_DegradedEstimate_TracksEstimatedCost(t *testing.T) {
 // TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide pins VD1: a charge
 // where the input side was sniffed exact but the output side degraded must
 // record only the output side's price as estimated, not the whole cost —
-// EstimatedCostFor drives /status's estimated_pct, and inflating it to ~100%
-// for a mostly-exact cost account defeats the one signal it exists to give.
+// the bucket's EstimatedCost drives /status's estimated_pct, and inflating
+// it to ~100% for a mostly-exact cost account defeats the one signal it
+// exists to give.
 func TestChargeCost_SplitSide_EstimatesOnlyTheUnsniffedSide(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	l := costLimit(1000)

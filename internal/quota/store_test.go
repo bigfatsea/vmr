@@ -51,8 +51,8 @@ func TestStore_RoundTrip(t *testing.T) {
 // metric: cost accounting) had no persistence coverage of their own before
 // this — TestStore_RoundTrip only ever charges the P1-era int fields, so a
 // JSON-tag typo or a dropped field specific to these two would not have
-// been caught by any quota-package-level test (internal/router/quota_p22_test.go
-// exercises Cost/AddEstimatedCost in memory, but never through Flush/Load).
+// been caught by any quota-package-level test — the in-memory ChargeCost
+// tests in quota_test.go never go through Flush/Load.
 func TestStore_RoundTrip_CostAndEstimatedCost(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "vmr-quota.json")
@@ -60,7 +60,7 @@ func TestStore_RoundTrip_CostAndEstimatedCost(t *testing.T) {
 
 	r := NewRegistry(path)
 	r.Charge("plan-e", "cost/1mo", ps, Counters{Fresh: 1000, Out: 200, Cost: 12.3456}, 0)
-	r.AddEstimatedCost("plan-e", "cost/1mo", ps, 4.5)
+	r.ChargeCost("plan-e", "cost/1mo", ps, Counters{}, 4.5)
 	if err := r.Flush(); err != nil {
 		t.Fatalf("Flush: %v", err)
 	}
@@ -73,8 +73,8 @@ func TestStore_RoundTrip_CostAndEstimatedCost(t *testing.T) {
 	if c.Cost != 12.3456 {
 		t.Fatalf("round-tripped Counters.Cost = %v, want 12.3456", c.Cost)
 	}
-	if got := r2.EstimatedCostFor("plan-e", "cost/1mo", ps); got != 4.5 {
-		t.Fatalf("round-tripped EstimatedCost = %v, want 4.5", got)
+	if _, _, estCost := r2.Snapshot("plan-e", "cost/1mo", ps); estCost != 4.5 {
+		t.Fatalf("round-tripped EstimatedCost = %v, want 4.5", estCost)
 	}
 }
 

@@ -208,17 +208,19 @@ providers:
     # quota left in absolute terms (a plan about to reset "wins" less than one
     # about to expire with unused quota).
     #
-    # A provider can carry any number of limits: entries (P3) — the tightest
-    # constraint decides: the LONGEST window on the account is its "bucket"
-    # (unused headroom there really is wasted if not spent, so it actively
-    # boosts the score — "use it or lose it"); every other, shorter window is
-    # a "gate" (a rate limiter with no economic value in maxing out, so it can
-    # only ever suppress the score toward its own saturation, never boost it
-    # above what the bucket gives). One entry is still the common case and
-    # behaves exactly like before. rolling: true remains a load-time "planned
-    # for a later batch" error, never a silent no-op. metric: cost and a
-    # pricing: block ARE supported (P2.2) — see the plan-e/plan-f examples
-    # further down and providers[].pricing's own comment block.
+    # A provider can carry any number of limits: entries (P3) — the LONGEST
+    # window on the account is its "bucket" (unused headroom there really is
+    # wasted if not spent, so it actively boosts the score — "use it or lose
+    # it"); every other, shorter window is a "gate": a local stand-in for the
+    # vendor's real rate limit. A live gate (used < amount) doesn't touch the
+    # score; one that's fully consumed zeroes it until the window resets — so
+    # set a gate's amount slightly TIGHTER than the vendor's real limit, with
+    # margin for calibration error and in-flight requests. One entry is still
+    # the common case and behaves exactly like before. rolling: true remains
+    # a load-time "planned for a later batch" error, never a silent no-op.
+    # metric: cost and a pricing: block ARE supported (P2.2) — see the
+    # plan-e/plan-f examples further down and providers[].pricing's own
+    # comment block.
     #
     # amount MUST be calibrated to what VMR ITSELF OBSERVES, not the plan's
     # marketing number: some vendors bill "one user turn" as a single unit

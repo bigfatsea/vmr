@@ -308,9 +308,9 @@ func resolveConfigRelative(path, configDir string) string {
 // sharpens vmr report's $ estimates, but still must be well-formed), and
 // additionally requires full, resolved pricing for every model a metric:
 // cost provider is configured to serve — storing the result in
-// c.ResolvedPricing for router.BuildSnapshot to attach to core.Endpoint,
-// so this expensive-ish resolution happens exactly once per config load,
-// not once per request.
+// c.ResolvedPricing for router.BuildSnapshot to fold onto core.Endpoint
+// (pricing.FoldSpec), so this expensive-ish resolution happens exactly once
+// per config load, not once per request.
 func (c *Config) resolvePricing(providerModels map[string]map[string]bool) error {
 	needsTable := c.Pricing != nil
 	costProviders := map[string]bool{}

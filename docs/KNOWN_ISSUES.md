@@ -19,8 +19,11 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危 5（`2.2`/`2.17`/`2.18`/`2.85`/`2.88`），其余均为低危。
-- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.88（闸封顶，需裁决）/ §2.89 / §2.90 / §2.91。
+- **§2 分布**：高危 0；中危 4（`2.2`/`2.17`/`2.18`/`2.85`），其余均为低危。
+- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.89 / §2.90 / §2.91。
+- **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——`Endpoint.PricingRate` 改持 `pricing.FoldSpec` 折叠出的 `*core.Rate`，cost 计费热路径字段直读（`core.Rate.Cost`），override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界；成本公式 SSOT 收敛到 `core.Rate.Cost`（`pricing.Rate.Cost` 委托之），`FoldSpec` 的 nil→nil 契约照旧。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
+- **2026-09-05 已闭环**（独立复核发现，quota role 展示层）：`/status`/`vmr status`/`vmr check` 的 bucket/gate `role=` 判定收敛到单一函数 `internal/quota.Role(limits, li, model)`，按行的 Scope 选 judging set——共享行（`model==""`）收窄成"同样覆盖全体模型的 Limit"（排除限定列表 Limit：它只为自己点名的模型竞争，混合 Scope 且该列表周期更长时，旧的全量视角会把共享池错标成闸，而受害的正是没有专属行的模型）；`vmr check` 对限定单个具名模型的 Limit 现在也按该模型的 `applicableLimits` 精确计算（不再是全量近似）——只有通配 `["*"]` 或列出多个模型的 Limit 仍是全量近似 + note 指向 `/status`（结构性：一条静态行给不出对多个模型各自不同的正确答案）。同时把 `Role` 的桶身份判定从字段值相等改成按 `limits` 原始下标比较——共享池与一条 metric/period/amount/since 恰好全等的通配 Limit（合法配置，不撞校验）用值判等无法区分，会被一起误标成桶。均为纯展示修正，非混合 Scope 且非该值巧合相等的配置零变化，路由/计费/评分零影响。详见 `CHANGELOG` `[Unreleased]`、`internal/quota/score_test.go`（`TestRole_*`）、`internal/router/quota_multilimit_test.go`、`cmd/vmr/cmd_check_quota_test.go`。
+- **2026-09-04 已闭环**：`ScoreForLimits` 闸归并二值化（原 §2.88，N3 裁决采纳「闸 = 带安全余量的厂商限流本地代理」语义：活着的闸不参与评分，烧断的闸归零沉底到窗口重置；旧 `min(1, raw)` 硬封顶把带闸账号的桶抢跑加分压死在 ≤1.0 的病灶随之消除）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-03 已闭环**：一批三方 review 核实后的小修（错误分类补 `error.code`、config 加载期禁 provider 名冒号 / 校验 strategy、keyless 自建上游按地址分级、探针仅 2xx 扣配额、anthropic 损坏图片仍计入 `HasImage`、`.parse-cache` mtime 消歧、md/html 行为指标统一、LLM detector 并发限时、`metric:cost` estimated 口径分侧等），详见 `CHANGELOG` `[Unreleased]`。删除的 §2 条目：`2.65`/`2.71`/`2.72`/`2.76`/`2.78`/`2.81`/`2.82`/`2.83`/`2.84`。
 - **2026-09（早于本轮）已闭环**：`standard_price_curated.yaml` 别名指向空 key 致 `LoadStandard` 失败（原 §2.87，commit `2e5d9cd` 恢复 `rates:` 段）。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
@@ -128,6 +131,8 @@
 - **不对 OpenAI 工具返回做 `error:` 关键字模糊嗅探**：实测全量生产语料 495,672 条 OpenAI 工具调用结果，结构化 JSON 错误字段 0 条（0.00%），全部是自由文本 stdout/stderr。子串模糊嗅探会引入海量代码输出/测试用例的假阳性。只对协议原生结构化错误标记（如 Anthropic `is_error`）做确定性统计。
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
 - **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `fmtutil.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
+
+- **用量折算（精确 vs 降级）的跨包入口刻意只有一条，没有单标志合并形式**：`quota.TokenCountersSides`（纯标量入参）是唯一权威实现，`router.TokenCountersSides` 是 `chatmsg.Usage`→`quota.TokenUsage` 的唯一翻译层（`report` 直接调 `quota` 侧，`archtest` 禁它 import `router`）。2026-09-04 删除 router 侧的单标志退化形式（router.TokenCounters，已不存在——零生产调用方、仅自身测试保活）——合并的“some usage was seen”信号无法区分完整账本与部分账本，把 partial 当 exact 记账正是 sides 拆分要消灭的 bug 类（`replay` 的 `chargeReplay` 曾把截断流的 ~1 占位 out 计成 exact，commit `ba6b0b3`）。**不要以“API 对称”或“给未来消费者留入口”名义复活单标志包装**——只能给单比特的调用方本就该逐侧决策。
 
 ### 1.5 产出与工程惯例
 
@@ -388,33 +393,16 @@
 - **触发条件**：真实用户报告「用某慢上游时流式响应假死后被客户端超时切断」。
 
 
-#### 2.88 [中，需调度语义 owner 裁决] `ScoreForLimits` 的闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效
+#### 2.89 [已落地 2026-09-05] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
 
-- **现状**（2026-09-04 定价/配额专题 review 发现，源码已核实）：`internal/quota/score.go` `ScoreForLimits` 的合并式是 `score := 5.0; 对每条 Limit: h = raw; if 非桶 && h > 1 { h = 1 }; if h < score { score = h }`。于是**只要一个 provider 配了哪怕一条 `raw ≥ 1` 的健康空闲速率闸，整个账号的综合评分就被 `min` 焊死在 ≤ 1.0**——月度预付费桶的 use-it-or-lose-it 抢跑加分（`raw > 1` 时主动提分争流量）永久拿不到。
-- **矛盾点**：设计文档 §5.2 散文说「闸只应该在接近饱和时压制流量，绝不应该提升流量」，读作「空闲闸不该压制」→ 是 bug；但同段公式 `综合 = min over L of headroom(L)`、`headroom(闸) = min(1, raw)` 又精确对应当前实现 → 是 as-designed。`internal/quota/score_test.go` 三个用例无一覆盖「桶 raw > 1 且闸空闲」这条正向抢跑路径。
-- **两种收法**：(a) 判为 bug —— `score := 桶raw; 对每条闸: if 闸raw < 1 && 闸raw < score { score = 闸raw }`（空闲闸不参与），补正向抢跑单测；(b) 判为 as-designed —— 在 `score.go` 注释 + 设计文档 §5.2 写死「任何闸都会把综合分压到 ≤ 1（保守取舍：不为长周期欠用而突破短周期节奏）」，消除散文歧义。
-- **为什么待定**：改动 (a) 会改变线上端点重排行为，属核心调度语义，需项目 owner 拍板。2026-09-04 已就此征询用户，裁为「本轮不碰，登记此条留待调度语义 owner 专门评审」。
+- **落地**（2026-09-05）：`BuildSnapshot` 现在把 `pricing.FoldSpec` 折叠出的 `*core.Rate` 挂 `Endpoint.PricingRate`，cost 计费分支字段直读（`core.Rate.Cost`），override 链解析不再进实时路由热路径——架构红线（§1.0「让价目表进实时路由热路径」）不再被越界。成本公式 SSOT 收敛到 `core.Rate.Cost`（`internal/pricing.Rate.Cost` 委托之），`replay` 走同一 `FoldSpec` 挂载，离线 `Resolver`/`vmr check` 显示形态不变。`FoldSpec(nil)→nil` 的契约与旧 `EffectiveRate(nil-spec)` 的零费率行为对齐。
+- **残留（触发驱动）**：`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`——config 侧展示（`vmr check`）与报表离线路径不受影响，纯属包边界整洁；等 `core` / `config` 下次有其它改动时顺路做，不为它单独排期。
 
-#### 2.89 [低，登记待触发] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
-
-- **现状**（2026-09-04 review 发现）：`core.Endpoint` 挂 `*core.PricingSpec` 而非折叠好的 `Rate`，`router.ChargeResponse` 的 cost 分支每笔请求 `pricing.EffectiveRate(ep.PricingRate)` 重跑一次 `resolveChain`（≤3 元素切片的递归下钻）。P0-A 移除时间维后 `EffectiveRate(spec)` 对给定 spec 是纯静态确定性函数，`BuildSnapshot` 时端点已细化到唯一 upstream model，完全可在加载期折叠为一个已解析 `Rate` 挂到端点上、热路径变字段直读。
-- **性质**：`resolveChain` 是纳秒级、相对一次上游 HTTP 可忽略——不是性能问题，是「让价目表进实时路由热路径」这条架构红线（§1.0）的一处轻微越界 + `core.go` 注释把「Resolve 阶段不能提前折叠 Base 与 Override」偷换成了「加载完成后也不能折叠为静态 Rate」的误导。
-- **可能方案**：`BuildSnapshot` 折叠预解析 `Rate` 挂 `Endpoint`；`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）。
-- **触发条件**：`core` / `router` 有其它改动顺路做，或 profiling 真的把它标出来（不太可能）。
-
-#### 2.90 [低] 周期长度相同的多条 Limit，`BucketIndex` 的桶/闸角色取决于 YAML 书写顺序
-
-- **现状**（2026-09-04 review 发现）：`internal/quota/score.go` `BucketIndex` 用 `nominalUnitHours` 严格大于挑最长周期。一个 provider 同时配了共享池 `every: 1mo` 和某模型专属池 `every: 1mo`（合法共存）时，两者名义时长相等，排在配置数组前面的被选为桶、后面的被选为闸——仅仅上下颠倒两行就会互换角色，缺确定性仲裁。
-- **可能方案**：周期时长并列时加次级裁决——共享池优先为桶（`!PerModel` 优于 `PerModel`），同类则 `Amount` 大者为桶。
-- **触发条件**：真实配置出现等长复合 Limit 且用户报告角色不符预期。当前可靠规范书写规避。
-
-#### 2.91 [低，F4 修复后已缓解] `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默
+#### 2.91 [低，决定不做 2026-09-05] `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默
 
 - **现状**（2026-09-04 review 发现）：`internal/quota/quota.go` `resetIfStaleLocked` 的 `rollbackWarned` 一旦置位便无重置机会。F4（`ChargeCost` 单锁原子）落地前，周期切换瞬间晚到的估算写可能携旧 `periodStart` 误触发一次时钟回退分支，此后宿主机真实 NTP 阶跃/快照回滚/时区误配都不再有 WARN。
 - **现状缓解**：F4 已消除那条跨锁裂缝，spurious trip 的主要来源没了。
-- **可能方案**：按 `limitKey` 或时间窗去重抑制，而非进程生命周期一次性 latch。
-- **触发条件**：F4 之后仍观察到本该有的时钟回退 WARN 缺失。
-
+- **裁决（不修）**：latch 只控制 WARN 是否打印，对计量行为**零影响**——回退期间计数照常累进且方向**保守**（used 偏高 → headroom 偏低 → provider 被轻微降权），并随下一次周期前移或进程重启**自愈**；残留代价仅是第二次真实回退不再有日志。VMR 配额本不为精准记账而是 provider 间的流量平衡，F4 后 spurious trip 主源已消除、真实回退本身罕见，为一条日志的去重精细化引入时间窗/limitKey 状态不值得。原「触发条件」（观察到 WARN 缺失）不再作为修复触发，仅作现象记录——若日后真实回退频繁出现且确需逐次告警，再按窗口化去重改。
 
 #### 2.17 [中] `imgprep` 解码闸门按「防炸弹」设定，其内存上界与单请求内存预算差一个数量级
 

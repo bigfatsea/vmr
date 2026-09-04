@@ -67,9 +67,8 @@ func TimeLeftFrac(now, start, end time.Time) float64 {
 //
 // P1 has exactly one Limit per provider, and that Limit is always the
 // account's bucket (see the design doc's Bucket vs Gate section) — the gate
-// role and its GateReserve down-scaling only exist from P3 once a provider
-// can carry more than one Limit, so this function has no "is this a bucket
-// or a gate" parameter at all.
+// role only exists from P3 once a provider can carry more than one Limit,
+// so this function has no "is this a bucket or a gate" parameter at all.
 func Headroom(usedFrac, timeLeftFrac float64) float64 {
 	tl := timeLeftFrac
 	if tl < epsilon {
@@ -101,7 +100,11 @@ func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 
 // BucketIndex returns the index of limits' bucket Limit — the longest
 // tumbling period among them (see the design doc's §5.2 bucket-vs-gate
-// rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). This package
+// rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). Equal nominal periods
+// break deterministically, never by YAML written order (KNOWN_ISSUES §2.90):
+// a shared (non-per-model) pool beats a per-model one, and within the same
+// class the larger Amount wins — see preferBucket; a full tie keeps the
+// earlier-configured Limit as the documented final fallback. This package
 // carries no rolling windows yet (see core.Limit's doc comment), so every
 // Limit is tumbling and this always resolves to a real index for a
 // non-empty slice — the "all-rolling has no bucket" branch §5.2 also
@@ -116,29 +119,47 @@ func BucketIndex(limits []core.Limit) int {
 	bh := nominalUnitHours(limits[0].EveryUnit, limits[0].EveryN)
 	for i := 1; i < len(limits); i++ {
 		h := nominalUnitHours(limits[i].EveryUnit, limits[i].EveryN)
-		if h > bh {
+		if h > bh || (h == bh && preferBucket(limits[i], limits[bi])) {
 			bi, bh = i, h
 		}
 	}
 	return bi
 }
 
+// preferBucket breaks the tie between two Limits whose nominal periods are
+// EQUAL — the case the longest-period rule alone leaves to YAML written
+// order (KNOWN_ISSUES §2.90). First principles, not convention: a shared
+// pool beats a per-model one because the shared pool's headroom is the
+// scarcity EVERY model's traffic draws down — only as the bucket does its
+// drain produce the smooth declining-score signal quota-aware reordering
+// needs; as a gate it stays silent until it blows, an abrupt step instead
+// of a gradient. Within the same class, the larger Amount wins: the tighter
+// constraint is the better fuse (it trips first, which is all a gate is
+// for), the looser pool the better capacity gauge. Strictly-better only —
+// a full tie (same class AND same Amount) reports false, keeping the
+// earlier-configured Limit, so config order remains the final, documented
+// fallback.
+func preferBucket(a, b core.Limit) bool {
+	pa, pb := PerModel(a), PerModel(b)
+	if pa != pb {
+		return !pa
+	}
+	return a.Amount > b.Amount
+}
+
 // ScoreForLimits composes a whole provider's score across every one of its
 // Limits (P3: multi-window) via the bucket-vs-gate rule: the longest-period
-// Limit is scored as a bucket (its raw headroom passes through unchanged —
-// underuse can push the score above 1.0, "use it or lose it"); every other
-// Limit is scored as a gate, hard-capped at 1.0 (`min(1, raw)`) — underuse
-// never boosts past neutral, only nearness-to-saturation (raw<1) suppresses.
-// The provider's score is the min across all of them — "the tightest
-// constraint decides".
-//
-// The gate cap is a flat ceiling, not a graduated reserve band — an earlier
-// version eased a gate toward suppression starting at raw < 2× pace (a
-// `GateReserve` constant), but that early-warning margin had no data behind
-// it, just an arbitrary "how early should this start" choice. `min(1, raw)`
-// keeps the one property that actually matters (a gate can never lift the
-// score above what pure on-pace consumption would give) without the extra
-// tunable.
+// Limit is the bucket — its raw headroom passes through unchanged (underuse
+// can push the score above 1.0, "use it or lose it"). Every other Limit is
+// a gate: a safety-margined local bound on the vendor's real rate limit, not
+// a capacity gauge — its config value only guarantees the one bit "blown or
+// not" (used >= amount), so a live gate contributes nothing to the score and
+// a blown one zeroes it: the gate trips before the vendor's real limit can,
+// and the provider stands down until the short window resets. The bucket is
+// the objective, the gates are constraints — a constraint's slack is never
+// folded into the utility. Both earlier gate merges (the GateReserve
+// graduated band, then the min(1, raw) hard cap) put a continuous signal
+// where the gate carries none; see the design doc's Bucket vs Gate section.
 //
 // used[i] must already have base(limits[i].Metric) applied (see
 // ScoreForLimit) and align index-for-index with limits — the caller (
@@ -146,9 +167,9 @@ func BucketIndex(limits []core.Limit) int {
 // Limit's Scope-filtered Counters, this function only merges the results.
 //
 // Degenerates to plain ScoreForLimit when len(limits)==1: that one Limit is
-// trivially both the longest and the only one, so it always gets bucket
-// treatment (no gate cap) — byte-identical to P1/P2's single-Limit
-// behavior, which is the "zero regression for existing configs" property.
+// trivially the bucket and there are no gates — byte-identical to P1/P2's
+// single-Limit behavior, which is the "zero regression for existing configs"
+// property.
 //
 // An empty limits slice returns 1.0 — neutral: no quota configured is
 // neither exhausted (0.0) nor a maximally-underused bucket (HeadroomCap),
@@ -159,16 +180,60 @@ func ScoreForLimits(limits []core.Limit, used []float64, now time.Time) float64 
 		return 1.0 // no quota configured == neutral: neither penalise (0.0 = exhausted) nor boost (>1 = underused bucket)
 	}
 	bi := BucketIndex(limits)
-	score := HeadroomCap
+	score := ScoreForLimit(limits[bi], used[bi], now)
 	for i, l := range limits {
-		raw := ScoreForLimit(l, used[i], now)
-		h := raw
-		if i != bi && h > 1 {
-			h = 1
-		}
-		if h < score {
-			score = h
+		if i != bi && used[i] >= l.Amount {
+			return 0 // blown gate: the local bound tripped before the vendor's real limit could — stand down until the window resets
 		}
 	}
 	return score
+}
+
+// Role reports whether limits[li] acts as "bucket" or "gate" among the
+// Limits that actually compete for the same slice of traffic it does — the
+// display-only counterpart to ScoreForLimits/BucketIndex, for /status,
+// `vmr status` and `vmr check`'s role= column. li identifies the Limit by
+// its ORIGINAL INDEX into limits, not by value: two distinct Limits (a
+// shared pool and a same-period, same-amount wildcard, say — legal, since
+// config.validateQuota's collision check only compares same-PerModel-class
+// Scopes) can be byte-identical in every field BucketIndex's tie-break
+// doesn't consider (Metric/EveryText/Amount/Since), so a value-equality
+// match cannot tell them apart; comparing indices always can. model picks
+// the judging set:
+//
+//   - model != "": the live per-model view — limits filtered to the ones
+//     whose Scope covers model, the identical subset scoreForEndpoint
+//     routes that model against.
+//   - model == "": the shared-row view, for a Limit with no Models of its
+//     own. A restricted-list Limit (models: [a, b]) only ever competes for
+//     the models it names — it must not be allowed to win BucketIndex
+//     against the shared pool just because it happens to have a longer
+//     period, or every model NOT on its list gets shown the wrong role for
+//     a pool that, from their own applicableLimits view, is their bucket.
+//     So the judging set here is limits that themselves cover every model —
+//     unrestricted (!PerModel) or wildcard (IsWildcardModels) — which is
+//     exactly applicableLimits(m) for a hypothetical model that appears in
+//     no restricted list. See KNOWN_ISSUES for the mixed-Scope config this
+//     resolves (a shared/wildcard row could otherwise print "gate" for a
+//     pool that is, in fact, every unlisted model's real bucket).
+func Role(limits []core.Limit, li int, model string) string {
+	app := make([]core.Limit, 0, len(limits))
+	orig := make([]int, 0, len(limits)) // app[k]'s index in limits, for identity below
+	for i, c := range limits {
+		switch {
+		case model != "":
+			if AppliesToModel(c, model) {
+				app = append(app, c)
+				orig = append(orig, i)
+			}
+		case !PerModel(c) || IsWildcardModels(c.Models):
+			app = append(app, c)
+			orig = append(orig, i)
+		}
+	}
+	bi := BucketIndex(app)
+	if bi < 0 || bi >= len(app) || orig[bi] != li {
+		return "gate"
+	}
+	return "bucket"
 }

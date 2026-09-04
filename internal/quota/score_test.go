@@ -123,13 +123,57 @@ func TestBucketIndex_LongestTumblingWins(t *testing.T) {
 	}
 }
 
+// TestBucketIndex_EqualPeriods_SharedBeatsPerModel pins the §2.90 tie-break's
+// first rule: two Limits with EQUAL nominal periods resolve by class, not by
+// YAML written order — the shared pool is the bucket in BOTH orders, because
+// only as the bucket does the shared pool's drain produce the smooth
+// declining-score signal reordering needs (as a gate it stays silent until
+// it blows).
+func TestBucketIndex_EqualPeriods_SharedBeatsPerModel(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricTokens, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 90_000_000}
+	perModel := core.Limit{Metric: core.MetricTokens, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 5_000_000, Models: []string{"claude-x"}}
+	if got := BucketIndex([]core.Limit{shared, perModel}); got != 0 {
+		t.Errorf("BucketIndex([shared, perModel]) = %v, want 0 (shared pool is the bucket)", got)
+	}
+	if got := BucketIndex([]core.Limit{perModel, shared}); got != 1 {
+		t.Errorf("BucketIndex([perModel, shared]) = %v, want 1 (shared pool is the bucket regardless of written order)", got)
+	}
+}
+
+// TestBucketIndex_EqualPeriodsSameClass_LargerAmountWins pins the §2.90
+// tie-break's second rule: two same-class equal-period Limits resolve by
+// Amount — the tighter constraint is the better fuse (it trips first, all a
+// gate is for), the looser pool the better capacity gauge.
+func TestBucketIndex_EqualPeriodsSameClass_LargerAmountWins(t *testing.T) {
+	small := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "w", EveryText: "1w", Amount: 100}
+	large := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "w", EveryText: "1w", Amount: 90_000}
+	if got := BucketIndex([]core.Limit{small, large}); got != 1 {
+		t.Errorf("BucketIndex([small, large]) = %v, want 1 (larger Amount is the bucket)", got)
+	}
+	if got := BucketIndex([]core.Limit{large, small}); got != 0 {
+		t.Errorf("BucketIndex([large, small]) = %v, want 0 (larger Amount is the bucket regardless of written order)", got)
+	}
+}
+
+// TestBucketIndex_FullTie_KeepsConfigOrder pins the tie-break's documented
+// final fallback: identical class AND Amount keeps the earlier-configured
+// Limit — config order is only ever consulted when nothing else
+// distinguishes the candidates.
+func TestBucketIndex_FullTie_KeepsConfigOrder(t *testing.T) {
+	a := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo", EveryText: "1mo", Amount: 1000}
+	b := a
+	if got := BucketIndex([]core.Limit{a, b}); got != 0 {
+		t.Errorf("BucketIndex([a, a]) = %v, want 0 (full tie keeps config order)", got)
+	}
+}
+
 // TestScoreForLimits_TypeA is the design doc's §5.2 worked example, pinned
-// as a numeric assertion: a 5h gate at 5500/6000 used with 1h left has
-// raw = 0.417 — under the flat gate cap (`min(1, raw)`) that's also its
-// headroom directly (already < 1, so the cap never engages) — alongside a
-// monthly bucket exactly on pace (raw = headroom = 1.0). The provider's
-// score is the min of the two: 0.417 — the gate's near-saturation
-// suppresses the score even though the bucket itself is perfectly healthy.
+// as a numeric assertion: a 5h gate at 5500/6000 used with 1h left is LIVE
+// (used < amount), and a live gate doesn't touch the score at all — the
+// monthly bucket alone decides, and it's exactly on pace (raw = 1.0). The
+// gate's own raw (0.417, near saturation) is deliberately NOT consumed: it
+// reflects the safety margin's tightness, not a capacity signal. Contrast
+// the blown variant in TestScoreForLimits_BlownGateZeroesScore.
 func TestScoreForLimits_TypeA(t *testing.T) {
 	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
@@ -137,35 +181,35 @@ func TestScoreForLimits_TypeA(t *testing.T) {
 	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
 		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000} // April has 30 days; now is exactly the midpoint
 	limits := []core.Limit{gate, bucket}
-	used := []float64{5500, 500} // gate: 5500/6000 used; bucket: exactly on pace (50% used, 50% elapsed)
+	used := []float64{5500, 500} // gate: alive (5500 < 6000); bucket: exactly on pace (50% used, 50% elapsed)
 
 	got := ScoreForLimits(limits, used, now)
-	if !almostEqual(got, 0.417, 0.01) {
-		t.Fatalf("ScoreForLimits (type A) = %v, want ~0.417 (design doc §5.2's worked example, gate cap flattened to min(1,raw))", got)
+	if !almostEqual(got, 1.0, 1e-9) {
+		t.Fatalf("ScoreForLimits (type A) = %v, want exactly 1.0 (design doc §5.2's worked example: live gate doesn't participate, the bucket alone decides)", got)
 	}
 }
 
-// TestScoreForLimits_GateNeverBoosts pins the invariant a flat min(raw)
-// simplification would violate (see the design doc's §14.3 P3 open
-// question 1): an underused GATE must never push the provider's score
-// above what the bucket alone would give. Here the gate is barely touched
-// (raw = 3.0, which would win a naive min() if gates weren't capped), but
-// the bucket is exactly on pace (raw = 1.0) — the merged score must stay
-// at 1.0, not jump to whatever the gate's own raw signal is.
+// TestScoreForLimits_GateNeverBoosts pins the one invariant every gate
+// merge has preserved across all three generations (GateReserve band,
+// min(1, raw) cap, today's binary fuse): a gate can never push the
+// provider's score above what the bucket alone would give. Here the gate
+// is barely touched (raw = 1.2) while the bucket is exactly on pace
+// (raw = 1.0) — under the binary fuse a live gate isn't consulted at all,
+// so the merged score is the bucket's 1.0 exactly.
 func TestScoreForLimits_GateNeverBoosts(t *testing.T) {
 	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
-		Amount: 1000} // computed used/now below give raw=3.0 (HeadroomCap territory, but not clamped)
+		Amount: 1000} // computed used/now below give raw=1.2
 	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo", Amount: 1000}
 	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	gate.Since = now.Add(-1 * time.Hour)                       // 1h of 5h elapsed -> 80% time left
 	bucket.Since = time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC) // half the month elapsed
 
 	limits := []core.Limit{gate, bucket}
-	used := []float64{40, 500} // gate: 40/1000 used (raw = 0.96/0.8 = 1.2, still under HeadroomCap); bucket: on pace (raw=1.0)
+	used := []float64{40, 500} // gate: 40/1000 used (raw = 0.96/0.8 = 1.2), alive; bucket: on pace (raw=1.0)
 
 	got := ScoreForLimits(limits, used, now)
-	if got > 1.0+1e-9 {
-		t.Fatalf("ScoreForLimits = %v, want <= 1.0 — an underused gate must never boost the score above the bucket's own headroom", got)
+	if !almostEqual(got, 1.0, 1e-9) {
+		t.Fatalf("ScoreForLimits = %v, want exactly 1.0 — a live gate must never boost the score above the bucket's own headroom", got)
 	}
 }
 
@@ -196,5 +240,170 @@ func TestScoreForLimits_DegeneratesToScoreForLimit(t *testing.T) {
 	got := ScoreForLimits([]core.Limit{l}, []float64{0}, now)
 	if got != want {
 		t.Fatalf("ScoreForLimits (single Limit) = %v, want %v (== ScoreForLimit)", got, want)
+	}
+}
+
+// TestScoreForLimits_BucketBoostWithIdleGate is the positive half of the
+// KNOWN_ISSUES 2.88 adjudication (N3, closed 2026-09-04): an underused
+// monthly bucket alone scores ~2.0 (use-it-or-lose-it boost), and adding
+// one perfectly idle short gate must NOT collapse it to 1.0 — a live gate
+// carries no routing information, so the bucket alone decides. The old
+// min(1, raw) cap pinned this at exactly 1.0, which is what killed the
+// boost for every gated account.
+func TestScoreForLimits_BucketBoostWithIdleGate(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000} // April midpoint: 50% elapsed
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // 1h of 5h elapsed -> 80% time left
+
+	bucketAlone := ScoreForLimits([]core.Limit{bucket}, []float64{0}, now)
+	if !almostEqual(bucketAlone, 2.0, 0.02) {
+		t.Fatalf("bucket alone (0 used, 50%% elapsed) = %v, want ~2.0 (underuse boost)", bucketAlone)
+	}
+
+	withIdleGate := ScoreForLimits([]core.Limit{gate, bucket}, []float64{0, 0}, now)
+	if !almostEqual(withIdleGate, 2.0, 0.02) {
+		t.Fatalf("bucket + idle gate = %v, want ~2.0 (2.88 adjudicated: a live gate doesn't participate, the boost survives)", withIdleGate)
+	}
+}
+
+// TestScoreForLimits_BlownGateZeroesScore pins the negative half of the
+// 2.88 adjudication: a gate's one guaranteed bit is blown-or-not, and blown
+// must veto everything — the local bound tripped before the vendor's real
+// rate limit could, so the provider stands down (score 0, sinks below every
+// live alternative) until the short window resets, regardless of how rich
+// its bucket is.
+func TestScoreForLimits_BlownGateZeroesScore(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000}
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // fully consumed
+
+	got := ScoreForLimits([]core.Limit{gate, bucket}, []float64{1000, 0}, now)
+	if got != 0 {
+		t.Fatalf("bucket (rich) + blown gate = %v, want exactly 0 (2.88 adjudicated: a blown gate vetoes the whole provider)", got)
+	}
+}
+
+// TestScoreForLimits_NearBlownGateDoesNotThrottle pins that the gate's
+// graded raw is genuinely unconsumed all the way down: a gate at 99.9%
+// used still doesn't touch the score — there is no progressive throttle
+// band, because the margin's tightness is a calibration artifact, not a
+// capacity signal. The cutoff is the blow itself (see
+// TestScoreForLimits_BlownGateZeroesScore).
+func TestScoreForLimits_NearBlownGateDoesNotThrottle(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000}
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // 999/1000 = 99.9% used, still alive
+
+	got := ScoreForLimits([]core.Limit{gate, bucket}, []float64{999, 0}, now)
+	if !almostEqual(got, 2.0, 0.02) {
+		t.Fatalf("bucket + 99.9%%-used gate = %v, want ~2.0 (2.88 adjudicated: no graded throttle — only the blow zeroes the score)", got)
+	}
+}
+
+// TestRole_SingleLimit_IsAlwaysBucket pins the P1/P2 degenerate case for
+// both judging sets: a provider's only Limit is trivially its own bucket,
+// whether asked about a specific model or the shared ("") view.
+func TestRole_SingleLimit_IsAlwaysBucket(t *testing.T) {
+	l := core.Limit{Metric: core.MetricRequests, EveryText: "1mo", Amount: 1000}
+	limits := []core.Limit{l}
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf("Role(shared view) = %q, want bucket", got)
+	}
+	if got := Role(limits, 0, "some-model"); got != "bucket" {
+		t.Errorf("Role(model view) = %q, want bucket", got)
+	}
+}
+
+// TestRole_NoMixedScope_MatchesPlainBucketIndex pins the zero-regression
+// property: with no restricted-list Limit in the mix, the shared row's
+// judging set (unrestricted + wildcard) is identical to the full Limit set,
+// so Role("") agrees with a plain BucketIndex over the whole slice — same
+// as before this function existed.
+func TestRole_NoMixedScope_MatchesPlainBucketIndex(t *testing.T) {
+	gate := core.Limit{Metric: core.MetricRequests, EveryText: "5h", EveryN: 5, EveryUnit: "h"}
+	bucket := core.Limit{Metric: core.MetricRequests, EveryText: "1mo", EveryN: 1, EveryUnit: "mo"}
+	limits := []core.Limit{gate, bucket}
+	if got := Role(limits, 0, ""); got != "gate" {
+		t.Errorf("Role(gate, \"\") = %q, want gate", got)
+	}
+	if got := Role(limits, 1, ""); got != "bucket" {
+		t.Errorf("Role(bucket, \"\") = %q, want bucket", got)
+	}
+}
+
+// TestRole_MixedScope_SharedRowExcludesRestrictedCompetitor pins the actual
+// fix: a shared 1d pool alongside a Limit restricted to one model with a
+// longer (1mo) period. A plain full-set BucketIndex would hand the pool's
+// "shared row" role to the restricted Limit (longest period wins) and print
+// the pool as a gate for every model — including one, "flash", that Limit
+// never covers and whose own applicableLimits routing view has the pool as
+// its ONLY Limit, hence trivially its bucket. Role("") must agree with that
+// view instead of the full-set one; Role(model) is untouched and must keep
+// agreeing with applicableLimits, exactly as before.
+func TestRole_MixedScope_SharedRowExcludesRestrictedCompetitor(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d"}
+	restricted := core.Limit{Metric: core.MetricTokens, EveryText: "1mo", EveryN: 1, EveryUnit: "mo", Models: []string{"lite"}}
+	limits := []core.Limit{shared, restricted}
+
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf(`Role(shared, "") = %q, want bucket (restricted-list Limit must not compete for the shared row)`, got)
+	}
+	if got := Role(limits, 0, "flash"); got != "bucket" {
+		t.Errorf(`Role(shared, "flash") = %q, want bucket (flash's applicable set is {shared} alone)`, got)
+	}
+	if got := Role(limits, 0, "lite"); got != "gate" {
+		t.Errorf(`Role(shared, "lite") = %q, want gate (lite's applicable set has the longer restricted Limit as bucket)`, got)
+	}
+	if got := Role(limits, 1, "lite"); got != "bucket" {
+		t.Errorf(`Role(restricted, "lite") = %q, want bucket`, got)
+	}
+}
+
+// TestRole_Wildcard_CompetesForSharedRow pins that a wildcard Limit
+// (models: ["*"]) — unlike a restricted list — DOES compete for the shared
+// row's role: it covers every model just as the shared pool does, so a
+// longer-period wildcard correctly outranks the pool in both the shared
+// ("") view and every individual model's view.
+func TestRole_Wildcard_CompetesForSharedRow(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d"}
+	wildcard := core.Limit{Metric: core.MetricTokens, EveryText: "1mo", EveryN: 1, EveryUnit: "mo", Models: []string{"*"}}
+	limits := []core.Limit{shared, wildcard}
+
+	if got := Role(limits, 0, ""); got != "gate" {
+		t.Errorf(`Role(shared, "") = %q, want gate (wildcard covers every model, so it legitimately outranks the pool)`, got)
+	}
+	if got := Role(limits, 1, "any-model"); got != "bucket" {
+		t.Errorf(`Role(wildcard, "any-model") = %q, want bucket`, got)
+	}
+}
+
+// TestRole_IdenticalFieldsDisambiguatedByIndex pins identity-by-index, not
+// by value: a shared pool and a same-period, same-amount wildcard Limit are
+// legal to configure together (config.validateQuota's collision check only
+// fires within the same PerModel class) and can be byte-identical in every
+// field BucketIndex's tie-break considers (Metric/EveryText/Amount/Since) —
+// only Models differs. preferBucket still deterministically picks the
+// shared pool as the bucket; a value-equality identity check couldn't tell
+// the two apart (both "look like" the winner) and would wrongly call the
+// wildcard a bucket too, in both the shared and the per-model view.
+func TestRole_IdenticalFieldsDisambiguatedByIndex(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d", Amount: 500}
+	wildcard := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d", Amount: 500, Models: []string{"*"}}
+	limits := []core.Limit{shared, wildcard}
+
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf(`Role(shared, "") = %q, want bucket (preferBucket picks the shared pool on the tie)`, got)
+	}
+	if got := Role(limits, 1, ""); got != "gate" {
+		t.Errorf(`Role(wildcard, "") = %q, want gate — the wildcard LOST the tie to the shared pool despite identical Metric/EveryText/Amount/Since`, got)
+	}
+	if got := Role(limits, 1, "m"); got != "gate" {
+		t.Errorf(`Role(wildcard, "m") = %q, want gate — same tie, per-model view`, got)
 	}
 }

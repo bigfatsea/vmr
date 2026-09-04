@@ -17,7 +17,6 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
-	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
 	"vmr/internal/strategy"
@@ -93,9 +92,10 @@ func needsTokenCharge(limits []core.Limit, model string) bool {
 // or ep.Quota==nil/no Limits is a silent no-op, the same contract
 // chargeQuota has always had.
 //
-// metric: cost prices raw through ep.PricingRate (pricing.EffectiveRate — a
-// deterministic function of the resolved override chain, with no time
-// dimension) and writes the resulting $ amount into Counters.Cost —
+// metric: cost prices raw through ep.PricingRate — the rate config
+// resolution folded once at BuildSnapshot time (pricing.FoldSpec), read as
+// a plain value here (core.Rate.Cost; the override chain never re-resolves
+// on the hot path) — and writes the resulting $ amount into Counters.Cost —
 // computed once per applicable Limit (never recomputed later from raw
 // tokens: the price table itself can still change across a config reload,
 // which produces a new ep.PricingRate — recomputing from raw tokens later
@@ -117,9 +117,8 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, quota.Counters{Requests: 1}, 0)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 		case core.MetricCost:
-			rate := pricing.EffectiveRate(ep.PricingRate)
 			d := raw
-			d.Cost = componentCost(d, rate)
+			d.Cost = componentCost(d, ep.PricingRate)
 			// estimated is token-denominated; on a cost Limit the estimate
 			// signal is money and is passed to ChargeCost below. Passing the
 			// token figure into Charge's `estimated` param would pollute
@@ -141,7 +140,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 				if !outSniffed {
 					estC.Out = d.Out
 				}
-				estCostAmount = componentCost(estC, rate)
+				estCostAmount = componentCost(estC, ep.PricingRate)
 			}
 			// One locked charge: the cost and its estimate must land in the
 			// same period even if another goroutine rolls the bucket in
@@ -157,8 +156,10 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 	}
 }
 
-// componentCost prices d's four raw components through rate — see
-// pricing.Rate.Cost for the shared formula (also used by
+// componentCost prices d's four raw components through the endpoint's
+// pre-folded rate (a nil rate — no pricing resolved — prices everything 0,
+// same as the old EffectiveRate(nil-spec) zero-Rate shape did) — see
+// core.Rate.Cost for the shared formula (also reached by
 // internal/report/cost.go's costFor) and the nil-component/Complete
 // reasoning. d's components are converted back to int64 here: a
 // metric: cost Limit can never have model_multipliers configured
@@ -166,7 +167,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 // own comment), so d is always the unscaled token counts tokenCharge
 // produced, which are exact integers even though quota.Counters stores
 // them as float64 to accommodate the requests/tokens Limits that DO scale.
-func componentCost(d quota.Counters, rate pricing.Rate) float64 {
+func componentCost(d quota.Counters, rate *core.Rate) float64 {
 	return rate.Cost(int64(d.Fresh), int64(d.CacheRead), int64(d.CacheWrite), int64(d.Out))
 }
 
@@ -199,29 +200,23 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	return
 }
 
-// TokenCounters turns one response's COMPLETE usage into the raw four-
-// component counters ChargeResponse charges, plus how much of that total
-// came from a degraded estimate (0 when exact). sniffed reports whether u is
-// a complete upstream usage object — BOTH sides of the ledger present; a
-// caller that can only say "some usage was seen" must use TokenCountersSides
-// instead, because partial usage (real input, placeholder output) billed as
-// exact is precisely the failure TokenCountersSides exists to prevent.
+// TokenCountersSides is the router half's one translation layer from
+// chatmsg.Usage to quota.TokenUsage, wrapping the canonical exact-vs-
+// degraded fold in quota.TokenCountersSides (see that function's doc
+// comment in internal/quota for the rule itself); u.Fresh() floors In to
+// non-negative as the scalar fold expects.
+// tokenCharge on the live billing path is the primary caller — it is not a
+// replay-only shim; it stays exported because internal/replay and cmd/vmr's
+// quota parity test drive this router-named entry point rather than
+// reaching past it into quota.
 //
-// A thin wrapper over quota.TokenCountersSides — the canonical implementation
-// lives in internal/quota (report needs the same fold and can't import
-// router, so the rule must live below both halves); this form just
-// translates chatmsg.Usage in, Fresh() flooring In to non-negative as the
-// scalar fold expects.
-func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
-	return TokenCountersSides(u, sniffed, sniffed, inEst, outEst)
-}
-
-// TokenCountersSides is TokenCounters' side-aware form — a thin wrapper over
-// quota.TokenCountersSides, the canonical implementation of the exact-vs-
-// degraded rule (see that function's doc comment in internal/quota for the
-// rule itself). Kept as an exported symbol because internal/replay and
-// cmd/vmr's quota parity test drive the router-named entry point; the body
-// is not here.
+// There is deliberately no single-flag (non-sides) wrapper: a merged "some
+// usage was seen" signal cannot tell a complete ledger from partial usage
+// (real input, placeholder output), and billing partial as exact is the
+// failure this function exists to prevent — replay's chargeReplay once did
+// exactly that with a merged u.In > 0 || u.Out > 0 flag until commit
+// ba6b0b3 moved it to per-side flags. A caller must always decide each side
+// separately.
 func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outEst int64) (quota.Counters, float64) {
 	return quota.TokenCountersSides(quota.TokenUsage{
 		Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,
@@ -244,10 +239,14 @@ type QuotaProviderStatus struct {
 	// Models is this Limit's Scope — omitted when the Limit applies to
 	// every model on the provider (the zero-config default).
 	Models []string `json:"models,omitempty"`
-	// Role is "bucket" or "gate" — see quota.BucketIndex/ScoreForLimits'
-	// doc comments for the rule (longest tumbling period on the provider
-	// wins bucket; every other Limit is a gate). Always "bucket" for a
-	// provider with exactly one Limit — the P1/P2 shape.
+	// Role is "bucket" or "gate" — see quota.Role's doc comment for the
+	// judging-set rule (longest tumbling period among the competing Limits
+	// wins bucket; equal periods tie-break deterministically — shared pool
+	// first, then larger Amount — never by YAML written order; every other
+	// Limit is a gate; a shared/wildcard row's competitors exclude any
+	// restricted-list Limit, which only ever competes for the models it
+	// names). Always "bucket" for a provider with exactly one Limit — the
+	// P1/P2 shape.
 	Role         string    `json:"role"`
 	Amount       float64   `json:"amount"`
 	Used         float64   `json:"used"`     // base(metric) already applied — directly comparable to Amount
@@ -372,9 +371,9 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 		}
 	}
 	var out []QuotaProviderStatus
-	for _, l := range limits {
+	for i, l := range limits {
 		if !quota.PerModel(l) {
-			role := limitRoleForModel(limits, l, "")
+			role := quota.Role(limits, i, "")
 			out = append(out, quotaStatusRow(reg, provider, l, "", role, now))
 			continue
 		}
@@ -383,30 +382,11 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 			if !ok {
 				continue
 			}
-			role := limitRoleForModel(limits, l, model)
+			role := quota.Role(limits, i, model)
 			out = append(out, quotaStatusRow(reg, provider, l, model, role, now))
 		}
 	}
 	return out
-}
-
-// limitRoleForModel determines whether l acts as the bucket or a gate for
-// model, mirroring the exact applicableLimits + BucketIndex logic
-// scoreForEndpoint uses during routing. model is "" for a shared Limit.
-func limitRoleForModel(limits []core.Limit, l core.Limit, model string) string {
-	app := limits
-	if model != "" {
-		app = applicableLimits(limits, model)
-	}
-	bi := quota.BucketIndex(app)
-	if bi < 0 || bi >= len(app) {
-		return "gate"
-	}
-	bucket := app[bi]
-	if bucket.Metric == l.Metric && bucket.EveryText == l.EveryText && bucket.Amount == l.Amount && bucket.Since.Equal(l.Since) {
-		return "bucket"
-	}
-	return "gate"
 }
 
 // quotaStatusRow builds one QuotaProviderStatus row for l. model is ""
