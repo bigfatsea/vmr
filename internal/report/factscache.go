@@ -167,8 +167,11 @@ func attemptFactsFrom(attempts []audit.Attempt) []attemptFacts {
 	return out
 }
 
-// loadCachedFacts unmarshals key's cached Facts payload from cache, when
-// present. cache may be nil (no prior cache at all). A missing entry,
+// loadCachedFacts unmarshals the file identified by key's cached Facts
+// payload from cache, when present. key is the file's content hash
+// (ctxgraph.HashFile) — the same key ctxgraph's own cache and scanFiles
+// key by, never a path or its canonical basename. cache may be nil (no
+// prior cache at all). A missing entry,
 // absent/empty Facts, or a stale SchemaVersion (shouldn't happen by the
 // time this runs — ctxgraph.ScanCached already invalidated the whole
 // entry on a version mismatch — checked again here anyway, since a wrong
@@ -192,11 +195,14 @@ func loadCachedFacts(cache *ctxgraph.FileCache, key string) (ff fileFacts, ok bo
 // storeCachedFacts marshals ff into cache.Files[key].Facts, preserving
 // that entry's other fields (Hash/Manifests/NoBody — already correct by
 // the time scanFiles runs; see ctxgraph.ScanCached's postcondition) and
-// stamping the current schema version. A marshal failure is silently
-// dropped (this run's own in-memory results are unaffected either way —
-// only the next run's cache hit rate would suffer, not correctness).
+// stamping the current schema version. key is the file's content hash; an
+// empty key means no hash could be computed for this file (see scanFiles)
+// and is a no-op — caching under a non-key would let a later run
+// cross-bind Facts to whatever content hashes to "". A marshal failure is
+// silently dropped (this run's own in-memory results are unaffected either
+// way — only the next run's cache hit rate would suffer, not correctness).
 func storeCachedFacts(cache *ctxgraph.FileCache, key string, ff fileFacts) {
-	if cache == nil {
+	if cache == nil || key == "" {
 		return
 	}
 	data, err := json.Marshal(ff)

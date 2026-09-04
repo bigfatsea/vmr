@@ -5,6 +5,8 @@ package report
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,11 +15,15 @@ import (
 )
 
 // cacheWithFacts builds a *ctxgraph.FileCache holding one entry (keyed by
-// path's canonical basename) whose Facts already contain n synthetic
-// records — enough for scanFiles' cache-hit branch to engage without any
-// real file needing to exist.
+// path's content hash — the same key scanFiles looks up by, see FileCache's
+// doc comment) whose Facts already contain n synthetic records. path must
+// exist on disk: hashing its bytes is what produces the key.
 func cacheWithFacts(t *testing.T, path string, n int) *ctxgraph.FileCache {
 	t.Helper()
+	hash, err := ctxgraph.HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var ff fileFacts
 	for i := 1; i <= n; i++ {
 		ff.Records = append(ff.Records, recordFacts{Line: i, TS: time.Now(), Model: "m1", Outcome: "ok"})
@@ -26,26 +32,39 @@ func cacheWithFacts(t *testing.T, path string, n int) *ctxgraph.FileCache {
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := ctxgraph.CanonicalPath(path)
 	return &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{
-		key: {Hash: "irrelevant-for-this-test", SchemaVersion: ctxgraph.CacheSchemaVersion, Facts: data},
+		hash: {Hash: hash, SchemaVersion: ctxgraph.CacheSchemaVersion, Facts: data},
 	}}
 }
 
-// TestScanFiles_CacheHitNeverOpensFile is the direct, mechanism-level
+// writeGarbageFile creates a real file whose bytes are unparseable as JSONL
+// — the discriminator between "scanFiles hashed the file and trusted the
+// Facts cache" and "scanFiles decoded the file": a decode of these bytes
+// can only produce parse errors, never records.
+func writeGarbageFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("this is not JSON\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestScanFiles_CacheHitNeverDecodesFile is the direct, mechanism-level
 // proof P3.6 exists for: given a valid Facts cache entry and onRecord ==
-// nil (the -details=false path), scanFiles must never call
-// audit.OpenLogFile — proven here by pointing it at a path that does not
-// exist on disk at all and confirming it still succeeds and ingests every
-// cached record.
-func TestScanFiles_CacheHitNeverOpensFile(t *testing.T) {
-	const path = "/definitely/does/not/exist/vmr-audit-2026-01-01.jsonl"
+// nil (the -details=false path), scanFiles must never JSON-decode the
+// file's record bodies. (Keyed by content hash, it still reads the file's
+// bytes once to hash them — what it skips is the decode.) Proven by
+// pointing it at a real file full of unparseable garbage and confirming it
+// still succeeds, ingests every cached record, and records zero parse
+// errors — a decode of those bytes would have flagged every line.
+func TestScanFiles_CacheHitNeverDecodesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vmr-audit-2026-01-01.jsonl")
+	writeGarbageFile(t, path)
 	cache := cacheWithFacts(t, path, 3)
 
 	rep := &Report2{}
 	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	if err := st.scanFiles([]string{path}, nil, nil, cache); err != nil {
-		t.Fatalf("scanFiles with a valid Facts cache hit should never touch the filesystem, got: %v", err)
+		t.Fatalf("scanFiles with a valid Facts cache hit should not need to decode the file, got: %v", err)
 	}
 	if rep.Meta.Records != 3 {
 		t.Errorf("Meta.Records = %d, want 3", rep.Meta.Records)
@@ -53,24 +72,31 @@ func TestScanFiles_CacheHitNeverOpensFile(t *testing.T) {
 	if len(rep.requests) != 3 {
 		t.Errorf("got %d ingested requests, want 3", len(rep.requests))
 	}
+	if rep.Meta.ParseErrors != 0 {
+		t.Errorf("Meta.ParseErrors = %d, want 0 — the garbage bytes were decoded, meaning the Facts cache hit was ignored", rep.Meta.ParseErrors)
+	}
 }
 
 // TestScanFiles_DetailsPathIgnoresFactsCache is
-// TestScanFiles_CacheHitNeverOpensFile's negative: with onRecord non-nil
-// (-details=true — it needs the raw audit.Record to render), the same
-// valid Facts cache must NOT be trusted to skip the file open, since
-// onRecord requires the actual record body. Proven by the inverse
-// assertion: pointed at the same nonexistent path, it must fail trying to
-// open it, not silently succeed off the cache.
+// TestScanFiles_CacheHitNeverDecodesFile's negative: with onRecord non-nil
+// (-details=true — it needs the raw audit.Record to render), the same valid
+// Facts cache must NOT be trusted to skip the decode. Proven by the inverse
+// assertion: pointed at the same unparseable-garbage file, the decode must
+// still run (parse errors appear, zero records ingested), not silently
+// succeed off the cache.
 func TestScanFiles_DetailsPathIgnoresFactsCache(t *testing.T) {
-	const path = "/definitely/does/not/exist/vmr-audit-2026-01-01.jsonl"
+	path := filepath.Join(t.TempDir(), "vmr-audit-2026-01-01.jsonl")
+	writeGarbageFile(t, path)
 	cache := cacheWithFacts(t, path, 3)
 
 	rep := &Report2{}
 	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	onRecord := func(*audit.Record, *ReqInfo) {}
-	if err := st.scanFiles([]string{path}, nil, onRecord, cache); err == nil {
-		t.Error("expected an error opening a nonexistent file when onRecord forces a decode, even with a valid Facts cache present")
+	if err := st.scanFiles([]string{path}, nil, onRecord, cache); err != nil {
+		t.Fatalf("scanFiles: %v", err)
+	}
+	if rep.Meta.ParseErrors == 0 || rep.Meta.Records != 0 {
+		t.Errorf("Meta.ParseErrors = %d, Meta.Records = %d — the Facts cache was trusted despite onRecord forcing a fresh decode", rep.Meta.ParseErrors, rep.Meta.Records)
 	}
 }
 
@@ -147,8 +173,13 @@ If it is NOT intentional, fix the extraction regression instead.`,
 // wrong answer here would silently corrupt aggregated numbers rather than
 // just cost a slower rerun.
 func TestLoadCachedFacts_RejectsStaleSchemaVersion(t *testing.T) {
-	cache := cacheWithFacts(t, "audit.jsonl", 1)
-	key := ctxgraph.CanonicalPath("audit.jsonl")
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	writeGarbageFile(t, path) // content is irrelevant; only its hash keys the entry
+	cache := cacheWithFacts(t, path, 1)
+	key, err := ctxgraph.HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stale := cache.Files[key]
 	stale.SchemaVersion = ctxgraph.CacheSchemaVersion - 1
 	cache.Files[key] = stale
@@ -166,4 +197,16 @@ func TestLoadCachedFacts_NilCache(t *testing.T) {
 
 func TestStoreCachedFacts_NilCacheIsNoop(t *testing.T) {
 	storeCachedFacts(nil, "x", fileFacts{}) // must not panic
+}
+
+// TestStoreCachedFacts_EmptyKeyIsNoop: an empty key means no content hash
+// could be computed for the file (see scanFiles' fallback path) — storing
+// under it would let a later run cross-bind Facts to whatever content
+// hashes to "", so it must be a no-op.
+func TestStoreCachedFacts_EmptyKeyIsNoop(t *testing.T) {
+	cache := &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{}}
+	storeCachedFacts(cache, "", fileFacts{ParseErrors: 1})
+	if len(cache.Files) != 0 {
+		t.Error("storeCachedFacts with an empty key should be a no-op")
+	}
 }

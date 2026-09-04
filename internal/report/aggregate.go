@@ -232,10 +232,21 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo), cache *ctxgraph.FileCache) error {
 	for fileIdx, path := range paths {
 		fileStart := time.Now()
-		key := ctxgraph.CanonicalPath(path)
+		// key is the cache identity for this file: its content hash — the
+		// same key ctxgraph.ScanCached keyed this file's entry by, so the
+		// Facts looked up here are the ones just validated for this exact
+		// file content (a path/mtime key would let a cp -r/backup restore
+		// cross-bind Facts between old and new content). A hash failure
+		// (file vanished between listing and hashing) has no identity to
+		// cache under: fall through to the fresh decode and skip the Facts
+		// store (storeCachedFacts no-ops on an empty key) — the decode
+		// reports its own error if the file is really gone.
+		key, hashErr := ctxgraph.HashFile(path)
 		var fileRecords int
 		var err error
-		if ff, ok := loadCachedFacts(cache, key); onRecord == nil && ok {
+		if hashErr != nil {
+			fileRecords, err = st.scanAndCacheFile(path, "", cache, onRecord)
+		} else if ff, ok := loadCachedFacts(cache, key); onRecord == nil && ok {
 			fileRecords = st.ingestCachedFile(path, ff)
 		} else {
 			fileRecords, err = st.scanAndCacheFile(path, key, cache, onRecord)

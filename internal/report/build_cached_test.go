@@ -15,6 +15,17 @@ import (
 	"vmr/internal/taskseg"
 )
 
+// hashKey returns the content-hash cache key for path — what the FileCache
+// is indexed by now (see ctxgraph.FileCache's doc comment).
+func hashKey(t *testing.T, path string) string {
+	t.Helper()
+	h, err := ctxgraph.HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 // TestBuild_LogsClientEndpointRowCount is the lock-in: §5.5 has no Top-N
 // cap by design, so this progress line is the one observable signal an
 // operator gets that it's grown large — must actually appear when
@@ -95,7 +106,7 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 	if string(wantJSON) != string(gotJSON) {
 		t.Errorf("BuildCached (warm) differs from Build:\nBuild:       %s\nBuildCached: %s", wantJSON, gotJSON)
 	}
-	key := ctxgraph.CanonicalPath(path)
+	key := hashKey(t, path)
 	if cache2.Files[key].Hash != cache1.Files[key].Hash {
 		t.Error("warm cache entry's hash should be unchanged (file didn't change)")
 	}
@@ -116,7 +127,7 @@ func TestBuildCached_WarmPopulatesFactsCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
-	key := ctxgraph.CanonicalPath(path)
+	key := hashKey(t, path)
 	if len(cache.Files[key].Facts) == 0 {
 		t.Error("cold run should have populated the file's Facts cache entry")
 	}
@@ -221,7 +232,7 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}
-	key := ctxgraph.CanonicalPath(path)
+	key := hashKey(t, path)
 	if cache2.Files[key].Hash == cache1.Files[key].Hash {
 		t.Error("hash should differ after appending")
 	}
