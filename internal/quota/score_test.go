@@ -305,3 +305,105 @@ func TestScoreForLimits_NearBlownGateDoesNotThrottle(t *testing.T) {
 		t.Fatalf("bucket + 99.9%%-used gate = %v, want ~2.0 (2.88 adjudicated: no graded throttle — only the blow zeroes the score)", got)
 	}
 }
+
+// TestRole_SingleLimit_IsAlwaysBucket pins the P1/P2 degenerate case for
+// both judging sets: a provider's only Limit is trivially its own bucket,
+// whether asked about a specific model or the shared ("") view.
+func TestRole_SingleLimit_IsAlwaysBucket(t *testing.T) {
+	l := core.Limit{Metric: core.MetricRequests, EveryText: "1mo", Amount: 1000}
+	limits := []core.Limit{l}
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf("Role(shared view) = %q, want bucket", got)
+	}
+	if got := Role(limits, 0, "some-model"); got != "bucket" {
+		t.Errorf("Role(model view) = %q, want bucket", got)
+	}
+}
+
+// TestRole_NoMixedScope_MatchesPlainBucketIndex pins the zero-regression
+// property: with no restricted-list Limit in the mix, the shared row's
+// judging set (unrestricted + wildcard) is identical to the full Limit set,
+// so Role("") agrees with a plain BucketIndex over the whole slice — same
+// as before this function existed.
+func TestRole_NoMixedScope_MatchesPlainBucketIndex(t *testing.T) {
+	gate := core.Limit{Metric: core.MetricRequests, EveryText: "5h", EveryN: 5, EveryUnit: "h"}
+	bucket := core.Limit{Metric: core.MetricRequests, EveryText: "1mo", EveryN: 1, EveryUnit: "mo"}
+	limits := []core.Limit{gate, bucket}
+	if got := Role(limits, 0, ""); got != "gate" {
+		t.Errorf("Role(gate, \"\") = %q, want gate", got)
+	}
+	if got := Role(limits, 1, ""); got != "bucket" {
+		t.Errorf("Role(bucket, \"\") = %q, want bucket", got)
+	}
+}
+
+// TestRole_MixedScope_SharedRowExcludesRestrictedCompetitor pins the actual
+// fix: a shared 1d pool alongside a Limit restricted to one model with a
+// longer (1mo) period. A plain full-set BucketIndex would hand the pool's
+// "shared row" role to the restricted Limit (longest period wins) and print
+// the pool as a gate for every model — including one, "flash", that Limit
+// never covers and whose own applicableLimits routing view has the pool as
+// its ONLY Limit, hence trivially its bucket. Role("") must agree with that
+// view instead of the full-set one; Role(model) is untouched and must keep
+// agreeing with applicableLimits, exactly as before.
+func TestRole_MixedScope_SharedRowExcludesRestrictedCompetitor(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d"}
+	restricted := core.Limit{Metric: core.MetricTokens, EveryText: "1mo", EveryN: 1, EveryUnit: "mo", Models: []string{"lite"}}
+	limits := []core.Limit{shared, restricted}
+
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf(`Role(shared, "") = %q, want bucket (restricted-list Limit must not compete for the shared row)`, got)
+	}
+	if got := Role(limits, 0, "flash"); got != "bucket" {
+		t.Errorf(`Role(shared, "flash") = %q, want bucket (flash's applicable set is {shared} alone)`, got)
+	}
+	if got := Role(limits, 0, "lite"); got != "gate" {
+		t.Errorf(`Role(shared, "lite") = %q, want gate (lite's applicable set has the longer restricted Limit as bucket)`, got)
+	}
+	if got := Role(limits, 1, "lite"); got != "bucket" {
+		t.Errorf(`Role(restricted, "lite") = %q, want bucket`, got)
+	}
+}
+
+// TestRole_Wildcard_CompetesForSharedRow pins that a wildcard Limit
+// (models: ["*"]) — unlike a restricted list — DOES compete for the shared
+// row's role: it covers every model just as the shared pool does, so a
+// longer-period wildcard correctly outranks the pool in both the shared
+// ("") view and every individual model's view.
+func TestRole_Wildcard_CompetesForSharedRow(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d"}
+	wildcard := core.Limit{Metric: core.MetricTokens, EveryText: "1mo", EveryN: 1, EveryUnit: "mo", Models: []string{"*"}}
+	limits := []core.Limit{shared, wildcard}
+
+	if got := Role(limits, 0, ""); got != "gate" {
+		t.Errorf(`Role(shared, "") = %q, want gate (wildcard covers every model, so it legitimately outranks the pool)`, got)
+	}
+	if got := Role(limits, 1, "any-model"); got != "bucket" {
+		t.Errorf(`Role(wildcard, "any-model") = %q, want bucket`, got)
+	}
+}
+
+// TestRole_IdenticalFieldsDisambiguatedByIndex pins identity-by-index, not
+// by value: a shared pool and a same-period, same-amount wildcard Limit are
+// legal to configure together (config.validateQuota's collision check only
+// fires within the same PerModel class) and can be byte-identical in every
+// field BucketIndex's tie-break considers (Metric/EveryText/Amount/Since) —
+// only Models differs. preferBucket still deterministically picks the
+// shared pool as the bucket; a value-equality identity check couldn't tell
+// the two apart (both "look like" the winner) and would wrongly call the
+// wildcard a bucket too, in both the shared and the per-model view.
+func TestRole_IdenticalFieldsDisambiguatedByIndex(t *testing.T) {
+	shared := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d", Amount: 500}
+	wildcard := core.Limit{Metric: core.MetricRequests, EveryText: "1d", EveryN: 1, EveryUnit: "d", Amount: 500, Models: []string{"*"}}
+	limits := []core.Limit{shared, wildcard}
+
+	if got := Role(limits, 0, ""); got != "bucket" {
+		t.Errorf(`Role(shared, "") = %q, want bucket (preferBucket picks the shared pool on the tie)`, got)
+	}
+	if got := Role(limits, 1, ""); got != "gate" {
+		t.Errorf(`Role(wildcard, "") = %q, want gate — the wildcard LOST the tie to the shared pool despite identical Metric/EveryText/Amount/Since`, got)
+	}
+	if got := Role(limits, 1, "m"); got != "gate" {
+		t.Errorf(`Role(wildcard, "m") = %q, want gate — same tie, per-model view`, got)
+	}
+}

@@ -82,8 +82,89 @@ func TestCmdCheck_EqualPeriods_RoleNotWrittenOrder(t *testing.T) {
 			t.Fatalf("the per-model equal-period Limit should be role=gate (shared pool wins the tie):\n%s", out)
 		}
 	}
-	if !strings.Contains(out, "per-model Limits' role is judged per applicable model") {
-		t.Fatalf("a per-model Limit in the config should produce the note pointing at /status:\n%s", out)
+	// A single-named-model Limit is resolved exactly (see
+	// TestCmdCheck_SingleNamedModelListIsExact) — no note here, unlike the
+	// wildcard/multi-model case in TestCmdCheck_ApproximatedRoleNote.
+	if strings.Contains(out, "role can differ per model") {
+		t.Fatalf("a single-named-model Limit's role is exact — it should not produce the approximation note:\n%s", out)
+	}
+}
+
+// TestCmdCheck_SharedRoleExcludesRestrictedCompetitor pins the shared-row
+// fix at the check layer: a shared pool alongside a STRICTLY LONGER
+// restricted-list Limit must still print the shared line as role=bucket —
+// the restricted Limit only ever competes for the model it names, never
+// for the shared row (see quota.Role's doc comment). Contrast
+// TestCmdCheck_EqualPeriods_RoleNotWrittenOrder, where the two periods tie
+// and the pool already won under the pre-fix full-set derivation too.
+func TestCmdCheck_SharedRoleExcludesRestrictedCompetitor(t *testing.T) {
+	yaml := strings.Replace(quotaConfigYAML,
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}",
+		"- {metric: requests, every: 1d, amount: 500}\n        - {metric: tokens, every: 1mo, amount: 250000, models: [real-model]}", 1)
+	path := writeTempFile(t, "config.yaml", yaml)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "every=1d") && !strings.Contains(line, "role=bucket") {
+			t.Fatalf("the shared 1d pool should stay role=bucket despite the longer restricted-list competitor:\n%s", out)
+		}
+		if strings.Contains(line, "models=real-model") && !strings.Contains(line, "role=bucket") {
+			t.Fatalf("real-model's own applicable set has the 1mo Limit as its bucket:\n%s", out)
+		}
+	}
+}
+
+// TestCmdCheck_SingleNamedModelListIsExact pins that a Limit restricted to
+// exactly ONE named model is resolved exactly, not approximated: two
+// disjoint single-model Limits on the same provider (legal — Scopes don't
+// overlap) each have applicableLimits({that one model}) = {itself} alone,
+// so each is trivially its own bucket regardless of which one has the
+// larger Amount. The old full-Limit-set approximation would pick a single
+// winner across BOTH lines (the larger Amount, via preferBucket) and print
+// the loser as role=gate even though it's the sole, hence winning, Limit in
+// its own model's routing view.
+func TestCmdCheck_SingleNamedModelListIsExact(t *testing.T) {
+	yaml := strings.Replace(quotaConfigYAML,
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}",
+		"- {metric: requests, every: 1mo, amount: 100, models: [lite]}\n        - {metric: requests, every: 1mo, amount: 200, models: [flash]}", 1)
+	path := writeTempFile(t, "config.yaml", yaml)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "models=lite") && !strings.Contains(line, "role=bucket") {
+			t.Fatalf("lite's applicable set is {itself} alone, so it's trivially its own bucket, not gated by flash's larger Amount:\n%s", out)
+		}
+		if strings.Contains(line, "models=flash") && !strings.Contains(line, "role=bucket") {
+			t.Fatalf("flash's applicable set is {itself} alone too:\n%s", out)
+		}
+	}
+	if strings.Contains(out, "role can differ per model") {
+		t.Fatalf("every Limit here is a single-named-model list, resolved exactly — no approximation note expected:\n%s", out)
+	}
+}
+
+// TestCmdCheck_ApproximatedRoleNote pins the narrowed note trigger: it
+// fires for a wildcard or a multi-model list (the two Scope shapes a
+// static line genuinely cannot resolve to one correct role), but not
+// merely because a per-model Limit exists (see
+// TestCmdCheck_SingleNamedModelListIsExact, which has none of the note).
+func TestCmdCheck_ApproximatedRoleNote(t *testing.T) {
+	const note = "role can differ per model"
+
+	wildcard := strings.Replace(quotaConfigYAML,
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}",
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}\n        - {metric: tokens, every: 1min, amount: 1000, models: [\"*\"]}", 1)
+	path := writeTempFile(t, "config.yaml", wildcard)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, note) {
+		t.Fatalf("a wildcard Limit should produce the approximation note:\n%s", out)
+	}
+
+	multiModel := strings.Replace(quotaConfigYAML,
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}",
+		"- {metric: requests, every: 1mo, since: 2026-08-01, amount: 90000}\n        - {metric: tokens, every: 1min, amount: 1000, models: [lite, flash]}", 1)
+	path = writeTempFile(t, "config.yaml", multiModel)
+	out = captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, note) {
+		t.Fatalf("a multi-model-list Limit should produce the approximation note:\n%s", out)
 	}
 }
 

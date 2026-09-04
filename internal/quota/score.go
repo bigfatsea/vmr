@@ -188,3 +188,52 @@ func ScoreForLimits(limits []core.Limit, used []float64, now time.Time) float64 
 	}
 	return score
 }
+
+// Role reports whether limits[li] acts as "bucket" or "gate" among the
+// Limits that actually compete for the same slice of traffic it does — the
+// display-only counterpart to ScoreForLimits/BucketIndex, for /status,
+// `vmr status` and `vmr check`'s role= column. li identifies the Limit by
+// its ORIGINAL INDEX into limits, not by value: two distinct Limits (a
+// shared pool and a same-period, same-amount wildcard, say — legal, since
+// config.validateQuota's collision check only compares same-PerModel-class
+// Scopes) can be byte-identical in every field BucketIndex's tie-break
+// doesn't consider (Metric/EveryText/Amount/Since), so a value-equality
+// match cannot tell them apart; comparing indices always can. model picks
+// the judging set:
+//
+//   - model != "": the live per-model view — limits filtered to the ones
+//     whose Scope covers model, the identical subset scoreForEndpoint
+//     routes that model against.
+//   - model == "": the shared-row view, for a Limit with no Models of its
+//     own. A restricted-list Limit (models: [a, b]) only ever competes for
+//     the models it names — it must not be allowed to win BucketIndex
+//     against the shared pool just because it happens to have a longer
+//     period, or every model NOT on its list gets shown the wrong role for
+//     a pool that, from their own applicableLimits view, is their bucket.
+//     So the judging set here is limits that themselves cover every model —
+//     unrestricted (!PerModel) or wildcard (IsWildcardModels) — which is
+//     exactly applicableLimits(m) for a hypothetical model that appears in
+//     no restricted list. See KNOWN_ISSUES for the mixed-Scope config this
+//     resolves (a shared/wildcard row could otherwise print "gate" for a
+//     pool that is, in fact, every unlisted model's real bucket).
+func Role(limits []core.Limit, li int, model string) string {
+	app := make([]core.Limit, 0, len(limits))
+	orig := make([]int, 0, len(limits)) // app[k]'s index in limits, for identity below
+	for i, c := range limits {
+		switch {
+		case model != "":
+			if AppliesToModel(c, model) {
+				app = append(app, c)
+				orig = append(orig, i)
+			}
+		case !PerModel(c) || IsWildcardModels(c.Models):
+			app = append(app, c)
+			orig = append(orig, i)
+		}
+	}
+	bi := BucketIndex(app)
+	if bi < 0 || bi >= len(app) || orig[bi] != li {
+		return "gate"
+	}
+	return "bucket"
+}

@@ -345,3 +345,67 @@ models:
 		}
 	}
 }
+
+// TestQuotaStatus_SharedRoleExcludesRestrictedCompetitor pins the shared-row
+// counterpart to TestQuotaStatus_RoleIsPerModelNotGlobal: a shared (no
+// Models) 1d pool alongside a Limit restricted to "lite" with a longer
+// (1mo) period. The old full-Limit-set derivation handed the pool's role to
+// whichever Limit had the longest period overall — the restricted one — and
+// printed the shared row as a gate, misleading every model NOT on that
+// restricted list ("flash" here, which never gets a row of its own and is
+// only ever represented by the shared row). The pool must instead be judged
+// only against Limits that also cover every model (see quota.Role): "flash"
+// routes with the pool as its only applicable Limit, hence trivially its
+// bucket, and the shared row must say so.
+func TestQuotaStatus_SharedRoleExcludesRestrictedCompetitor(t *testing.T) {
+	rt := New(nil)
+	rt.Quota = quota.NewRegistry("")
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+providers:
+  - name: google
+    base_url: {openai-completions: https://example.com}
+    api_key: k1
+    quota:
+      limits:
+        - {metric: requests, every: 1d, amount: 500}
+        - {metric: tokens, every: 1mo, amount: 250000, models: [lite]}
+models:
+  m1:
+    endpoints:
+      - {protocol: openai-completions, providers: [google], models: [lite, flash]}
+`)
+	snap := mustSnapshot(t, cfg)
+	rt.Install(snap)
+
+	for _, m := range []string{"lite", "flash"} {
+		ep := &core.Endpoint{Provider: "google", Model: m, Quota: snap.Models["openai-completions"]["m1"].Endpoints[0].Quota}
+		ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, true, true, chargeNow)
+	}
+
+	st := rt.QuotaStatus()
+	if len(st) != 2 {
+		// One shared 1d row (charged by both models but rendered once) plus
+		// one 1mo row for lite — flash has no Limit of its own and gets no
+		// row; its only representation is the shared row.
+		t.Fatalf("rows = %d, want 2, got %+v", len(st), st)
+	}
+	for _, row := range st {
+		switch {
+		case row.Metric == "requests":
+			if len(row.Models) != 0 {
+				t.Errorf("shared row Models = %v, want empty (Scope-less)", row.Models)
+			}
+			if row.Role != "bucket" {
+				t.Errorf("shared 1d role = %q, want bucket (flash's applicable set is {shared pool} alone)", row.Role)
+			}
+		case row.Metric == "tokens":
+			if len(row.Models) != 1 || row.Models[0] != "lite" {
+				t.Errorf("per-model row Models = %v, want [lite]", row.Models)
+			}
+			if row.Role != "bucket" {
+				t.Errorf("lite 1mo role = %q, want bucket (unchanged: lite's own longest applicable Limit)", row.Role)
+			}
+		}
+	}
+}

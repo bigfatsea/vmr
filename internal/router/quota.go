@@ -239,12 +239,14 @@ type QuotaProviderStatus struct {
 	// Models is this Limit's Scope — omitted when the Limit applies to
 	// every model on the provider (the zero-config default).
 	Models []string `json:"models,omitempty"`
-	// Role is "bucket" or "gate" — see quota.BucketIndex/ScoreForLimits'
-	// doc comments for the rule (longest tumbling period on the provider
+	// Role is "bucket" or "gate" — see quota.Role's doc comment for the
+	// judging-set rule (longest tumbling period among the competing Limits
 	// wins bucket; equal periods tie-break deterministically — shared pool
 	// first, then larger Amount — never by YAML written order; every other
-	// Limit is a gate). Always "bucket" for a provider with exactly one
-	// Limit — the P1/P2 shape.
+	// Limit is a gate; a shared/wildcard row's competitors exclude any
+	// restricted-list Limit, which only ever competes for the models it
+	// names). Always "bucket" for a provider with exactly one Limit — the
+	// P1/P2 shape.
 	Role         string    `json:"role"`
 	Amount       float64   `json:"amount"`
 	Used         float64   `json:"used"`     // base(metric) already applied — directly comparable to Amount
@@ -369,9 +371,9 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 		}
 	}
 	var out []QuotaProviderStatus
-	for _, l := range limits {
+	for i, l := range limits {
 		if !quota.PerModel(l) {
-			role := limitRoleForModel(limits, l, "")
+			role := quota.Role(limits, i, "")
 			out = append(out, quotaStatusRow(reg, provider, l, "", role, now))
 			continue
 		}
@@ -380,30 +382,11 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 			if !ok {
 				continue
 			}
-			role := limitRoleForModel(limits, l, model)
+			role := quota.Role(limits, i, model)
 			out = append(out, quotaStatusRow(reg, provider, l, model, role, now))
 		}
 	}
 	return out
-}
-
-// limitRoleForModel determines whether l acts as the bucket or a gate for
-// model, mirroring the exact applicableLimits + BucketIndex logic
-// scoreForEndpoint uses during routing. model is "" for a shared Limit.
-func limitRoleForModel(limits []core.Limit, l core.Limit, model string) string {
-	app := limits
-	if model != "" {
-		app = applicableLimits(limits, model)
-	}
-	bi := quota.BucketIndex(app)
-	if bi < 0 || bi >= len(app) {
-		return "gate"
-	}
-	bucket := app[bi]
-	if bucket.Metric == l.Metric && bucket.EveryText == l.EveryText && bucket.Amount == l.Amount && bucket.Since.Equal(l.Since) {
-		return "bucket"
-	}
-	return "gate"
 }
 
 // quotaStatusRow builds one QuotaProviderStatus row for l. model is ""
