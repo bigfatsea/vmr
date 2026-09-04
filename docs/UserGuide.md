@@ -298,12 +298,15 @@ providers:
     api_key: ${PLAN_A_KEY}
     quota:
       limits:
-        # a provider can carry more than one window (P3) — the tightest
-        # constraint decides: a short window acts as a rate-limiting "gate"
-        # (it can only suppress the score, never boost it), the longest
+        # a provider can carry more than one window (P3) — the longest
         # window on the account is its "bucket" (an underused bucket DOES
-        # boost the score — "use it or lose it"). One entry is still the
-        # common case and behaves exactly like before.
+        # boost the score — "use it or lose it"); every shorter window is
+        # a "gate": a local stand-in for the vendor's real rate limit.
+        # A live gate doesn't touch the score at all; one that's fully
+        # consumed zeroes it until the window resets — so set a gate's
+        # amount slightly TIGHTER than the vendor's real limit, with
+        # margin for calibration error and in-flight requests. One entry
+        # is still the common case and behaves exactly like before.
         - metric: requests       # or: tokens (input + output, equal-weighted)
           every: 1min            # N{min,h,d,w,mo} — also valid: 5h, 2w, 3d
           amount: 60              # a short RPM-style gate
@@ -359,7 +362,7 @@ A Limit's `every:` sets its counting window. Supported units: `1min` (or any `Nm
 
 `"*"` is a reserved token, not a glob pattern — `models: ["gpt-*"]` matches nothing (there's no prefix matching), and combining `"*"` with a named entry (`models: ["*", "premium-model"]`) is a load-time error, since the wildcard already covers whatever the named entry would add. An endpoint only interacts with the Limits whose Scope covers its own upstream model (unscoped, wildcard, or a matching name) — a Limit that doesn't cover a given endpoint neither charges against it nor constrains its score, the same as if that Limit didn't exist for that endpoint. `/status`/`vmr status` show one row per model that has actually been charged against a per-model Limit — a `"*"` Limit's row count grows as new models send traffic, not fixed at config time.
 
-**Bucket vs. gate, when a provider carries more than one Limit.** The Limit with the *longest* period is the account's "bucket" — its unused headroom really is being wasted if it isn't spent ("use it or lose it"), so an underused bucket actively boosts the score. Every other, shorter Limit is a "gate" — a rate limiter the vendor uses to smooth load, with no economic value in maxing it out, so a gate can only ever suppress the score toward its own saturation and never boost it above what the bucket alone would give. The provider's score is the tightest (minimum) of all its Limits' scores. With a single Limit (the common case), it's simply the account's bucket and this degenerates to exactly the P1/P2 behavior described above.
+**Bucket vs. gate, when a provider carries more than one Limit.** The Limit with the *longest* period is the account's "bucket" — its unused headroom really is being wasted if it isn't spent ("use it or lose it"), so an underused bucket actively boosts the score. Every other, shorter Limit is a "gate" — a local stand-in for the vendor's real rate limit, and a binary one: while the gate is live (`used < amount`) it doesn't touch the score at all (the bucket alone decides), and once fully consumed it zeroes the score until the short window resets. Set a gate's `amount` slightly *tighter* than the vendor's real limit, so the gate trips locally — a clean deprioritization — before the vendor can answer 429s; the margin should cover both your calibration error and the requests already in flight when the gate trips, and a zero margin is what lets sticky-pinned sessions keep hitting a blown gate's upstream. A gated provider comes back at full score the moment its window resets. With a single Limit (the common case), it's simply the account's bucket and this degenerates to exactly the P1/P2 behavior described above.
 
 Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying. Write `since` as `YYYY-MM-DD` (anchored to local-timezone midnight) or an RFC3339 stamp carrying an explicit local offset (`…+08:00`) — a `Z`/UTC stamp anchors every later boundary to that UTC instant, so `2026-08-01T00:00:00Z` resets at 08:00 local in UTC+8, not at midnight.
 

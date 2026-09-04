@@ -96,32 +96,44 @@ func TestReorderByQuota_ScopedLimit_TreatsNonMatchingEndpointAsUnmetered(t *test
 	}
 }
 
-// TestReorderByQuota_MultiLimit_GatePicksTighterConstraint pins the
+// TestReorderByQuota_MultiLimit_BlownGateDeprioritizes pins the
 // bucket-vs-gate merge (quota.ScoreForLimits) actually driving reorder
-// decisions: two providers share the same healthy monthly bucket, but one
-// also carries a nearly-exhausted daily gate — that provider must sort
-// second despite its bucket being identical.
-func TestReorderByQuota_MultiLimit_GatePicksTighterConstraint(t *testing.T) {
+// decisions, under the binary-fuse gate semantics (KNOWN_ISSUES 2.88,
+// adjudicated 2026-09-04): two providers share the same healthy monthly
+// bucket, but one also carries a daily gate that has fully blown — that
+// provider must sort second despite its bucket being identical. A merely
+// NEARLY-exhausted live gate must NOT reorder: the gate's graded raw is a
+// calibration artifact, not a signal — only the blow is.
+func TestReorderByQuota_MultiLimit_BlownGateDeprioritizes(t *testing.T) {
 	reg := quota.NewRegistry("")
 	bucket := requestsLimit(1000) // both providers: on-pace monthly bucket (nothing charged, mid-month)
 
-	tightGate := requestsLimit(100)
-	tightGate.EveryUnit, tightGate.EveryText = "d", "1d"
+	gate := requestsLimit(100)
+	gate.EveryUnit, gate.EveryText = "d", "1d"
 
 	specHealthy := &core.QuotaSpec{Limits: []core.Limit{bucket}}
-	specGated := &core.QuotaSpec{Limits: []core.Limit{bucket, tightGate}}
-
-	// Nearly exhaust the gate on the second provider only.
-	reg.Charge("gated", quota.LimitKey(tightGate, ""), quota.PeriodStart(tightGate, chargeNow), quota.Counters{Requests: 99}, 0)
+	specGated := &core.QuotaSpec{Limits: []core.Limit{bucket, gate}}
 
 	epHealthy := &core.Endpoint{Provider: "healthy", Model: "m", Quota: specHealthy}
 	epGated := &core.Endpoint{Provider: "gated", Model: "m", Quota: specGated}
-	cands := []*core.Endpoint{epGated, epHealthy} // deliberately gated-first, so a no-op would leave it first
 
+	// A near-exhausted (99/100) but live gate changes nothing — no graded
+	// throttle exists to engage.
+	reg.Charge("gated", quota.LimitKey(gate, ""), quota.PeriodStart(gate, chargeNow), quota.Counters{Requests: 99}, 0)
+	cands := []*core.Endpoint{epGated, epHealthy} // gated-first, so a no-op leaves it first
+	if changed := reorderByQuota(cands, nil, reg, chargeNow); changed {
+		t.Fatalf("reorderByQuota reordered on a live 99%%-used gate — no graded throttle exists; only a blown gate reorders")
+	}
+	if cands[0] != epGated {
+		t.Fatalf("order = %v, want epGated still first (its gate is live — near-exhaustion is not a signal)", cands)
+	}
+
+	// Blow the gate completely (100/100): now the provider must sink.
+	reg.Charge("gated", quota.LimitKey(gate, ""), quota.PeriodStart(gate, chargeNow), quota.Counters{Requests: 1}, 0)
+	cands = []*core.Endpoint{epGated, epHealthy}
 	reorderByQuota(cands, nil, reg, chargeNow)
-
 	if cands[0] != epHealthy {
-		t.Fatalf("order = %v, want epHealthy first (epGated's daily gate is nearly exhausted)", cands)
+		t.Fatalf("order = %v, want epHealthy first (epGated's gate is blown — the local bound tripped before the vendor's limit)", cands)
 	}
 }
 

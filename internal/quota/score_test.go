@@ -124,12 +124,12 @@ func TestBucketIndex_LongestTumblingWins(t *testing.T) {
 }
 
 // TestScoreForLimits_TypeA is the design doc's §5.2 worked example, pinned
-// as a numeric assertion: a 5h gate at 5500/6000 used with 1h left has
-// raw = 0.417 — under the flat gate cap (`min(1, raw)`) that's also its
-// headroom directly (already < 1, so the cap never engages) — alongside a
-// monthly bucket exactly on pace (raw = headroom = 1.0). The provider's
-// score is the min of the two: 0.417 — the gate's near-saturation
-// suppresses the score even though the bucket itself is perfectly healthy.
+// as a numeric assertion: a 5h gate at 5500/6000 used with 1h left is LIVE
+// (used < amount), and a live gate doesn't touch the score at all — the
+// monthly bucket alone decides, and it's exactly on pace (raw = 1.0). The
+// gate's own raw (0.417, near saturation) is deliberately NOT consumed: it
+// reflects the safety margin's tightness, not a capacity signal. Contrast
+// the blown variant in TestScoreForLimits_BlownGateZeroesScore.
 func TestScoreForLimits_TypeA(t *testing.T) {
 	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
@@ -137,35 +137,35 @@ func TestScoreForLimits_TypeA(t *testing.T) {
 	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
 		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000} // April has 30 days; now is exactly the midpoint
 	limits := []core.Limit{gate, bucket}
-	used := []float64{5500, 500} // gate: 5500/6000 used; bucket: exactly on pace (50% used, 50% elapsed)
+	used := []float64{5500, 500} // gate: alive (5500 < 6000); bucket: exactly on pace (50% used, 50% elapsed)
 
 	got := ScoreForLimits(limits, used, now)
-	if !almostEqual(got, 0.417, 0.01) {
-		t.Fatalf("ScoreForLimits (type A) = %v, want ~0.417 (design doc §5.2's worked example, gate cap flattened to min(1,raw))", got)
+	if !almostEqual(got, 1.0, 1e-9) {
+		t.Fatalf("ScoreForLimits (type A) = %v, want exactly 1.0 (design doc §5.2's worked example: live gate doesn't participate, the bucket alone decides)", got)
 	}
 }
 
-// TestScoreForLimits_GateNeverBoosts pins the invariant a flat min(raw)
-// simplification would violate (see the design doc's §14.3 P3 open
-// question 1): an underused GATE must never push the provider's score
-// above what the bucket alone would give. Here the gate is barely touched
-// (raw = 3.0, which would win a naive min() if gates weren't capped), but
-// the bucket is exactly on pace (raw = 1.0) — the merged score must stay
-// at 1.0, not jump to whatever the gate's own raw signal is.
+// TestScoreForLimits_GateNeverBoosts pins the one invariant every gate
+// merge has preserved across all three generations (GateReserve band,
+// min(1, raw) cap, today's binary fuse): a gate can never push the
+// provider's score above what the bucket alone would give. Here the gate
+// is barely touched (raw = 1.2) while the bucket is exactly on pace
+// (raw = 1.0) — under the binary fuse a live gate isn't consulted at all,
+// so the merged score is the bucket's 1.0 exactly.
 func TestScoreForLimits_GateNeverBoosts(t *testing.T) {
 	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
-		Amount: 1000} // computed used/now below give raw=3.0 (HeadroomCap territory, but not clamped)
+		Amount: 1000} // computed used/now below give raw=1.2
 	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo", Amount: 1000}
 	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
 	gate.Since = now.Add(-1 * time.Hour)                       // 1h of 5h elapsed -> 80% time left
 	bucket.Since = time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC) // half the month elapsed
 
 	limits := []core.Limit{gate, bucket}
-	used := []float64{40, 500} // gate: 40/1000 used (raw = 0.96/0.8 = 1.2, still under HeadroomCap); bucket: on pace (raw=1.0)
+	used := []float64{40, 500} // gate: 40/1000 used (raw = 0.96/0.8 = 1.2), alive; bucket: on pace (raw=1.0)
 
 	got := ScoreForLimits(limits, used, now)
-	if got > 1.0+1e-9 {
-		t.Fatalf("ScoreForLimits = %v, want <= 1.0 — an underused gate must never boost the score above the bucket's own headroom", got)
+	if !almostEqual(got, 1.0, 1e-9) {
+		t.Fatalf("ScoreForLimits = %v, want exactly 1.0 — a live gate must never boost the score above the bucket's own headroom", got)
 	}
 }
 
@@ -196,5 +196,68 @@ func TestScoreForLimits_DegeneratesToScoreForLimit(t *testing.T) {
 	got := ScoreForLimits([]core.Limit{l}, []float64{0}, now)
 	if got != want {
 		t.Fatalf("ScoreForLimits (single Limit) = %v, want %v (== ScoreForLimit)", got, want)
+	}
+}
+
+// TestScoreForLimits_BucketBoostWithIdleGate is the positive half of the
+// KNOWN_ISSUES 2.88 adjudication (N3, closed 2026-09-04): an underused
+// monthly bucket alone scores ~2.0 (use-it-or-lose-it boost), and adding
+// one perfectly idle short gate must NOT collapse it to 1.0 — a live gate
+// carries no routing information, so the bucket alone decides. The old
+// min(1, raw) cap pinned this at exactly 1.0, which is what killed the
+// boost for every gated account.
+func TestScoreForLimits_BucketBoostWithIdleGate(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000} // April midpoint: 50% elapsed
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // 1h of 5h elapsed -> 80% time left
+
+	bucketAlone := ScoreForLimits([]core.Limit{bucket}, []float64{0}, now)
+	if !almostEqual(bucketAlone, 2.0, 0.02) {
+		t.Fatalf("bucket alone (0 used, 50%% elapsed) = %v, want ~2.0 (underuse boost)", bucketAlone)
+	}
+
+	withIdleGate := ScoreForLimits([]core.Limit{gate, bucket}, []float64{0, 0}, now)
+	if !almostEqual(withIdleGate, 2.0, 0.02) {
+		t.Fatalf("bucket + idle gate = %v, want ~2.0 (2.88 adjudicated: a live gate doesn't participate, the boost survives)", withIdleGate)
+	}
+}
+
+// TestScoreForLimits_BlownGateZeroesScore pins the negative half of the
+// 2.88 adjudication: a gate's one guaranteed bit is blown-or-not, and blown
+// must veto everything — the local bound tripped before the vendor's real
+// rate limit could, so the provider stands down (score 0, sinks below every
+// live alternative) until the short window resets, regardless of how rich
+// its bucket is.
+func TestScoreForLimits_BlownGateZeroesScore(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000}
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // fully consumed
+
+	got := ScoreForLimits([]core.Limit{gate, bucket}, []float64{1000, 0}, now)
+	if got != 0 {
+		t.Fatalf("bucket (rich) + blown gate = %v, want exactly 0 (2.88 adjudicated: a blown gate vetoes the whole provider)", got)
+	}
+}
+
+// TestScoreForLimits_NearBlownGateDoesNotThrottle pins that the gate's
+// graded raw is genuinely unconsumed all the way down: a gate at 99.9%
+// used still doesn't touch the score — there is no progressive throttle
+// band, because the margin's tightness is a calibration artifact, not a
+// capacity signal. The cutoff is the blow itself (see
+// TestScoreForLimits_BlownGateZeroesScore).
+func TestScoreForLimits_NearBlownGateDoesNotThrottle(t *testing.T) {
+	now := time.Date(2026, 4, 16, 0, 0, 0, 0, time.UTC)
+	bucket := core.Limit{Metric: core.MetricRequests, EveryN: 1, EveryUnit: "mo",
+		Since: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC), Amount: 1000}
+	gate := core.Limit{Metric: core.MetricRequests, EveryN: 5, EveryUnit: "h",
+		Since: now.Add(-1 * time.Hour), Amount: 1000} // 999/1000 = 99.9% used, still alive
+
+	got := ScoreForLimits([]core.Limit{gate, bucket}, []float64{999, 0}, now)
+	if !almostEqual(got, 2.0, 0.02) {
+		t.Fatalf("bucket + 99.9%%-used gate = %v, want ~2.0 (2.88 adjudicated: no graded throttle — only the blow zeroes the score)", got)
 	}
 }

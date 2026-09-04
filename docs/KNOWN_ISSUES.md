@@ -19,8 +19,9 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危 5（`2.2`/`2.17`/`2.18`/`2.85`/`2.88`），其余均为低危。
-- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.88（闸封顶，需裁决）/ §2.89 / §2.90 / §2.91。
+- **§2 分布**：高危 0；中危 4（`2.2`/`2.17`/`2.18`/`2.85`），其余均为低危。
+- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.89 / §2.90 / §2.91。
+- **2026-09-04 已闭环**：`ScoreForLimits` 闸归并二值化（原 §2.88，N3 裁决采纳「闸 = 带安全余量的厂商限流本地代理」语义：活着的闸不参与评分，烧断的闸归零沉底到窗口重置；旧 `min(1, raw)` 硬封顶把带闸账号的桶抢跑加分压死在 ≤1.0 的病灶随之消除）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-03 已闭环**：一批三方 review 核实后的小修（错误分类补 `error.code`、config 加载期禁 provider 名冒号 / 校验 strategy、keyless 自建上游按地址分级、探针仅 2xx 扣配额、anthropic 损坏图片仍计入 `HasImage`、`.parse-cache` mtime 消歧、md/html 行为指标统一、LLM detector 并发限时、`metric:cost` estimated 口径分侧等），详见 `CHANGELOG` `[Unreleased]`。删除的 §2 条目：`2.65`/`2.71`/`2.72`/`2.76`/`2.78`/`2.81`/`2.82`/`2.83`/`2.84`。
 - **2026-09（早于本轮）已闭环**：`standard_price_curated.yaml` 别名指向空 key 致 `LoadStandard` 失败（原 §2.87，commit `2e5d9cd` 恢复 `rates:` 段）。
 - **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
@@ -387,13 +388,6 @@
 - **可能方案**（触及核心四态机，需评估与 buffered/opaque/截断三分支的交互 + 完整回归）：在 `decide()` / `ingest` 的 undecided/buffered 路径识别保活帧（`event: ping`、SSE 注释行 `:`）并立即旁路 `s.out`，不参与 decide（ping 无 content、无 model 字段，早发对 SSE 语义无害，与 MiniMax buffered 不共存）。
 - **触发条件**：真实用户报告「用某慢上游时流式响应假死后被客户端超时切断」。
 
-
-#### 2.88 [中，需调度语义 owner 裁决] `ScoreForLimits` 的闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效
-
-- **现状**（2026-09-04 定价/配额专题 review 发现，源码已核实）：`internal/quota/score.go` `ScoreForLimits` 的合并式是 `score := 5.0; 对每条 Limit: h = raw; if 非桶 && h > 1 { h = 1 }; if h < score { score = h }`。于是**只要一个 provider 配了哪怕一条 `raw ≥ 1` 的健康空闲速率闸，整个账号的综合评分就被 `min` 焊死在 ≤ 1.0**——月度预付费桶的 use-it-or-lose-it 抢跑加分（`raw > 1` 时主动提分争流量）永久拿不到。
-- **矛盾点**：设计文档 §5.2 散文说「闸只应该在接近饱和时压制流量，绝不应该提升流量」，读作「空闲闸不该压制」→ 是 bug；但同段公式 `综合 = min over L of headroom(L)`、`headroom(闸) = min(1, raw)` 又精确对应当前实现 → 是 as-designed。`internal/quota/score_test.go` 三个用例无一覆盖「桶 raw > 1 且闸空闲」这条正向抢跑路径。
-- **两种收法**：(a) 判为 bug —— `score := 桶raw; 对每条闸: if 闸raw < 1 && 闸raw < score { score = 闸raw }`（空闲闸不参与），补正向抢跑单测；(b) 判为 as-designed —— 在 `score.go` 注释 + 设计文档 §5.2 写死「任何闸都会把综合分压到 ≤ 1（保守取舍：不为长周期欠用而突破短周期节奏）」，消除散文歧义。
-- **为什么待定**：改动 (a) 会改变线上端点重排行为，属核心调度语义，需项目 owner 拍板。2026-09-04 已就此征询用户，裁为「本轮不碰，登记此条留待调度语义 owner 专门评审」。
 
 #### 2.89 [低，登记待触发] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
 
