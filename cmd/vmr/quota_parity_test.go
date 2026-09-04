@@ -151,9 +151,10 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 }
 
 // tokenChargeFor reproduces what internal/router computed for this request by
-// calling the router's OWN exported entry point (router.TokenCountersSides —
-// the same function the live path's tokenCharge and `vmr replay`'s
-// chargeReplay both go through). The per-side flags come from
+// calling the router's exported entry point (router.TokenCountersSides — a
+// thin wrapper over quota.TokenCountersSides, the one canonical
+// exact-vs-degraded fold; the live path's tokenCharge and `vmr replay`'s
+// chargeReplay go through the same one). The per-side flags come from
 // chatmsg.ExtractUsageSides, the single authority for the side rule, so
 // the exact-vs-degraded decision is the same one the router's live path
 // makes (and the old single-bool disjunction would have gotten wrong for

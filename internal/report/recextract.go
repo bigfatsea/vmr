@@ -16,6 +16,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
+	"vmr/internal/quota"
 	"vmr/internal/reqdetail"
 )
 
@@ -159,21 +160,20 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 		r.newInstruction = ri.NewInstruction
 		r.workloadClass = workloadClassOf(ri)
 	}
-	// Per-side degraded estimate: fill only the side whose usage is
-	// missing, and only when an endpoint actually served the request (same
-	// gate as before — nothing served means nothing was charged). The Out
-	// side uses max(placeholder, degradedEstimate) to mirror the router's
-	// TokenCountersSides max(u.Out, outEst) rule — the Anthropic
-	// message_start placeholder (~1) is not a real generation total, but
-	// the router still charges whichever is larger between that and the
-	// byte estimate, and the report must reproduce that same total.
+	// Per-side degraded estimate: fill only the side whose usage is missing,
+	// and only when an endpoint actually served the request (nothing served
+	// means nothing was charged). The fold (In fully to Fresh, Out max'd
+	// with the placeholder) is quota.TokenCountersSides' — the same rule the
+	// router charges and costFor prices through — applied here to recover
+	// the per-side estimates ingest and cost consume.
 	if r.endpoint != "" {
-		estIn, estOut := rf.EstInFresh, rf.EstOut
+		tu := quota.TokenUsage{Fresh: r.usage.Fresh(), CacheRead: r.usage.CacheRead, CacheWrite: r.usage.CacheWrite, Out: r.usage.Out}
+		raw, _ := quota.TokenCountersSides(tu, r.usageInOK, r.usageOutOK, rf.EstInFresh, rf.EstOut)
 		if !r.usageInOK {
-			r.estInFresh = estIn
+			r.estInFresh = int64(raw.Fresh)
 		}
 		if !r.usageOutOK {
-			r.estOut = max(r.usage.Out, estOut)
+			r.estOut = int64(raw.Out)
 		}
 	}
 	return r

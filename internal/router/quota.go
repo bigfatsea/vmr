@@ -203,57 +203,25 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 // instead, because partial usage (real input, placeholder output) billed as
 // exact is precisely the failure TokenCountersSides exists to prevent.
 //
-// Exported, and factored out of tokenCharge, because this exact-vs-degraded
-// decision had grown THREE independent implementations: this one,
-// internal/replay's chargeReplay, and internal/report's own reproduction of
-// it for `vmr report`'s §2.5 recomputed column. Three copies of "if usage was
-// sniffed charge it exactly, otherwise charge a byte estimate and mark the
-// whole thing estimated" is the same class of drift risk the audit-log label
-// format and quota.BaseAmount were each collapsed to one implementation to
-// avoid — and it is specifically what cmd/vmr/quota_parity_test.go exists to
-// catch, so that test must drive THIS function rather than re-deriving it.
+// A thin wrapper over quota.TokenCountersSides — the canonical implementation
+// lives in internal/quota (report needs the same fold and can't import
+// router, so the rule must live below both halves); this form just
+// translates chatmsg.Usage in, Fresh() flooring In to non-negative as the
+// scalar fold expects.
 func TokenCounters(u chatmsg.Usage, sniffed bool, inEst, outEst int64) (quota.Counters, float64) {
 	return TokenCountersSides(u, sniffed, sniffed, inEst, outEst)
 }
 
-// TokenCountersSides is TokenCounters' side-aware form — the canonical
-// implementation of the exact-vs-degraded rule. inSniffed/outSniffed report
-// whether each side of the usage ledger was actually parsed; a missing side
-// falls back to the caller's estimate for that side (max'd with whatever the
-// usage object did claim — a placeholder must never beat real emitted-text
-// evidence), and the estimated share is reported honestly as the portion of
-// the charge that came from an estimate, never 0 just because SOME usage was
-// seen. The degraded In side charges everything to Fresh: it cannot tell
-// cache hits apart, and assuming none is the safe direction — it
-// overestimates consumption rather than silently crediting a cache discount
-// that may not have happened (see the design doc's Metering section).
+// TokenCountersSides is TokenCounters' side-aware form — a thin wrapper over
+// quota.TokenCountersSides, the canonical implementation of the exact-vs-
+// degraded rule (see that function's doc comment in internal/quota for the
+// rule itself). Kept as an exported symbol because internal/replay and
+// cmd/vmr's quota parity test drive the router-named entry point; the body
+// is not here.
 func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outEst int64) (quota.Counters, float64) {
-	if inSniffed && outSniffed {
-		return quota.Counters{
-			Fresh:      float64(u.Fresh()),
-			CacheRead:  float64(u.CacheRead),
-			CacheWrite: float64(u.CacheWrite),
-			Out:        float64(u.Out),
-		}, 0
-	}
-	var c quota.Counters
-	var est float64
-	if inSniffed {
-		c.Fresh = float64(u.Fresh())
-		c.CacheRead = float64(u.CacheRead)
-		c.CacheWrite = float64(u.CacheWrite)
-	} else {
-		c.Fresh = float64(inEst)
-		est += float64(inEst)
-	}
-	if outSniffed {
-		c.Out = float64(u.Out)
-	} else {
-		out := max(u.Out, outEst)
-		c.Out = float64(out)
-		est += float64(out)
-	}
-	return c, est
+	return quota.TokenCountersSides(quota.TokenUsage{
+		Fresh: u.Fresh(), CacheRead: u.CacheRead, CacheWrite: u.CacheWrite, Out: u.Out,
+	}, inSniffed, outSniffed, inEst, outEst)
 }
 
 // QuotaProviderStatus is one (provider, Limit) pair's live state, for

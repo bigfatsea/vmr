@@ -5,34 +5,34 @@ package report
 
 import (
 	"vmr/internal/pricing"
+	"vmr/internal/quota"
 )
 
 // costFor computes an estimated cost for a record using pricing.Rate.Cost.
-// Per-side basis, mirroring router.TokenCountersSides / router.ChargeResponse:
-// a side the upstream reported is priced from its real value; a missing side
-// falls back to the degraded estimate (In charged entirely to Fresh, Out
-// max'd with the placeholder the usage object may still carry). estCost is
-// the portion of c attributable to a degraded side only — 0 when both sides
-// were sniffed, the full c when both degraded, and just the un-sniffed
-// side's price when one side is real. It feeds EndpointRow.CostEstimateEst /
-// WindowEstimatedPct, the operator's calibration signal: a request with real
-// input usage and a degraded output side is ~1% estimated, not 100%.
+// The per-side basis is quota.TokenCountersSides — the same canonical
+// exact-vs-degraded fold the router charges through: a side the upstream
+// reported is priced from its real value; a missing side falls back to the
+// degraded estimate (In charged entirely to Fresh, Out max'd with the
+// placeholder the usage object may still carry). estCost prices only the
+// degraded-side components (the same per-side split ChargeResponse's cost
+// branch records into EstimatedCost) — 0 when both sides were sniffed, the
+// full c when both degraded, and just the un-sniffed side's price when one
+// side is real. It feeds EndpointRow.CostEstimateEst / WindowEstimatedPct,
+// the operator's calibration signal: a request with real input usage and a
+// degraded output side is ~1% estimated, not 100%.
 func costFor(pr pricing.Rate, rc *rec2) (c, estCost float64) {
-	var fresh, cacheRead, cacheWrite, out int64
-	var eFresh, eOut int64 // components attributable to a degraded side
-	if rc.usageInOK {
-		fresh, cacheRead, cacheWrite = rc.usage.Fresh(), rc.usage.CacheRead, rc.usage.CacheWrite
-	} else {
-		fresh = rc.estInFresh
-		eFresh = fresh
+	raw, _ := quota.TokenCountersSides(quota.TokenUsage{
+		Fresh: rc.usage.Fresh(), CacheRead: rc.usage.CacheRead, CacheWrite: rc.usage.CacheWrite, Out: rc.usage.Out,
+	}, rc.usageInOK, rc.usageOutOK, rc.estInFresh, rc.estOut)
+	var estC quota.Counters
+	if !rc.usageInOK {
+		estC.Fresh = raw.Fresh
 	}
-	if rc.usageOutOK {
-		out = rc.usage.Out
-	} else {
-		out = max(rc.usage.Out, rc.estOut)
-		eOut = out
+	if !rc.usageOutOK {
+		estC.Out = raw.Out
 	}
-	return pr.Cost(fresh, cacheRead, cacheWrite, out), pr.Cost(eFresh, 0, 0, eOut)
+	c = pr.Cost(int64(raw.Fresh), int64(raw.CacheRead), int64(raw.CacheWrite), int64(raw.Out))
+	return c, pr.Cost(int64(estC.Fresh), int64(estC.CacheRead), int64(estC.CacheWrite), int64(estC.Out))
 }
 
 // accumulateCost prices rc against every CostEstimate bucket it applies to

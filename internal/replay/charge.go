@@ -44,9 +44,10 @@ func inEstFor(rv *recordView) int64 {
 // Facts.EstimatedTokens (inEst, the live basis) plus a byte estimate of
 // the response.
 //
-// Everything after "how usage was obtained" is router.TokenCountersSides,
-// not a second copy of the exact-vs-degraded rule — see that function's
-// doc comment for why all three call sites had to converge on one
+// Everything after "how usage was obtained" is quota.TokenCountersSides
+// (reached through router's thin wrapper), not a second copy of the
+// exact-vs-degraded rule — see that function's doc comment in
+// internal/quota/counters.go for why all call sites converge on one
 // implementation. The side flags come from ExtractUsageSides, never from
 // the merged `u.In > 0 || u.Out > 0` disjunction: a stream truncated after
 // Anthropic's message_start would bill its ~1 placeholder output as exact
