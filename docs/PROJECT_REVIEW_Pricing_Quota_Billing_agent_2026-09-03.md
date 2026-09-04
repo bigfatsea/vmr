@@ -3,7 +3,7 @@
 
 # 定价 · 计费 · 配额 专题 Review（agent · 2026-09-03）
 
-> **落地状态(2026-09-04,本轮复核重构)**:F1-F9 + 备注 A/B + 裁决 A 全部落地或确认维持,四轮独立终审后又做了一轮分歧收口(`ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`:F9 在 `report` 侧的收口逃逸补齐、`AddEstimatedCost`/`EstimatedCostFor` 死代码删除、`TokenCountersSides` 注释订正、N3 补只读基线测试)。本轮(三份文档交叉核对 + 逐条源码抽样验证)确认原始清单在本专题范围内技术债已清零,据此把阶段五按"已解决只留标题 + 状态标签"重构,四段式正文与复核细节移入 `ISSUE_RESOLUTION_REPORT.md`。**尚未解决**（全部为复核过程新发现，见“阶段五·附”）：N2 / N5 / N9（触发驱动，均已登记 `KNOWN_ISSUES`；N2 的 `core.go` 注释误导部分已订正，条目只剩 `BuildSnapshot` 折叠本身）。**N3 已裁决落地**（2026-09-04，采纳“闸 = 带安全余量的保险丝”二值语义，见“阶段五·附” N3 条目）。**L2 已裁决落地**（2026-09-04：`router.TokenCounters` 删除、单标志合并入口不复提供——合并信号正是 partial-as-exact bug 类，见“阶段五·附” L2 条目）。**驳回**:N8「nil Facts panic」--`core.CanonicalRequest.Facts` 是值类型,类型混淆。
+> **落地状态(2026-09-05,最终复核)**：F1-F9 + 备注 A/B + 裁决 A + N3 + L2 全部落地或确认维持，四轮独立终审后又做了一轮分歧收口（`ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`：F9 在 `report` 侧的收口逃逸补齐、`AddEstimatedCost`/`EstimatedCostFor` 死代码删除、`TokenCountersSides` 注释订正、N3 补只读基线测试）。复核过程新发现的 N2 / N5 / N9（三份文档交叉核对 + 逐条源码抽样验证 + 第一性原理分析）也已全部落地或裁决：N2 第一步落地（`Endpoint.PricingRate` 改持 `pricing.FoldSpec` 折叠出的 `*core.Rate`，热路径字段直读、override 链不再进实时路由热路径；成本公式收敛 `core.Rate.Cost`；`core.PricingSpec` 迁入 `internal/pricing` 维持触发驱动，登记见 `KNOWN_ISSUES` §2.89）、N5 落地（等周期次级裁决 + `vmr check` 打印桶/闸角色）、N9 裁决不修（纯日志残留，完整理由见 `KNOWN_ISSUES` §2.91）。本专题原始范围与复核新发现的技术债至此全部清零或转为确认维持/裁决不修，阶段五按"已解决只留标题 + 状态标签"重构，四段式正文与复核细节移入 `ISSUE_RESOLUTION_REPORT.md`。**驳回**：N8「nil Facts panic」——`core.CanonicalRequest.Facts` 是值类型，类型混淆。
 
 > **定位**：一次范围严格限定在"定价 / 计费 / 配额"的系统级架构 Review。方法沿用 full-review 五阶段；但**覆盖范围收窄**为定价、计费、配额相关的模块、代码、功能（`internal/pricing`、`internal/quota`、`internal/config` 的 pricing/quota 部分、路由半区计费路径 `internal/router/quota.go`、分析半区配额/成本消费面 `internal/report/{cost,providerquota,findings_quota,pricing}.go`、`cmd/vmr` 配额入口、`core` 的 `QuotaSpec`/`PricingSpec`/`Limit` 契约）。
 > 前身文档 `Billing_Quota_Pricing_2026-09` 的全部有效内容（P1–P6、配额周期时区裁决、`every` 语法备注、优先级矩阵与依赖关系）已在下文逐条合并吸收，状态更新为"本轮源码复核结论"；确认吸收完整后，前身文档被删除。
@@ -187,7 +187,7 @@ sequenceDiagram
 
 ## 阶段五：问题清单（四段式）与演进路线图
 
-> **2026-09-04 复核重构说明**：F1–F9 + 备注 A/B + 裁决 A 经三支 `fix/pqb-{p,q,r}` 落地、四轮独立终审、一轮分歧收口后全部关闭或确认维持。本轮复核（三份文档逐条交叉核对 + 对当前工作区源码抽样验证）确认原始清单在本专题范围内的技术债已清零，据此把"已解决 / 已确认"项压成"标题 + 状态标签"；四段式正文、复核过程与逐条 ROI 裁决的权威记录移到 `ISSUE_RESOLUTION_REPORT.md`（Phase 1 复核 + ROI 裁决 + Phase 2 落地账本）与 `ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`（四轮终审后的分歧收口）。复核过程新发现的问题单列"阶段五·附"，同样按已解决 / 未解决分组。
+> **2026-09-04 复核重构说明**：F1–F9 + 备注 A/B + 裁决 A 经三支 `fix/pqb-{p,q,r}` 落地、四轮独立终审、一轮分歧收口后全部关闭或确认维持。本轮复核（三份文档逐条交叉核对 + 对当前工作区源码抽样验证）确认原始清单在本专题范围内的技术债已清零，据此把"已解决 / 已确认"项压成"标题 + 状态标签"；四段式正文、复核过程与逐条 ROI 裁决的权威记录移到 `ISSUE_RESOLUTION_REPORT.md`（Phase 1 复核 + ROI 裁决 + Phase 2 落地账本）与 `ISSUE_DIVERGENCE_RESOLUTION_claude-sonnet-5_2026-09-04.md`（四轮终审后的分歧收口）。复核过程新发现的问题单列"阶段五·附"，2026-09-05 全部处置完毕后压成同一张"已解决 / 已驳回"表。
 
 ### 一、原始问题清单（F1–F9 + 备注 / 裁决）
 
@@ -210,10 +210,10 @@ sequenceDiagram
 
 #### 尚未解决
 
-原始清单本轮无独立残留待办。两处"部分落地"的尾巴已转入"阶段五·附"跟踪，不在此重复：
+原始清单无独立残留待办。两处"部分落地"的尾巴转入"阶段五·附"跟踪，均已处置完毕，不在此重复：
 
-- F1 的"加载期把 `EffectiveRate` 折叠为静态 `Rate` 挂 `Endpoint`"可选正交优化 → **N2**。
-- F4 的 `rollbackWarned` 进程级 latch 残留（F4 已消除其主要误触发源）→ **N9**。
+- F1 的"加载期把 `EffectiveRate` 折叠为静态 `Rate` 挂 `Endpoint`"可选正交优化 → **N2**（已落地第一步）。
+- F4 的 `rollbackWarned` 进程级 latch 残留（F4 已消除其主要误触发源）→ **N9**（裁决不修）。
 
 ### 二、架构健康度评估（更新）
 
@@ -224,19 +224,19 @@ sequenceDiagram
 - `quota` 按 provider **名称**记数（轮换 key 不清零）是防 bug 的正确决策，注释作为反"再协调"护栏明确存在。
 - 两域共享叶（`pricing.Rate.Cost` / `quota.BaseAmount` / `ApplyModelMultiplier`）已经收敛，方向正确。
 
-**原"当前薄弱点"7 条的现状**：F2（口径 SSOT 裂缝）、F1（校验器 / 解析器语义分裂）、F3（包级可变全局退化）、F7（`missing beats wrong` 被绕过）、F4（单锁 + cost 双锁积习）、F8（Finding 丢作用域）、F9（热路径重复 `findK`）已于 2026-09-04 全部闭合。落地后残留的架构自洽项收敛为"阶段五·附"的 N2 / N5 / N9（N3 已于同日裁决落地，见其条目）。
+**原"当前薄弱点"7 条的现状**：F2（口径 SSOT 裂缝）、F1（校验器 / 解析器语义分裂）、F3（包级可变全局退化）、F7（`missing beats wrong` 被绕过）、F4（单锁 + cost 双锁积习）、F8（Finding 丢作用域）、F9（热路径重复 `findK`）已于 2026-09-04 全部闭合。落地后残留的架构自洽项收敛为"阶段五·附"的 N2 / N5 / N9，三项已于 2026-09-05 全部落地或裁决（N3 / L2 已于 2026-09-04 裁决落地，见各自条目）。
 
 ### 三、中长期架构演进路线图（更新）
 
-原路线图"本迭代 / 下迭代 / 触发驱动"各项已全部落地或转为登记项，原 gantt 作废。本专题（定价 / 计费 / 配额）原始范围内的技术债已清零；剩余工作全部来自复核过程新发现：
+原路线图"本迭代 / 下迭代 / 触发驱动"各项已全部落地或转为登记项，原 gantt 作废。本专题（定价 / 计费 / 配额）原始范围与复核过程新发现的技术债均已清零、确认维持或裁决不修，无排期中的剩余工作，仅 N2 留一处不单独排期的触发驱动残留：
 
-| 项 | 类型 | 触发条件 / 待办 |
+| 项 | 类型 | 最终处置 |
 | --- | --- | --- |
-| N2 | 触发驱动 | `core` / `router` 有其它改动时，顺路把预解析 `Rate` 折叠进 `Endpoint`；不单独排期 |
-| N5 | 触发驱动 | 真实配置出现等长复合 Limit 且用户报告桶 / 闸角色不符预期 |
-| N9 | 触发驱动 | F4 之后仍观察到本该有的时钟回退 WARN 缺失 |
-| N3 | **已裁决落地（2026-09-04）** | 采纳二值保险丝语义，见"阶段五·附" N3 条目 |
-| L2 | **已裁决落地（2026-09-04）** | 删 `router.TokenCounters`，单标志合并入口不复活（见“阶段五·附” L2 条目） |
+| N2 | 已落地（第一步） | 折叠预解析 `Rate` 已挂 `Endpoint`（热路径字段直读）；`core.PricingSpec` 迁入 `internal/pricing` 待 `core` / `config` 下次有改动时顺路做，不单独排期 |
+| N5 | 已落地 | 等周期次级裁决 + `vmr check` 打印桶/闸角色，角色不再依赖 YAML 书写顺序 |
+| N9 | 裁决不修 | 纯日志残留，见 `KNOWN_ISSUES` §2.91 完整理由；不再设修复触发 |
+| N3 | 已裁决落地（2026-09-04） | 采纳二值保险丝语义，见"阶段五·附" N3 条目 |
+| L2 | 已裁决落地（2026-09-04） | 删 `router.TokenCounters`，单标志合并入口不复活（见"阶段五·附" L2 条目） |
 
 ---
 
@@ -249,50 +249,20 @@ sequenceDiagram
 | 编号 | 标题 | 状态 |
 | --- | --- | --- |
 | **N1** | `parseRateRow` 接受四分量全空的费率行（`tableHit=true` 绕过 F7 的 `!tableHit` 防御） | 已落地（随 F7） |
+| **N2** | `core.Endpoint.PricingRate` 持 `*PricingSpec`，`metric: cost` 热路径每笔请求重跑一次链式解析 | 已落地（第一步：`BuildSnapshot` 折叠 `*core.Rate` 挂 `Endpoint`，热路径字段直读；残留 `core.PricingSpec` 迁入 `internal/pricing` 触发驱动，见 `KNOWN_ISSUES` §2.89） |
+| **N3** | `ScoreForLimits` 闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效 | 已裁决落地 |
 | **N4** | `Limit.Since` 零值致 `findK` 巨大 k / 潜在死循环 | 已落地（`PeriodBounds` 入口 guard） |
+| **N5** | 周期长度相同的多条 Limit，`BucketIndex` 的桶 / 闸角色取决于 YAML 书写顺序 | 已落地（`preferBucket` 次级裁决 + `vmr check` 打印 `role=`） |
 | **N6** | §2.5 配额子表格完全缺 Scope / Model 列，同 provider 多 Limit 行在 Markdown 里不可辨 | 已落地 |
 | **N7** | `renderSkippedAttemptsNote` 在表格 guard 外被无条件调用，skip 统计随表格空而静默消失 | 已落地（随 F3） |
+| **N8** | ~~`tokenCharge` 裸解引用 `creq.Facts.EstimatedTokens` 致 nil panic~~ | 驳回·类型混淆 |
+| **N9** | `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默 | 裁决不修，见 `KNOWN_ISSUES` §2.91 |
 | **分歧 #1** | F9 在 `internal/report/providerquota.go` 仍成对调用 `PeriodStart` / `PeriodEnd`，未收敛到 `PeriodBounds` | 已落地（收口到单次 `PeriodBounds`） |
 | **分歧 #3** | `Registry.AddEstimatedCost` / `EstimatedCostFor` 是仅 `store_test.go` 保活的 deprecated 包装 | 已落地（删除，测试改调 `ChargeCost` / `Snapshot`） |
 | **分歧 #4** | `router.TokenCountersSides` doc 注释把在线主调用方 `tokenCharge` 漏成"仅 replay / 测试" | 已落地（注释 + CHANGELOG 订正） |
-| **N3** | `ScoreForLimits` 闸封顶把整个 provider 评分压到 ≤1.0，带闸账号的桶抢跑失效 | 已裁决落地 |
 | **L2** | `router.TokenCounters`（非 sides 形式）疑似仅测试保活 | 已裁决落地（删除） |
-| **N8** | ~~`tokenCharge` 裸解引用 `creq.Facts.EstimatedTokens` 致 nil panic~~ | 驳回·类型混淆 |
 
 > N8 驳回依据：`core.CanonicalRequest.Facts` 是值类型（`RequestFacts`，非指针），复核 Agent 混淆了 `audit.Record.Facts`（`*RequestFacts`，`replay` 侧才需判空）。四轮终审 + 分歧收口两次独立复核一致确认驳回正确。
-
-### 二、尚未解决
-
-#### N2 · `core.Endpoint.PricingRate` 持 `*PricingSpec`，`metric: cost` 热路径每笔请求重跑一次链式解析 【D6 契约域 × D4 路由计费域 · 已登记 `KNOWN_ISSUES` · ROI 低】
-
-- **问题描述**：
-  *典型业务场景*：每笔 `metric: cost` 请求成功后，路由计费尾部要把端点定价规格折算成实际费率来扣减金额配额。
-  *底层矛盾*：`core.Endpoint` 挂的是 `*core.PricingSpec`（`Base + Overrides` 未折叠），而非一个已解析的 `Rate`。`router.ChargeResponse` 的 cost 分支每请求都 `pricing.EffectiveRate(ep.PricingRate)` 重跑一次 `resolveChain`（≤3 元素切片的递归折扣下钻）。
-  *改与不改*：不改——`resolveChain` 每请求跑一次是纳秒级、相对一次上游 HTTP 可忽略，**不是性能问题**；真正的代价是它构成"让价目表进实时路由热路径"这条架构红线（`KNOWN_ISSUES` §1.0）的一处轻微越界，且 `core.go` 注释把"Resolve 阶段不能提前折叠 `Base` 与 `Override`"偷换成了"加载完成后也不能折叠为静态 `Rate`"的误导。改了——热路径变一次字段直读，架构红线不再被越界，注释误导消除。
-- **根因**：`EffectiveRate` 移除时间维（P0-A）后是 spec 的纯静态确定性函数，但 `core.Endpoint` 的定价挂载点设计成持规格而非持已解析费率；`BuildSnapshot` 端点已细化到唯一 upstream model，却没有"把 `Rate` 折叠好挂上去"这一步。本项即 F1 复核时从误杀修复里剥离出的"可缓做的正交简化"部分（见 `ISSUE_RESOLUTION_REPORT.md`）。
-- **建议方案**：`BuildSnapshot` 折叠预解析 `Rate` 挂 `Endpoint`，热路径字段直读；`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`（离线 `Resolver` 的 memo 同样只需缓存 `Rate`）；同步订正 `core.go` 注释。
-- **ROI**：Return 低（性能收益可忽略，价值在消除架构红线越界 + 注释误导 + 架构自洽）；Investment 中（`core.PricingSpec` 迁移面较大，触及 `core` / `config` / `router` / `pricing` 四包）。**触发驱动**：`core` / `router` 有其它改动时顺路做，不为它单独排期。
-- **收口订正（2026-09-04）**：`core.go` 的 `PricingSpec` 注释已改写——把「不能折叠」约束限定为 Resolve 期逐规则折叠（折进 `Base` 又留在 `Overrides` 会双重计算），并明示 P0-A 后 spec 全静态、`EffectiveRate(spec)` 是纯函数、整链可折叠为单个 `Rate` 在 `BuildSnapshot` 挂 `Endpoint`（回指本条）。注释误导消除，剩余 `BuildSnapshot` 折叠本身仍触发驱动。
-
-#### N5 · 周期长度相同的多条 Limit，`BucketIndex` 的桶 / 闸角色取决于 YAML 书写顺序 【D3 配额域 · 已登记 `KNOWN_ISSUES` · ROI 低】
-
-- **问题描述**：
-  *典型业务场景*：一个 provider 同时配了共享池 `every: 1mo` 和某模型专属池 `every: 1mo`（合法共存）。
-  *底层矛盾*：`internal/quota/score.go` `BucketIndex` 用名义周期时长严格大于挑最长周期作桶。两条 Limit 名义时长相等时，排在配置数组前面的被选为桶（无闸封顶），后面的被选为闸——仅仅上下颠倒两行 YAML 就会互换桶 / 闸角色，缺确定性仲裁。
-  *改与不改*：不改——当前靠规范书写规避，属边缘场景；改了——等长时加次级裁决，角色不再依赖书写顺序。
-- **根因**：`BucketIndex` 只有"最长周期"一个判据，周期时长并列时无 tie-break。
-- **建议方案**：周期时长并列时加次级裁决——共享池优先为桶（`!PerModel` 优于 `PerModel`），同类则 `Amount` 大者为桶。
-- **ROI**：Return 低（边缘场景，可靠规范书写即可规避）；Investment 低。**触发驱动**：真实配置出现等长复合 Limit 且用户报告角色不符预期。
-
-#### N9 · `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默 【D3 配额域 · 已登记 `KNOWN_ISSUES` · F4 后已缓解 · ROI 低】
-
-- **问题描述**：
-  *典型业务场景*：宿主机发生真实时钟回退（NTP 阶跃、快照回滚、时区误配），配额周期计数本应打一条 WARN 提示运维。
-  *底层矛盾*：`internal/quota/quota.go` `resetIfStaleLocked` 的 `rollbackWarned` 是进程级一次性 bool，一旦置位便无重置机会。F4 落地前，周期切换瞬间晚到的估算写可能携旧 `periodStart` 误触发一次时钟回退分支，此后真实回退永久静默。
-  *改与不改*：F4（`ChargeCost` 单锁原子）已消除那条跨锁裂缝，spurious trip 的主要来源没了——本条已大幅缓解；彻底修需把去抖从进程生命周期改为按 `limitKey` 或时间窗去重抑制。
-- **根因**：告警去抖用了进程级一次性 latch 而非窗口化去重。
-- **建议方案**：按 `limitKey` 或时间窗去重抑制，而非进程生命周期一次性 latch。
-- **ROI**：Return 低（F4 后已缓解）；Investment 低。**触发驱动**：F4 之后仍观察到本该有的时钟回退 WARN 缺失。
 
 ---
 
