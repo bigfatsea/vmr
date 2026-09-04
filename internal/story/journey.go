@@ -15,8 +15,6 @@
 package story
 
 import (
-	"crypto/md5"
-	"encoding/json"
 	"regexp"
 	"runtime"
 	"sort"
@@ -713,12 +711,13 @@ func sanitizeIDComponent(s string) string {
 // into one running SysHash for lineage-splitting purposes, but the event
 // stream wants each shown (and de-duplicated) as its own entry.
 //
-// For system messages (idx < LeadSys) this hashes via json.Marshal (a
-// quoted-string digest), not via md5.Sum([]byte(text)) the way SysHash
-// does. The two serve different purposes: SysHash is compared across
-// manifests to detect system-prompt changes; event-stream hashes only need
-// self-consistency for dedup within one Build run. The two hash spaces are
-// never compared against each other, so the difference is harmless.
+// For system messages (idx < LeadSys) this goes through ctxgraph.HashMsgJSON
+// (cache_control stripped) — the same hash space m.Keys lives in, so a
+// message keeps its dedup identity whether it sits in the lead-system block
+// or the keyed tail: hashing the marker raw would make the same system
+// prompt hash differently with and without a cache breakpoint and show
+// twice in the event stream. (SysHash, ctxgraph's text-space running digest,
+// is a different hash space entirely and is never compared against these.)
 func eventHashAt(m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off, idx int) ctxgraph.Hash {
 	if idx >= m.LeadSys {
 		return m.Keys[idx-m.LeadSys]
@@ -727,8 +726,7 @@ func eventHashAt(m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, of
 	if ri := idx - off; ri >= 0 && ri < len(rawMsgs) {
 		raw = rawMsgs[ri]
 	}
-	b, _ := json.Marshal(raw)
-	return md5.Sum(b)
+	return ctxgraph.HashMsgJSON(raw)
 }
 
 // newInstructionTitleAtStitch is taskseg.LastInstruction's stitch-boundary
