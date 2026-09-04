@@ -85,6 +85,15 @@ func hashMsgJSON(raw any) Hash {
 	return hashJSON(stripCacheControl(raw))
 }
 
+// HashMsgJSON is the official entry point for hashing ONE decoded message
+// value: Anthropic cache_control breakpoint markers are stripped first (see
+// hashMsgJSON), so a marker's presence or position never changes the digest.
+// Any downstream that needs to dedup or compare messages by content must use
+// this — a private json.Marshal+md5 re-implementation is the whole bug class
+// (marker leakage, key-order drift, or a silently divergent hash space), not
+// a style preference.
+func HashMsgJSON(raw any) Hash { return hashMsgJSON(raw) }
+
 func containsCacheControl(v any) bool {
 	switch t := v.(type) {
 	case map[string]any:

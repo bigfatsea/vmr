@@ -214,7 +214,12 @@ func roleMeasure(body any, measure func(string) int64) map[string]int64 {
 		default:
 			add(role, chatmsg.RenderContent(c))
 		}
-		if rc, _ := m["reasoning_content"].(string); rc != "" {
+		// Reasoning text belongs to its role's share — go through the
+		// authoritative extractor (reasoning_content → reasoning → thought)
+		// rather than probing one field here: a private single-field read
+		// silently drops the other carriers and disagrees with the detail
+		// page's own reasoning rendering on the same body.
+		if rc := chatmsg.ExtractReasoning(m); rc != "" {
 			add(role, rc)
 		}
 		for _, tc := range chatmsg.ToolCallList(m["tool_calls"]) {

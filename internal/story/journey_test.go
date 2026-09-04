@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
@@ -443,5 +444,62 @@ func TestSortByRootThenTime_TieBreaksOnRootHash(t *testing.T) {
 		if got[0] != want[0] || got[1] != want[1] {
 			t.Errorf("sortByRootThenTime(%v) tie-break not deterministic/RootHash-ordered: got %v, want %v", in, got, want)
 		}
+	}
+}
+
+// eventHashAt goes through ctxgraph.HashMsgJSON for the lead-system branch
+// (idx < LeadSys) — the same hash space BuildManifest's Keys live in — so
+// these tests pin the two branches against each other as well as the
+// cache_control stripping itself.
+
+func TestEventHashAt_CacheControlStripped(t *testing.T) {
+	t.Parallel()
+	m := &ctxgraph.Manifest{LeadSys: 1}
+	msgs := []chatmsg.Message{{Role: "system", Text: "You are terse."}}
+	plain := map[string]any{"role": "system", "content": "You are terse."}
+	marked := map[string]any{"role": "system", "content": "You are terse.", "cache_control": map[string]any{"type": "ephemeral"}}
+	hPlain := eventHashAt(m, msgs, []any{plain}, 0, 0)
+	hMarked := eventHashAt(m, msgs, []any{marked}, 0, 0)
+	if hPlain != hMarked {
+		t.Errorf("cache_control marker changed the lead-system hash: %v vs %v", hPlain, hMarked)
+	}
+	// The marker wash must not become a content wash: different prompts,
+	// same marker, still distinct.
+	other := map[string]any{"role": "system", "content": "You are verbose.", "cache_control": map[string]any{"type": "ephemeral"}}
+	if hMarked == eventHashAt(m, msgs, []any{other}, 0, 0) {
+		t.Error("distinct lead-system prompts must not share a hash")
+	}
+}
+
+func TestEventHashAt_LeadSysMatchesKeysSpace(t *testing.T) {
+	t.Parallel()
+	markedSys := map[string]any{"role": "system", "content": "You are terse.", "cache_control": map[string]any{"type": "ephemeral"}}
+	// The same system message as a keyed (non-lead) tail message: manifest
+	// Keys hash it via ctxgraph's own hashMsgJSON path. It sits after a user
+	// turn so BuildManifest doesn't fold it into the lead-system run.
+	body := map[string]any{"messages": []any{
+		map[string]any{"role": "system", "content": "shared preamble"},
+		map[string]any{"role": "user", "content": "hi"},
+		markedSys,
+	}}
+	rec := audit.Record{
+		Model: "agent", Protocol: "openai-completions", Outcome: "ok",
+		Client: audit.Exchange{Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: body}},
+	}
+	m, ok := ctxgraph.BuildManifest(&rec, "f", 1)
+	if !ok {
+		t.Fatal("expected ok=true")
+	}
+	if m.LeadSys != 1 || len(m.Keys) != 2 {
+		t.Fatalf("LeadSys=%d len(Keys)=%d, want 1/2", m.LeadSys, len(m.Keys))
+	}
+	// And as the lead system of its own request: eventHashAt's idx < LeadSys
+	// branch. Same message content in the two branches must land on the same
+	// hash — a message moving between lead-system and keyed-tail position
+	// (cache marker and all) neither pseudo-dedups nor loses dedup.
+	mLead := &ctxgraph.Manifest{LeadSys: 1}
+	msgsLead := []chatmsg.Message{{Role: "system", Text: "You are terse."}}
+	if got := eventHashAt(mLead, msgsLead, []any{markedSys}, 0, 0); got != m.Keys[1] {
+		t.Errorf("lead-system branch hash = %v, want Keys-space hash %v", got, m.Keys[1])
 	}
 }
