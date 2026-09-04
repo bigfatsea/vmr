@@ -99,6 +99,49 @@ func TestQuotaExhaustionFinding_EmptyProviderQuotas(t *testing.T) {
 	}
 }
 
+// TestQuotaExhaustionFinding_ModelScopeInImplicated is the F8 lock-in: a
+// per-model Limit's row must name its model in Implicated — "acct1 (gpt-4o)"
+// — so an operator can tell a single model's exhaustion from a whole-account
+// one.
+func TestQuotaExhaustionFinding_ModelScopeInImplicated(t *testing.T) {
+	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+		{Provider: "acct1", Models: []string{"gpt-4o"}, Metric: "cost", Every: "1d",
+			Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 50.0},
+	}}
+	f := quotaExhaustionFinding(rep, i18n.EN)
+	if f == nil || f.Implicated != "acct1 (gpt-4o)" {
+		t.Fatalf("Implicated = %+v, want acct1 (gpt-4o)", f)
+	}
+}
+
+// TestQuotaExhaustionFinding_SharedLimitNoModelScope: a shared Limit (Models
+// empty) must keep the bare provider name — no empty parentheses.
+func TestQuotaExhaustionFinding_SharedLimitNoModelScope(t *testing.T) {
+	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+		{Provider: "acct1", Metric: "requests", Every: "1mo",
+			Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 50.0},
+	}}
+	f := quotaExhaustionFinding(rep, i18n.EN)
+	if f == nil || f.Implicated != "acct1" {
+		t.Fatalf("Implicated = %+v, want plain acct1", f)
+	}
+}
+
+// TestQuotaExhaustionFinding_SameProviderTieBreaksByModel: two per-model
+// rows of one provider tied at the max must resolve by model name (render
+// order across runs must be deterministic — buildProviderQuotaRows' own sort
+// uses the same rule).
+func TestQuotaExhaustionFinding_SameProviderTieBreaksByModel(t *testing.T) {
+	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+		{Provider: "acct1", Models: []string{"o1"}, Live: &LiveQuota{Pct: 95.0}},
+		{Provider: "acct1", Models: []string{"gpt-4o"}, Live: &LiveQuota{Pct: 95.0}},
+	}}
+	f := quotaExhaustionFinding(rep, i18n.EN)
+	if f == nil || f.Implicated != "acct1 (gpt-4o)" {
+		t.Fatalf("Implicated = %+v, want acct1 (gpt-4o) (alphabetically first model)", f)
+	}
+}
+
 func TestQuotaExhaustionFinding_ZH(t *testing.T) {
 	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Metric: "tokens", Every: "1mo", Live: &LiveQuota{Pct: 95.0}},
