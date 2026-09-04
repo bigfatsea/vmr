@@ -29,25 +29,31 @@ const SlowThresholdMS = 30_000
 // compute during finish* (fresh tokens, cache_efficiency, slow_requests,
 // true stream_ms percentiles) since the raw sums already exist then.
 type Report2 struct {
-	Meta            Meta                `json:"meta"`
-	Overall         Row                 `json:"overall"`
-	ByModel         []Row               `json:"by_model"`
-	ByDate          []Row               `json:"by_date"`
-	Hours           []HourRow           `json:"hours,omitempty"`
-	HoursOfDay      []HourRow           `json:"hours_of_day,omitempty"`
-	Endpoints       []EndpointRow       `json:"endpoints"`
-	EndpointsAll    []EndpointRow       `json:"endpoints_all,omitempty"`
-	ByClient        []ClientRow         `json:"by_client,omitempty"`
-	Workloads       []WorkloadRow       `json:"workloads,omitempty"`
-	Sessions        []SessionRow        `json:"sessions,omitempty"`
-	Compactions     []CompactionRow     `json:"compactions,omitempty"`
-	Tools           []ToolShapeRow      `json:"tools,omitempty"`
-	Efficiency      []Finding           `json:"efficiency,omitempty"`
-	Sticky          *StickyEffect       `json:"sticky,omitempty"`
-	Providers       []ProviderRow       `json:"providers,omitempty"`
-	ProviderQuotas  []ProviderQuotaRow  `json:"provider_quotas,omitempty"`
-	ClientEndpoints []ClientEndpointRow `json:"client_endpoints,omitempty"`
-	Pricing         *Pricing            `json:"pricing,omitempty"`
+	Meta           Meta               `json:"meta"`
+	Overall        Row                `json:"overall"`
+	ByModel        []Row              `json:"by_model"`
+	ByDate         []Row              `json:"by_date"`
+	Hours          []HourRow          `json:"hours,omitempty"`
+	HoursOfDay     []HourRow          `json:"hours_of_day,omitempty"`
+	Endpoints      []EndpointRow      `json:"endpoints"`
+	EndpointsAll   []EndpointRow      `json:"endpoints_all,omitempty"`
+	ByClient       []ClientRow        `json:"by_client,omitempty"`
+	Workloads      []WorkloadRow      `json:"workloads,omitempty"`
+	Sessions       []SessionRow       `json:"sessions,omitempty"`
+	Compactions    []CompactionRow    `json:"compactions,omitempty"`
+	Tools          []ToolShapeRow     `json:"tools,omitempty"`
+	Efficiency     []Finding          `json:"efficiency,omitempty"`
+	Sticky         *StickyEffect      `json:"sticky,omitempty"`
+	Providers      []ProviderRow      `json:"providers,omitempty"`
+	ProviderQuotas []ProviderQuotaRow `json:"provider_quotas,omitempty"`
+	// Skipped-window stats: EndpointsAll rows whose provider name matched no
+	// quotas entry (see quotaWindow.skippedAttempts) — rendered as the note
+	// under the §2.5 quota sub-table and carried in the JSON contract so a
+	// programmatic consumer sees the same "contributed nothing" disclosure.
+	ProviderQuotaSkippedAttempts  int                 `json:"provider_quota_skipped_attempts,omitempty"`
+	ProviderQuotaSkippedProviders []string            `json:"provider_quota_skipped_providers,omitempty"`
+	ClientEndpoints               []ClientEndpointRow `json:"client_endpoints,omitempty"`
+	Pricing                       *Pricing            `json:"pricing,omitempty"`
 
 	// requests is the per-request export (vmr-requests.json). Unexported so
 	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via

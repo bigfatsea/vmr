@@ -8,6 +8,7 @@ package report
 
 import (
 	"strconv"
+	"strings"
 
 	"vmr/internal/i18n"
 )
@@ -32,9 +33,9 @@ const quotaExhaustionThresholdPct = 90.0
 // must never be the basis of an alert an operator might act on).
 //
 // Picks the single highest Live.Pct among qualifying accounts, tie-broken
-// by provider name — the same "report only the worst one" convention
-// buildFindings' other detectors already use (see e.g. its worst-tool-shape
-// / worst-session selection).
+// by provider name, then by the row's model scope — the same "report only
+// the worst one" convention buildFindings' other detectors already use (see
+// e.g. its worst-tool-shape / worst-session selection).
 func quotaExhaustionFinding(rep *Report2, lang i18n.Lang) *Finding {
 	var worst *ProviderQuotaRow
 	for i := range rep.ProviderQuotas {
@@ -43,7 +44,8 @@ func quotaExhaustionFinding(rep *Report2, lang i18n.Lang) *Finding {
 			continue
 		}
 		if worst == nil || r.Live.Pct > worst.Live.Pct ||
-			(r.Live.Pct == worst.Live.Pct && r.Provider < worst.Provider) {
+			(r.Live.Pct == worst.Live.Pct && (r.Provider < worst.Provider ||
+				(r.Provider == worst.Provider && strings.Join(r.Models, ",") < strings.Join(worst.Models, ",")))) {
 			worst = r
 		}
 	}
@@ -51,7 +53,7 @@ func quotaExhaustionFinding(rep *Report2, lang i18n.Lang) *Finding {
 		return nil
 	}
 	ft := i18n.Efficiency(lang).ProviderQuotaExhaustionFinding(
-		worst.Provider, strconv.FormatFloat(worst.Live.Pct, 'f', 1, 64), worst.Metric, worst.Every)
+		worst.Provider, worst.Models, strconv.FormatFloat(worst.Live.Pct, 'f', 1, 64), worst.Metric, worst.Every)
 	return &Finding{
 		Code: FindingProviderQuotaExhaustion, Finding: ft.Title, Metric: "provider_quota_used_pct",
 		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,

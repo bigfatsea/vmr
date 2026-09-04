@@ -12,7 +12,10 @@
 // here — it's the caller's stable identifier and never varies by language.
 package i18n
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 // FindingText is one auto-discovered finding's localized parts.
 type FindingText struct {
@@ -42,8 +45,10 @@ type EfficiencyText struct {
 	// ProviderQuotaExhaustionFinding  fires from the router's own
 	// real-time counter (report.ProviderQuotaRow.Live), never from this
 	// report's recomputed window value — see that field's doc comment for
-	// why an estimate must never be the basis of an alert.
-	ProviderQuotaExhaustionFinding func(provider string, usedPct string, metric, every string) FindingText
+	// why an estimate must never be the basis of an alert. models is the
+	// row's model scope (per-model Limit) or empty (shared) — a per-model
+	// exhaustion must not read as a whole-account one.
+	ProviderQuotaExhaustionFinding func(provider string, models []string, usedPct string, metric, every string) FindingText
 }
 
 func Efficiency(lang Lang) EfficiencyText {
@@ -109,10 +114,14 @@ func Efficiency(lang Lang) EfficiencyText {
 					Implicated: sessionID + " " + sessionTitle, Action: "中途 compaction",
 				}
 			},
-			ProviderQuotaExhaustionFinding: func(provider string, usedPct string, metric, every string) FindingText {
+			ProviderQuotaExhaustionFinding: func(provider string, models []string, usedPct string, metric, every string) FindingText {
+				implicated := provider
+				if len(models) > 0 {
+					implicated = provider + " (" + strings.Join(models, ", ") + ")"
+				}
 				return FindingText{
 					Title: "额度即将耗尽", Value: usedPct + "%（" + metric + " · " + every + "）",
-					Implicated: provider, Action: "检查该账户的路由权重或额度配置",
+					Implicated: implicated, Action: "检查该账户或模型的路由权重或额度配置",
 				}
 			},
 		}
@@ -174,10 +183,14 @@ func Efficiency(lang Lang) EfficiencyText {
 				Implicated: sessionID + " " + sessionTitle, Action: "compact mid-session",
 			}
 		},
-		ProviderQuotaExhaustionFinding: func(provider string, usedPct string, metric, every string) FindingText {
+		ProviderQuotaExhaustionFinding: func(provider string, models []string, usedPct string, metric, every string) FindingText {
+			implicated := provider
+			if len(models) > 0 {
+				implicated = provider + " (" + strings.Join(models, ", ") + ")"
+			}
 			return FindingText{
 				Title: "Quota nearing exhaustion", Value: usedPct + "% (" + metric + " · " + every + ")",
-				Implicated: provider, Action: "Review this account's routing weight or quota configuration",
+				Implicated: implicated, Action: "Review this account's or model's routing weight or quota configuration",
 			}
 		},
 	}

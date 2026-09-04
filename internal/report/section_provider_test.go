@@ -381,3 +381,49 @@ func TestRenderProviderQuotaTable_ZH(t *testing.T) {
 		t.Errorf("zh footnote missing:\n%s", out)
 	}
 }
+
+// TestRenderProviderQuotaTable_ModelScopeInProviderCell is the N6 lock-in:
+// rows carry no model column (the 8-column header is deliberately
+// untouched), so a per-model Limit's scope is suffixed to the provider cell
+// — without it, a provider's shared and per-model rows render as several
+// indistinguishable identical-provider lines.
+func TestRenderProviderQuotaTable_ModelScopeInProviderCell(t *testing.T) {
+	rep := &Report2{
+		ProviderQuotas: []ProviderQuotaRow{
+			{Provider: "openai", Metric: "tokens", Every: "1mo", Amount: 1000, WindowConsumed: f64(5)},
+			{Provider: "openai", Models: []string{"gpt-4o"}, Metric: "tokens", Every: "1d", Amount: 100, WindowConsumed: f64(3)},
+		},
+	}
+	out := renderProvidersStr(rep, i18n.EN)
+	if !strings.Contains(out, "| openai | tokens | 5 |") {
+		t.Errorf("the shared-Limit row must render the bare provider name:\n%s", out)
+	}
+	if !strings.Contains(out, "| openai (gpt-4o) | tokens | 3 |") {
+		t.Errorf("the per-model row must render provider (model):\n%s", out)
+	}
+}
+
+// TestRenderProviderQuotaTable_SkippedNoteInsideTable is the N7 lock-in: the
+// skipped-attempts note is part of the sub-table — rendered when the table
+// is, and absent when the table is absent (even with skip stats set).
+func TestRenderProviderQuotaTable_SkippedNoteInsideTable(t *testing.T) {
+	withTable := &Report2{
+		ProviderQuotas:                []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: f64(5)}},
+		ProviderQuotaSkippedAttempts:  2,
+		ProviderQuotaSkippedProviders: []string{"ghost-a"},
+	}
+	out := renderProvidersStr(withTable, i18n.EN)
+	if !strings.Contains(out, "2 attempts skipped") {
+		t.Errorf("note must render under the quota table when skips exist:\n%s", out)
+	}
+
+	withoutTable := &Report2{
+		Providers:                     []ProviderRow{{Provider: "p1", Requests: 1, RequestsOK: 1}},
+		ProviderQuotaSkippedAttempts:  2,
+		ProviderQuotaSkippedProviders: []string{"ghost-a"},
+	}
+	out = renderProvidersStr(withoutTable, i18n.EN)
+	if strings.Contains(out, "attempts skipped") {
+		t.Errorf("note must not render without the quota table (orphan note):\n%s", out)
+	}
+}
