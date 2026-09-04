@@ -255,6 +255,24 @@ func EffectiveRate(spec *core.PricingSpec) Rate {
 	return r
 }
 
+// FoldSpec resolves spec's override chain once and returns the effective
+// rate as a *core.Rate — the shape core.Endpoint.PricingRate carries, so
+// the routing hot path reads a precomputed value instead of re-running
+// resolveChain per request (KNOWN_ISSUES §1.0's red line: pricing-table
+// logic stays out of the live path). The result is exactly
+// EffectiveRate(spec).toCore(); the spec itself remains the config-side
+// carrier (Config.ResolvedPricing, vmr check's display) and the offline
+// report path keeps its own Resolver. nil-safe: a nil spec folds to a nil
+// rate, matching EffectiveRate's zero-Rate behavior at the Endpoint mount
+// point; core.Rate.Cost handles a nil receiver the same way.
+func FoldSpec(spec *core.PricingSpec) *core.Rate {
+	if spec == nil {
+		return nil
+	}
+	r := EffectiveRate(spec).toCore()
+	return &r
+}
+
 // Complete reports whether EffectiveRate(spec) is a Complete() rate — the
 // gate config.validate() applies to any provider+model a metric: cost Limit
 // will actually charge. Since EffectiveRate has exactly one resolution path

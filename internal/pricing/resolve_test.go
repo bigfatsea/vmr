@@ -307,6 +307,46 @@ func TestEffectiveRate_NilSpec_ReturnsZeroRate(t *testing.T) {
 	}
 }
 
+// TestFoldSpec_MatchesEffectiveRate pins the fold contract the routing hot
+// path leans on: FoldSpec(spec) is exactly EffectiveRate(spec) in
+// core.Rate shape — the pre-folded rate Endpoint.PricingRate carries must
+// charge identically to what a per-request EffectiveRate would have
+// produced, or the two shapes silently diverge. The nil case is part of the
+// contract too: nil spec -> nil rate (the Endpoint's "no pricing" mount),
+// which core.Rate.Cost handles as a zero floor.
+func TestFoldSpec_MatchesEffectiveRate(t *testing.T) {
+	if FoldSpec(nil) != nil {
+		t.Fatal("FoldSpec(nil) = non-nil, want nil (the Endpoint's no-pricing mount)")
+	}
+	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
+		Table: NewTable("USD"), Currency: "USD",
+		Overrides: []OverrideRule{
+			{Model: "*", Discount: f(0.6)},
+			{Model: "my-model-x", Explicit: Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}},
+		},
+	})
+	if !ok {
+		t.Fatal("Resolve failed")
+	}
+	want := EffectiveRate(spec)
+	got := FoldSpec(spec)
+	for _, c := range []struct {
+		name      string
+		got, want *float64
+	}{{"in_fresh", got.InFresh, want.InFresh}, {"cache_read", got.CacheRead, want.CacheRead},
+		{"cache_write", got.CacheWrite, want.CacheWrite}, {"out", got.Out, want.Out}} {
+		if (c.got == nil) != (c.want == nil) || (c.got != nil && *c.got != *c.want) {
+			t.Fatalf("FoldSpec.%s = %v, want %v (must equal EffectiveRate exactly)", c.name, c.got, c.want)
+		}
+	}
+	// The shape check: a folded rate prices the same token counts as the
+	// spec-side EffectiveRate — the whole point of the fold.
+	const fresh, out = 1_000_000, 2_000_000
+	if got.Cost(fresh, 0, 0, out) != want.Cost(fresh, 0, 0, out) {
+		t.Fatalf("FoldSpec.Cost = %v, want %v (EffectiveRate's own pricing)", got.Cost(fresh, 0, 0, out), want.Cost(fresh, 0, 0, out))
+	}
+}
+
 // --- discount composes against the resolved lower layer, never re-applies to itself ---
 
 func TestResolve_DiscountAppliesOnceToBase(t *testing.T) {

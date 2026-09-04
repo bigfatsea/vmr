@@ -17,7 +17,6 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
-	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
 	"vmr/internal/strategy"
@@ -93,9 +92,10 @@ func needsTokenCharge(limits []core.Limit, model string) bool {
 // or ep.Quota==nil/no Limits is a silent no-op, the same contract
 // chargeQuota has always had.
 //
-// metric: cost prices raw through ep.PricingRate (pricing.EffectiveRate — a
-// deterministic function of the resolved override chain, with no time
-// dimension) and writes the resulting $ amount into Counters.Cost —
+// metric: cost prices raw through ep.PricingRate — the rate config
+// resolution folded once at BuildSnapshot time (pricing.FoldSpec), read as
+// a plain value here (core.Rate.Cost; the override chain never re-resolves
+// on the hot path) — and writes the resulting $ amount into Counters.Cost —
 // computed once per applicable Limit (never recomputed later from raw
 // tokens: the price table itself can still change across a config reload,
 // which produces a new ep.PricingRate — recomputing from raw tokens later
@@ -117,9 +117,8 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, quota.Counters{Requests: 1}, 0)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 		case core.MetricCost:
-			rate := pricing.EffectiveRate(ep.PricingRate)
 			d := raw
-			d.Cost = componentCost(d, rate)
+			d.Cost = componentCost(d, ep.PricingRate)
 			// estimated is token-denominated; on a cost Limit the estimate
 			// signal is money and is passed to ChargeCost below. Passing the
 			// token figure into Charge's `estimated` param would pollute
@@ -141,7 +140,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 				if !outSniffed {
 					estC.Out = d.Out
 				}
-				estCostAmount = componentCost(estC, rate)
+				estCostAmount = componentCost(estC, ep.PricingRate)
 			}
 			// One locked charge: the cost and its estimate must land in the
 			// same period even if another goroutine rolls the bucket in
@@ -157,8 +156,10 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 	}
 }
 
-// componentCost prices d's four raw components through rate — see
-// pricing.Rate.Cost for the shared formula (also used by
+// componentCost prices d's four raw components through the endpoint's
+// pre-folded rate (a nil rate — no pricing resolved — prices everything 0,
+// same as the old EffectiveRate(nil-spec) zero-Rate shape did) — see
+// core.Rate.Cost for the shared formula (also reached by
 // internal/report/cost.go's costFor) and the nil-component/Complete
 // reasoning. d's components are converted back to int64 here: a
 // metric: cost Limit can never have model_multipliers configured
@@ -166,7 +167,7 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 // own comment), so d is always the unscaled token counts tokenCharge
 // produced, which are exact integers even though quota.Counters stores
 // them as float64 to accommodate the requests/tokens Limits that DO scale.
-func componentCost(d quota.Counters, rate pricing.Rate) float64 {
+func componentCost(d quota.Counters, rate *core.Rate) float64 {
 	return rate.Cost(int64(d.Fresh), int64(d.CacheRead), int64(d.CacheWrite), int64(d.Out))
 }
 
@@ -240,8 +241,10 @@ type QuotaProviderStatus struct {
 	Models []string `json:"models,omitempty"`
 	// Role is "bucket" or "gate" — see quota.BucketIndex/ScoreForLimits'
 	// doc comments for the rule (longest tumbling period on the provider
-	// wins bucket; every other Limit is a gate). Always "bucket" for a
-	// provider with exactly one Limit — the P1/P2 shape.
+	// wins bucket; equal periods tie-break deterministically — shared pool
+	// first, then larger Amount — never by YAML written order; every other
+	// Limit is a gate). Always "bucket" for a provider with exactly one
+	// Limit — the P1/P2 shape.
 	Role         string    `json:"role"`
 	Amount       float64   `json:"amount"`
 	Used         float64   `json:"used"`     // base(metric) already applied — directly comparable to Amount

@@ -25,6 +25,7 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/imgprep"
 	"vmr/internal/jsonscan"
+	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 )
@@ -140,7 +141,7 @@ func buildReplayEndpoint(cfg *config.Config, opts Options, rv *recordView) (ad a
 		RoleMap: resolveRoleMap(cfg, protocol, rv.Model, opts.Provider),
 		// chargeReplay needs these resolved directly, the same as above.
 		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
-		PricingRate: cfg.ResolvedPricing[opts.Provider+"\x00"+model],
+		PricingRate: pricing.FoldSpec(cfg.ResolvedPricing[opts.Provider+"\x00"+model]),
 	}
 	ep.FullURL = ad.ResolveURL(baseURL)
 	return ad, protocol, providerCfg, ep, nil

@@ -105,23 +105,15 @@ func (r Rate) Scale(f float64) Rate {
 }
 
 // Cost prices fresh/cacheRead/cacheWrite/out (raw token counts) through r and
-// sums them — the base(cost) formula from
-// docs/VirtualModelRouter_Design_v4_Quota.md's §3, shared by
-// internal/router/quota.go's charge-time computation and
-// internal/report/cost.go's per-record estimate so the two never drift
-// (they were independently hand-written to the same formula until
-// post-delivery review consolidated them here). A nil component (see this
-// type's own doc comment: unknown, not free) contributes 0 rather than
-// panicking — a defensive floor, not a documented degrade path.
+// sums them — a thin delegate to core.Rate.Cost, where the base(cost)
+// formula from docs/VirtualModelRouter_Design_v4_Quota.md's §3 actually
+// lives (one formula, both halves — see that method's doc comment for the
+// drift and parity reasoning). Kept as a method here so the analytics
+// half's call sites read naturally and no caller has to spell the
+// conversion out by hand.
 func (r Rate) Cost(fresh, cacheRead, cacheWrite, out int64) float64 {
-	priced := func(tokens int64, perMillion *float64) float64 {
-		if perMillion == nil {
-			return 0
-		}
-		return float64(tokens) / 1_000_000 * *perMillion
-	}
-	return priced(fresh, r.InFresh) + priced(cacheRead, r.CacheRead) +
-		priced(cacheWrite, r.CacheWrite) + priced(out, r.Out)
+	c := r.toCore()
+	return c.Cost(fresh, cacheRead, cacheWrite, out)
 }
 
 // entry is one canonical-model-id row inside a Table.

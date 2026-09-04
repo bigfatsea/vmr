@@ -211,15 +211,19 @@ type Endpoint struct {
 	// provider has no quota configured (unmetered account).
 	Quota *QuotaSpec
 
-	// PricingRate is this specific provider+model's resolved pricing
-	// , resolved at BuildSnapshot time — unlike Quota, NOT shared
-	// across every Endpoint expanded from the same provider, because price
-	// is inherently model-scoped (see PricingSpec's doc comment). nil = no
-	// pricing resolved for this provider+model (no providers[].pricing
-	// configured and no standard/supplement table match) — a metric: cost
-	// Limit on such a provider is rejected at config-validate time before
-	// this is ever read on the request path.
-	PricingRate *PricingSpec
+	// PricingRate is this specific provider+model's effective pricing,
+	// folded ONCE at BuildSnapshot time from the resolved PricingSpec chain
+	// (pricing.FoldSpec) — unlike Quota, NOT shared across every Endpoint
+	// expanded from the same provider, because price is inherently
+	// model-scoped (see PricingSpec's doc comment). The hot path reads it as
+	// a plain value (Rate.Cost) and never re-runs the override-chain
+	// resolution per request — pricing-table logic stays out of the routing
+	// hot path (KNOWN_ISSUES §1.0's red line). nil = no pricing resolved for
+	// this provider+model (no providers[].pricing configured and no
+	// standard/supplement table match) — a metric: cost Limit on such a
+	// provider is rejected at config-validate time before this is ever read
+	// on the request path; Cost on a nil receiver returns 0 defensively.
+	PricingRate *Rate
 
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
@@ -451,6 +455,32 @@ type Rate struct {
 	Out        *float64
 }
 
+// Cost prices fresh/cacheRead/cacheWrite/out (raw token counts) through r
+// and sums them — the base(cost) formula from
+// docs/VirtualModelRouter_Design_v4_Quota.md's §3, and the formula's single
+// home: the routing half charges through it directly (router.ChargeResponse's
+// cost branch reads Endpoint.PricingRate as a plain value), the analytics
+// half reaches it through internal/pricing.Rate.Cost, which delegates here —
+// the two sides cannot drift, and cmd/vmr's quota parity test pins their
+// numbers against each other on top of that. A nil component (see this
+// type's doc comment: unknown, not free) contributes 0 rather than
+// panicking — a defensive floor, not a documented degrade path. A nil
+// receiver (Endpoint.PricingRate == nil: no pricing resolved for this
+// provider+model) returns 0 the same way.
+func (r *Rate) Cost(fresh, cacheRead, cacheWrite, out int64) float64 {
+	if r == nil {
+		return 0
+	}
+	priced := func(tokens int64, perMillion *float64) float64 {
+		if perMillion == nil {
+			return 0
+		}
+		return float64(tokens) / 1_000_000 * *perMillion
+	}
+	return priced(fresh, r.InFresh) + priced(cacheRead, r.CacheRead) +
+		priced(cacheWrite, r.CacheWrite) + priced(out, r.Out)
+}
+
 // PricingOverride is one model-scoped rule from an account's
 // providers[].pricing.overrides, already filtered (at resolve time, in
 // internal/pricing) to the ones whose `model` pattern matches this specific
@@ -491,11 +521,11 @@ type PricingOverride struct {
 // into Base at Resolve time while also keeping it in Overrides would
 // double-apply it. That constraint is on this structure's shape, not on
 // when resolution happens: P0-A made a spec fully static, so
-// EffectiveRate(spec) is a pure function of it, and the whole chain could
-// be pre-resolved to one Rate at BuildSnapshot time and cached on the
-// Endpoint — the router's per-charge re-resolution is a tracked,
-// trigger-driven follow-up (KNOWN_ISSUES §2.89), not a semantic
-// requirement.
+// EffectiveRate(spec) is a pure function of it, and the routing half
+// consumes the spec already folded — BuildSnapshot caches pricing.FoldSpec's
+// result on Endpoint.PricingRate. This type therefore only lives on the
+// config side (Config.ResolvedPricing, vmr check's display) and inside
+// internal/pricing; nothing re-resolves the chain per request.
 type PricingSpec struct {
 	Base      Rate
 	Overrides []PricingOverride
