@@ -21,7 +21,7 @@ providers:
     api_key: k-parked
     disabled: true
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p_on, p_off], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p_on, p_off], models: [x]}]}}
 `
 
 // TestDisabled_ReferencedStillValidatesButWarns pins the headline
@@ -59,7 +59,7 @@ func TestDisabled_FallbackReferenceWarned(t *testing.T) {
 	yaml := strings.Replace(disabledYAML, "providers: [p_on, p_off]", "providers: [p_on]", 1)
 	yaml = strings.Replace(yaml,
 		"models:\n  m:",
-		"fallback_endpoints:\n  - {protocol: openai-completions, providers: [p_off], models: [fb], priority: 90}\nmodels:\n  m:", 1)
+		"fallback_endpoints:\n  openai-completions:\n    - {providers: [p_off], models: [fb], priority: 90}\nmodels:\n  m:", 1)
 	cfg := mustParse(t, yaml)
 	issues := cfg.Check()
 	for _, is := range issues {

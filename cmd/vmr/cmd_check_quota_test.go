@@ -26,9 +26,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [plan-a]
-        models: [real-model]
+      openai-completions:
+        - providers: [plan-a]
+          models: [real-model]
 `
 
 func TestCmdCheck_PrintsQuotaConfig(t *testing.T) {
@@ -205,9 +205,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [plan-a]
-        models: [real-model]
+      openai-completions:
+        - providers: [plan-a]
+          models: [real-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
@@ -256,9 +256,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      anthropic-messages:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 
@@ -308,9 +308,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [other-model]
+      openai-completions:
+        - providers: [p1]
+          models: [other-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
@@ -333,9 +333,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
 `
 	path := writeTempFile(t, "config.yaml", yaml)
 	var out string
@@ -388,7 +388,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)
@@ -421,7 +421,7 @@ listen: %s
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.Listener.Addr().String())
 
 	path := writeTempFile(t, "config.yaml", yaml)

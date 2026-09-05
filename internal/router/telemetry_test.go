@@ -66,8 +66,8 @@ providers:
   - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
   - {name: p2, base_url: {anthropic-messages: https://example.com/v1}, api_key: k}
 models:
-  coding: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
-  claude: {endpoints: [{protocol: anthropic-messages, providers: [p2], models: [m]}]}
+  coding: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
+  claude: {endpoints: {anthropic-messages: [{providers: [p2], models: [m]}]}}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))

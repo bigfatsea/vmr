@@ -15,13 +15,13 @@ models:
   # `coding` is reachable from any OpenAI-compatible client (POST /v1/chat/completions).
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v3.2-exp]
+      openai-completions:
+        - providers: [deepseek]
+          models: [deepseek-v3.2-exp]
 
   # `claude` is reachable from Anthropic-protocol clients like Claude Code (POST /v1/messages).
   claude:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [deepseek]
-        models: [deepseek-v3.2-exp]
+      anthropic-messages:
+        - providers: [deepseek]
+          models: [deepseek-v3.2-exp]

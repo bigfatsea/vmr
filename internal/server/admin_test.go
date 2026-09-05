@@ -63,7 +63,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

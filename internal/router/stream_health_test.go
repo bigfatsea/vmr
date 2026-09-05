@@ -57,7 +57,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, srv.URL))
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -111,7 +112,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, u.srv.URL))
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -144,7 +146,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, u.srv.URL))
 	snap := mustSnapshot(t, cfg)
 	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
@@ -182,7 +185,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, srv.URL))
 	snap := mustSnapshot(t, cfg)
 	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]
@@ -262,7 +266,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, srv.URL))
 	snap := mustSnapshot(t, cfg)
 	ep := snap.Models["openai-completions"]["vm"].Endpoints[0]

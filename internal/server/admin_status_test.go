@@ -64,8 +64,10 @@ providers:
 models:
   a:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: anthropic-messages, providers: [p1], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+      anthropic-messages:
+        - {providers: [p1], models: [m2]}
 `
 	models := adminStatusModels(t, yaml)
 
@@ -151,7 +153,8 @@ models:
     capabilities: [text]
     max_context_tokens: 128000
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1], capabilities: [vision], max_context_tokens: 200000}
+      openai-completions:
+        - {providers: [p1], models: [m1], capabilities: [vision], max_context_tokens: 200000}
 `
 	models := adminStatusModels(t, yaml)
 	if len(models) != 1 {

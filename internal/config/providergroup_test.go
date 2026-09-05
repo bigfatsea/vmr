@@ -20,9 +20,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1, p2]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1, p2]
+          models: [real-model]
 `
 
 func TestEndpointGroup_ProvidersField_Parses(t *testing.T) {
@@ -30,7 +30,7 @@ func TestEndpointGroup_ProvidersField_Parses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("providers: [...] should validate: %v", err)
 	}
-	eg := cfg.Models["m1"].Endpoints[0]
+	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
 	got := eg.Providers
 	want := []string{"p1", "p2"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
@@ -74,16 +74,16 @@ providers:
     base_url: {openai-completions: https://api.example.com/v1}
     api_key: k2
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [p2]
-    models: [fallback-model]
-    priority: 90
+  openai-completions:
+    - providers: [p2]
+      models: [fallback-model]
+      priority: 90
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
 `
 
 func TestFallbackEndpoints_Parses(t *testing.T) {
@@ -94,14 +94,14 @@ func TestFallbackEndpoints_Parses(t *testing.T) {
 	if len(cfg.FallbackEndpoints) != 1 {
 		t.Fatalf("got %d fallback endpoints, want 1", len(cfg.FallbackEndpoints))
 	}
-	fb := cfg.FallbackEndpoints[0]
-	if fb.Protocol != "openai-completions" || len(fb.Providers) != 1 || fb.Providers[0] != "p2" || fb.Priority != 90 {
+	fb := cfg.FallbackEndpoints["openai-completions"][0]
+	if len(fb.Providers) != 1 || fb.Providers[0] != "p2" || fb.Priority != 90 {
 		t.Errorf("fallback endpoint = %+v, unexpected", fb)
 	}
 }
 
 func TestFallbackEndpoints_PriorityOmitted_Rejected(t *testing.T) {
-	yaml := strings.Replace(fallbackYAML, "    priority: 90\n", "", 1)
+	yaml := strings.Replace(fallbackYAML, "      priority: 90\n", "", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "priority must be set and > 0") {
 		t.Errorf("want a priority-required error, got %v", err)
@@ -128,20 +128,20 @@ func TestFallbackEndpoints_PriorityNegative_Rejected(t *testing.T) {
 // FallbackEndpoints entry is validated through the exact same path as an
 // ordinary endpoint-group entry (validateEndpointGroup) — an unknown
 // provider reference here must fail the same way it would inside
-// models.<name>.endpoints[].
+// models.<name>.endpoints.
 func TestFallbackEndpoints_ReuseEndpointGroupValidation(t *testing.T) {
 	yaml := strings.Replace(fallbackYAML, "providers: [p2]", "providers: [ghost]", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), `unknown provider "ghost"`) {
 		t.Errorf("want unknown provider error naming ghost, got %v", err)
 	}
-	if err != nil && !strings.Contains(err.Error(), "fallback_endpoints[0]") {
-		t.Errorf("error should be attributed to fallback_endpoints[0], got %v", err)
+	if err != nil && !strings.Contains(err.Error(), "fallback_endpoints.openai-completions[#1]") {
+		t.Errorf("error should be attributed to fallback_endpoints.openai-completions[#1], got %v", err)
 	}
 }
 
 func TestFallbackEndpoints_UnknownProtocolRejected(t *testing.T) {
-	yaml := strings.Replace(fallbackYAML, "protocol: openai-completions\n    providers: [p2]", "protocol: nosuch\n    providers: [p2]", 1)
+	yaml := strings.Replace(fallbackYAML, "fallback_endpoints:\n  openai-completions:", "fallback_endpoints:\n  nosuch:", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Errorf("want unknown protocol error, got %v", err)
@@ -199,16 +199,16 @@ providers:
     quota:
       limits: [{metric: cost, every: 1mo, since: 2026-08-01, amount: 100}]
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [costy]
-    models: [totally-unpriceable-model-xyz]
-    priority: 90
+  openai-completions:
+    - providers: [costy]
+      models: [totally-unpriceable-model-xyz]
+      priority: 90
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
 `
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "totally-unpriceable-model-xyz") {

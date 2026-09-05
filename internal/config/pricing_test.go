@@ -25,9 +25,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [%s]
-        models: [%s]
+      openai-completions:
+        - providers: [%s]
+          models: [%s]
 `
 
 // pricingCfg builds a config with provider name "p1" — used by tests that
@@ -641,9 +641,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [plain]
-        models: [gpt-4o]
+      openai-completions:
+        - providers: [plain]
+          models: [gpt-4o]
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -689,9 +689,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      openai-completions:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {

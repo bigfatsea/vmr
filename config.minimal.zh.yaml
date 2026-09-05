@@ -14,13 +14,13 @@ models:
   # `coding` 可被任意 OpenAI 兼容客户端访问（POST /v1/chat/completions）。
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v3.2-exp]
+      openai-completions:
+        - providers: [deepseek]
+          models: [deepseek-v3.2-exp]
 
   # `claude` 可被 Anthropic 协议客户端访问，如 Claude Code（POST /v1/messages）。
   claude:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [deepseek]
-        models: [deepseek-v3.2-exp]
+      anthropic-messages:
+        - providers: [deepseek]
+          models: [deepseek-v3.2-exp]

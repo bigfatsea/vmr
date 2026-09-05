@@ -88,16 +88,21 @@ providers:
 models:
   coding:                      # 只有 openai-completions 协议 → 走 /v1/chat/completions
     endpoints:
-      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
+      openai-completions:
+        - {providers: [openrouter], models: [z-ai/glm-5.2]}   # 不写 priority：列表顺序就是尝试顺序
   claude:                      # 只有 anthropic-messages 协议 → 走 /v1/messages
     endpoints:
-      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
+      anthropic-messages:
+        - {providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # 只有 openai-responses 协议 → 走 /v1/responses
     endpoints:
-      - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
+      openai-responses:
+        - {providers: [openrouter], models: [z-ai/glm-5.2]}
 ```
 
 全部字段与校验规则见设计文档 Part 1 §10。修改配置数秒内热生效；坏配置被拒绝、不影响运行实例。解析是严格的：未知或拼错的配置键（如 `max_concurency: 8`）会直接导致加载失败，绝不会被静默忽略、让你误以为设置已生效。
+
+模型的 `endpoints:`（以及顶层 `fallback_endpoints:`）按协议作 key——和 `base_url` 同一套键名，并经过 adapter 注册表校验，未知的协议 key 会在加载期报错并直接点名这个 key。协议桶之间的顺序无关紧要（一个请求只会查询它自己入口协议的那个桶）；桶*内*条目的顺序就是 try-order。协议放在 key 上还让错误定位更准：某条 entry 的错误会报成 `model "x" endpoints.openai-completions[#2]: ...`，而不是含糊的 "endpoint group #N"。仍按旧形态书写（一个带逐条 `protocol:` 字段的扁平端点列表）的配置会作为 unknown field 被拒绝——没有任何兼容层。
 
 ### 启动与热重载检查
 
@@ -125,7 +130,7 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 
 ### 角色改写 role_map
 
-有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints[]` 的某条 entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 是 `protocol: openai-responses`，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
+有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints` 的某条 try-order entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
 
 ### 端点尝试顺序 priority 与 strategy
 
@@ -149,10 +154,10 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [volcengine, volcengine2]
-        models: [deepseek-v4-pro]
-        priority: 1
+      openai-completions:
+        - providers: [volcengine, volcengine2]
+          models: [deepseek-v4-pro]
+          priority: 1
 ```
 
 这会展开成 `providers` × `models` 那么多个独立的、各自单独做健康跟踪的端点——外层按 `models` 循环，内层按 `providers` 循环，也就是每个具名 provider 都会先试完当前（更优先的）模型，整条记录才会降级到下一个模型。每个账号仍然各自保留自己的 `quota:`/`pricing:`（照旧写在它自己的 `providers[]` 记录上——合并 try-order 那一行不会把账号的配额账本也合并）；`vmr check` 展开后打印的结果，和手写多条记录时完全一样。
@@ -170,29 +175,29 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [volcengine]        # 加载时被改写为 [volcengine-main, volcengine-backup]
-        models: [deepseek-v4-pro]
-        priority: 1
+      openai-completions:
+        - providers: [volcengine]      # 加载时被改写为 [volcengine-main, volcengine-backup]
+          models: [deepseek-v4-pro]
+          priority: 1
 ```
 
 这一步完全在 `config.Parse` 里完成，先于校验和 `BuildSnapshot`：`volcengine` 会变成两条独立的 `Provider`，名字分别是 `volcengine-main`/`volcengine-backup`，配置里任何地方对 `providers: [volcengine]` 的引用——包括 `fallback_endpoints:`——都会被自动改写成展开后的名字列表。改写完之后，它和手写两条 `providers[]` 记录没有任何区别：各自独立的 `quota:`/健康度/Sticky 绑定，`vmr check` 里各自一行，各自的审计记录（`openai-completions:volcengine-main:deepseek-v4-pro`）。一个 provider 只能二选一写 `api_key:` 或 `api_keys:`，两个都写是加载期错误。`vmr check` 里谁排第一不跟着 YAML 书写顺序走——`api_keys:` 就是个普通 map；但没配 `quota:` 时，排在前面的那把才是实际在用的，其余纯冷备，`vmr check`/启动日志每次都会打印真实生效的顺序，所以不是不可知，只是没法靠调整 YAML 顺序去指定它。想让几把 Key 都真正参与流量分配，跟顺序无关，就给每把 Key 各自配一份 `quota:`，让 vmr 的配额水位打分接管。
 
-**全局兜底端点**：一个顶层的 `fallback_endpoints:` 列表，记录形状和 `models.<name>.endpoints[]` 完全一样，会被追加到*每一个*虚拟模型自己 try-order 的末尾，而不用往每一个都想要同一档兜底的模型上分别粘贴一遍：
+**全局兜底端点**：一个顶层的 `fallback_endpoints:` 映射，按协议作 key，和 `models.<name>.endpoints` 完全同构，会被追加到*每一个*虚拟模型在对应协议上 try-order 的末尾，而不用往每一个都想要同一档兜底的模型上分别粘贴一遍：
 
 ```yaml
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [bai, sensenova]
-    models: [deepseek-v4-flash]
-    priority: 98
+  openai-completions:
+    - providers: [bai, sensenova]
+      models: [deepseek-v4-flash]
+      priority: 98
 
 models:
-  coding: {endpoints: [...]}   # 上面这条 fallback 会自动追加进来
-  cheap:  {endpoints: [...]}   # 这个也一样
+  coding: {endpoints: {...}}   # 上面这条 fallback 会自动追加进来
+  cheap:  {endpoints: {...}}   # 这个也一样
 ```
 
-一条 fallback 只会挂到那些本来就已经有对应 `protocol` 入口的虚拟模型上——它是给已有入口做增补，绝不会给一个模型凭空开一个它原本没声明过的新入口（一个纯 anthropic-messages 的模型不会被 openai-completions 协议的 fallback 碰到）。一个虚拟模型可以用 `fallback: false` 完全不参与。和普通端点组不同，fallback 记录的 `priority` **必须显式声明且 > 0**——省略/写 0 会让它悄悄和模型自己的真实端点抢占同一档位，而不是老老实实排在后面，这正是 `vmr check` 的加载期校验存在的意义：在请求意外路由到那里之前把这类陷阱拦下来。`vmr check` 打印一条来自 fallback 的端点时会带上末尾的 `fallback` 标注，也会对"某条 fallback 悄悄重复了模型自己已经声明过的端点"这种情况打 ⚠️。
+一条 fallback 只会挂到那些本来就已经有对应协议入口的虚拟模型上——它是给已有入口做增补，绝不会给一个模型凭空开一个它原本没声明过的新入口（一个纯 anthropic-messages 的模型不会被 openai-completions 协议的 fallback 碰到）。一个虚拟模型可以用 `fallback: false` 完全不参与。和普通端点组不同，fallback 记录的 `priority` **必须显式声明且 > 0**——省略/写 0 会让它悄悄和模型自己的真实端点抢占同一档位，而不是老老实实排在后面，这正是 `vmr check` 的加载期校验存在的意义：在请求意外路由到那里之前把这类陷阱拦下来。`vmr check` 打印一条来自 fallback 的端点时会带上末尾的 `fallback` 标注，会对"某条 fallback 悄悄重复了模型自己已经声明过的端点"这种情况打 ⚠️，也会对"协议 key 匹配不到*任何*虚拟模型端点"的 fallback 桶给出 ⚠️ 告警（非致命）——这样的桶永远不会生效，没有这条告警的话这种失败是完全静默的（作为演进路径它是合法的：以后补上匹配的端点，它就会活过来）。
 
 ### 临时下线一个 provider
 
@@ -264,14 +269,13 @@ models:
     capabilities: [text, tools]        # 基线：下面每个端点都继承这个
     max_context_tokens: 128000         # 基线：同上
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
-        max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
+          max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
+        - providers: [deepseek]
+          models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
 ```
 
 两个字段在虚拟模型层和端点层都是可选的，缺省即**不限制**：虚拟模型不声明 `capabilities` 就没有基线，端点不声明自己的就视为支持模型基线里的一切（如果哪一层都没声明，就是什么都支持）——现有配置文件行为完全不变。`capabilities` 在端点层是**叠加**语义（与模型基线取并集）,`max_context_tokens` 则是**覆盖或继承**（单个数值没法取并集）。端点的生效能力集合一旦非空就是穷尽式的（把它真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）；`vmr check` 会把每个虚拟模型的基线、以及每个端点自己声明的叠加/覆盖值打印出来，配置遗漏在这里一眼可见。
@@ -296,14 +300,13 @@ models:
     # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
     # 才需要显式写 sticky: false
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        # 继承全局的 10 分钟 ttl.sticky
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-chat]
-        sticky_ttl: 2h      # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          # 继承全局的 10 分钟 ttl.sticky
+        - providers: [deepseek]
+          models: [deepseek-chat]
+          sticky_ttl: 2h    # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
 ```
 
 - **身份识别**：对话锚点取自 system prompt **和**第一条非 system 消息的哈希——两者都只哈希、从不记录或以其他方式暴露。两个恰好用同一句话开场的不同 Agent 不会被混同，因为它们的 system prompt（进而它们在上游真正的缓存前缀）不同；如果只哈希首条用户消息、不含 system prompt，恰好会漏掉这个场景。
@@ -678,7 +681,7 @@ models:
 | --- | --- |
 | `POST /v1/chat/completions` | OpenAI Chat Completions 协议入口（流式 + 非流式） |
 | `POST /v1/messages` | Anthropic Messages 协议入口（流式 + 非流式） |
-| `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要一条 `protocol: openai-responses` 的端点 |
+| `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要在 `openai-responses` key 下声明端点 |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
 | `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime，以及 `base_urls`：各协议的客户端入口地址——都是 `<scheme>://<host>/v1/`——从请求本身回显（Host 头 + 是否 TLS）、不是从 `listen` 推导，你用什么地址问的就该用什么地址配客户端）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、每个 虚拟模型 × 协议 一条 `models` 数组项，含 `capabilities`（跨端点并集；空数组 = 不限制）、`max_context_tokens`（跨端点最大值；0 = 不限制）与逐端点健康及各端点自己的 capabilities/context 覆盖——让把 custom model 指向 vmr 的 Agent 能直接读出上下文长度与能力——以及实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |

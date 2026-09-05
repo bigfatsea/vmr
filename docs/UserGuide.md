@@ -89,16 +89,21 @@ providers:
 models:
   coding:                      # openai-completions protocol only → served via /v1/chat/completions
     endpoints:
-      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}   # no priority field: list order = try order
+      openai-completions:
+        - {providers: [openrouter], models: [z-ai/glm-5.2]}   # no priority field: list order = try order
   claude:                      # anthropic-messages protocol only → served via /v1/messages
     endpoints:
-      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
+      anthropic-messages:
+        - {providers: [openrouter], models: [minimax/minimax-m3]}
   agent:                       # openai-responses protocol only → served via /v1/responses
     endpoints:
-      - {protocol: openai-responses, providers: [openrouter], models: [z-ai/glm-5.2]}
+      openai-responses:
+        - {providers: [openrouter], models: [z-ai/glm-5.2]}
 ```
 
 All fields and validation rules: Part 1 §10 of the design doc. Config edits hot-reload within seconds; a broken config is rejected and the running instance keeps its current one. Parsing is strict: an unknown or misspelled key (`max_concurency: 8`) is a load error, never a silently ignored no-op you believe is in effect.
+
+A model's `endpoints:` (and the top-level `fallback_endpoints:`) are keyed by protocol — the same key set as `base_url`, validated against the adapter registry, so an unknown key is a load error naming the key itself. Bucket order between protocol keys is irrelevant (a request only ever consults the bucket of its own ingress); the order of entries *within* a bucket is the try-order. Protocol at the key also sharpens error messages: a per-entry mistake is reported as `model "x" endpoints.openai-completions[#2]: ...` rather than an anonymous "endpoint group #N". Configs written in the pre-map form (a flat endpoint list with a per-entry `protocol:` field) are rejected as unknown fields — there is no compatibility layer.
 
 ### Startup and reload checks
 
@@ -126,7 +131,7 @@ vmr pre-computes each provider's complete upstream URL at initialization by appe
 
 ### Role remapping (role_map)
 
-Some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a `models.<name>.endpoints[]` entry rewrites matching `"role"` values inside the top-level `messages` array (or, for a `protocol: openai-responses` entry, the top-level `input` array) before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the endpoint-group, not the provider or the virtual model as a whole, since the same account can back several endpoint-groups (different virtual models, different upstream model families) that don't all necessarily need the same rewrite; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for an entry whose upstream accepts every role as-is — the default.
+Some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a `models.<name>.endpoints` try-order entry rewrites matching `"role"` values inside the top-level `messages` array (or, for an entry under the `openai-responses` key, the top-level `input` array) before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the endpoint-group, not the provider or the virtual model as a whole, since the same account can back several endpoint-groups (different virtual models, different upstream model families) that don't all necessarily need the same rewrite; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for an entry whose upstream accepts every role as-is — the default.
 
 ### Endpoint try-order (priority and strategy)
 
@@ -150,10 +155,10 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [volcengine, volcengine2]
-        models: [deepseek-v4-pro]
-        priority: 1
+      openai-completions:
+        - providers: [volcengine, volcengine2]
+          models: [deepseek-v4-pro]
+          priority: 1
 ```
 
 This expands into as many independent, individually health-tracked endpoints as `providers` × `models` — outer loop over `models`, inner loop over `providers`, so every named provider is tried for the preferred model before the entry falls through to the next model. Each account keeps its own `quota:`/`pricing:` (declared on its own `providers[]` entry, same as always — merging the try-order line doesn't merge the accounts' quota ledgers); `vmr check` shows the expanded list exactly like a hand-written multi-entry version would.
@@ -171,29 +176,29 @@ providers:
 models:
   coding:
     endpoints:
-      - protocol: openai-completions
-        providers: [volcengine]        # rewritten at load time to [volcengine-main, volcengine-backup]
-        models: [deepseek-v4-pro]
-        priority: 1
+      openai-completions:
+        - providers: [volcengine]      # rewritten at load time to [volcengine-main, volcengine-backup]
+          models: [deepseek-v4-pro]
+          priority: 1
 ```
 
 This is resolved entirely in `config.Parse`, before validation or `BuildSnapshot` ever run: `volcengine` becomes two independent `Provider` entries named `volcengine-main`/`volcengine-backup`, and every `providers: [volcengine]` reference anywhere in the config — including `fallback_endpoints:` — is rewritten to the expanded name list automatically. From that point on it's indistinguishable from having hand-written two `providers[]` entries: independent `quota:`/health/Sticky per key, its own line in `vmr check`'s effective routing table, its own audit trail (`openai-completions:volcengine-main:deepseek-v4-pro`). A provider sets `api_key:` or `api_keys:`, never both. Which key `vmr check` lists first isn't pinned to write order — `api_keys:` is an ordinary map — but with no `quota:` configured, whichever one comes first is the only one traffic uses, the rest are pure cold standby; `vmr check`/the startup log always show the actual resolved order, so it's never a mystery, just not something you can dictate by reordering the YAML. Give each key its own `quota:` if you want vmr's headroom-aware scoring to spread traffic across all of them regardless of order.
 
-**Global fallback endpoints**: a top-level `fallback_endpoints:` list, same entry shape as `models.<name>.endpoints[]`, appended to the tail of *every* virtual model's own try-order instead of being pasted onto each one:
+**Global fallback endpoints**: a top-level `fallback_endpoints:` map keyed by protocol, exactly like `models.<name>.endpoints`, appended to the tail of *every* virtual model's try-order for that protocol instead of being pasted onto each one:
 
 ```yaml
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [bai, sensenova]
-    models: [deepseek-v4-flash]
-    priority: 98
+  openai-completions:
+    - providers: [bai, sensenova]
+      models: [deepseek-v4-flash]
+      priority: 98
 
 models:
-  coding: {endpoints: [...]}   # gets the fallback above appended automatically
-  cheap:  {endpoints: [...]}   # so does this one
+  coding: {endpoints: {...}}   # gets the fallback above appended automatically
+  cheap:  {endpoints: {...}}   # so does this one
 ```
 
-A fallback entry only attaches to a virtual model that already has its own entry point on the fallback's `protocol` — it augments an existing ingress, it never opens a new one a model didn't already declare (an anthropic-messages-only model is untouched by an openai-completions fallback). A virtual model can opt out entirely with `fallback: false`. Unlike an ordinary endpoint-group, `priority` on a fallback entry is **required and must be > 0** — omitted/0 would silently compete at the same tier as a model's own real endpoints instead of trailing behind them, and that's exactly the kind of surprise `vmr check`'s load-time validation exists to catch instead of a request routing there by accident. `vmr check` prints a fallback-origin endpoint with a trailing `fallback` annotation, and flags (⚠️) a fallback that would silently duplicate an endpoint a model already declares for itself.
+A fallback entry only attaches to a virtual model that already has its own entry point on the fallback's protocol key — it augments an existing ingress, it never opens a new one a model didn't already declare (an anthropic-messages-only model is untouched by an openai-completions fallback). A virtual model can opt out entirely with `fallback: false`. Unlike an ordinary endpoint-group, `priority` on a fallback entry is **required and must be > 0** — omitted/0 would silently compete at the same tier as a model's own real endpoints instead of trailing behind them, and that's exactly the kind of surprise `vmr check`'s load-time validation exists to catch instead of a request routing there by accident. `vmr check` prints a fallback-origin endpoint with a trailing `fallback` annotation, flags (⚠️) a fallback that would silently duplicate an endpoint a model already declares for itself, and warns (⚠️, non-fatal) about a fallback protocol key that matches *no* virtual model's endpoints at all — such a bucket can never fire, and without the warning that failure is silent (legal as a staging step: add a matching endpoint later and it comes alive).
 
 ### Temporarily disabling a provider
 
@@ -264,14 +269,13 @@ models:
     capabilities: [text, tools]        # base: every endpoint below inherits this
     max_context_tokens: 128000         # base: ditto
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        capabilities: [image]          # ADDED to the base -> effective: text, tools, image
-        max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-chat]        # declares neither -> inherits the base as-is
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          capabilities: [image]          # ADDED to the base -> effective: text, tools, image
+          max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
+        - providers: [deepseek]
+          models: [deepseek-chat]        # declares neither -> inherits the base as-is
 ```
 
 Both fields are optional at both levels and default to **unconstrained**: a virtual model with no `capabilities` has no base, and an endpoint that doesn't add its own is assumed to support everything the model does (or, absent any declaration anywhere, everything at all) — existing configs behave exactly as before. `capabilities` is *additive* per endpoint (union with the model's base) since `max_context_tokens` is *override-or-inherit* instead (a single number can't be unioned). Once an endpoint's effective capability set is non-empty it's exhaustive (list everything it actually supports, not just what you want checked); `vmr check` prints each virtual model's base and each endpoint's own declared extras/override so a gap is visible before it causes a misroute.
@@ -296,14 +300,13 @@ models:
     # sticky: true is the default — omit it. Only a genuinely one-shot
     # virtual model (no multi-turn value to protect) needs sticky: false.
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        # inherits the global 10-minute ttl.sticky
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-chat]
-        sticky_ttl: 2h      # DeepSeek's disk-based cache lasts hours to days — override per endpoint
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          # inherits the global 10-minute ttl.sticky
+        - providers: [deepseek]
+          models: [deepseek-chat]
+          sticky_ttl: 2h    # DeepSeek's disk-based cache lasts hours to days — override per endpoint
 ```
 
 - **Identity**: a conversation is fingerprinted from its system prompt *and* first non-system message — both hashed, never logged or otherwise exposed. Two different agents that happen to open with the same line don't collide, because their system prompts (and therefore their actual upstream cache prefixes) differ; hashing only the first user message, without the system prompt, would have missed exactly that case.
@@ -685,7 +688,7 @@ Both are config fields —
 | --- | --- |
 | `POST /v1/chat/completions` | OpenAI Chat Completions ingress (streaming + non-streaming) |
 | `POST /v1/messages` | Anthropic Messages ingress (streaming + non-streaming) |
-| `POST /v1/responses` | OpenAI Responses ingress (streaming + non-streaming); requires a `protocol: openai-responses` endpoint |
+| `POST /v1/responses` | OpenAI Responses ingress (streaming + non-streaming); requires an endpoint under the `openai-responses` key |
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
 | `GET /health` | liveness only: `{"status":"ok","time":…,"uptime_seconds":…}`. **No credential, any source address** — the one endpoint a container probe, reverse proxy or external monitor can reach without an API key or a 127.0.0.1 source. It reports the current time and uptime rather than a constant `ok` so a cached 200 is distinguishable from a live one. Liveness, never readiness: it stays 200 while every upstream is down, because restarting the router cannot fix an upstream outage — read `/status`'s health block if you want readiness. Nothing about the instance appears here; that is what the next row is for |
 | `GET /status` | process identity & execution context (pid/listen/version/cwd/executable/uptime, plus `base_urls`: the per-protocol client-facing base URL — all `<scheme>://<host>/v1/` — echoed from the request itself (Host header + TLS), not derived from `listen`, so whatever address you asked from is the one to point your client at), config freshness (mtime/stale/reload/issues), concurrency throttles, system resources (memory/goroutines/disk free space), live traffic telemetry (requests/tokens/sticky), one `models` array entry per virtual-model × protocol carrying `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and per-endpoint health incl. each endpoint's own capabilities/context override — so an agent pointing a custom model at vmr can read its context window and abilities straight off this payload — and live quota metrics (auth-gated via `api_keys`) — `vmr status` below is the CLI front end for this payload |

@@ -16,8 +16,9 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [x]}
-      - {protocol: openai-completions, providers: [p1, p2], models: [x]}
+      openai-completions:
+        - {providers: [p1], models: [x]}
+        - {providers: [p1, p2], models: [x]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
@@ -35,11 +36,13 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 fallback_endpoints:
-  - {protocol: openai-completions, providers: [p1], models: [x], priority: 90}
+  openai-completions:
+    - {providers: [p1], models: [x], priority: 90}
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [x]}
+      openai-completions:
+        - {providers: [p1], models: [x]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
@@ -57,14 +60,16 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com, anthropic-messages: https://example.com}, api_key: k1}
 fallback_endpoints:
-  - {protocol: anthropic-messages, providers: [p1], models: [x], priority: 90}
+  anthropic-messages:
+    - {providers: [p1], models: [x], priority: 90}
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [x]}
+      openai-completions:
+        - {providers: [p1], models: [x]}
 `)
-	if issues := cfg.Check(); len(issues) != 0 {
-		t.Errorf("Check() = %+v, want no issues — model m has no anthropic entry point for the fallback to attach to", issues)
+	if issues := cfg.Check(); len(issues) != 1 || issues[0].Field != "fallback" || issues[0].Severity != SeverityWarning {
+		t.Errorf("Check() = %+v, want exactly the unreachable-fallback warning — model m has no anthropic entry point, so no duplicate is possible but the fallback can never fire", issues)
 	}
 }
 
@@ -77,12 +82,14 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 fallback_endpoints:
-  - {protocol: openai-completions, providers: [p1], models: [x], priority: 90}
+  openai-completions:
+    - {providers: [p1], models: [x], priority: 90}
 models:
   m:
     fallback: false
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [x]}
+      openai-completions:
+        - {providers: [p1], models: [x]}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("Check() = %+v, want no issues — model m opted out of fallbacks", issues)
@@ -99,11 +106,13 @@ providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
   - {name: p2, base_url: {openai-completions: https://example.com}, api_key: k2}
 fallback_endpoints:
-  - {protocol: openai-completions, providers: [p2], models: [y], priority: 90}
+  openai-completions:
+    - {providers: [p2], models: [y], priority: 90}
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p1, p2], models: [x]}
+      openai-completions:
+        - {providers: [p1, p2], models: [x]}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("Check() = %+v, want empty", issues)

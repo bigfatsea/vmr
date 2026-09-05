@@ -27,7 +27,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 
 type configSubBlock struct {
@@ -257,7 +258,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 	cfgAuthed, err := config.Parse([]byte(authedYAML))
 	if err != nil {
@@ -329,7 +331,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(exposedYAML))
 	if err != nil {
@@ -375,7 +378,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(cleanYAML))
 	if err != nil {
@@ -501,7 +505,8 @@ models:
   vm:
     image_downscale: 256
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m]}
+      openai-completions:
+        - {providers: [p1], models: [m]}
 `
 	cfg, err := config.Parse([]byte(perModelYAML))
 	if err != nil {

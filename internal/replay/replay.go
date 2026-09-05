@@ -545,21 +545,18 @@ func loadRecordByLine(path string, line int) (*recordView, int, error) {
 
 // resolveModel looks up the real upstream model name for provider under the
 // virtual model the record was sent to — the same lookup config.yaml itself
-// encodes (models.<virtualModel>.endpoints[].{protocol,provider,models}).
-// Errors (rather than guessing) when provider/protocol match more than one
-// candidate model — an EndpointGroup's Models list can legitimately hold
-// several, and picking the wrong one would replay against a model the
-// record was never sent to.
+// encodes (models.<virtualModel>.endpoints' per-protocol
+// {provider,models} groups). Errors (rather than guessing) when
+// provider/protocol match more than one candidate model — an EndpointGroup's
+// Models list can legitimately hold several, and picking the wrong one
+// would replay against a model the record was never sent to.
 func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (string, error) {
 	vm, ok := cfg.Models[virtualModel]
 	if !ok {
 		return "", fmt.Errorf("virtual model %q not found in config; pass -model to specify the upstream model explicitly", virtualModel)
 	}
 	var candidates []string
-	for _, eg := range vm.Endpoints {
-		if eg.Protocol != protocol {
-			continue
-		}
+	for _, eg := range vm.Endpoints[protocol] {
 		for _, pn := range eg.Providers {
 			if pn == provider {
 				candidates = append(candidates, eg.Models...)
@@ -589,10 +586,7 @@ func resolveRoleMap(cfg *config.Config, protocol, virtualModel, provider string)
 	if !ok {
 		return nil
 	}
-	for _, eg := range vm.Endpoints {
-		if eg.Protocol != protocol {
-			continue
-		}
+	for _, eg := range vm.Endpoints[protocol] {
 		for _, pn := range eg.Providers {
 			if pn == provider {
 				return eg.RoleMap

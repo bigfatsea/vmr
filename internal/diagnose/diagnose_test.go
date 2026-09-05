@@ -82,7 +82,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "https://this-host-does-not-exist.invalid"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ http_proxy: "http://%s"
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, openProxy.Addr().String(), upstream.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ http_proxy: "http://%s"
 providers:
   - {name: p1, base_url: {openai-completions: "http://this-host-does-not-exist.invalid"}, api_key: k, proxy: true}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, openProxy.Addr().String())))
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
@@ -297,7 +297,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 			if err != nil {
 				t.Fatal(err)
@@ -325,7 +325,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://%s"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, addr)))
 	if err != nil {
 		t.Fatal(err)
@@ -391,7 +391,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -419,7 +419,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m], role_map: {developer: system}}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m], role_map: {developer: system}}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +445,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {anthropic-messages: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: anthropic-messages, providers: [p1], models: [m]}]}
+  vm: {endpoints: {anthropic-messages: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -508,7 +508,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-responses: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-responses, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-responses: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -528,7 +528,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-responses: %q}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-responses, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-responses: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
@@ -554,8 +554,8 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q, anthropic-messages: %q}, api_key: k}
 models:
-  vm-openai: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
-  vm-anthropic: {endpoints: [{protocol: anthropic-messages, providers: [p1], models: [m]}]}
+  vm-openai: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
+  vm-anthropic: {endpoints: {anthropic-messages: [{providers: [p1], models: [m]}]}}
 `, ts.URL, ts.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -629,8 +629,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [bad], models: [m], priority: 0}
-      - {protocol: openai-completions, providers: [good], models: [m], priority: 1}
+      openai-completions:
+        - {providers: [bad], models: [m], priority: 0}
+        - {providers: [good], models: [m], priority: 1}
 `, goodUp.URL, badUp.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -724,8 +725,8 @@ providers:
   - {name: zulu, base_url: {openai-completions: %[1]q}, api_key: k1}
   - {name: alpha, base_url: {openai-completions: %[1]q}, api_key: k2}
 models:
-  vm-a: {endpoints: [{protocol: openai-completions, providers: [zulu], models: [m1]}, {protocol: openai-completions, providers: [alpha], models: [m2]}]}
-  vm-z: {endpoints: [{protocol: openai-completions, providers: [alpha], models: [m1]}]}
+  vm-a: {endpoints: {openai-completions: [{providers: [zulu], models: [m1]}, {providers: [alpha], models: [m2]}]}}
+  vm-z: {endpoints: {openai-completions: [{providers: [alpha], models: [m1]}]}}
 `, up.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -757,7 +758,7 @@ providers:
   - {name: p1, base_url: {openai-completions: %[1]q}, api_key: k1}
   - {name: p2, base_url: {openai-completions: %[1]q}, api_key: k2}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1, p2], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1, p2], models: [m]}]}}
 `, up.URL))
 
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: 5 * time.Second})
@@ -800,7 +801,7 @@ func TestRun_ChecksRunConcurrently(t *testing.T) {
 	var models strings.Builder
 	for i := 0; i < n; i++ {
 		fmt.Fprintf(&providers, "  - {name: p%d, base_url: {openai-completions: %q}, api_key: k}\n", i, slow.URL)
-		fmt.Fprintf(&models, "  vm%d: {endpoints: [{protocol: openai-completions, providers: [p%d], models: [m]}]}\n", i, i)
+		fmt.Fprintf(&models, "  vm%d: {endpoints: {openai-completions: [{providers: [p%d], models: [m]}]}}\n", i, i)
 	}
 	cfgPath := writeConfig(t, fmt.Sprintf("listen: 127.0.0.1:0\nproviders:\n%s\nmodels:\n%s", providers.String(), models.String()))
 
@@ -826,7 +827,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: false})
 	if err != nil {
@@ -865,7 +866,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://provider.invalid:1/unreachable"}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
 	if err != nil {
@@ -910,7 +911,7 @@ listen: 0.0.0.0:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://127.0.0.1:1/unreachable"}, api_key: k1}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `)
 	rep, err := Run(context.Background(), Options{ConfigPath: cfgPath, TestRouting: true, TestTimeout: time.Second})
 	if err != nil {
@@ -1048,7 +1049,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %q}, api_key: k1}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, up.URL))
 
 	var progress strings.Builder

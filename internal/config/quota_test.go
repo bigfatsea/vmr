@@ -25,9 +25,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
 `
 
 func withQuotaBlock(block string) string {

@@ -70,7 +70,8 @@ func (r *ModelRoute) EffectiveImageDownscaleMaxPx(globalMaxPx int) int {
 // Models is keyed protocol -> name: BuildSnapshot splits each
 // config.VirtualModel's endpoint groups by their own declared protocol, so
 // this shape is derived, not a direct mirror of config.Config.Models (which
-// is keyed by virtual-model name alone — see config.VirtualModel).
+// is keyed by virtual-model name alone; the protocol lives as the map key of
+// VirtualModel.Endpoints — see config.VirtualModel).
 type Snapshot struct {
 	Cfg    *config.Config
 	Models map[string]map[string]*ModelRoute
@@ -93,10 +94,10 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 }
 
 // BuildSnapshot resolves provider references into concrete endpoints. A
-// virtual model's config.EndpointGroups are grouped by their own declared
-// Protocol into one *ModelRoute per protocol actually present — the same
-// virtual model name can be reachable from both ingress protocols at once
-// (see config.VirtualModel's doc comment), each independently, sharing the
+// virtual model's Endpoints are already bucketed by protocol key; each key
+// with at least one group becomes its own *ModelRoute — the same virtual
+// model name can be reachable from both ingress protocols at once (see
+// config.VirtualModel's doc comment), each independently, sharing the
 // model-level Dims/Sticky/ImageDownscaleMaxPx but never each other's
 // endpoints. Each EndpointGroup's Models list expands into that many
 // independent *core.Endpoint values, in list order.
@@ -124,31 +125,37 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		sticky := m.Sticky == nil || *m.Sticky
 		fallbackOK := m.Fallback == nil || *m.Fallback
 		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
-		for _, eg := range m.Endpoints {
-			eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, eg, cfg.TTL.Sticky.D(), false)
-			if err != nil {
-				return nil, fmt.Errorf("model %q: %w", name, err)
+		for protocol, groups := range m.Endpoints {
+			for _, eg := range groups {
+				eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, eg, protocol, cfg.TTL.Sticky.D(), false)
+				if err != nil {
+					return nil, fmt.Errorf("model %q: %w", name, err)
+				}
+				route, ok := routes[protocol]
+				if !ok {
+					route = &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
+					routes[protocol] = route
+				}
+				route.Endpoints = append(route.Endpoints, eps...)
 			}
-			route, ok := routes[eg.Protocol]
-			if !ok {
-				route = &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
-				routes[eg.Protocol] = route
-			}
-			route.Endpoints = append(route.Endpoints, eps...)
 		}
 		// Only attaches to protocols this model already routes — a fallback
-		// augments, it never opens a new ingress.
+		// augments, it never opens a new ingress. Direct per-protocol lookup
+		// into FallbackEndpoints (no scan): the config is already keyed the
+		// way this loop consumes it.
 		if fallbackOK {
-			for i, fb := range cfg.FallbackEndpoints {
-				route, ok := routes[fb.Protocol]
+			for protocol, groups := range cfg.FallbackEndpoints {
+				route, ok := routes[protocol]
 				if !ok {
 					continue
 				}
-				eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, fb, cfg.TTL.Sticky.D(), true)
-				if err != nil {
-					return nil, fmt.Errorf("model %q: fallback_endpoints[%d]: %w", name, i, err)
+				for i, fb := range groups {
+					eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, fb, protocol, cfg.TTL.Sticky.D(), true)
+					if err != nil {
+						return nil, fmt.Errorf("model %q: fallback_endpoints.%s[#%d]: %w", name, protocol, i+1, err)
+					}
+					route.Endpoints = append(route.Endpoints, eps...)
 				}
-				route.Endpoints = append(route.Endpoints, eps...)
 			}
 		}
 		for protocol, route := range routes {
@@ -164,16 +171,16 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 }
 
 // buildEndpoints expands one EndpointGroup (fromFallback marks whether it's
-// a FallbackEndpoints entry) into its *core.Endpoint values — outer loop
-// over Models, inner loop over eg.Providers. Providers absent from
-// `enabled` (Provider.Disabled = true) are silently skipped — that's the
-// stated intent of the switch ("carries no traffic until re-enabled"),
-// and the check warning is what makes it visible. Each returned Endpoint
-// is already Freeze()'d.
-func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, enabled map[string]bool, m config.VirtualModel, eg config.EndpointGroup, globalStickyTTL time.Duration, fromFallback bool) ([]*core.Endpoint, error) {
-	ad, ok := adapter.Get(eg.Protocol)
+// a FallbackEndpoints entry; protocol is the map key the group lives under)
+// into its *core.Endpoint values — outer loop over Models, inner loop over
+// eg.Providers. Providers absent from `enabled` (Provider.Disabled = true)
+// are silently skipped — that's the stated intent of the switch ("carries no
+// traffic until re-enabled"), and the check warning is what makes it
+// visible. Each returned Endpoint is already Freeze()'d.
+func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, enabled map[string]bool, m config.VirtualModel, eg config.EndpointGroup, protocol string, globalStickyTTL time.Duration, fromFallback bool) ([]*core.Endpoint, error) {
+	ad, ok := adapter.Get(protocol)
 	if !ok { // defensive; config.validate already checked this
-		return nil, fmt.Errorf("unknown adapter type %q (available: %v)", eg.Protocol, adapter.Names())
+		return nil, fmt.Errorf("unknown adapter type %q (available: %v)", protocol, adapter.Names())
 	}
 	stickyTTL := globalStickyTTL
 	if eg.StickyTTL != nil {
@@ -202,13 +209,13 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("unknown provider %q", providerName)
 			}
-			baseURL, ok := p.BaseURL[eg.Protocol]
+			baseURL, ok := p.BaseURL[protocol]
 			if !ok { // defensive; config.validate already checked this
-				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, eg.Protocol)
+				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, protocol)
 			}
 			ep := &core.Endpoint{
 				Provider:            providerName,
-				AdapterType:         eg.Protocol,
+				AdapterType:         protocol,
 				BaseURL:             baseURL,
 				FullURL:             ad.ResolveURL(baseURL),
 				APIKey:              p.APIKey,

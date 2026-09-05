@@ -95,8 +95,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `
 	const shrunk = `
 listen: 127.0.0.1:0
@@ -105,7 +106,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `
 	rt := New(nil)
 	snap := mustSnapshot(t, mustConfig(t, base))

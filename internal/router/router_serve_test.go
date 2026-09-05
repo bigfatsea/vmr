@@ -47,12 +47,13 @@ func mustSnapshot(t *testing.T, cfg *config.Config) *Snapshot {
 	return snap
 }
 
-// endpointFor rebuilds the *core.Endpoint a config's models.<name>.endpoints[0]
-// resolves to, the same way BuildSnapshot would — used by tests that need to
-// probe rt.Health directly (Available/HealthKey) rather than through Serve.
+// endpointFor rebuilds the *core.Endpoint a config's models.<name>.endpoints
+// first entry under protocol resolves to, the same way BuildSnapshot would —
+// used by tests that need to probe rt.Health directly (Available/HealthKey)
+// rather than through Serve.
 func endpointFor(t *testing.T, cfg *config.Config, protocol, virtualModel string) *core.Endpoint {
 	t.Helper()
-	eg := cfg.Models[virtualModel].Endpoints[0]
+	eg := cfg.Models[virtualModel].Endpoints[protocol][0]
 	p, ok := cfg.ProviderByName(eg.Providers[0])
 	if !ok {
 		t.Fatalf("provider %q not found", eg.Providers[0])
@@ -115,9 +116,10 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
-      - {protocol: openai-completions, providers: [p3], models: [m3]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
+        - {providers: [p3], models: [m3]}
 `, u1.srv.URL, u2.srv.URL, u3.srv.URL))
 
 	rt := New(nil)
@@ -146,7 +148,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  real: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  real: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -192,7 +194,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p%d, base_url: {openai-completions: https://example.com/v1}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p%d], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p%d], models: [m]}]}}
 `, i, i))
 		snaps[i] = mustSnapshot(t, cfg)
 	}
@@ -227,8 +229,8 @@ providers:
   - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: k}
   - {name: p2, base_url: {anthropic-messages: https://example.com/v1}, api_key: k}
 models:
-  coding: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
-  claude: {endpoints: [{protocol: anthropic-messages, providers: [p2], models: [m]}]}
+  coding: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
+  claude: {endpoints: {anthropic-messages: [{providers: [p2], models: [m]}]}}
 `)
 	rt := New(nil)
 	rt.Install(mustSnapshot(t, cfg))
@@ -252,7 +254,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -286,7 +288,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://api.example.com/v1}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `)
 
 	rt := New(nil)
@@ -313,7 +315,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: ""}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -560,7 +562,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, redirected.srv.URL))
 
 	rt := New(nil)
@@ -595,8 +597,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -627,8 +630,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -657,8 +661,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -695,8 +700,9 @@ models:
   vm:
     soft_block_failover: true
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -728,8 +734,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -759,8 +766,9 @@ models:
   vm:
     soft_block_failover: true
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -785,8 +793,9 @@ models:
   vm:
     soft_block_failover: true
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1], soft_block_failover: false}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1], soft_block_failover: false}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -833,8 +842,9 @@ models:
   vm:
     soft_block_failover: true
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -887,8 +897,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -925,8 +936,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -965,8 +977,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `, u1.srv.URL, u2.srv.URL))
 
 	rt := New(nil)
@@ -1003,7 +1016,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, u.srv.URL))
 
 	rt := New(nil)
@@ -1055,7 +1069,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
 `, u.srv.URL))
 
 	snap := mustSnapshot(t, cfg)

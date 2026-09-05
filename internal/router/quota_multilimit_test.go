@@ -182,7 +182,7 @@ providers:
       limits: [{metric: requests, every: 1d, amount: 60, models: ["*"]}]
 models:
   m1:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-a, model-b]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [model-a, model-b]}]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
@@ -242,7 +242,7 @@ providers:
       limits: [{metric: requests, every: 1d, amount: 200, models: [premium-model]}]
 models:
   m1:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [premium-model, other-model]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [premium-model, other-model]}]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
@@ -304,7 +304,8 @@ providers:
 models:
   m1:
     endpoints:
-      - {protocol: openai-completions, providers: [google], models: [lite, flash]}
+      openai-completions:
+        - {providers: [google], models: [lite, flash]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
@@ -373,7 +374,8 @@ providers:
 models:
   m1:
     endpoints:
-      - {protocol: openai-completions, providers: [google], models: [lite, flash]}
+      openai-completions:
+        - {providers: [google], models: [lite, flash]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)

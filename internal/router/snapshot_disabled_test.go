@@ -23,13 +23,14 @@ providers:
     quota:
       limits: [{metric: requests, every: 1mo, since: 2026-08-01, amount: 1000}]
 fallback_endpoints:
-  - {protocol: openai-completions, providers: [p_off], models: [fb-model], priority: 90}
+  openai-completions:
+    - {providers: [p_off], models: [fb-model], priority: 90}
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [p_on, p_off]
-        models: [model-a]
+      openai-completions:
+        - providers: [p_on, p_off]
+          models: [model-a]
 `
 
 // TestBuildSnapshot_DisabledAbsentFromRoutes pins the core semantics —
@@ -113,9 +114,9 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [p_off]
-        models: [model-a]
+      openai-completions:
+        - providers: [p_off]
+          models: [model-a]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

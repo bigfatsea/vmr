@@ -82,27 +82,31 @@ func smokeRequestBody(protocol, model string) []byte {
 
 // smokeTargets enumerates every distinct (model, protocol, provider,
 // target) combination in config. It follows the same expansion
-// router.BuildSnapshot does (outer loop over Models, inner loop over each
-// EndpointGroup's Providers × Models) so the smoke set is exactly the set
-// real routing could reach. FallbackEndpoints are intentionally excluded:
-// smoke reports on what a virtual model declares as its own backends, not
-// the shared catch-all tier. Dedups identical combos that would otherwise
-// repeat (the same provider+target listed twice for one model). Deterministic
-// order: model names sorted, then config order within a model.
+// router.BuildSnapshot does (outer loop over Models, then each protocol
+// bucket's EndpointGroups' Providers × Models) so the smoke set is exactly
+// the set real routing could reach. FallbackEndpoints are intentionally
+// excluded: smoke reports on what a virtual model declares as its own
+// backends, not the shared catch-all tier. Dedups identical combos that
+// would otherwise repeat (the same provider+target listed twice for one
+// model). Deterministic order: model names sorted, then protocol keys
+// sorted (bucket order is meaningless in the map-keyed config), then
+// config order within a bucket.
 func smokeTargets(cfg *config.Config) []smokeTarget {
 	var out []smokeTarget
 	seen := map[string]bool{}
 	for _, name := range fmtutil.SortedKeys(cfg.Models) {
 		m := cfg.Models[name]
-		for _, eg := range m.Endpoints {
-			for _, prov := range eg.Providers {
-				for _, target := range eg.Models {
-					key := name + "\x00" + eg.Protocol + "\x00" + prov + "\x00" + target
-					if seen[key] {
-						continue
+		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+			for _, eg := range m.Endpoints[protocol] {
+				for _, prov := range eg.Providers {
+					for _, target := range eg.Models {
+						key := name + "\x00" + protocol + "\x00" + prov + "\x00" + target
+						if seen[key] {
+							continue
+						}
+						seen[key] = true
+						out = append(out, smokeTarget{model: name, protocol: protocol, provider: prov, target: target})
 					}
-					seen[key] = true
-					out = append(out, smokeTarget{model: name, protocol: eg.Protocol, provider: prov, target: target})
 				}
 			}
 		}

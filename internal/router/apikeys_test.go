@@ -29,10 +29,10 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter]
-        models: [model-a]
-        priority: 1
+      openai-completions:
+        - providers: [openrouter]
+          models: [model-a]
+          priority: 1
 `
 
 // TestBuildSnapshot_APIKeys_ExpandsIntoDistinctEndpointsWithOwnCredentials

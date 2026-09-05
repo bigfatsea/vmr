@@ -19,14 +19,14 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter]
-        models: [real-model]
+      openai-completions:
+        - providers: [openrouter]
+          models: [real-model]
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [openrouter]
-    models: [fallback-model]
-    priority: 90
+  openai-completions:
+    - providers: [openrouter]
+      models: [fallback-model]
+      priority: 90
 `
 
 // byName finds an expanded provider by name — expansion order follows Go's
@@ -68,7 +68,7 @@ func TestProviderAPIKeys_RewritesEndpointAndFallbackReferences(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 	wantSet := map[string]bool{"openrouter-team_a": true, "openrouter-team_b": true}
-	for _, got := range [][]string{cfg.Models["m1"].Endpoints[0].Providers, cfg.FallbackEndpoints[0].Providers} {
+	for _, got := range [][]string{cfg.Models["m1"].Endpoints["openai-completions"][0].Providers, cfg.FallbackEndpoints["openai-completions"][0].Providers} {
 		if len(got) != 2 || !wantSet[got[0]] || !wantSet[got[1]] || got[0] == got[1] {
 			t.Errorf("providers = %v, want both expanded names, each once", got)
 		}
@@ -76,7 +76,7 @@ func TestProviderAPIKeys_RewritesEndpointAndFallbackReferences(t *testing.T) {
 	// The rewritten reference order must match cfg.Providers' own order for
 	// these two entries — self-consistent, even though which one comes
 	// first isn't pinned.
-	got := cfg.Models["m1"].Endpoints[0].Providers
+	got := cfg.Models["m1"].Endpoints["openai-completions"][0].Providers
 	a, _ := byName(cfg.Providers, got[0])
 	b, _ := byName(cfg.Providers, got[1])
 	if a.Name != got[0] || b.Name != got[1] {
@@ -166,13 +166,13 @@ func TestProviderAPIKeys_ExpandedNameCollidesWithHandWrittenProvider(t *testing.
 }
 
 func TestProviderAPIKeys_DirectReferenceToExpandedNameStillWorks(t *testing.T) {
-	yaml := strings.Replace(apiKeysYAML, "providers: [openrouter]\n        models: [real-model]",
-		"providers: [openrouter-team_a]\n        models: [real-model]", 1)
+	yaml := strings.Replace(apiKeysYAML, "providers: [openrouter]\n          models: [real-model]",
+		"providers: [openrouter-team_a]\n          models: [real-model]", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("a direct reference to an expanded sub-provider name should still validate: %v", err)
 	}
-	got := cfg.Models["m1"].Endpoints[0].Providers
+	got := cfg.Models["m1"].Endpoints["openai-completions"][0].Providers
 	if len(got) != 1 || got[0] != "openrouter-team_a" {
 		t.Errorf("endpoint providers = %v, want [openrouter-team_a] unchanged", got)
 	}

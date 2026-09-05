@@ -69,7 +69,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `, u.URL)
 	ts := newRouterServer(t, yaml)
 
@@ -114,7 +115,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `, up.URL)
 	ts, al := newAuditedServer(t, yaml)
 

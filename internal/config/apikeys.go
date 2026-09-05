@@ -7,8 +7,8 @@ import "fmt"
 // expandProviderAPIKeys desugars every Provider.APIKeys into that many
 // independent Provider entries — named "<name>-<label>", sharing
 // BaseURL/Proxy/Quota/Pricing by copy — and rewrites every reference to the
-// original name (models[].endpoints[].providers, fallback_endpoints[].
-// providers) into the expanded name list.
+// original name (models[].endpoints' and fallback_endpoints' providers
+// lists) into the expanded name list.
 //
 // Runs in Parse right after YAML decode, before applyDefaults/validate —
 // everything downstream (quota, pricing, health, sticky, audit, vmr check/
@@ -65,9 +65,16 @@ func (c *Config) expandProviderAPIKeys() error {
 
 	for name, m := range c.Models {
 		changed := false
-		for i, eg := range m.Endpoints {
-			if newProviders, ok := rewriteProviderRefs(eg.Providers, rename); ok {
-				m.Endpoints[i].Providers = newProviders
+		for protocol, groups := range m.Endpoints {
+			bucketChanged := false
+			for i, eg := range groups {
+				if newProviders, ok := rewriteProviderRefs(eg.Providers, rename); ok {
+					groups[i].Providers = newProviders
+					bucketChanged = true
+				}
+			}
+			if bucketChanged {
+				m.Endpoints[protocol] = groups
 				changed = true
 			}
 		}
@@ -75,9 +82,16 @@ func (c *Config) expandProviderAPIKeys() error {
 			c.Models[name] = m
 		}
 	}
-	for i, fb := range c.FallbackEndpoints {
-		if newProviders, ok := rewriteProviderRefs(fb.Providers, rename); ok {
-			c.FallbackEndpoints[i].Providers = newProviders
+	for protocol, groups := range c.FallbackEndpoints {
+		bucketChanged := false
+		for i, fb := range groups {
+			if newProviders, ok := rewriteProviderRefs(fb.Providers, rename); ok {
+				groups[i].Providers = newProviders
+				bucketChanged = true
+			}
+		}
+		if bucketChanged {
+			c.FallbackEndpoints[protocol] = groups
 		}
 	}
 	return nil

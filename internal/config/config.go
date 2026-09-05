@@ -61,22 +61,24 @@ const (
 )
 
 // EndpointGroup is one try-order entry under a virtual model: one or more
-// providers, a protocol face of them, and one or more upstream model names,
-// all sharing this entry's routing metadata. Each (provider, model) pair
-// expands into its own independent *core.Endpoint — outer loop over Models,
-// inner loop over Providers, so every provider is tried for the preferred
-// model before falling through to the next.
+// providers and one or more upstream model names, all sharing this entry's
+// routing metadata. Each (provider, model) pair expands into its own
+// independent *core.Endpoint — outer loop over Models, inner loop over
+// Providers, so every provider is tried for the preferred model before
+// falling through to the next.
 //
-// Providers resolves by name against Config.Providers. Protocol picks which
-// of each named provider's declared BaseURL entries applies — a provider
-// with no base_url for Protocol is a validation error, not a silent
-// mismatch.
+// An EndpointGroup carries no protocol of its own: it always lives under a
+// protocol key of VirtualModel.Endpoints or Config.FallbackEndpoints — the
+// same protocol-keyed shape as Provider.BaseURL, so both halves of the
+// config read the same way (and no protocol: value can ever disagree with
+// the bucket it sits in). The key picks which of each named provider's
+// declared BaseURL entries applies — a provider with no base_url for the
+// key's protocol is a validation error, not a silent mismatch.
 //
 // Priority defaults to 0; equal-priority entries keep config-file order
 // (Sort is stable). Config.FallbackEndpoints entries are the exception:
 // Priority there must be set and positive.
 type EndpointGroup struct {
-	Protocol  string   `yaml:"protocol"`
 	Providers []string `yaml:"providers"`
 	Models    []string `yaml:"models"`
 	Priority  int      `yaml:"priority"`
@@ -133,13 +135,20 @@ type EndpointGroup struct {
 //
 // A VirtualModel is reachable from whichever ingress protocol(s) its own
 // Endpoints declare — the same virtual model name can mix an openai-completions
-// entry and an anthropic-messages entry in one place, each independently
+// bucket and an anthropic-messages bucket in one place, each independently
 // reachable only from its own protocol's ingress (POST /v1/chat/completions
 // vs POST /v1/messages); see BuildSnapshot.
 type VirtualModel struct {
-	Strategy            []string        `yaml:"strategy"`
-	Endpoints           []EndpointGroup `yaml:"endpoints"`
-	ImageDownscaleMaxPx *int            `yaml:"image_downscale"`
+	Strategy []string `yaml:"strategy"`
+	// Endpoints is keyed by ingress protocol (same key space as
+	// Provider.BaseURL, validated against the adapter registry), each holding
+	// that protocol's try-order groups in config order. Keyed by protocol —
+	// not a flat list with a per-entry protocol field — because a request
+	// only ever consults the bucket of its own ingress (BuildSnapshot splits
+	// the buckets into independent routes), so bucket order is irrelevant
+	// while the order within a bucket is the try-order.
+	Endpoints           map[string][]EndpointGroup `yaml:"endpoints"`
+	ImageDownscaleMaxPx *int                       `yaml:"image_downscale"`
 
 	// Capabilities and MaxContextTokens are the *base* condition-routing
 	// declaration shared by every endpoint under this virtual model —
@@ -316,11 +325,11 @@ type TTL struct {
 
 // Providers is a flat list (protocol is per-provider data, not a grouping
 // key — see Provider.BaseURL); Models is keyed by virtual-model name alone,
-// with protocol carried per EndpointGroup instead (see VirtualModel). Every
-// protocol value appearing anywhere (Provider.BaseURL's keys, EndpointGroup.
-// Protocol) is validated against the adapter registry, so adding a new
-// ingress protocol is still just "register an adapter" — no schema change
-// here.
+// with protocol as the Endpoints/FallbackEndpoints map key instead (see
+// VirtualModel). Every protocol key appearing anywhere (Provider.BaseURL,
+// VirtualModel.Endpoints, FallbackEndpoints) is validated against the
+// adapter registry, so adding a new ingress protocol is still just
+// "register an adapter" — no schema change here.
 type Config struct {
 	Listen string `yaml:"listen"`
 	// APIKeys is the list of credentials vmr itself accepts (empty = auth
@@ -380,14 +389,16 @@ type Config struct {
 	Models    map[string]VirtualModel `yaml:"models"`
 	// FallbackEndpoints is appended to the tail of every virtual model's
 	// try-order — declare a shared catch-all tier once instead of pasting
-	// it onto every VirtualModel.Endpoints list. router.BuildSnapshot only
-	// attaches an entry to a model that already has an entry point on the
-	// entry's Protocol (augments an existing ingress, never opens a new
-	// one), unless VirtualModel.Fallback == false. Priority here is
-	// mandatory and must be > 0, unlike an ordinary EndpointGroup: an unset
-	// priority defaults to 0 and would silently compete with a model's own
-	// real endpoints for the same tier.
-	FallbackEndpoints []EndpointGroup `yaml:"fallback_endpoints"`
+	// it onto every VirtualModel.Endpoints bucket. Keyed by protocol like
+	// VirtualModel.Endpoints (same EndpointGroup shape; no compatible-layer
+	// between the two forms). router.BuildSnapshot only attaches a bucket's
+	// entries to a model that already has an entry point on that protocol
+	// (augments an existing ingress, never opens a new one), unless
+	// VirtualModel.Fallback == false. Priority here is mandatory and must
+	// be > 0, unlike an ordinary EndpointGroup: an unset priority defaults
+	// to 0 and would silently compete with a model's own real endpoints for
+	// the same tier.
+	FallbackEndpoints map[string][]EndpointGroup `yaml:"fallback_endpoints"`
 	// Pricing is the global pricing block — currency, exchange rate,
 	// and an optional user supplement/standard-table override. See
 	// PricingConfig's doc comment (pricing.go).

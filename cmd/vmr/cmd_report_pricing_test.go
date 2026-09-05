@@ -26,9 +26,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      anthropic-messages:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
@@ -64,9 +64,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      anthropic-messages:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
 	extraRates := map[string]float64{"JPY": 155}
@@ -106,9 +106,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      anthropic-messages:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
@@ -139,9 +139,9 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [anthropic]
-        models: [claude-3-7-sonnet-20250219]
+      anthropic-messages:
+        - providers: [anthropic]
+          models: [claude-3-7-sonnet-20250219]
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)

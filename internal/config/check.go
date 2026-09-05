@@ -81,6 +81,7 @@ func (c *Config) Check() []Issue {
 	issues = append(issues, c.checkListenExposure()...)
 	issues = append(issues, c.checkProviders()...)
 	issues = append(issues, c.checkModels()...)
+	issues = append(issues, c.checkFallbackReachability()...)
 	return issues
 }
 
@@ -232,15 +233,19 @@ func (c *Config) checkDisabledReferences() []Issue {
 			Message: fmt.Sprintf("provider %q is disabled but still referenced by %s; it carries no traffic until re-enabled", pn, where)})
 	}
 	for _, name := range fmtutil.SortedKeys(c.Models) {
-		for _, eg := range c.Models[name].Endpoints {
-			for _, pn := range eg.Providers {
-				sayRef(pn, fmt.Sprintf("model %q endpoint %s", name, eg.Protocol))
+		for protocol, groups := range c.Models[name].Endpoints {
+			for _, eg := range groups {
+				for _, pn := range eg.Providers {
+					sayRef(pn, fmt.Sprintf("model %q endpoints.%s", name, protocol))
+				}
 			}
 		}
 	}
-	for i, fb := range c.FallbackEndpoints {
-		for _, pn := range fb.Providers {
-			sayRef(pn, fmt.Sprintf("fallback_endpoints[%d]", i))
+	for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
+		for _, fb := range c.FallbackEndpoints[protocol] {
+			for _, pn := range fb.Providers {
+				sayRef(pn, fmt.Sprintf("fallback_endpoints.%s", protocol))
+			}
 		}
 	}
 	return issues
@@ -260,37 +265,67 @@ func (c *Config) checkModels() []Issue {
 		m := c.Models[name]
 		seen := map[string]bool{}
 		protocols := map[string]bool{}
-		for _, eg := range m.Endpoints {
-			protocols[eg.Protocol] = true
-			for _, pn := range eg.Providers {
-				for _, mn := range eg.Models {
-					key := eg.Protocol + "/" + pn + "/" + mn
-					if seen[key] {
-						issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
-							"model %q: endpoint %s declared more than once", name, key)})
-						continue
-					}
-					seen[key] = true
-				}
-			}
-		}
-		if m.Fallback == nil || *m.Fallback {
-			for _, fb := range c.FallbackEndpoints {
-				if !protocols[fb.Protocol] {
-					continue
-				}
-				for _, pn := range fb.Providers {
-					for _, mn := range fb.Models {
-						key := fb.Protocol + "/" + pn + "/" + mn
+		for protocol, groups := range m.Endpoints {
+			protocols[protocol] = true
+			for _, eg := range groups {
+				for _, pn := range eg.Providers {
+					for _, mn := range eg.Models {
+						key := protocol + "/" + pn + "/" + mn
 						if seen[key] {
 							issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
-								"model %q: fallback endpoint %s duplicates an endpoint already declared under this model", name, key)})
+								"model %q: endpoint %s declared more than once", name, key)})
 							continue
 						}
 						seen[key] = true
 					}
 				}
 			}
+		}
+		if m.Fallback == nil || *m.Fallback {
+			for protocol, groups := range c.FallbackEndpoints {
+				if !protocols[protocol] {
+					continue
+				}
+				for _, fb := range groups {
+					for _, pn := range fb.Providers {
+						for _, mn := range fb.Models {
+							key := protocol + "/" + pn + "/" + mn
+							if seen[key] {
+								issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
+									"model %q: fallback endpoint %s duplicates an endpoint already declared under this model", name, key)})
+								continue
+							}
+							seen[key] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return issues
+}
+
+// checkFallbackReachability warns when a fallback_endpoints protocol key
+// matches no virtual model's endpoints: BuildSnapshot only augments an
+// existing ingress and never opens a new one, so such a bucket silently
+// carries no traffic forever. That's a legal evolution path (add a matching
+// endpoint and it comes alive), hence a warning, not an error — but it must
+// be spoken, because "I configured a fallback and it never fires" is near-
+// impossible to self-diagnose otherwise. One issue per unreachable
+// protocol, not per entry. Only key presence is checked — a model that
+// deliberately opted out via fallback: false is intent, not breakage.
+func (c *Config) checkFallbackReachability() []Issue {
+	reachable := map[string]bool{}
+	for _, m := range c.Models {
+		for protocol := range m.Endpoints {
+			reachable[protocol] = true
+		}
+	}
+	var issues []Issue
+	for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
+		if !reachable[protocol] {
+			issues = append(issues, Issue{Field: "fallback", Severity: SeverityWarning, Message: fmt.Sprintf(
+				"fallback protocol %q matches no virtual model — it will never be used", protocol)})
 		}
 	}
 	return issues

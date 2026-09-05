@@ -26,12 +26,11 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [model-a, model-b]
-      - protocol: openai-completions
-        providers: [p2]
-        models: [model-c]
+      openai-completions:
+        - providers: [p1]
+          models: [model-a, model-b]
+        - providers: [p2]
+          models: [model-c]
 `
 
 func TestBuildSnapshot_QuotaSpecAttachedAndSharedPerProvider(t *testing.T) {
@@ -85,7 +84,7 @@ providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   m1:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

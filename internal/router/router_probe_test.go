@@ -83,7 +83,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `)
 	// Override the endpoint's adapter type to the panic adapter.
 	snap := mustSnapshot(t, cfg)
@@ -127,7 +128,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, providers: [p1], models: [model-one]}
+      openai-responses:
+        - {providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)
@@ -162,7 +164,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)
@@ -200,7 +203,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -254,7 +258,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `)
 	snap := mustSnapshot(t, cfg)
 	ctx, cancel := context.WithCancel(context.Background())

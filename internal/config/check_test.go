@@ -25,7 +25,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("clean config: Check() = %v, want empty", issues)
@@ -41,7 +41,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Provider != "p1" || issues[0].Field != "api_key" {
@@ -61,7 +61,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://localhost:11434/v1"}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Provider != "p1" || issues[0].Field != "api_key" {
@@ -85,7 +85,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://192.168.1.50:8000/v1"}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Severity != SeverityWarning {
@@ -102,7 +102,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://api.example.com}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Severity != SeverityError {
@@ -120,7 +120,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: "http://localhost:11434/v1", anthropic-messages: https://api.example.com}, api_key: ""}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Severity != SeverityError {
@@ -139,7 +139,7 @@ timeouts: {probe: 130s, response_header: 120s}
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Field != "probe_timeout" {
@@ -165,7 +165,7 @@ listen: 0.0.0.0:8800
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Field != "listen" {
@@ -190,7 +190,7 @@ api_keys: [sixteen-plus-chars]
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("non-loopback listen with api_keys configured: Check() = %v, want empty", issues)
@@ -207,7 +207,7 @@ listen: 127.0.0.1:8800
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
-  m: {endpoints: [{protocol: openai-completions, providers: [p1], models: [x]}]}
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("loopback listen with no api_keys: Check() = %v, want empty", issues)
@@ -225,11 +225,67 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [x, x]}
+      openai-completions:
+        - {providers: [p1], models: [x, x]}
 `)
 	issues := cfg.Check()
 	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
 		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions/p1/x", issues)
+	}
+}
+
+// TestCheckFlagsUnreachableFallback covers the D.2 warning: a
+// fallback_endpoints protocol key that matches no virtual model's endpoints
+// can never fire (BuildSnapshot only augments an existing ingress) — that
+// must surface as a SeverityWarning, one issue per unreachable protocol,
+// never blocking a load.
+func TestCheckFlagsUnreachableFallback(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com, openai-responses: https://example.com, anthropic-messages: https://example.com}, api_key: k1}
+fallback_endpoints:
+  openai-responses:
+    - {providers: [p1], models: [fb1], priority: 90}
+  anthropic-messages:
+    - {providers: [p1], models: [fb2], priority: 90}
+models:
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
+`)
+	issues := cfg.Check()
+	if len(issues) != 2 {
+		t.Fatalf("Check() = %+v, want exactly the two unreachable-fallback warnings", issues)
+	}
+	for _, is := range issues {
+		if is.Severity != SeverityWarning || is.Field != "fallback" || !strings.Contains(is.Message, "it will never be used") {
+			t.Errorf("issue = %+v, want a fallback SeverityWarning naming the dead protocol", is)
+		}
+	}
+	if HasErrors(issues) {
+		t.Errorf("HasErrors(%+v) = true, want false — unreachable fallback must never gate a load", issues)
+	}
+}
+
+// TestCheckNoUnreachableFallbackWarningWhenKeyMatches pins the positive
+// half: a fallback protocol key that at least one virtual model declares is
+// reachable — no issue, even if another model opts out via fallback: false
+// (opt-out is intent, not breakage).
+func TestCheckNoUnreachableFallbackWarningWhenKeyMatches(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
+fallback_endpoints:
+  openai-completions:
+    - {providers: [p1], models: [fb], priority: 90}
+models:
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
+  opted-out:
+    fallback: false
+    endpoints: {openai-completions: [{providers: [p1], models: [y]}]}
+`)
+	if issues := cfg.Check(); len(issues) != 0 {
+		t.Errorf("Check() = %+v, want empty — the fallback key matches a declared endpoint", issues)
 	}
 }
 

@@ -392,8 +392,10 @@ providers:
 models:
   shared:
     endpoints:
-      - {protocol: openai-completions, providers: [oai], models: [model-one]}
-      - {protocol: anthropic-messages, providers: [anth], models: [model-two]}
+      openai-completions:
+        - {providers: [oai], models: [model-one]}
+      anthropic-messages:
+        - {providers: [anth], models: [model-two]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 

@@ -105,15 +105,14 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [model-one]
-        priority: 1
-      - protocol: openai-completions
-        providers: [p2]
-        models: [model-two]
-        priority: 2
-        sticky_ttl: 200ms
+      openai-completions:
+        - providers: [p1]
+          models: [model-one]
+          priority: 1
+        - providers: [p2]
+          models: [model-two]
+          priority: 2
+          sticky_ttl: 200ms
 `, u1.srv.URL, u2.srv.URL))
 
 	chat(t, ts, simpleReq, nil) // establishes p2 stickiness

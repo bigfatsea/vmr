@@ -20,10 +20,10 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
-        priority: 1
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+          priority: 1
 `, baseURL))
 }
 

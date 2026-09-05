@@ -275,15 +275,17 @@ func printProviders(w io.Writer, cfg *config.Config) {
 
 // printFallbackEndpoints previews the raw Config.FallbackEndpoints entries
 // (their per-model expansion shows up as `fallback` tags under === Models
-// === below).
+// === below). Keyed by protocol; entries within a protocol bucket keep
+// config order.
 func printFallbackEndpoints(w io.Writer, cfg *config.Config) {
 	fmt.Fprintln(w, "=== Fallback Endpoints ===")
-	for i, fb := range cfg.FallbackEndpoints {
-		fmt.Fprintf(w, "%d:\n", i+1)
-		fmt.Fprintln(w, checkLine(2, "protocol", fb.Protocol))
-		fmt.Fprintln(w, checkLine(2, "providers", strings.Join(fb.Providers, ",")))
-		fmt.Fprintln(w, checkLine(2, "models", strings.Join(fb.Models, ",")))
-		fmt.Fprintln(w, checkLine(2, "priority", fmt.Sprintf("%d", fb.Priority)))
+	for _, protocol := range fmtutil.SortedKeys(cfg.FallbackEndpoints) {
+		for i, fb := range cfg.FallbackEndpoints[protocol] {
+			fmt.Fprintf(w, "%s[#%d]:\n", protocol, i+1)
+			fmt.Fprintln(w, checkLine(2, "providers", strings.Join(fb.Providers, ",")))
+			fmt.Fprintln(w, checkLine(2, "models", strings.Join(fb.Models, ",")))
+			fmt.Fprintln(w, checkLine(2, "priority", fmt.Sprintf("%d", fb.Priority)))
+		}
 	}
 }
 

@@ -288,9 +288,10 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [plan-a], models: [ma]}
-      - {protocol: openai-completions, providers: [plan-b], models: [mb]}
-      - {protocol: openai-completions, providers: [plan-c], models: [mc]}
+      openai-completions:
+        - {providers: [plan-a], models: [ma]}
+        - {providers: [plan-b], models: [mb]}
+        - {providers: [plan-c], models: [mc]}
 `
 }
 
@@ -316,8 +317,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
-      - {protocol: openai-completions, providers: [p2], models: [m2]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt := New(nil)

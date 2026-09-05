@@ -14,11 +14,12 @@
 # models is keyed by virtual-model name only. A virtual model's own top-level
 # `capabilities`/`max_context_tokens` are the *base* shared by every endpoint
 # under it — set once instead of repeating the same declaration on every
-# try-order candidate (see the "agent" example below). Each entry under a
-# model's `endpoints:` list is one try-order candidate: it names its own
-# protocol (which ingress can reach it — POST /v1/chat/completions for
-# "openai-completions", POST /v1/messages for "anthropic-messages", POST /v1/responses for
-# "openai-responses"), one or more providers (resolved by name against the
+# try-order candidate (see the "agent" example below). A model's
+# `endpoints:` is itself keyed by protocol (the same key set as base_url
+# above — POST /v1/chat/completions for "openai-completions", POST /v1/messages
+# for "anthropic-messages", POST /v1/responses for "openai-responses"), and
+# each entry under a protocol key is one try-order candidate: one or more
+# providers (resolved by name against the
 # providers list above — see providers[] below), and a `models:` list of
 # upstream model names that all share this entry's capabilities/
 # max_context_tokens/role_map/sticky_ttl/priority — each (provider, model)
@@ -28,13 +29,12 @@
 # the model's base (union — declare only what this specific entry adds
 # beyond the shared floor); its own `max_context_tokens` *overrides* the
 # base instead when set (a single number can't be unioned). A virtual model
-# name can mix protocols: give it one endpoint-group entry with protocol:
-# openai and another with protocol: anthropic-messages (or openai-responses), and it
+# name can mix protocols: give it one bucket under endpoints: openai-completions
+# and another under endpoints: anthropic-messages (or openai-responses), and it
 # becomes reachable — with potentially different upstream candidates — from
 # every one of those ingress protocols at once (see the "agent" example
-# below). Mixing protocols within one endpoint-group entry has no syntax to
-# express, rather than being a config error to catch: each entry is exactly
-# one protocol.
+# below). A try-order entry can't span two protocols — it lives under
+# exactly one protocol key.
 #
 # openai-responses is newer and narrower than the other two: as of this
 # writing only DeepSeek and OpenRouter document a Responses-compatible
@@ -51,18 +51,20 @@
 # list exists for: several accounts on the same vendor, so the try-order
 # list doesn't need one line per account per model.
 #
-# `fallback_endpoints:` (top-level, alongside `providers`/`models`) is a
-# list of endpoint-group entries appended to the tail of every virtual
-# model's own try-order — the same shape as a models.<name>.endpoints[]
-# entry, but declared once instead of pasted onto every model that wants
+# `fallback_endpoints:` (top-level, alongside `providers`/`models`) is
+# protocol-keyed, exactly like a model's `endpoints:` — its entries are
+# appended to the tail of every virtual model's try-order for that protocol.
+# The same shape as a models.<name>.endpoints bucket,
+# but declared once instead of pasted onto every model that wants
 # the same low-priority catch-all tier. A fallback only attaches to a
 # virtual model that already has its own entry point on the fallback's
-# `protocol` (it never opens a new ingress a model didn't already have),
+# protocol key (it never opens a new ingress a model didn't already have),
 # and a model can opt out entirely with `fallback: false` (see the "cheap"
 # example below). Unlike an ordinary endpoint-group, a fallback's
 # `priority` is required and must be > 0 — omitted/0 would silently
 # compete at the same tier as a model's own real endpoints instead of
-# trailing behind them.
+# trailing behind them. `vmr check` warns when a fallback protocol key
+# matches no virtual model at all — such a bucket could never fire.
 
 listen: 127.0.0.1:8800
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
@@ -177,10 +179,10 @@ listen: 127.0.0.1:8800
 # candidate so this example doesn't also trip the "fallback duplicates an
 # endpoint already declared under this model" check `vmr check` runs.
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [openrouter2]
-    models: [z-ai/glm-5.2]
-    priority: 90              # required and must be > 0 on a fallback entry — see the header comment above
+  openai-completions:
+    - providers: [openrouter2]
+      models: [z-ai/glm-5.2]
+      priority: 90              # required and must be > 0 on a fallback entry — see the header comment above
 
 providers:
   # base_url must include the provider's own full API version (/v1, /v3,
@@ -193,9 +195,9 @@ providers:
   #
   # base_url declares at least one protocol, up to both — MiniMax speaks
   # both surfaces on the same account, so one entry covers it instead of
-  # two (the old format's two separately protocol-keyed minimax declarations
-  # duplication). A models.<name> endpoint-group's own `protocol:` picks
-  # which of these a given try-order entry actually uses.
+  # two separately protocol-keyed declarations. A models.<name>
+  # endpoints key picks which of these a given try-order bucket actually
+  # uses.
   #
   # Never embed credentials in base_url — no user:pass@host userinfo, no
   # ?api_key=…/?token=… query parameter: base_url is recorded verbatim in
@@ -382,7 +384,8 @@ providers:
   #     backup: ${OPENROUTER_KEY_BACKUP}
 
   # A provider whose API doesn't accept all OpenAI roles can have it rewritten
-  # per endpoint-group (models.<name>.endpoints[].role_map below) — a plain
+  # per endpoint-group (the role_map entries under models.<name>.endpoints
+  # below) — a plain
   # old->new mapping applied to "role" values inside the top-level "messages"
   # array before the body is sent upstream. The canonical use case: some
   # providers (e.g. DashScope/Qianwen) reject the "developer" role OpenAI
@@ -413,12 +416,11 @@ models:
     # per-endpoint override forms. Full reference: docs/UserGuide.md
     # "Condition-based routing" / "Sticky Model".
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter]
-        models: [z-ai/glm-5.2]
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v4-pro]
+      openai-completions:
+        - providers: [openrouter]
+          models: [z-ai/glm-5.2]
+        - providers: [deepseek]
+          models: [deepseek-v4-pro]
 
   cheap:
     # image_downscale: 0        # per-model override example: force this model
@@ -438,26 +440,24 @@ models:
                                   # Model-level here is the default for every endpoint below;
                                   # an endpoint can still override with its own value.
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        # capabilities: [image]        # this model has no base capabilities above, so this
-        #                              # endpoint's effective set is exactly [image] alone
-        # max_context_tokens: 1000000  # declare once you want vmr to skip this endpoint
-        #                              # for requests it can't actually serve
-        # soft_block_failover: false   # this one endpoint opts out even if the model turned it on
-      - protocol: openai-completions
-        providers: [openrouter]
-        # A models: list with more than one name expands into that many
-        # independent, individually health-tracked endpoints sharing this
-        # entry's provider/protocol/capabilities/priority — tried in list
-        # order (each still subject to its own failover/health state).
-        models: [tencent/hy3-preview, qwen/qwen3-max]
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v4-flash]
-        # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
-                            # override the global sticky_ttl for just this endpoint
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          # capabilities: [image]        # this model has no base capabilities above, so this
+          #                              # endpoint's effective set is exactly [image] alone
+          # max_context_tokens: 1000000  # declare once you want vmr to skip this endpoint
+          #                              # for requests it can't actually serve
+          # soft_block_failover: false   # this one endpoint opts out even if the model turned it on
+        - providers: [openrouter]
+          # A models: list with more than one name expands into that many
+          # independent, individually health-tracked endpoints sharing this
+          # entry's provider/protocol/capabilities/priority — tried in list
+          # order (each still subject to its own failover/health state).
+          models: [tencent/hy3-preview, qwen/qwen3-max]
+        - providers: [deepseek]
+          models: [deepseek-v4-flash]
+          # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
+                              # override the global sticky_ttl for just this endpoint
 
   # "agent" mixes all three ingress protocols under one virtual model name:
   # the openai-completions entry is reachable only from POST /v1/chat/completions,
@@ -478,33 +478,31 @@ models:
     capabilities: [text, tools]
     max_context_tokens: 256000
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter, openrouter2]   # multi-account merge: outer loop over models,
-        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # inner over providers — openrouter then
-        #                                                       # openrouter2 for gemini-3.6-flash-high,
-        #                                                       # then the same pair for gemini-3.1-pro-high
-      - protocol: anthropic-messages
-        providers: [minimax]
-        models: [MiniMax-M3]
-        max_context_tokens: 512000
-        capabilities: [image, audio, video, thinking]
-      - protocol: openai-responses
-        providers: [openrouter]
-        models: [gemini-3.6-flash-high]
+      openai-completions:
+        - providers: [openrouter, openrouter2]   # multi-account merge: outer loop over models,
+          models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # inner over providers — openrouter then
+          #                                                       # openrouter2 for gemini-3.6-flash-high,
+          #                                                       # then the same pair for gemini-3.1-pro-high
+      anthropic-messages:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          max_context_tokens: 512000
+          capabilities: [image, audio, video, thinking]
+      openai-responses:
+        - providers: [openrouter]
+          models: [gemini-3.6-flash-high]
 
   # Anthropic-only virtual model: reachable only via POST /v1/messages.
-  # "claude" needs no openai-completions entry — nothing on the openai-completions side
+  # "claude" needs no openai-completions bucket — nothing on the openai-completions side
   # references it, and a request for it over POST /v1/chat/completions
   # simply finds no route, since that ingress only ever looks at
-  # protocol: openai-completions entries.
+  # openai-completions endpoints.
   claude:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [minimax]
-        models: [MiniMax-M3]
-      - protocol: anthropic-messages
-        providers: [deepseek]
-        models: [deepseek-v4-pro]
-      - protocol: anthropic-messages
-        providers: [openrouter]
-        models: [minimax/minimax-m3] # any OpenRouter model, spoken over anthropic-messages protocol
+      anthropic-messages:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+        - providers: [deepseek]
+          models: [deepseek-v4-pro]
+        - providers: [openrouter]
+          models: [minimax/minimax-m3] # any OpenRouter model, spoken over anthropic-messages protocol

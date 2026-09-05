@@ -28,8 +28,9 @@ models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1], priority: 1}
-      - {protocol: openai-completions, providers: [p2], models: [m2], priority: 2}
+      openai-completions:
+        - {providers: [p1], models: [m1], priority: 1}
+        - {providers: [p2], models: [m2], priority: 2}
 `
 }
 

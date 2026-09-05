@@ -144,9 +144,17 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
 			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)
 		}
-		for i, eg := range m.Endpoints {
-			if err := c.validateEndpointGroup(fmt.Sprintf("model %q endpoint group #%d", name, i+1), eg, providerModels); err != nil {
-				return err
+		for protocol, groups := range m.Endpoints {
+			// Protocol lives at the map key, so one check per bucket covers
+			// every group under it — the key can't drift from the entries.
+			if _, ok := adapter.Get(protocol); !ok {
+				return fmt.Errorf("model %q: endpoints: unknown protocol %q (available: %v)%s", name, protocol, adapter.Names(), unknownProtocolHint(protocol))
+			}
+			for i, eg := range groups {
+				ctx := fmt.Sprintf("model %q endpoints.%s[#%d]", name, protocol, i+1)
+				if err := c.validateEndpointGroup(ctx, protocol, eg, providerModels); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -156,25 +164,28 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 // validateFallbackEndpoints validates fallback endpoint definitions and ensures
 // priority is explicitly set and positive.
 func (c *Config) validateFallbackEndpoints(providerModels map[string]map[string]bool) error {
-	for i, fb := range c.FallbackEndpoints {
-		if fb.Priority <= 0 {
-			return fmt.Errorf("fallback_endpoints[%d]: priority must be set and > 0 (an unset priority defaults to 0, which could silently outrank a model's own endpoints)", i)
+	for protocol, groups := range c.FallbackEndpoints {
+		if _, ok := adapter.Get(protocol); !ok {
+			return fmt.Errorf("fallback_endpoints: unknown protocol %q (available: %v)%s", protocol, adapter.Names(), unknownProtocolHint(protocol))
 		}
-		if err := c.validateEndpointGroup(fmt.Sprintf("fallback_endpoints[%d]", i), fb, providerModels); err != nil {
-			return err
+		for i, fb := range groups {
+			if fb.Priority <= 0 {
+				return fmt.Errorf("fallback_endpoints.%s[#%d]: priority must be set and > 0 (an unset priority defaults to 0, which could silently outrank a model's own endpoints)", protocol, i+1)
+			}
+			ctx := fmt.Sprintf("fallback_endpoints.%s[#%d]", protocol, i+1)
+			if err := c.validateEndpointGroup(ctx, protocol, fb, providerModels); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// validateEndpointGroup validates one EndpointGroup (ctx names its context
-// for error messages) and records its (provider, model) pairs into
-// providerModels. Shared by both models.<name>.endpoints[] and
-// FallbackEndpoints so the two can't drift on what "valid" means.
-func (c *Config) validateEndpointGroup(ctx string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
-	if _, ok := adapter.Get(eg.Protocol); !ok {
-		return fmt.Errorf("%s: unknown protocol %q (available: %v)%s", ctx, eg.Protocol, adapter.Names(), unknownProtocolHint(eg.Protocol))
-	}
+// validateEndpointGroup validates one EndpointGroup under protocol (ctx
+// names its context for error messages) and records its (provider, model)
+// pairs into providerModels. Shared by both models.<name>.endpoints and
+// FallbackEndpoints buckets so the two can't drift on what "valid" means.
+func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
 	if len(eg.Providers) == 0 {
 		return fmt.Errorf("%s: providers: at least one required", ctx)
 	}
@@ -183,8 +194,8 @@ func (c *Config) validateEndpointGroup(ctx string, eg EndpointGroup, providerMod
 		if !ok {
 			return fmt.Errorf("%s: unknown provider %q", ctx, pn)
 		}
-		if _, ok := p.BaseURL[eg.Protocol]; !ok {
-			return fmt.Errorf("%s: provider %q has no base_url for protocol %q", ctx, pn, eg.Protocol)
+		if _, ok := p.BaseURL[protocol]; !ok {
+			return fmt.Errorf("%s: provider %q has no base_url for protocol %q", ctx, pn, protocol)
 		}
 	}
 	if len(eg.Models) == 0 {

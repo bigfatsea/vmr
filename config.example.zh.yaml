@@ -12,21 +12,21 @@
 #
 # models 只按虚拟模型名分 key。一个虚拟模型自己顶层的 `capabilities`/
 # `max_context_tokens` 是它下面每个候选端点共享的*基线*——只写一次，不用在每个
-# try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型
-# `endpoints:` 列表下的每一条，是一个 try-order 候选：它自己声明协议（哪个入口
-# 能打到它——POST /v1/chat/completions 对应 "openai-completions"，POST /v1/messages 对应
-# "anthropic-messages"，POST /v1/responses 对应 "openai-responses"）、一个或多个 provider
-# （按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
+# try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型的
+# `endpoints:` 本身按协议作 key（和上面 base_url 的 key 同一套——POST /v1/chat/completions
+# 对应 "openai-completions"，POST /v1/messages 对应 "anthropic-messages"，POST /v1/responses
+# 对应 "openai-responses"），每个协议 key 下的一条记录是一个 try-order 候选：一个或多个
+# provider（按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
 # `models:` 上游模型名列表，这些模型名共享这一条的 capabilities/
 # max_context_tokens/role_map/sticky_ttl/priority——每个 (provider, model) 对
 # 都会展开成各自独立、单独做健康跟踪的端点，外层按 models 循环、内层按
 # providers 循环。一条记录自己的 `capabilities` 是对模型基线的*叠加*（并集——只需要声明这条相
 # 对共享底线额外多出的部分）；它自己的 `max_context_tokens` 一旦设置就是*覆盖*
-# 基线（一个数字没法做并集）。同一个虚拟模型名可以混合协议：给它一条
-# protocol: openai-completions 的端点组记录，再给一条 protocol: anthropic-messages（或
-# openai-responses）的记录，它就能同时从这几种入口协议访问到——各自可能有不同
-# 的上游候选（见下面的 "agent" 示例）。在同一条端点组记录里混用多个协议没有对
-# 应的写法，不是一个需要去校验拦截的配置错误：每一条记录本来就只对应一种协议。
+# 基线（一个数字没法做并集）。同一个虚拟模型名可以混合协议：在 endpoints: 下同时给
+# openai-completions 和 anthropic-messages（或 openai-responses）两个协议桶，它就能同时从
+# 这几种入口协议访问到——各自可能有不同
+# 的上游候选（见下面的 "agent" 示例）。一条 try-order 记录没法横跨两个协议——
+# 它只存在于一个协议 key 之下。
 #
 # openai-responses 比另外两个更新、覆盖面也更窄：截至撰写本文时只有 DeepSeek
 # 和 OpenRouter 明确文档化了兼容 Responses 的端点（MiniMax 暂时还没有），而且
@@ -40,14 +40,15 @@
 # 是为了同一个厂商下有好几个账号的场景，这样 try-order 列表就不用给每个账号、
 # 每个模型各写一行。
 #
-# `fallback_endpoints:`（顶层字段，和 `providers`/`models` 平级）是一份端点组
-# 记录列表，会被追加到每个虚拟模型自己 try-order 的末尾——形状和一条
-# models.<name>.endpoints[] 记录完全一样，只是只需要声明一次，不用往每个都想
+# `fallback_endpoints:`（顶层字段，和 `providers`/`models` 平级）和模型的
+# `endpoints:` 一样按协议作 key——它的记录会被追加到每个虚拟模型对应协议 try-order
+# 的末尾。形状和 models.<name>.endpoints 的协议桶完全一样，只是只需要声明一次，不用往每个都想
 # 要同一档低优先级兜底的模型上都粘贴一遍。一条 fallback 只会挂到那些本来就已经
-# 有对应 `protocol` 入口的虚拟模型上（它从不会给一个模型凭空开一个新的入口协
+# 有对应协议入口的虚拟模型上（它从不会给一个模型凭空开一个新的入口协
 # 议），一个模型也可以用 `fallback: false` 完全不参与（见下面 "cheap" 示例）。
 # 和普通端点组不同，fallback 的 `priority` 是必填项且必须 > 0——省略/写 0 会
 # 让它悄悄地和模型自己的真实端点抢占同一档位，而不是老老实实排在它们后面。
+# `vmr check` 会在某个 fallback 协议 key 匹配不到任何虚拟模型时告警——这样的桶永远不可能生效。
 
 listen: 127.0.0.1:8800
 # api_keys:                      # 可选：给路由器加一层保护（Bearer 或 x-api-key）。每个 key 的
@@ -155,10 +156,10 @@ listen: 127.0.0.1:8800
 # providers[] 里的第二个账号，选它只是为了拿一个模型下还没声明过的候选，避免
 # 这个示例也触发 `vmr check` 的"fallback 与模型自身已声明的端点重复"检查。
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [openrouter2]
-    models: [z-ai/glm-5.2]
-    priority: 90              # fallback 记录必须显式声明且 > 0——见上面的说明段落
+  openai-completions:
+    - providers: [openrouter2]
+      models: [z-ai/glm-5.2]
+      priority: 90              # fallback 记录必须显式声明且 > 0——见上面的说明段落
 
 providers:
   # base_url 必须包含 provider 自己完整的 API 版本号段（/v1、/v3，随它怎么叫）——
@@ -168,9 +169,8 @@ providers:
   # 是原因所在：把 "/v1" 硬编码进拼接路径会给这些 provider 悄悄拼出错误的 URL。
   #
   # base_url 至少声明一种协议，最多两种都声明——MiniMax 在同一个账号下同时支持
-  # 两种接入面，所以一条记录就够，不用像旧格式那样拆成
-  # 两份按协议分开的 minimax 重复声明。具体
-  # 某条 models.<name> 端点组用这里面的哪一个，由它自己的 `protocol:` 决定。
+  # 两种接入面，所以一条记录就够，不用拆成两份按协议分开的 minimax 重复声明。
+  # 某条 models.<name> 的 endpoints 协议 key 决定某个 try-order 桶用这里面的哪一个。
   #
   # 绝不要把凭据写进 base_url——不要用 user:pass@host 形式的 userinfo，也不要
   # 拼 ?api_key=… / ?token=… 之类的查询参数：base_url 会原样进入审计日志及其
@@ -320,7 +320,7 @@ providers:
                                      # key 的情况下也能干净地加载通过
 
   # 如果某个 provider 的 API 不接受全部 OpenAI 角色，可以按端点组
-  # （下面 models.<name>.endpoints[].role_map）做重写——一份简单的旧值->新值
+  # （下面 models.<name>.endpoints 下的各条 role_map）做重写——一份简单的旧值->新值
   # 映射，在请求体发往上游之前应用到顶层 "messages" 数组里的 "role" 字段上。
   # 典型场景：有些 provider（比如 DashScope/通义千问）拒绝 OpenAI 给 o1/o3 系列
   # 模型引入的 "developer" 角色——把它映射回 "system" 就能让这些客户端在完全
@@ -345,12 +345,11 @@ models:
     # 独覆盖的写法。完整参考见 docs/UserGuide.zh.md 的"基于条件的路由"/
     # "Sticky Model" 一节。
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter]
-        models: [z-ai/glm-5.2]
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v4-pro]
+      openai-completions:
+        - providers: [openrouter]
+          models: [z-ai/glm-5.2]
+        - providers: [deepseek]
+          models: [deepseek-v4-pro]
 
   cheap:
     # image_downscale: 0        # 按模型覆盖的示例：强制这个模型跳过缩图，即使
@@ -366,25 +365,23 @@ models:
                                   # 仅非流式响应；默认关。写在模型级是下面每个端点的默认值，
                                   # 端点可以用自己的值覆盖。
     endpoints:
-      - protocol: openai-completions
-        providers: [minimax]
-        models: [MiniMax-M3]
-        # capabilities: [image]        # 这个模型上面没有基线 capabilities，所以这条
-        #                              # 端点实际生效的能力集合就是单独的 [image]
-        # max_context_tokens: 1000000  # 一旦声明，vmr 就会跳过这条端点，不把它用于
-        #                              # 那些它实际服务不了的请求
-        # soft_block_failover: false   # 即使模型级打开了，这一条端点也单独退出
-      - protocol: openai-completions
-        providers: [openrouter]
-        # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
-        # 的端点，共享这一条记录的 provider/protocol/capabilities/priority——按
-        # 列表顺序依次尝试（每一个仍然有自己独立的 failover/健康状态）。
-        models: [tencent/hy3-preview, qwen/qwen3-max]
-      - protocol: openai-completions
-        providers: [deepseek]
-        models: [deepseek-v4-flash]
-        # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
-                            # 只针对这一条端点覆盖全局 sticky_ttl
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          # capabilities: [image]        # 这个模型上面没有基线 capabilities，所以这条
+          #                              # 端点实际生效的能力集合就是单独的 [image]
+          # max_context_tokens: 1000000  # 一旦声明，vmr 就会跳过这条端点，不把它用于
+          #                              # 那些它实际服务不了的请求
+          # soft_block_failover: false   # 即使模型级打开了，这一条端点也单独退出
+        - providers: [openrouter]
+          # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
+          # 的端点，共享这一条记录的 provider/protocol/capabilities/priority——按
+          # 列表顺序依次尝试（每一个仍然有自己独立的 failover/健康状态）。
+          models: [tencent/hy3-preview, qwen/qwen3-max]
+        - providers: [deepseek]
+          models: [deepseek-v4-flash]
+          # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
+                              # 只针对这一条端点覆盖全局 sticky_ttl
 
   # "agent" 在同一个虚拟模型名下混合了全部三种入口协议：openai-completions 协议的记录只能
   # 从 POST /v1/chat/completions 到达，anthropic-messages 协议的记录只能从
@@ -402,32 +399,30 @@ models:
     capabilities: [text, tools]
     max_context_tokens: 256000
     endpoints:
-      - protocol: openai-completions
-        providers: [openrouter, openrouter2]   # 多账号合并：外层按 models 循环，内层
-        models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # 按 providers——gemini-3.6-flash-high
-        #                                                       # 先试 openrouter 再试 openrouter2，
-        #                                                       # 然后 gemini-3.1-pro-high 同样再来一遍
-      - protocol: anthropic-messages
-        providers: [minimax]
-        models: [MiniMax-M3]
-        max_context_tokens: 512000
-        capabilities: [image, audio, video, thinking]
-      - protocol: openai-responses
-        providers: [openrouter]
-        models: [gemini-3.6-flash-high]
+      openai-completions:
+        - providers: [openrouter, openrouter2]   # 多账号合并：外层按 models 循环，内层
+          models: [gemini-3.6-flash-high, gemini-3.1-pro-high]   # 按 providers——gemini-3.6-flash-high
+          #                                                       # 先试 openrouter 再试 openrouter2，
+          #                                                       # 然后 gemini-3.1-pro-high 同样再来一遍
+      anthropic-messages:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+          max_context_tokens: 512000
+          capabilities: [image, audio, video, thinking]
+      openai-responses:
+        - providers: [openrouter]
+          models: [gemini-3.6-flash-high]
 
   # 仅 Anthropic 的虚拟模型：只能通过 POST /v1/messages 到达。
   # "claude" 不需要 openai-completions 协议的记录——openai-completions 那一侧没有任何地方引用它，通过
   # POST /v1/chat/completions 请求它只会找不到路由，因为那个入口从来只看
-  # protocol: openai-completions 的记录。
+  # openai-completions 协议桶下的记录。
   claude:
     endpoints:
-      - protocol: anthropic-messages
-        providers: [minimax]
-        models: [MiniMax-M3]
-      - protocol: anthropic-messages
-        providers: [deepseek]
-        models: [deepseek-v4-pro]
-      - protocol: anthropic-messages
-        providers: [openrouter]
-        models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 anthropic-messages 协议来说话
+      anthropic-messages:
+        - providers: [minimax]
+          models: [MiniMax-M3]
+        - providers: [deepseek]
+          models: [deepseek-v4-pro]
+        - providers: [openrouter]
+          models: [minimax/minimax-m3] # 任意 OpenRouter 模型，用 anthropic-messages 协议来说话

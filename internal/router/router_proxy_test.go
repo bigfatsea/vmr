@@ -29,9 +29,10 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [a], models: [x]}
-      - {protocol: openai-completions, providers: [b], models: [x]}
-      - {protocol: openai-completions, providers: [c], models: [x]}
+      openai-completions:
+        - {providers: [a], models: [x]}
+        - {providers: [b], models: [x]}
+        - {providers: [c], models: [x]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +100,8 @@ providers:
   - {name: viaproxy, base_url: {openai-completions: http://upstream.invalid/v1}, api_key: k, proxy: true}
   - {name: directp, base_url: {openai-completions: %s/v1}, api_key: k, proxy: false}
 models:
-  m-proxy:  {endpoints: [{protocol: openai-completions, providers: [viaproxy], models: [real]}]}
-  m-direct: {endpoints: [{protocol: openai-completions, providers: [directp], models: [real]}]}
+  m-proxy:  {endpoints: {openai-completions: [{providers: [viaproxy], models: [real]}]}}
+  m-direct: {endpoints: {openai-completions: [{providers: [directp], models: [real]}]}}
 `, proxy.URL, upstream.URL))
 	if err != nil {
 		t.Fatal(err)

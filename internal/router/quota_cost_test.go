@@ -242,7 +242,7 @@ providers:
       limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 100}]
 models:
   m1:
-    endpoints: [{protocol: openai-completions, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
+    endpoints: {openai-completions: [{providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)
@@ -287,7 +287,7 @@ providers:
       limits: [{metric: cost, every: 1mo, since: 2026-01-01, amount: 1000}]
 models:
   vm:
-    endpoints: [{protocol: openai-completions, providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]
+    endpoints: {openai-completions: [{providers: [anthropic], models: [claude-3-7-sonnet-20250219]}]}
 `)
 	rt := New(nil)
 	rt.Quota = quota.NewRegistry("")

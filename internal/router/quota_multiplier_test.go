@@ -199,7 +199,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [heavy]}
+      openai-completions:
+        - {providers: [p1], models: [heavy]}
 `)
 	rt := New(nil)
 	rt.Quota = quota.NewRegistry("")
@@ -245,7 +246,7 @@ providers:
       limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {out: 5.0}}]
 models:
   m1:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [real-model]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [real-model]}]}
 `)
 	snap := mustSnapshot(t, cfg)
 	rt.Install(snap)

@@ -21,10 +21,10 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
-        priority: 1
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+          priority: 1
 `
 
 func TestParseDefaultsAndEnvExpansion(t *testing.T) {
@@ -205,13 +205,13 @@ func TestCustomTimeouts(t *testing.T) {
 // the same account can back several endpoint-groups with different upstream
 // model families, not all of which necessarily need the same role rewrite.
 func TestRoleMapConfig(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        role_map:\n          developer: system", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          role_map:\n            developer: system", 1)
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Models["m1"].Endpoints[0].RoleMap
+	got := cfg.Models["m1"].Endpoints["openai-completions"][0].RoleMap
 	if len(got) != 1 || got["developer"] != "system" {
 		t.Errorf("role_map: got %v, want map[developer:system]", got)
 	}
@@ -223,7 +223,7 @@ func TestRoleMapUnsetIsNil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Models["m1"].Endpoints[0].RoleMap; got != nil {
+	if got := cfg.Models["m1"].Endpoints["openai-completions"][0].RoleMap; got != nil {
 		t.Errorf("role_map should be nil when omitted, got %v", got)
 	}
 }
@@ -395,15 +395,16 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [p], models: [third]}
-      - {protocol: openai-completions, providers: [p], models: [first]}
-      - {protocol: openai-completions, providers: [p], models: [second]}
+      openai-completions:
+        - {providers: [p], models: [third]}
+        - {providers: [p], models: [first]}
+        - {providers: [p], models: [second]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := cfg.Models["m"].Endpoints
+	eps := cfg.Models["m"].Endpoints["openai-completions"]
 	if len(eps) != 3 || eps[0].Models[0] != "third" || eps[1].Models[0] != "first" || eps[2].Models[0] != "second" {
 		t.Errorf("endpoints must keep file order when priority is omitted: %+v", eps)
 	}
@@ -427,7 +428,7 @@ func TestModelsListExpandsToMultipleCandidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"model-a", "model-b", "model-c"}
-	got := cfg.Models["m1"].Endpoints[0].Models
+	got := cfg.Models["m1"].Endpoints["openai-completions"][0].Models
 	if len(got) != len(want) {
 		t.Fatalf("models = %v, want %v", got, want)
 	}
@@ -452,7 +453,8 @@ providers:
 models:
   m:
     endpoints:
-      - {protocol: openai-completions, providers: [dual], models: [x]}
+      openai-completions:
+        - {providers: [dual], models: [x]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
@@ -484,22 +486,24 @@ providers:
 models:
   coding:
     endpoints:
-      - {protocol: openai-completions, providers: [openrouter], models: [z-ai/glm-5.2]}
-      - {protocol: anthropic-messages, providers: [openrouter], models: [minimax/minimax-m3]}
+      openai-completions:
+        - {providers: [openrouter], models: [z-ai/glm-5.2]}
+      anthropic-messages:
+        - {providers: [openrouter], models: [minimax/minimax-m3]}
 `
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := cfg.Models["coding"].Endpoints
-	if len(eps) != 2 {
-		t.Fatalf("want 2 endpoint groups, got %d", len(eps))
+	endpoints := cfg.Models["coding"].Endpoints
+	if len(endpoints) != 2 || len(endpoints["openai-completions"]) != 1 || len(endpoints["anthropic-messages"]) != 1 {
+		t.Fatalf("want one group per protocol bucket, got %v", endpoints)
 	}
-	if eps[0].Protocol != "openai-completions" || eps[0].Models[0] != "z-ai/glm-5.2" {
-		t.Errorf("openai-completions entry mismatch: %+v", eps[0])
+	if eg := endpoints["openai-completions"][0]; len(eg.Models) != 1 || eg.Models[0] != "z-ai/glm-5.2" {
+		t.Errorf("openai-completions entry mismatch: %+v", eg)
 	}
-	if eps[1].Protocol != "anthropic-messages" || eps[1].Models[0] != "minimax/minimax-m3" {
-		t.Errorf("anthropic-messages entry mismatch: %+v", eps[1])
+	if eg := endpoints["anthropic-messages"][0]; len(eg.Models) != 1 || eg.Models[0] != "minimax/minimax-m3" {
+		t.Errorf("anthropic-messages entry mismatch: %+v", eg)
 	}
 }
 
@@ -532,13 +536,11 @@ func TestUnknownProtocolKeyRejected(t *testing.T) {
 	}
 }
 
-// TestUnknownEndpointProtocolRejected covers the new per-endpoint-group
-// `protocol:` field itself naming an unregistered adapter — a validation
-// path that didn't exist under the old nested-by-protocol schema, where
-// protocol was implicit from map position rather than a value that could be
-// wrong.
+// TestUnknownEndpointProtocolRejected covers the endpoints map key naming
+// an unregistered adapter — the key IS the protocol, so the validation
+// error names the key directly.
 func TestUnknownEndpointProtocolRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "protocol: openai-completions", "protocol: nosuch", 1)
+	yaml := strings.Replace(validYAML, "      openai-completions:", "      nosuch:", 1)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "unknown protocol") {
 		t.Errorf("want unknown protocol error, got %v", err)
@@ -556,11 +558,11 @@ func TestLegacyProtocolNameGivesRenameHint(t *testing.T) {
 			t.Errorf("want a rename hint for the legacy base_url key, got %v", err)
 		}
 	})
-	t.Run("endpoint protocol", func(t *testing.T) {
-		yaml := strings.Replace(validYAML, "protocol: openai-completions", "protocol: anthropic", 1)
+	t.Run("endpoint protocol key", func(t *testing.T) {
+		yaml := strings.Replace(validYAML, "      openai-completions:", "      anthropic:", 1)
 		_, err := Parse([]byte(yaml))
 		if err == nil || !strings.Contains(err.Error(), `rename "anthropic" to "anthropic-messages"`) {
-			t.Errorf("want a rename hint for the legacy protocol value, got %v", err)
+			t.Errorf("want a rename hint for the legacy endpoints key, got %v", err)
 		}
 	})
 }
@@ -642,7 +644,7 @@ func TestExtraRedactHeadersEmptyEntryRejected(t *testing.T) {
 }
 
 func TestEmptySections(t *testing.T) {
-	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: [{protocol: openai-completions, providers: [x], models: [y]}]}}")); err == nil {
+	if _, err := Parse([]byte("listen: 127.0.0.1:1\nmodels: {m: {endpoints: {openai-completions: [{providers: [x], models: [y]}]}}}")); err == nil {
 		t.Error("want error for no providers")
 	}
 	if _, err := Parse([]byte("providers:\n  - {name: p, base_url: {openai-completions: https://x.com}}")); err == nil {
@@ -661,7 +663,7 @@ func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	eg := cfg.Models["m1"].Endpoints[0]
+	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
 	if len(eg.Capabilities) != 0 {
 		t.Errorf("expected no declared capabilities, got %v", eg.Capabilities)
 	}
@@ -672,12 +674,12 @@ func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
 
 func TestCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
 	yaml := strings.Replace(validYAML, "priority: 1",
-		"priority: 1\n        capabilities: [text, image, tools]\n        max_context_tokens: 200000", 1)
+		"priority: 1\n          capabilities: [text, image, tools]\n          max_context_tokens: 200000", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eg := cfg.Models["m1"].Endpoints[0]
+	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
 	want := []string{"text", "image", "tools"}
 	if len(eg.Capabilities) != len(want) {
 		t.Fatalf("Capabilities = %v, want %v", eg.Capabilities, want)
@@ -693,7 +695,7 @@ func TestCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
 }
 
 func TestMaxContextTokensNegativeRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        max_context_tokens: -1", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          max_context_tokens: -1", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("negative max_context_tokens must be rejected at load, not silently clamped")
 	}
@@ -756,12 +758,12 @@ func TestStickyTTLGlobalOverride(t *testing.T) {
 func TestStickyTTLPerEndpointOverride(t *testing.T) {
 	// nil (unset) vs. an explicit override must both be representable —
 	// same *Duration pattern as ImageDownscaleMaxPx.
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 2h", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 2h", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eg := cfg.Models["m1"].Endpoints[0]
+	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
 	if eg.StickyTTL == nil {
 		t.Fatal("expected a non-nil per-endpoint StickyTTL override")
 	}
@@ -775,13 +777,13 @@ func TestStickyTTLPerEndpointOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base.Models["m1"].Endpoints[0].StickyTTL != nil {
+	if base.Models["m1"].Endpoints["openai-completions"][0].StickyTTL != nil {
 		t.Error("expected a nil per-endpoint StickyTTL when not set (inherit global)")
 	}
 }
 
 func TestStickyTTLNonPositiveRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 0s", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 0s", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("sticky_ttl: 0s must be rejected at load (a zero-duration affinity window is meaningless)")
 	}
@@ -803,7 +805,7 @@ func TestStickyTTLGlobalAboveBackstopRejected(t *testing.T) {
 }
 
 func TestStickyTTLPerEndpointAboveBackstopRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n        sticky_ttl: 48h", 1)
+	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 48h", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("per-endpoint sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
 	}
@@ -862,18 +864,18 @@ providers:
 models:
   m1:
     endpoints:
-      - protocol: openai-responses
-        providers: [p1]
-        models: [real-model]
+      openai-responses:
+        - providers: [p1]
+          models: [real-model]
 `
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("openai-responses protocol should validate: %v", err)
 	}
-	eg := cfg.Models["m1"].Endpoints[0]
-	if eg.Protocol != "openai-responses" {
-		t.Errorf("protocol: got %q", eg.Protocol)
+	eg := cfg.Models["m1"].Endpoints["openai-responses"][0]
+	if len(eg.Models) != 1 || eg.Models[0] != "real-model" {
+		t.Errorf("openai-responses entry mismatch: %+v", eg)
 	}
 }
 
@@ -895,20 +897,21 @@ providers:
 models:
   agent:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [real-model]
-      - protocol: openai-responses
-        providers: [p1]
-        models: [real-model]
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+      openai-responses:
+        - providers: [p1]
+          models: [real-model]
 `
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("mixed protocol endpoints under one virtual model should validate: %v", err)
 	}
-	if len(cfg.Models["agent"].Endpoints) != 2 {
-		t.Fatalf("expected 2 endpoint groups, got %d", len(cfg.Models["agent"].Endpoints))
+	endpoints := cfg.Models["agent"].Endpoints
+	if len(endpoints) != 2 || len(endpoints["openai-completions"]) != 1 || len(endpoints["openai-responses"]) != 1 {
+		t.Fatalf("expected one endpoint group per protocol bucket, got %v", endpoints)
 	}
 }
 

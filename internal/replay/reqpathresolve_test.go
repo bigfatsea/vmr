@@ -30,7 +30,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `
 	path := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {

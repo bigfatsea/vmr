@@ -30,10 +30,10 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1, p2]
-        models: [model-a, model-b]
-        priority: 1
+      openai-completions:
+        - providers: [p1, p2]
+          models: [model-a, model-b]
+          priority: 1
 `
 
 // TestBuildSnapshot_MultiProvider_ExpandsModelMajor pins the documented
@@ -161,23 +161,26 @@ providers:
   - {name: p1, base_url: {openai-completions: https://p1.example.com, anthropic-messages: https://p1.example.com}, api_key: k1}
   - {name: fb, base_url: {openai-completions: https://fb.example.com}, api_key: kfb}
 fallback_endpoints:
-  - protocol: openai-completions
-    providers: [fb]
-    models: [fallback-model]
-    priority: 90
+  openai-completions:
+    - providers: [fb]
+      models: [fallback-model]
+      priority: 90
 models:
   openai_only:
     capabilities: [text, tools]
     max_context_tokens: 128000
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [own-model]}
+      openai-completions:
+        - {providers: [p1], models: [own-model]}
   anthropic_only:
     endpoints:
-      - {protocol: anthropic-messages, providers: [p1], models: [own-model]}
+      anthropic-messages:
+        - {providers: [p1], models: [own-model]}
   opted_out:
     fallback: false
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [own-model]}
+      openai-completions:
+        - {providers: [p1], models: [own-model]}
 `
 
 func TestBuildSnapshot_Fallback_InjectedWhenProtocolMatches(t *testing.T) {
@@ -281,11 +284,13 @@ providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
   - {name: fb, base_url: {openai-completions: %s}, api_key: kfb}
 fallback_endpoints:
-  - {protocol: openai-completions, providers: [fb], models: [fallback-model], priority: 90}
+  openai-completions:
+    - {providers: [fb], models: [fallback-model], priority: 90}
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [own-model]}
+      openai-completions:
+        - {providers: [p1], models: [own-model]}
 `, own.srv.URL, fb.srv.URL))
 
 	rt := New(nil)

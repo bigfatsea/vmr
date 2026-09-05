@@ -38,8 +38,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-a], priority: 1}
-      - {protocol: openai-completions, providers: [p2], models: [model-b], priority: 2}
+      openai-completions:
+        - {providers: [p1], models: [model-a], priority: 1}
+        - {providers: [p2], models: [model-b], priority: 2}
 `, u1, u2)
 }
 

@@ -166,7 +166,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `
 	srv, _ := newTeeServer(t, yaml)
 

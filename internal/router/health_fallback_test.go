@@ -24,7 +24,7 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k}
 models:
-  vm: {endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, u.srv.URL))
 
 	snap := mustSnapshot(t, cfg)
@@ -63,8 +63,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [pshallow], models: [m]}
-      - {protocol: openai-completions, providers: [pdeep], models: [m]}
+      openai-completions:
+        - {providers: [pshallow], models: [m]}
+        - {providers: [pdeep], models: [m]}
 `, uShallow.srv.URL, uDeep.srv.URL))
 
 	snap := mustSnapshot(t, cfg)
@@ -109,8 +110,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [phealthy], models: [m]}
-      - {protocol: openai-completions, providers: [phalf], models: [m]}
+      openai-completions:
+        - {providers: [phealthy], models: [m]}
+        - {providers: [phalf], models: [m]}
 `, uHealthy.srv.URL, uHalfOpen.srv.URL))
 
 	snap := mustSnapshot(t, cfg)

@@ -40,14 +40,16 @@ func writeConfig(t *testing.T, dir, upstreamURL string, withModel bool) string {
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `
 	} else {
 		models = `
 models:
   other:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `
 	}
 	yaml := fmt.Sprintf(`
@@ -204,7 +206,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-responses, providers: [p1], models: [upstream-model]}
+      openai-responses:
+        - {providers: [p1], models: [upstream-model]}
 `, upstream.URL)
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
@@ -405,7 +408,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m]}
+      openai-completions:
+        - {providers: [p1], models: [m]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -423,7 +427,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m], role_map: {developer: system}}
+      openai-completions:
+        - {providers: [p1], models: [m], role_map: {developer: system}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -445,7 +450,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m], role_map: {developer: system}}
+      openai-completions:
+        - {providers: [p1], models: [m], role_map: {developer: system}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -463,7 +469,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m], role_map: {developer: system}}
+      openai-completions:
+        - {providers: [p1], models: [m], role_map: {developer: system}}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -490,7 +497,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model], role_map: {developer: system}}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model], role_map: {developer: system}}
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
@@ -542,7 +550,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1, p2], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1, p2], models: [upstream-model]}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1112,7 +1121,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `, upstream.URL)
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
@@ -1194,7 +1204,8 @@ models:
   vm:
     image_downscale: 0
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `, upstream.URL)
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)
@@ -1233,7 +1244,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [upstream-model]}
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
 `, upstream.URL)
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)

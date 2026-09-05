@@ -59,7 +59,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-one]}
+      openai-completions:
+        - {providers: [p1], models: [model-one]}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -251,10 +252,10 @@ providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-one]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [model-one]}]}
   vm-small:
     image_downscale: 256
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-one]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [model-one]}]}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -302,7 +303,7 @@ providers:
 models:
   vm-off:
     image_downscale: 0
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-one]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [model-one]}]}
 `, up.URL)
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -353,7 +354,7 @@ providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
   vm:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [model-one]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [model-one]}]}
 `, cacheDir, up.URL))
 
 	uri := bigJPEGDataURI(t) // 1600x900

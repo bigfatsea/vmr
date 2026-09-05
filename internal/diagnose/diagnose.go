@@ -218,25 +218,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		// then sort by protocol/provider/model — so the same provider's
 		// endpoints land next to each other in the report instead of
 		// scattered across wherever each virtual model listed them.
-		// The map value is the endpoint-group's RoleMap (first endpoint-group
-		// referencing a given triple wins — the same triple declared with two
-		// different role_maps across virtual models is an edge case not
-		// worth reconciling here): testEndpoint needs it both to apply the
-		// same rewrite real traffic would get and, on failure, to word its
-		// hint correctly.
-		seen := map[epKey]map[string]string{}
-		for _, name := range fmtutil.SortedKeys(cfg.Models) {
-			for _, eg := range cfg.Models[name].Endpoints {
-				for _, pn := range eg.Providers {
-					for _, mn := range eg.Models {
-						k := epKey{eg.Protocol, pn, mn}
-						if _, ok := seen[k]; !ok {
-							seen[k] = eg.RoleMap
-						}
-					}
-				}
-			}
-		}
+		seen := collectEndpointTriples(cfg)
 		keys := make([]epKey, 0, len(seen))
 		for k := range seen {
 			keys = append(keys, k)
@@ -296,6 +278,32 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 }
 
 type epKey struct{ protocol, provider, model string }
+
+// collectEndpointTriples gathers every distinct (protocol, provider, model)
+// triple referenced by any virtual model, with the endpoint-group's RoleMap
+// (first group referencing a given triple wins — the same triple declared
+// with two different role_maps across virtual models is an edge case not
+// worth reconciling here): testEndpoint needs it both to apply the same
+// rewrite real traffic would get and, on failure, to word its hint
+// correctly.
+func collectEndpointTriples(cfg *config.Config) map[epKey]map[string]string {
+	seen := map[epKey]map[string]string{}
+	for _, name := range fmtutil.SortedKeys(cfg.Models) {
+		for protocol, groups := range cfg.Models[name].Endpoints {
+			for _, eg := range groups {
+				for _, pn := range eg.Providers {
+					for _, mn := range eg.Models {
+						k := epKey{protocol, pn, mn}
+						if _, ok := seen[k]; !ok {
+							seen[k] = eg.RoleMap
+						}
+					}
+				}
+			}
+		}
+	}
+	return seen
+}
 
 // envCheck reports whether this provider is reachable without sending an
 // LLM request: DNS + TLS for a direct connection, or just the proxy's own

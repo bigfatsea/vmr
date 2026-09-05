@@ -42,13 +42,13 @@ providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
   plain:
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [m]}]}
   overridden:
     image_downscale: 256
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [m]}]}
   disabled:
     image_downscale: 0
-    endpoints: [{protocol: openai-completions, providers: [p1], models: [m]}]
+    endpoints: {openai-completions: [{providers: [p1], models: [m]}]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -91,8 +91,9 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [mapped], models: [m1], role_map: {developer: system}}
-      - {protocol: openai-completions, providers: [plain], models: [m2]}
+      openai-completions:
+        - {providers: [mapped], models: [m1], role_map: {developer: system}}
+        - {providers: [plain], models: [m2]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -126,14 +127,13 @@ providers:
 models:
   vm:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [m1]
-        capabilities: [text, image, tools]
-        max_context_tokens: 200000
-      - protocol: openai-completions
-        providers: [p1]
-        models: [m2]
+      openai-completions:
+        - providers: [p1]
+          models: [m1]
+          capabilities: [text, image, tools]
+          max_context_tokens: 200000
+        - providers: [p1]
+          models: [m2]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -175,14 +175,13 @@ models:
     capabilities: [text, tools]
     max_context_tokens: 128000
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [extra]
-        capabilities: [image]
-        max_context_tokens: 512000
-      - protocol: openai-completions
-        providers: [p1]
-        models: [plain]
+      openai-completions:
+        - providers: [p1]
+          models: [extra]
+          capabilities: [image]
+          max_context_tokens: 512000
+        - providers: [p1]
+          models: [plain]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -268,17 +267,19 @@ providers:
 models:
   defaulted:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
   disabled:
     sticky: false
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m1]}
+      openai-completions:
+        - {providers: [p1], models: [m1]}
   overridden:
     endpoints:
-      - protocol: openai-completions
-        providers: [p1]
-        models: [m1]
-        sticky_ttl: 2h
+      openai-completions:
+        - providers: [p1]
+          models: [m1]
+          sticky_ttl: 2h
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -318,8 +319,10 @@ models:
   vm:
     sticky: false
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [m-openai]}
-      - {protocol: anthropic-messages, providers: [p1], models: [m-anthropic]}
+      openai-completions:
+        - {providers: [p1], models: [m-openai]}
+      anthropic-messages:
+        - {providers: [p1], models: [m-anthropic]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -356,7 +359,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p1], models: [model-a, model-b, model-c]}
+      openai-completions:
+        - {providers: [p1], models: [model-a, model-b, model-c]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

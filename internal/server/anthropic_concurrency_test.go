@@ -154,8 +154,9 @@ providers:
 models:
   bad:
     endpoints:
-      - {protocol: openai-completions, providers: [oai], models: [a]}
-      - {protocol: openai-completions, providers: [anth], models: [b]}
+      openai-completions:
+        - {providers: [oai], models: [a]}
+        - {providers: [anth], models: [b]}
 `
 	_, err := config.Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "no base_url for protocol") {
@@ -178,8 +179,10 @@ providers:
 models:
   coding:
     endpoints:
-      - {protocol: openai-completions, providers: [oai], models: [model-one]}
-      - {protocol: anthropic-messages, providers: [anth], models: [real-a]}
+      openai-completions:
+        - {providers: [oai], models: [model-one]}
+      anthropic-messages:
+        - {providers: [anth], models: [real-a]}
 `, o.srv.URL, a.srv.URL)
 	ts := newRouterServer(t, yaml)
 
@@ -268,7 +271,8 @@ providers:
 models:
   vm:
     endpoints:
-      - {protocol: openai-completions, providers: [p], models: [m]}
+      openai-completions:
+        - {providers: [p], models: [m]}
 `, slow.URL))
 
 	var wg sync.WaitGroup
@@ -311,7 +315,7 @@ providers:
   - {name: p, base_url: {openai-completions: %s}, api_key: k}
 models:
   vm:
-    endpoints: [{protocol: openai-completions, providers: [p], models: [m]}]
+    endpoints: {openai-completions: [{providers: [p], models: [m]}]}
 `, slow.URL))
 
 	// Occupy the only slot.
