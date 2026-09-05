@@ -234,7 +234,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	rv.Client.Request.Body, _ = imgprep.Downscale(rv.Client.Request.Body, protocol, imgprep.Options{
 		MaxPx:        effectiveImageDownscaleMaxPx(cfg, rv.Model),
 		CacheDir:     cfg.ImageCacheDir,
-		CacheTTLDays: cfg.ImageCacheTTLDays,
+		CacheTTLDays: cfg.TTL.ImageCache.Days(),
 	})
 
 	creq := &core.CanonicalRequest{

@@ -432,16 +432,6 @@ type Config struct {
 	pricingFactorCache   float64 `yaml:"-"`
 	pricingCurrencyCache string  `yaml:"-"`
 
-	// Transitional mirrors of Timeouts.Probe / TTL.Sticky / TTL.ImageCache
-	// for the pre-TTL field-name readers this package doesn't own
-	// (internal/router's probe.go and snapshot.go, internal/replay);
-	// applyDefaults — the one place defaults resolve — keeps them in step,
-	// so nothing else may write either side. Delete these once those readers
-	// use the new fields directly.
-	ProbeTimeout      Duration `yaml:"-"`
-	StickyTTL         Duration `yaml:"-"`
-	ImageCacheTTLDays int      `yaml:"-"`
-
 	// configDir is the directory the config file was Load()ed from — the
 	// anchor for relative sidecar paths (see resolveConfigRelative). Empty
 	// for a config built from bytes via Parse.
@@ -571,10 +561,6 @@ func (c *Config) applyDefaults() {
 			c.Models[name] = m
 		}
 	}
-	// Transitional mirrors — see the field comments on Config.
-	c.ProbeTimeout = c.Timeouts.Probe
-	c.StickyTTL = c.TTL.Sticky
-	c.ImageCacheTTLDays = c.TTL.ImageCache.Days()
 }
 
 func (c *Config) validate() error {

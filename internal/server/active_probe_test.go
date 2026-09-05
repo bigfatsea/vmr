@@ -43,8 +43,8 @@ func TestActiveProbe_HalfOpenEndpointServedAsLastResort(t *testing.T) {
 	u := newProbeUpstream(t)
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
-probe_timeout: 200ms
 timeouts:
+  probe: 200ms
   response_header: 300ms
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
@@ -88,7 +88,7 @@ func TestActiveProbe_RealTrafficUnaffectedByBackgroundProbeLatency(t *testing.T)
 	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 300ms"))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "timeouts: {probe: 300ms}"))
 	driveHalfOpenViaFailover(t, ts, u1) // (not driveHalfOpen: with p2 present, p1's 429 fails over to p2 rather than passing through)
 
 	u1.mode.Store("block")
@@ -127,7 +127,7 @@ func TestActiveProbe_RecoversInBackgroundThenServesRealTraffic(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(429)
 	u1.retryAfter = "1"
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "timeouts: {probe: 2s}"))
 
 	resp, _ := chat(t, ts, simpleReq, nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
@@ -177,7 +177,7 @@ func TestActiveProbe_FailedProbeReleasesSlot(t *testing.T) {
 	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "timeouts: {probe: 2s}"))
 	driveHalfOpenViaFailover(t, ts, u1)
 
 	u1.mode.Store("400") // ErrClient-classified: request-specific, no cooldown, but the probe slot must still be released
@@ -228,7 +228,7 @@ func TestActiveProbe_UpstreamFailureGoesToReportFailure(t *testing.T) {
 	t.Parallel()
 	u1 := newProbeUpstream(t)
 	u2 := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "probe_timeout: 2s"))
+	ts := newRouterServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, "timeouts: {probe: 2s}"))
 	driveHalfOpenViaFailover(t, ts, u1) // fails=1 (429/rate_limit), cooldown expired
 
 	u1.mode.Store("console_go")

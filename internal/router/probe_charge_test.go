@@ -38,7 +38,8 @@ func TestRunProbe_ChargesRequestsOnlyOn2xx(t *testing.T) {
 
 		cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
 models:

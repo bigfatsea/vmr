@@ -251,7 +251,8 @@ func TestRunProbe_ChargesRequestQuota(t *testing.T) {
 
 	cfg := mustConfig(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - name: p1
     base_url: {openai-completions: %s}

@@ -125,7 +125,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		fallbackOK := m.Fallback == nil || *m.Fallback
 		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
 		for _, eg := range m.Endpoints {
-			eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, eg, cfg.StickyTTL.D(), false)
+			eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, eg, cfg.TTL.Sticky.D(), false)
 			if err != nil {
 				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
@@ -144,7 +144,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 				if !ok {
 					continue
 				}
-				eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, fb, cfg.StickyTTL.D(), true)
+				eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, fb, cfg.TTL.Sticky.D(), true)
 				if err != nil {
 					return nil, fmt.Errorf("model %q: fallback_endpoints[%d]: %w", name, i, err)
 				}

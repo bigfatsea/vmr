@@ -261,7 +261,8 @@ func TestMergeCapabilitiesDedup(t *testing.T) {
 func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
-sticky_ttl: 10m
+ttl:
+  sticky: 10m
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:

@@ -76,7 +76,8 @@ func TestRunProbe_PanicRecovery(t *testing.T) {
 
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - {name: p1, base_url: {openai-completions: `+upstream.URL+`}, api_key: k1}
 models:
@@ -119,7 +120,8 @@ func TestRunProbe_ResponsesProtocolSendsResponsesShapedBody(t *testing.T) {
 
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - {name: p1, base_url: {openai-responses: `+upstream.URL+`}, api_key: k1}
 models:
@@ -153,7 +155,8 @@ func TestRunProbe_ChatCompletionsProtocolUnaffected(t *testing.T) {
 
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - {name: p1, base_url: {openai-completions: `+upstream.URL+`}, api_key: k1}
 models:
@@ -190,7 +193,8 @@ func TestRunProbe_ContextCanceledDuringInFlight(t *testing.T) {
 
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 5s
+timeouts:
+  probe: 5s
 providers:
   - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
 models:
@@ -243,7 +247,8 @@ func TestRunProbe_ContextAlreadyCanceled(t *testing.T) {
 
 	cfg := mustConfig(t, `
 listen: 127.0.0.1:0
-probe_timeout: 2s
+timeouts:
+  probe: 2s
 providers:
   - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
 models:

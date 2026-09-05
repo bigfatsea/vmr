@@ -71,7 +71,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		body, nonce = probe.Request(ep.Model)
 	}
 	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body}
-	ctx, cancel := context.WithTimeout(rt.Context(), snap.Cfg.ProbeTimeout.D())
+	ctx, cancel := context.WithTimeout(rt.Context(), snap.Cfg.Timeouts.Probe.D())
 	defer cancel()
 
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
