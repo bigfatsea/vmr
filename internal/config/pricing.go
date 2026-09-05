@@ -115,7 +115,8 @@ func (o PricingOverrideConfig) explicitFieldsSet() int {
 // comment); targetCurrency "" is treated as USD, matching
 // buildPricingContext's own "no pricing.currency set = USD" default.
 func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[string]float64, targetCurrency string) (pricing.OverrideRule, error) {
-	if o.Model == "" {
+	model := strings.TrimSpace(o.Model)
+	if model == "" {
 		return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: model is required (a name, or \"*\" for a wildcard)", providerName, idx)
 	}
 	explicitN := o.explicitFieldsSet()
@@ -145,7 +146,7 @@ func (o PricingOverrideConfig) validate(providerName string, idx int, rates map[
 			return pricing.OverrideRule{}, fmt.Errorf("provider %q: pricing.overrides[%d]: %s must be a finite number >= 0 (got %v)", providerName, idx, f.name, *f.val)
 		}
 	}
-	rule := pricing.OverrideRule{Model: o.Model, Discount: o.Discount}
+	rule := pricing.OverrideRule{Model: model, Discount: o.Discount}
 	if o.Discount == nil {
 		rate := pricing.Rate{InFresh: o.InFresh, CacheRead: o.CacheRead, CacheWrite: o.CacheWrite, Out: o.Out}
 		if o.Currency != "" {

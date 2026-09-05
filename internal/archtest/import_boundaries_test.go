@@ -179,8 +179,8 @@ var forbiddenImports = map[string][]string{
 // package at all, per CLAUDE.md's module map: these are the leaf layer both
 // halves import freely, which only stays safe while none of them grows a
 // dependency of its own. core holds the shared types; fmtutil the display
-// formatting; i18n the EN/ZH text tables. jsonscan joined this list when the
-// extracted from internal/adapter's
+// formatting; i18n the EN/ZH text tables. jsonscan joined this list when it
+// was extracted from internal/adapter's
 // classify.go/fingerprint.go — a pure JSON byte-range scanning engine with
 // no reason to depend on anything but the standard library.
 // Checked separately from forbiddenImports above because "must

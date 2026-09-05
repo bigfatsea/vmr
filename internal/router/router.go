@@ -144,12 +144,15 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
-		// Acquire enforces the single-flight probe for half-open endpoints.
-		// Every candidate reaching this line was already Available() above
-		// (fails==0, or the health-filter loop would have diverted it to a
-		// background probe instead), so this is normally a no-op true — it
-		// only matters as a race guard against an endpoint going half-open
-		// in the gap between that filter and this loop.
+		// Acquire enforces the single-flight rule for half-open endpoints.
+		// Candidates reaching this line are either healthy (fails==0: this is
+		// a no-op true) or the health filter's last-resort release — a
+		// half-open endpoint whose probe slot healthFilter just freed via
+		// ReportNeutral, so Acquire re-claims the slot on behalf of THIS real
+		// request, making the request itself the occupying probe. It still
+		// guards the race against an endpoint turning half-open between the
+		// filter and this loop (one that just failed is stopped by its fresh
+		// cooldown instead).
 		if !rt.Health.Acquire(ep.HealthKey(), time.Now()) {
 			continue
 		}

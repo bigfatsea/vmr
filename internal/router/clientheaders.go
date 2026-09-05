@@ -17,6 +17,10 @@ var headerBlocklist = map[string]struct{}{
 	"x-forwarded-host":    {},
 	"forwarded":           {}, // RFC 7239 — same client-IP leak as x-forwarded-*, in the standardized form
 	"x-real-ip":           {},
+	"cf-connecting-ip":    {}, // CDN edge-injected client IPs — same leak, vendor-proprietary spellings
+	"true-client-ip":      {},
+	"x-client-ip":         {},
+	"fastly-client-ip":    {},
 	"proxy-authorization": {},
 	"host":                {}, // Go http.Request.Host follows URL, but block anyway
 	"content-length":      {}, // Go Transport recomputes

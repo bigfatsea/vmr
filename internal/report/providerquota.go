@@ -132,8 +132,9 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 	// were 0 (same "hasCost" treatment endpointValueRows already uses).
 	// Provider name, then window text, then the specific model (several
 	// rows can now share Provider+Every — every per-model Limit's live
-	// buckets do) is the final tie-break, for a deterministic order across
-	// runs.
+	// buckets do), then the metric (same scope, different unit — requests
+	// vs tokens vs cost) is the tie-break chain, for a deterministic order
+	// across runs.
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
 		ha, hb := a.Live != nil, b.Live != nil
@@ -149,7 +150,10 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 		if a.Every != b.Every {
 			return a.Every < b.Every
 		}
-		return strings.Join(a.Models, ",") < strings.Join(b.Models, ",")
+		if m := strings.Join(a.Models, ","); m != strings.Join(b.Models, ",") {
+			return m < strings.Join(b.Models, ",")
+		}
+		return a.Metric < b.Metric
 	})
 	// Skip info lands on rep (part of the JSON contract, read by
 	// renderSkippedAttemptsNote) rather than a package-level global —

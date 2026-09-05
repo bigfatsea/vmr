@@ -394,12 +394,18 @@ func pickPredecessor(l *Lineage, b0 *Manifest, overlap map[int]int, distinct int
 		if pred == nil || len(pred.Manifests) == 0 {
 			continue
 		}
-		predEnd := pred.Manifests[len(pred.Manifests)-1].TS
-		if !predEnd.Before(b0.TS) {
-			continue // a predecessor must temporally precede the break
+		predEnd := pred.Manifests[len(pred.Manifests)-1]
+		// A predecessor must precede the break: strictly earlier in time, or
+		// equal-ts with a strictly smaller record coordinate (Req orders
+		// records within/across files) — ns-truncated or stubbed timestamps
+		// can collapse onto one instant, and a plain Before check would then
+		// falsely disqualify the true predecessor. Equal-ts + equal-Req can
+		// only be the lineage itself, so self-exclusion holds.
+		if predEnd.TS.After(b0.TS) || (predEnd.TS.Equal(b0.TS) && predEnd.Req >= b0.Req) {
+			continue
 		}
 		score := float64(n) / float64(distinct)
-		gap := b0.TS.Sub(predEnd)
+		gap := b0.TS.Sub(predEnd.TS)
 		if pred.SessKey != l.SessKey {
 			if gap > stitchCrossBucketMaxGap {
 				continue // see stitchCrossBucketMaxGap's doc comment
@@ -438,11 +444,11 @@ func findSameChatCandidate(l *Lineage, sessBuckets map[string][]*Lineage) *Stitc
 		if pred.Idx == l.Idx || len(pred.Manifests) == 0 {
 			continue
 		}
-		predEnd := pred.Manifests[len(pred.Manifests)-1].TS
-		if !predEnd.Before(b0TS) {
-			continue
+		predEnd := pred.Manifests[len(pred.Manifests)-1]
+		if predEnd.TS.After(b0TS) || (predEnd.TS.Equal(b0TS) && predEnd.Req >= l.Manifests[0].Req) {
+			continue // same preceding rule as pickPredecessor's equal-ts tie-break
 		}
-		gap := b0TS.Sub(predEnd)
+		gap := b0TS.Sub(predEnd.TS)
 		if gap > stitchSameChatWindow {
 			continue
 		}

@@ -116,6 +116,12 @@ func PeriodBounds(l core.Limit, now time.Time) (start, end time.Time) {
 	if l.Since.IsZero() {
 		l.Since = DefaultSince(now, l.EveryUnit)
 	}
+	if l.EveryN <= 0 {
+		// Config validation rejects EveryN <= 0; this guard only protects
+		// direct callers of the pure function (tests, stubs) from findK's
+		// zero-step infinite loop. 1 mirrors the unset default.
+		l.EveryN = 1
+	}
 	since := l.Since.In(fmtutil.DisplayZone)
 	now = now.In(fmtutil.DisplayZone)
 	step := stepFor(l.EveryUnit, l.EveryN)

@@ -484,7 +484,7 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 | metric | `base` | 适用套餐 | 解析成本 |
 |---|---|---|---|
 | `requests` | `1` | Coding Plan（74% 按次数计） | **零**。不碰响应体 |
-| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重账号级、缺省全 1.0 | 类型 C / D | 中，见 §7.2 |
+| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重按单条 Limit（见「折算规则下沉至 Limit 级」）、缺省全 1.0 | 类型 C / D | 中，见 §7.2 |
 | `cost` | `Σ_c tokens_c × Rate[provider, model, c, ts]`，费率见 §4.2 ① 的三层解析 | 类型 E / F | 同 `tokens`，多一次查表 |
 
 `c` 遍历四个分量 `{in_fresh, cache_read, cache_write, out}`，其中
