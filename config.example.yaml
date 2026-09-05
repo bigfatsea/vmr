@@ -161,13 +161,14 @@ listen: 127.0.0.1:8800
 #                                 # portable across deployments; this map only fills in what it doesn't cover.
 #                                 # Also consulted by vmr report's -currency display currency when it differs
 #                                 # from this one. Write {CNY: 1.0} to state deliberately that no conversion applies.
-#   supplement: ./pricing.yaml    # optional: your own additions, same shape as the built-in table
-#                                   # (see pricing.example.yaml — copy it to pricing.yaml and adjust),
-#                                   # merged in — yours wins on a canonical-key clash. Can also carry an
-#                                   # aliases: block (bare model name -> canonical key) for a gateway that
-#                                   # invented its own model id. A relative path is resolved against THIS
-#                                   # config file's directory, so it works from any working directory; a
-#                                   # path that doesn't exist is a load-time error, not a silent skip.
+#   # Inline custom rates & aliases: define list price additions/corrections directly
+#   # here without needing an external pricing.yaml file. Merged over the built-in
+#   # standard table (inline rates win on a canonical-key clash):
+#   # rates:
+#   #   - {key: my-vendor/my-model, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
+#   # aliases:
+#   #   my-model-alias: my-vendor/my-model
+#   # supplement: ./pricing.yaml    # optional: legacy external file support (see pricing.example.yaml)
 
 # Real model defaults: capabilities and context window ceiling for upstream
 # models, shared across all virtual models. Omit entirely if unneeded

@@ -66,6 +66,9 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 		default:
 			line += "; currency=" + currency
 		}
+		if len(cfg.Pricing.Rates) > 0 {
+			line += fmt.Sprintf("; %d inline rate(s)", len(cfg.Pricing.Rates))
+		}
 		if cfg.Pricing.Supplement != "" {
 			line += "; supplement=" + cfg.Pricing.Supplement
 		}

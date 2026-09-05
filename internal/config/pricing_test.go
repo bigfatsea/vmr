@@ -797,6 +797,133 @@ pricing:
 	}
 }
 
+func TestPricing_InlineRates_HappyPath(t *testing.T) {
+	yaml := pricingCfgNamed(`pricing:
+  currency: USD
+  rates:
+    - key: custom/my-model
+      in_fresh: 2.0
+      cache_read: 0.2
+      cache_write: 2.5
+      out: 8.0
+`, "anthropic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}`, "custom/my-model")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	spec := cfg.ResolvedPricing["anthropic\x00custom/my-model"]
+	if spec == nil {
+		t.Fatal("no PricingSpec resolved for inline rate model")
+	}
+	rate := pricing.EffectiveRate(spec)
+	if *rate.InFresh != 2.0 || *rate.Out != 8.0 {
+		t.Fatalf("unexpected rate components: %+v", rate)
+	}
+}
+
+func TestPricing_InlineAliases_Resolves(t *testing.T) {
+	yaml := pricingCfgNamed(`pricing:
+  currency: USD
+  rates:
+    - key: custom/target-model
+      in_fresh: 1.0
+      cache_read: 0.1
+      cache_write: 1.25
+      out: 4.0
+  aliases:
+    my-alias: custom/target-model
+`, "anthropic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}`, "my-alias")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	spec := cfg.ResolvedPricing["anthropic\x00my-alias"]
+	if spec == nil {
+		t.Fatal("no PricingSpec resolved for inline alias")
+	}
+	rate := pricing.EffectiveRate(spec)
+	if *rate.InFresh != 1.0 || *rate.Out != 4.0 {
+		t.Fatalf("unexpected rate components: %+v", rate)
+	}
+}
+
+func TestPricing_InlineRates_PrecedenceOrder(t *testing.T) {
+	supplementPath := writeSupplementFile(t, `
+currency: USD
+rates:
+  - key: anthropic/claude-3-haiku-20240307
+    in_fresh: 9.0
+    cache_read: 0.9
+    cache_write: 11.25
+    out: 36.0
+`)
+	// Inline sets in_fresh=5.0, supplement sets in_fresh=9.0.
+	// Supplement merges on top of inline, so supplement should win (9.0).
+	yaml := pricingCfgNamed(fmt.Sprintf(`pricing:
+  currency: USD
+  supplement: %s
+  rates:
+    - key: anthropic/claude-3-haiku-20240307
+      in_fresh: 5.0
+      cache_read: 0.5
+      cache_write: 6.25
+      out: 20.0
+`, supplementPath), "anthropic", `quota:
+  limits:
+    - {metric: cost, every: 1mo, amount: 100}`, "claude-3-haiku-20240307")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+	spec := cfg.ResolvedPricing["anthropic\x00claude-3-haiku-20240307"]
+	if spec == nil {
+		t.Fatal("no PricingSpec resolved")
+	}
+	rate := pricing.EffectiveRate(spec)
+	if got, want := *rate.InFresh, 9.0; got != want {
+		t.Fatalf("InFresh = %v, want %v (supplement should take precedence over inline)", got, want)
+	}
+}
+
+func TestPricing_InlineRates_Validation(t *testing.T) {
+	// Duplicate inline key
+	yamlDup := pricingCfgNamed(`pricing:
+  currency: USD
+  rates:
+    - key: custom/dup-model
+      in_fresh: 1.0
+      cache_read: 0.1
+      cache_write: 1.25
+      out: 4.0
+    - key: custom/dup-model
+      in_fresh: 2.0
+      cache_read: 0.2
+      cache_write: 2.5
+      out: 8.0
+`, "anthropic", "", "custom/dup-model")
+	if _, err := Parse([]byte(yamlDup)); err == nil {
+		t.Fatal("want error on duplicate inline rate key, got nil")
+	}
+
+	// Negative rate
+	yamlNeg := pricingCfgNamed(`pricing:
+  currency: USD
+  rates:
+    - key: custom/neg-model
+      in_fresh: -1.0
+      cache_read: 0.1
+      cache_write: 1.25
+      out: 4.0
+`, "anthropic", "", "custom/neg-model")
+	if _, err := Parse([]byte(yamlNeg)); err == nil {
+		t.Fatal("want error on negative inline rate, got nil")
+	}
+}
+
 // writeSupplementFile writes content to a temp file and returns its path —
 // internal/pricing.ParseTable (via config.buildPricingContext) reads
 // pricing.supplement from disk via os.ReadFile, so an in-memory YAML string

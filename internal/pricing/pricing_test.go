@@ -542,3 +542,91 @@ func TestParseTableWithRates_NilRates_BehavesLikePlainParseTable(t *testing.T) {
 		t.Fatalf("Table.Currency = %q, want USD", tbl.Currency)
 	}
 }
+
+func TestNewTableFromRows_HappyPath(t *testing.T) {
+	fresh := 1.0
+	cRead := 0.1
+	cWrite := 1.25
+	out := 4.0
+	rows := []RateRow{
+		{
+			Key:        "vendor/model-a",
+			InFresh:    &fresh,
+			CacheRead:  &cRead,
+			CacheWrite: &cWrite,
+			Out:        &out,
+		},
+		{
+			Key:        "domestic/model-b",
+			Currency:   "CNY",
+			InFresh:    f(7.1),
+			CacheRead:  f(0.71),
+			CacheWrite: f(8.875),
+			Out:        f(28.4),
+		},
+	}
+	aliases := map[string]string{
+		"alias-a": "vendor/model-a",
+	}
+	tbl, err := NewTableFromRows(rows, aliases, "USD", map[string]float64{"CNY": 7.1})
+	if err != nil {
+		t.Fatalf("NewTableFromRows: %v", err)
+	}
+	// Check vendor/model-a
+	ra, ok := tbl.Lookup("vendor/model-a")
+	if !ok {
+		t.Fatalf("Lookup vendor/model-a failed")
+	}
+	if *ra.InFresh != 1.0 || *ra.Out != 4.0 {
+		t.Errorf("vendor/model-a rates unexpected: %+v", ra)
+	}
+	// Check domestic/model-b (converted from CNY to USD)
+	rb, ok := tbl.Lookup("domestic/model-b")
+	if !ok {
+		t.Fatalf("Lookup domestic/model-b failed")
+	}
+	if math.Abs(*rb.InFresh-1.0) > 1e-6 || math.Abs(*rb.Out-4.0) > 1e-6 {
+		t.Errorf("domestic/model-b rates unexpected: %+v", rb)
+	}
+	// Check alias
+	target, ok := tbl.LookupAlias("alias-a")
+	if !ok || target != "vendor/model-a" {
+		t.Errorf("LookupAlias alias-a = %q, %v, want vendor/model-a, true", target, ok)
+	}
+}
+
+func TestNewTableFromRows_RejectsDuplicatesAndInvalid(t *testing.T) {
+	fresh := 1.0
+	// Duplicate key
+	dupRows := []RateRow{
+		{Key: "vendor/model", InFresh: &fresh},
+		{Key: "vendor/model", InFresh: &fresh},
+	}
+	if _, err := NewTableFromRows(dupRows, nil, "USD", nil); err == nil {
+		t.Errorf("want duplicate key error, got nil")
+	}
+
+	// Empty key
+	emptyKeyRows := []RateRow{
+		{Key: "  ", InFresh: &fresh},
+	}
+	if _, err := NewTableFromRows(emptyKeyRows, nil, "USD", nil); err == nil {
+		t.Errorf("want empty key error, got nil")
+	}
+
+	// Deep key
+	deepKeyRows := []RateRow{
+		{Key: "a/b/c", InFresh: &fresh},
+	}
+	if _, err := NewTableFromRows(deepKeyRows, nil, "USD", nil); err == nil {
+		t.Errorf("want deep key error, got nil")
+	}
+
+	// Missing currency rate
+	cnyRows := []RateRow{
+		{Key: "vendor/model", Currency: "CNY", InFresh: &fresh},
+	}
+	if _, err := NewTableFromRows(cnyRows, nil, "USD", nil); err == nil {
+		t.Errorf("want missing exchange rate error, got nil")
+	}
+}

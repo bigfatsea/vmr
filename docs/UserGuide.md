@@ -474,7 +474,12 @@ providers:
 pricing:
   currency: CNY # required once any account uses metric: cost; the standard table itself is USD
   exchange_rate: {CNY: 7.1} # a general "1 USD = X <code>" map — required whenever currency isn't USD
-  supplement: ./pricing.yaml # optional: your own additions, same shape as the built-in table, merged in (yours wins on a key clash) — see pricing.example.yaml
+  # Optional: inline custom rates and aliases (no external pricing.yaml file needed):
+  rates:
+    - {key: custom/my-model, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
+  aliases:
+    my-model-alias: custom/my-model
+  # supplement: ./pricing.yaml # optional: external supplement file, merged on top if specified
 
 providers:
   - name: anthropic # naming the provider after its vendor helps auto-resolution — see below
@@ -493,11 +498,12 @@ providers:
 
 That last step is the interesting one, because a bare model name is usually carried by several vendors: the maker, plus every aggregator reselling it. vmr breaks that tie by **vendor precedence** — the single non-reseller (first-party) row wins, since its price *is* the model's list price, which is what an offline estimate means. Only a tie among resellers is left unresolved, because two aggregators quoting someone else's model have no canonical answer between them, and vmr refuses to guess a rate rather than risk a wrong one. This is what lets `deepseek-v4-flash` price correctly through a provider you named `my-plan`.
 
-**Precedence is the safety net for the long tail, not the mechanism you should rely on for a model you actually route.** It can change without anyone editing anything: a table refresh that adds a second first-party row (a platform that resells another vendor alongside its own line) turns a name that used to resolve into one that does not — silently, with no error, just a price that leaves the report. Pin anything you depend on with an **alias** instead: an alias whose target disappears is a load-time error, which is the failure mode you want. The built-in table already pins multi-vendor and curated models that precedence cannot decide, and you can add your own in a `pricing.supplement` file's `aliases:` block:
+**Precedence is the safety net for the long tail, not the mechanism you should rely on for a model you actually route.** It can change without anyone editing anything: a table refresh that adds a second first-party row (a platform that resells another vendor alongside its own line) turns a name that used to resolve into one that does not — silently, with no error, just a price that leaves the report. Pin anything you depend on with an **alias** instead: an alias whose target disappears is a load-time error, which is the failure mode you want. The built-in table already pins multi-vendor and curated models that precedence cannot decide, and you can add your own directly in `pricing.aliases` (or in a `pricing.supplement` file's `aliases:` block):
 
 ```yaml
-aliases:
-  my-gateway-model-name: gemini/gemini-3.7-flash   # a reference to a priced key, never a copied number
+pricing:
+  aliases:
+    my-gateway-model-name: gemini/gemini-3.7-flash   # a reference to a priced key, never a copied number
 ```
 
 An alias resolves in exactly one hop — pointing one at another alias, or at a key that doesn't exist, is a load-time error. `vmr check` prints what resolved for each provider, plus how many aliases are in effect, so this is never a guessing game on your end either.

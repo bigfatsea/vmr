@@ -52,6 +52,13 @@ type PricingConfig struct {
 	// (supplement wins on a matching canonical key). A path that doesn't
 	// exist is a load-time error, never a silent skip.
 	Supplement string `yaml:"supplement"`
+	// Rates optionally defines custom pricing table rows directly inline,
+	// without needing a separate pricing.yaml supplement file. Merged over
+	// the embedded standard table (rates win on a matching canonical key).
+	Rates []pricing.RateRow `yaml:"rates"`
+	// Aliases optionally defines bare-model-name -> canonical-key mappings
+	// directly inline, without needing a separate pricing.yaml supplement file.
+	Aliases map[string]string `yaml:"aliases"`
 	// Standard optionally replaces the embedded standard table wholesale
 	// (for a deployment that maintains its own complete price list) —
 	// still merged with Supplement on top. Rare; most configs leave this
@@ -249,6 +256,13 @@ func buildPricingContext(gc *PricingConfig, configDir string) (*pricingContext, 
 			return nil, fmt.Errorf("pricing.standard %s: %w", path, err)
 		}
 		table = override
+	}
+	if len(gc.Rates) > 0 || len(gc.Aliases) > 0 {
+		inline, err := pricing.NewTableFromRows(gc.Rates, gc.Aliases, gc.Currency, gc.ExchangeRate)
+		if err != nil {
+			return nil, fmt.Errorf("pricing: %w", err)
+		}
+		table = pricing.Merge(table, inline)
 	}
 	if gc.Supplement != "" {
 		path := resolveConfigRelative(gc.Supplement, configDir)

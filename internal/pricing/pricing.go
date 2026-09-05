@@ -414,21 +414,17 @@ type fileTable struct {
 	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 }
 
-// fileRate is one fileTable row. Pointer fields: an absent YAML key decodes
-// to nil (unknown), present-with-0.0 decodes to a non-nil pointer at 0.0
-// (explicitly free) — this is the exact mechanism Rate's "missing vs zero"
-// distinction is built on; no custom UnmarshalYAML is needed to get it
-// (see config.LimitConfig's own doc comment for the same "plain fields
-// beat a custom decoder" precedent this package follows).
+// RateRow is one row in a pricing table (either an external supplement file or
+// an inline pricing.rates declaration in config.yaml). Pointer fields: an absent
+// YAML key decodes to nil (unknown), present-with-0.0 decodes to a non-nil pointer
+// at 0.0 (explicitly free) — preserving Rate's "missing vs zero" distinction.
 //
-// Currency optionally overrides the table's own top-level currency for this
+// Currency optionally overrides the table's own default currency for this
 // one row — e.g. a domestic vendor's row entered straight from its official
-// CNY price list inside an otherwise-USD supplement file. Empty means
-// "inherit the table's currency:" (itself USD if that's also empty). Only
-// ParseTableWithRates actually honors a non-USD value; plain ParseTable
-// (the embedded standard/curated tables' loader) rejects it exactly as
-// before — see that function's doc comment.
-type fileRate struct {
+// CNY price list. Empty means "inherit the table's default currency" (itself
+// USD if also empty). Converted to USD via the effective exchange_rate map at
+// parse time.
+type RateRow struct {
 	Key        string   `yaml:"key"`
 	Currency   string   `yaml:"currency"`
 	InFresh    *float64 `yaml:"in_fresh"`
@@ -436,6 +432,8 @@ type fileRate struct {
 	CacheWrite *float64 `yaml:"cache_write"`
 	Out        *float64 `yaml:"out"`
 }
+
+type fileRate = RateRow
 
 // FactorBetween returns the multiplier that converts an amount denominated
 // in fromCCY into toCCY, via a USD pivot: rates maps a currency code to "1
@@ -541,36 +539,44 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 	if defaultCCY == "" {
 		defaultCCY = "USD"
 	}
-	// Validated unconditionally, even for a table with zero rows (or every
-	// row naming its own currency) — declaring a table-level currency: is a
-	// commitment that it CAN convert, not just that something happens to
-	// need it right now.
+	t, err := NewTableFromRows(ft.Rates, ft.Aliases, defaultCCY, effectiveRates)
+	if err != nil {
+		return nil, fmt.Errorf("parse pricing table: %w", err)
+	}
+	t.GeneratedAt = ft.GeneratedAt
+	return t, nil
+}
+
+// NewTableFromRows constructs a Table from in-memory RateRow entries and
+// optional aliases, normalized to USD via the provided exchange-rate map.
+// defaultCCY sets the fallback currency for rows that omit Currency ("" or
+// "USD" means USD). Used for inline pricing.rates/pricing.aliases in config.yaml
+// as well as the fileTable parser.
+func NewTableFromRows(rows []RateRow, aliases map[string]string, defaultCCY string, rates map[string]float64) (*Table, error) {
+	defaultCCY = strings.ToUpper(strings.TrimSpace(defaultCCY))
+	if defaultCCY == "" {
+		defaultCCY = "USD"
+	}
 	if defaultCCY != "USD" {
-		if _, ok := FactorBetween(defaultCCY, "USD", effectiveRates); !ok {
-			return nil, fmt.Errorf("parse pricing table: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", defaultCCY, defaultCCY, defaultCCY)
+		if _, ok := FactorBetween(defaultCCY, "USD", rates); !ok {
+			return nil, fmt.Errorf("currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\")", defaultCCY, defaultCCY, defaultCCY)
 		}
 	}
-	// The resulting Table is ALWAYS USD, regardless of what the source file
-	// declared — every row below is normalized to USD before t.put, so
-	// every downstream consumer (Merge, Resolve, the discount-chain
-	// recursion in resolve.go) keeps operating on pure-USD Rate values
-	// exactly as before this function existed.
 	t := NewTable("USD")
-	t.GeneratedAt = ft.GeneratedAt
-	for from, to := range ft.Aliases {
+	for from, to := range aliases {
 		if strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
-			return nil, fmt.Errorf("parse pricing table: aliases: both sides must be non-empty (got %q -> %q)", from, to)
+			return nil, fmt.Errorf("aliases: both sides must be non-empty (got %q -> %q)", from, to)
 		}
 		t.putAlias(from, to)
 	}
 	seen := map[string]bool{}
-	for i, r := range ft.Rates {
-		lk, rate, err := parseRateRow(r, i, defaultCCY, effectiveRates)
+	for i, r := range rows {
+		lk, rate, err := parseRateRow(r, i, defaultCCY, rates)
 		if err != nil {
 			return nil, err
 		}
 		if seen[lk] {
-			return nil, fmt.Errorf("parse pricing table: rates[%d]: duplicate key %q", i, r.Key)
+			return nil, fmt.Errorf("rates[%d]: duplicate key %q", i, r.Key)
 		}
 		seen[lk] = true
 		t.put(lk, rate)
@@ -587,7 +593,7 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 // set stays with the caller, which owns that set.
 func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64) (string, Rate, error) {
 	if strings.TrimSpace(r.Key) == "" {
-		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key is required", i)
+		return "", Rate{}, fmt.Errorf("rates[%d]: key is required", i)
 	}
 	// Canonical keys are exactly "vendor/basename" (or a bare name). A
 	// deeper key — openrouter's forced "meta-llama/llama-3.3-70b-instruct",
@@ -598,7 +604,7 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	// can never see each other. Reject at load time so a hand-written
 	// supplement names the two-segment key instead.
 	if strings.Count(r.Key, "/") > 1 {
-		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
+		return "", Rate{}, fmt.Errorf("rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
 	}
 	lk := strings.ToLower(strings.TrimSpace(r.Key))
 	rowCCY := strings.ToUpper(strings.TrimSpace(r.Currency))
@@ -609,7 +615,7 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	if rowCCY != "USD" {
 		factor, ok := FactorBetween(rowCCY, "USD", rates)
 		if !ok {
-			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
+			return "", Rate{}, fmt.Errorf("rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
 		}
 		rate = rate.Scale(factor)
 	}
@@ -617,7 +623,7 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	// lookup of that key a tableHit with an all-nil (unpriced) Rate —
 	// bypassing the "no rate at all" contract upstream callers rely on.
 	if rate.IsEmpty() {
-		return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: at least one of in_fresh/cache_read/cache_write/out must be set", i, r.Key)
+		return "", Rate{}, fmt.Errorf("rates[%d]: key %q: at least one of in_fresh/cache_read/cache_write/out must be set", i, r.Key)
 	}
 	// Reject NaN, Inf, and negative rates — a hand-written supplement
 	// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons
@@ -632,13 +638,13 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 			continue
 		}
 		if math.IsNaN(*comp.val) {
-			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is NaN", i, r.Key, comp.name)
+			return "", Rate{}, fmt.Errorf("rates[%d]: key %q: %s is NaN", i, r.Key, comp.name)
 		}
 		if math.IsInf(*comp.val, 0) {
-			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is Inf", i, r.Key, comp.name)
+			return "", Rate{}, fmt.Errorf("rates[%d]: key %q: %s is Inf", i, r.Key, comp.name)
 		}
 		if *comp.val < 0 {
-			return "", Rate{}, fmt.Errorf("parse pricing table: rates[%d]: key %q: %s is negative (%v)", i, r.Key, comp.name, *comp.val)
+			return "", Rate{}, fmt.Errorf("rates[%d]: key %q: %s is negative (%v)", i, r.Key, comp.name, *comp.val)
 		}
 	}
 	return lk, rate, nil
