@@ -2,7 +2,7 @@
 
 # `config.mock.yaml` 配置形态简化分析（V2）
 
-> **本版定位**：V1 的内容在"现状 / 改动"两类之间交叉穿插，且每节论证模板不统一；本版按 **域（domain）** 重排，每节内部统一 6 段模板（目标 / 现状 / 方案对比 / 推荐 / 成本 / ROI 权衡），并把 mock.yaml 文本层零碎观察从"配置 schema 改动"里剥出来。便于与 V1 对照——本文件**不动**V1，对应内容见 V1 同名章节。
+> **本版定位**：V1 的内容在"现状 / 改动"两类之间交叉穿插，且每节论证模板不统一；本版按 **域（domain）** 重排，每节内部统一 6 段模板（目标 / 现状 / 方案对比 / 推荐 / 成本 / ROI 权衡）。V1 曾单列"mock.yaml 文本层零碎观察" B 节讨论示例文件的事实性错误——本轮决定取消该独立 B 节（mock 是示例，准确性与 schema 重构正交），仅在 G.1/G.3 留一句"顺手做"。
 >
 > **复核口径**：所有论断对照源码核实（`internal/config/*`、`internal/router/snapshot.go`、`internal/strategy/strategy.go`、`internal/config/pricing.go`）；与 V1 不同的取舍均以源码证据为准。
 >
@@ -16,7 +16,6 @@
   - A.1 时间字段归集（`timeouts:` / `ttl:`）与 Duration 文法统一
   - A.2 TTL 零值歧义（`audit_retention: 0`）与第三种零值语义（`0 = 无上限`）
   - A.3 `api_keys` 与 `proxy` 同层不同生命周期（不算问题，文档补一句）
-- **B. mock.yaml 文本层零碎观察**（不参与 schema 改动）
 - **C. Provider 块**
   - C.1 `Provider.Disabled` 临时下线开关
 - **D. 虚拟模型与 endpoint 块**
@@ -52,11 +51,8 @@
 | 节 | 议题 | 一句话结论 |
 |---|---|---|
 | A.1 | 时间字段归集（`timeouts:` / `ttl:`） | 同意；5 套时间语法 → 2 套 |
-| A.2 | TTL 零值消歧（`forever` 关键字）与 `0 = 无上限` 登记 | 同意；TTL 零值只剩"用默认"，无上限在文档标明 |
+| A.2 | TTL 零值消歧（取消"永久"语义，只接受带单位的具体数值） | 同意；`0` 与未写同义=用默认；需要长期保留写大数 |
 | A.3 | `api_keys` / `proxy` 同层不同生命周期 | 不算问题；UserGuide 补一句 |
-| B.1–B.3 | mock 零碎清理（`strategy` / `USD` / `model_multipliers` 注释） | 同意；零成本 |
-| B.4 | mock `premium.priority` 注释反向 | 同意且优先修；反向教学比无注释更糟 |
-| B.5 | `pricing` 命名歧义 | 不改名；UserGuide 补一句；术语替换成本与收益相抵 |
 | C.1 | `Provider.Disabled` 临时下线开关 | 同意；1 字段、运营高频、单独 PR |
 | D.1 | endpoints 二层 map 化 | 同意；最高 ROI，#1 优先 |
 | D.2 | fallback 联动 map 化 + 不可达告警 | 同意；与 D.1 强制联动，同一 PR |
@@ -73,7 +69,7 @@
 
 ### 目标
 
-让"等多久"与"活多久"两类时间字段在 YAML 上从字面就能区分；把同一份文件里并存的 5 套时间表达（`90 days` int 后缀、`10m` Go Duration、`1d` every 自创语法、`15s`、`forever`）收敛成 2 套。
+让"等多久"与"活多久"两类时间字段在 YAML 上从字面就能区分；把同一份文件里并存的 5 套时间表达（`90 days` int 后缀、`10m` Go Duration、`1d` every 自创语法、`15s`、各种"永久"语义）收敛成 2 套。
 
 ### 现状
 
@@ -141,56 +137,77 @@ ttl:                     # 活多久:生命周期/淘汰
 
 ### 目标
 
-`0` 在 TTL 字段上只剩一种解释，把"永不删除"独立成显式标记。
+- **`0`（及字段不写）只剩一种解释**：用配置默认值
+- **不支持**任何"永不过期/永久/无限期"语义——`forever` / `permanent` / `never` / `0` 都不表示"永久"
+- **需要长期保留的用户写一个具体大数**（如 `90000d` ≈ 246 年）
 
 ### 现状
 
 三个 TTL 字段零值行为各异（`config.go` 注释对照）：
 
-| 字段 | `= 0` 含义 |
-|---|---|
-| `audit_retention_days` | **永不删除**（高消费） |
-| `image_cache_ttl_days` | **默认 7 天** |
-| `sticky_ttl` | **默认 10 分钟** |
+| 字段 | `= 0` 现行含义 | 应有含义 |
+|---|---|---|
+| `audit_retention_days` | **永不删除**（高消费） | 用默认（90d） |
+| `image_cache_ttl_days` | **默认 7 天** | 用默认（7d） |
+| `sticky_ttl` | **默认 10 分钟** | 用默认（10min） |
 
-`0` 在同一份文件里同时意味着"永不""用默认"两种相反意图。**A.1 的 Duration 化不解决这个问题**——`0d` 照样两可。
+`0` 在同一份文件里同时意味着"永不""用默认"两种相反意图。A.1 的 Duration 化不解决这个问题（`0d` 照样两可）；**"永不删除"作为一个不与其他字段对称的零值语义，是历史遗留的怪异设计**，本轮彻底铲除。
 
 ### 方案对比
 
 | 方案 | 描述 | 取舍 |
 |---|---|---|
-| **A. `*Duration` + 显式 `forever` 关键字**（推荐） | `audit_retention` 改 `*Duration`，nil = "用配置默认 90d"、具体值 = "X 天后删"、新增 `forever` 关键字 = "永不删除" | 三种状态全分立；`0` 只有"用默认"一种解释 |
-| B. 注释起步 | `ttl.audit_retention` 在注释与 UserGuide 中显式写明"0 = 永不删除（有意为之）" | 零结构改动；新人靠注释避开歧义；不够彻底 |
-| C. `0` 改用 `default`，"永不" 用 0 | 反转语义 | 与现有已部署 config 互不兼容（无兼容层，等同重写），且新极性不如 `forever` 直观 |
+| **A. `*Duration`，只接受具体数值（带单位），不允许任何"永久"关键字**（推荐） | `audit_retention` 等三个 TTL 字段改 `*Duration`；nil 与 0 同义 = 用配置默认；解析器显式拒绝 `forever` / `permanent` / `never` 这类关键字 | 零值只有"用默认"一种解释；与"等多久"侧 `timeouts.*` 一致的极性；"想要永久"是用户明确选择，表现为一个具体大数 |
+| B. 维持 `*int` 字段类型（int64 天数），加 "不要写 0 表示永久" 的注释 | 不改类型 | 零值歧义的结构根源未解决；新极性可读性差；否决 |
+| C. 保留 `forever` 关键字（V1 早先方案） | 与方案 A 类似但允许 forever | "永久"不是一个有意义的额外语义，仅仅是"任意大数"的语法糖；本轮明确取消"永久"作为一类语义 |
+
+**不引"`*int` nil/0 同义再加显式默认"那种"三态"指针**：把 `*Duration` 的 nil 视为 "0 或未写"，由 `applyDefaults` 负责填默认值——这是单一职责，nil 本身不代表"未声明"。**`unconstrained` 这类语义根本不出现在 TTL 字段上**（TTL 字段有自然下限 0，无 unconstrained 概念）。
 
 ### 推荐
 
 ```yaml
 ttl:
-  audit_retention: 90d       # 正常写法
+  audit_retention: 90d      # 显式: 90 天后删
   # 或:
-  audit_retention: forever   # 显式永不删除, 语义无歧义
+  audit_retention: 3mo      # 3 个月后删（mo = month）
+  # 或:
+  audit_retention: 90000d   # 约 246 年——给需要长期保留的场景
+  # 或不写:
+  # → 用配置默认值 90d
 ```
 
-`image_cache_ttl` / `sticky_ttl` 同理（`*Duration`，0 = 默认不歧义；当前 `= 0` = "永不" 是错误分类，本来就不是用户合理意图）。
+**支持的单位（不区分大小写）**：
+- `d`（天）
+- `w`（周 = 7 天）
+- `mo`（月 = 30 天；月是日历近似，与 `every: 1mo` 语义一致）
+- `y`（年 = 365 天；同近似）
+
+**显式禁止**：
+- `forever` / `permanent` / `never` 这类永久语义关键字——解析器拒绝，load error
+- `0d` / `0` 表示永久——`0` 与"未写"同义，= 用默认
+- 负数——`applyDefaults` 改为 `value <= 0` 都用默认（不再有"非 0 才生效"的隐藏极性）
+
+`image_cache_ttl` / `sticky_ttl` 同理（注意 `sticky_ttl` 单位仍是 `min/h` 沿用 Go Duration 语法，因为 sticky 是分钟/小时量级；`image_cache_ttl` / `audit_retention` 用扩展语法 `d/w/mo/y`）。
 
 **同类问题顺带登记：第三种零值语义（`0 = 无上限`）**：
-除上述三个 TTL 字段在"0 = 默认"与"0 = 永不"之间的二义性外，系统还存在第三种零值语义——`max_attempts: 0` 与 `max_concurrency: 0` 表示 **"0 = 无上限"（unlimited）**。这是业界常见约定且代码已有明确注释，本轮形态简化**结构维持不动**；但 **UserGuide 的字段表应逐字段显式标明零值含义**，消除配置者在三种零值语义之间的猜测成本。
+除上述三个 TTL 字段的零值二义性外，系统还存在第三种零值语义——`max_attempts: 0` 与 `max_concurrency: 0` 表示 **"0 = 无上限"（unlimited）**。这是业界常见约定且代码已有明确注释，本轮形态简化**结构维持不动**；但 **UserGuide 的字段表应逐字段显式标明零值含义**，消除配置者在三种零值语义之间的猜测成本。
 
 ### 成本
 
-- 3 个字段类型 `int` → `*Duration`（或 `*int64`），含 `forever` 关键字识别
-- `applyDefaults` 三行改
-- 语义错误检查：`audit_retention` 旧值 = 0 改后被解释为"默认 90d"——这是**新行为**，需在 `CHANGELOG.md` 显式列出（用户须显式写 `forever` 以保留旧"永不删除"语义）
-- 文档：UserGuide 字段表逐字段标明零值含义（包含 TTL 的 `forever`/默认，以及 `max_attempts` / `max_concurrency` 的 `0 = 无上限`）
+- 3 个字段类型 `int` → `*Duration`（`sticky_ttl` 沿用 `min/h`、其余两个加 `d/w/mo/y` 扩展）
+- 解析器扩 `d/w/mo/y` 单位（复用 A.1 提议的扩展方案）；**显式拒绝** `forever` / `permanent` / `never` 关键字（一个 `if token in forbiddenSet { error }`）
+- `applyDefaults` 改：`<= 0` 用默认（而不是只 `== 0` 用默认；与"`*Duration` 的 nil 等价于 0"语义对齐）
+- **行为变更（Breaking）**：`audit_retention` 旧值 = 0 改后被解释为"默认 90d"——**今天依赖"0 = 永不删除"的用户**会**默默丢数据**。`CHANGELOG.md` `[Unreleased]` 段需列为 Breaking Change，发布说明里给一行人工映射（"依赖旧'永不删除'语义请改为 `90000d` 或更大值"），UserGuide 在 `audit_retention` 字段处**显式警告**。
+- 源码注释修正：`config.go:250` 当前注释 "0/absent = never delete audit files" 是**错的**（与新语义不符），改 "0/absent = use default retention (90d)"
 
-**估算**：~30 行 Go，无新依赖。
+**估算**：~50 行 Go（含 4 单位 parser、关键字拒绝、`*Duration` 类型改）；文档+CHANGELOG 同步。无新依赖。
 
 ### ROI 权衡
 
-- **Return（架构简洁优雅）**：零值语义全分立，`0` 不再"既是 X 又是 Y"。三类 TTL 字段统一极性，新人无歧义；顺带清理全配置的零值认知负担。
-- **Investment**：低（`forever` 关键字复用 `Duration.UnmarshalYAML` 的扩展位）；风险：低（语义错误检查显式列出）。
-- **结论**：高 ROI，与 A.1 一起做。
+- **Return（架构简洁优雅）**：零值语义**全分立**——TTL 字段"0 = 用默认"（且只有这一种解释）、`max_attempts`/`max_concurrency` "0 = 无上限"（业界约定）、`audit_retention` 不再有"0 = 永久"这种孤立怪异极性。"永久"作为语义被彻底取消，零值含义在整个 config 文件中收敛为两种。
+- **Return（用户认知负担）**：新人不再需要"为什么 `audit_retention: 0` 是永不，而 `image_cache_ttl: 0` 是默认"这种"按字段记忆特殊极性"的认知负担。
+- **Investment**：低-中（`Duration` 解析器扩单位 + 关键字拒绝 + 3 字段类型改 + 文档同步）；风险：**中**（Breaking Change：依赖旧"0 = 永久"行为的部署会默默丢数据，**必须** `CHANGELOG.md` 标 Breaking、UserGuide 显式警告、迁移指南给出等价改写）
+- **结论**：高 ROI，但有 Breaking 风险——落地前需设计评审确认迁移方案与告警位齐全。
 
 ---
 
@@ -218,54 +235,6 @@ ttl:
 - **Return（易维护性）**：澄清一处潜在误解。
 - **Investment**：~5 行文档。
 - **结论**：顺手做，单独一行 PR。
-
----
-
-# B. mock.yaml 文本层零碎观察
-
-> 范围：`config.mock.yaml` 自身的事实性错误 / 注释过时 / 冗余条目。**不**涉及 schema 改动。
-> ROI 维度统一为"易学性 vs 修改工作量"——都是 mock 文本层面的修正，不影响运行时、不影响其他配置文件。
-
-## B.1 `strategy: [priority]` 显式列出 —— 示例冗余
-
-`applyDefaults` 自动填默认值（`config.go:381-387`），mock.yaml 该行可删。
-
-**ROI**：零成本，纯清理。
-
-## B.2 `pricing.exchange_rate` 里的 `USD: 1.0` —— 冗余
-
-`pricing.go` 注释明确"USD 恒为隐式 1.0，永不需要条目"。mock.yaml 的 `USD: 1.0` 是死配置——删掉，避免用户误以为汇率表必须含 USD。
-
-**ROI**：零成本；用户误导性预防。
-
-## B.3 `openrouter` 的 `model_multipliers` 注释过时
-
-mock.yaml 写"通用条目先列，否则会被 wildcard 兜底死代码"——这条已是 **load error** 而非静默死代码：`pricing.go` 的 resolvePricing 显式拒绝"永远不可激活"的 Explicit 规则（错误信息指明"删除该条或重排"）。
-
-**ROI**：零成本；防止用户学错知识。
-
-## B.4 mock.yaml 的 `premium.priority` 注释方向错误
-
-`premium` 模型第一条 endpoint 写 `priority: 100  # 比默认 0 优先`——**两处都错**：
-
-1. priority 数值**越小**越优先（lower number wins，`internal/strategy/strategy.go:87`），100 实际排在默认 0 **之后**；
-2. 该条是 anthropic-messages、另一条是 openai-completions，分属不同 protocol route，**根本不参与同一排序**。
-
-示例文件的注释误导性强（它正是用户学习 priority 语义的地方），必须修正：要么改成同协议两条以演示排序，要么把注释改为准确描述。
-
-**ROI（问题严重性）**：高——这条注释**反向教学**，比"无注释"更糟，必须先修。
-
-## B.5 `pricing` 字段名的语义模糊（文档补注，不改名）
-
-`providers[].pricing` 双重角色：配 `metric: cost` 时必填（计费）；不配时可选，只为 `vmr report` 的 $ 估算提精度（报表）。字段名不区分这两种用途。
-
-**改名是合理的**（`pricing` → `billing`）——一个字段承担两种语义，"只有 metric: cost 才要求四要素完整"改成结构约束而非隐含规则。
-
-**但改名是一次贯穿三层的术语替换**（Quota 设计文档、内嵌标准表、`supplement` 文件格式都用 "pricing" 作术语），收益与成本相抵。
-
-**决策**：不改名；UserGuide 把"两种角色"写透。将来若 pricing 语义继续膨胀（账号级折扣、阶梯价），那时再拆。
-
-**ROI（问题严重性 vs 维护成本）**：中等 vs 跨三层术语替换成本——持平，不动。
 
 ---
 
@@ -409,7 +378,7 @@ agent:
 - **校验更严**：map key 本身过 `adapter.Get` 注册表校验，未知协议在 key 层就报错；错误信息从 "endpoint group #N" 变成 "endpoints.<protocol>[#N]"，更可定位。
 - **per-entry 覆盖项不受影响**：`max_context_tokens`/`capabilities`/`role_map`/`sticky_ttl`/`soft_block_failover` 全部留在条目内，语义零变化。
 
-`premium` 模型的 `priority: 100` 不构成反例：priority 全局可比、跨协议混排语义不变（mock 里那条注释本身是错的，见 B.4）。
+`premium` 模型的 `priority: 100` 不构成反例：priority 全局可比、跨协议混排语义不变（mock.yaml 里那条注释本身是错的，与示例准确性有关，不在 schema 范围）。
 
 ### 成本
 
@@ -529,11 +498,11 @@ quota:
 
 # E. 声明与默认值机制
 
-## E.1 `capabilities` / `max_context_tokens` 提至 `model_defaults`（按 (provider, model) 寻址）
+## E.1 `capabilities` / `max_context_tokens` 提至 `model_defaults`（按真实模型名寻址，`providers` 作为子属性）
 
 ### 目标
 
-同一真实模型（在多个虚拟模型下使用）"它到底支持什么 / 上下文多大"这一**横向**事实只写一次。
+同一真实模型（在多个虚拟模型下使用）"它到底支持什么 / 上下文多大"这一**横向**事实只写一次；`model_defaults` 块**以模型名为 key**，`providers` 退为子属性表征"这条声明对哪些 provider 生效"。
 
 ### 现状
 
@@ -555,10 +524,11 @@ quota:
 
 | 方案 | 描述 | 取舍 |
 |---|---|---|
-| **A. 顶层 `model_defaults` 表（按 (provider, model) 寻址）**（推荐） | 顶层新增 `model_defaults: {<provider>: {<model>: {capabilities, max_context_tokens}}}`；endpoint 级覆盖字段移除；虚拟模型级保留作为"显式 override" | 与"按真实模型声明"的需求维度完全匹配；横向合并；详见 E.2 关于 override |
-| B. 在 `Provider` 块内声明 | `provider.capabilities: {<model>: [...]}` | 跨账户共享时拆写两份（`openrouter2` 和 `openrouter` 上跑同一个 `anthropic/claude-3-7-sonnet`，能力一样），是新的机械重复；否决 |
-| C. 把 `capabilities`/`max_context_tokens` 上提到 `api_key` 展开级别（per-credential） | 解决"不同账户有不同能力"问题 | 不是用户场景的主要矛盾；过度复杂化 |
-| D. 维持现状 + YAML 锚点 | 复用 `&cap_default` | 锚点解决字面重复，但不改变"事实归一"的本质——同一真实模型的能力仍然"分散在多个虚拟模型块里"；否决 |
+| **A. 顶层 `model_defaults`，key=模型名，`providers` 为子属性**（推荐） | `model_defaults: {<model>: {providers?, capabilities, max_context_tokens}}`；`providers` 不写 = 对所有 provider 生效；endpoint 级覆盖字段移除 | 与块的英文名 "model_defaults" 名实相符；与 `models[].endpoints[].providers: [list]` 的现有列表约定对称；同一模型在不同 provider 下有不同能力时，`providers: [subset]` 表达 |
+| B. 双层 map `model_defaults: {<provider>: {<model>: ...}}` | 外层 key 仍是 provider | 外层 key 名为"model_defaults"但实际上是 provider 寻址——**名实不符**；否决（V1 之前的中间方案，现以 A 取代） |
+| C. 在 `Provider` 块内声明 | `provider.capabilities: {<model>: [...]}` | 跨账户共享时拆写两份（`openrouter2` 和 `openrouter` 上跑同一个 `anthropic/claude-3-7-sonnet`，能力一样），是新的机械重复；否决 |
+| D. 把 `capabilities`/`max_context_tokens` 上提到 `api_key` 展开级别（per-credential） | 解决"不同账户有不同能力"问题 | 不是用户场景的主要矛盾；过度复杂化 |
+| E. 维持现状 + YAML 锚点 | 复用 `&cap_default` | 锚点解决字面重复，但不改变"事实归一"的本质——同一真实模型的能力仍然"分散在多个虚拟模型块里"；否决 |
 
 ### 推荐
 
@@ -568,29 +538,36 @@ model_defaults:
   # 通配(可选): 大多数模型走这份基线; 不写 = 未匹配模型 unconstrained
   "*":
     capabilities: [text, tools]
-  # 精准匹配: provider + model 都给定时, 胜过通配
-  minimax:
-    MiniMax-M3:
-      capabilities: [text, tools, image, audio, video, thinking]
-      max_context_tokens: 512000
-  anthropic:
-    claude-3-7-sonnet-20250219:
-      max_context_tokens: 200000
+  # 精准匹配: 模型名 = key, providers 不写 = 对所有 provider 生效
+  MiniMax-M3:
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]   # 这条声明仅对这两个 provider 生效
+  # 另一精准: providers 不写 = 通配所有 provider
+  claude-3-7-sonnet:
+    max_context_tokens: 200000
 ```
+
+**关键设计点**：
+
+- **key 是真实模型名**（与 `model_defaults` 块名实相符）
+- **`providers` 不写 = 对所有 provider 生效**（与 `models[].endpoints[].providers: [list]` 的现有列表约定对称；列表子集表达"这条声明仅生效于这些 provider"）
+- **同一模型在不同 provider 下可声明不同能力**：例如 `MiniMax-M3` 在 `openrouter` 和 `minimax` 上的窗口都是 512k、多模态齐全；但 `claude-3-7-sonnet` 在 `anthropic` 上 200k，在 `openrouter` 转发时只剩 100k——后者用 `providers: [openrouter]: { max_context_tokens: 100000 }` 表达
+- **重复声明合并**：`capabilities` 取并集（声明式集合）；`max_context_tokens` 是标量，**待定**（落地时敲定取最大/后写覆盖/拒绝）——见本节末尾"待敲定项"
 
 `VirtualModel` 级保留 `capabilities` / `max_context_tokens` 作为**显式覆盖**（E.2 详述为何需要保留 override 机制）；不写就查 `model_defaults`。`EndpointGroup` 上的 `capabilities` / `max_context_tokens` 字段**移除**。
 
 #### 解析顺序与字段独立回退
 
-注意：`capabilities` 与 `max_context_tokens` 两个维度**相互正交、按字段独立回退**，而不是整条 entry 整体覆盖或整体回退（例如 `anthropic.claude-3-7-sonnet` 若仅声明了 `max_context_tokens: 200000`，其 `capabilities` 缺省，继续向通配 `*` 或 unconstrained 回退，不会被该 entry 阻断）。
+`capabilities` 与 `max_context_tokens` 两个维度**相互正交、按字段独立回退**——而不是整条 entry 整体覆盖或整体回退（例：`claude-3-7-sonnet` 若仅声明了 `max_context_tokens: 200000`，其 `capabilities` 缺省，继续向通配 `*` 或 unconstrained 回退，不会被该 entry 阻断）。
 
 每次 `buildEndpoints` 对单个 `(virtualModel, provider, model)` 的每个独立维度（`capabilities` / `max_context_tokens`）计算最终值时：
 
 ```
-1. 若虚拟模型本身显式声明了该字段         → 用虚拟模型的（显式覆盖/降级，见 E.2）
-2. 若 model_defaults[provider][model] 声明了该字段 → 用这个（精准匹配）
-3. 若 model_defaults["*"] 声明了该字段            → 用通配
-4. 否则                                           → unconstrained（0 / 空切片）
+1. 若虚拟模型本身显式声明了该字段                → 用虚拟模型的（显式覆盖/降级，见 E.2）
+2. 若 model_defaults[model] 存在且（providers 未写 OR provider ∈ providers）   → 用这个（精准匹配）
+3. 若 model_defaults["*"] 存在                                  → 用通配
+4. 否则                                                        → unconstrained（0 / 空切片）
 ```
 
 （字段直接删，不存在"旧写法还在被解析"——旧写法 = unknown field，严格 YAML 直接 load error，报错信息指向新写法。）
@@ -607,11 +584,18 @@ model_defaults:
 
 #### 为什么放在顶层而不是 Provider 内
 
-`provider.base_url` 在 provider 内合理（每账户每协议一个 base URL）；但 `capabilities` / `max_context_tokens` **跨账户共享**——`openrouter2` 和 `openrouter` 上跑同一个 `anthropic/claude-3-7-sonnet`，窗口和能力一样；按 provider 拆写两份是新的机械重复。顶层按 `(provider, model)` 寻址恰好对应真实需求维度。
+`provider.base_url` 在 provider 内合理（每账户每协议一个 base URL）；但 `capabilities` / `max_context_tokens` **跨账户共享**——`openrouter2` 和 `openrouter` 上跑同一个 `anthropic/claude-3-7-sonnet`，窗口和能力一样；按 provider 拆写两份是新的机械重复。顶层按模型名寻址恰好对应真实需求维度。`providers` 退为子属性而不是外层 key，**也意味着同一模型跨账户共享同一份声明**——这正是"按真实模型声明"的核心动机。
+
+#### 待敲定项
+
+**同一模型名 + 同一 provider 出现多条 model_defaults 声明时如何处理**（例：`MiniMax-M3` 在两处分别声明 `capabilities`）：
+
+- `capabilities`：取并集（声明式集合，并集语义最自然）
+- `max_context_tokens`：取最大 / 取最后写 / 拒绝重写——三种选项各有取舍，本轮不决，**落地时敲定**。倾向**取最大**（"声明 = 允许的最大值"，与 unconstrained 时取 0 的方向相反）
 
 ### 成本
 
-- 新结构：`Config.ModelDefaults map[string]map[string]ModelDefaultEntry`（provider × model），按需展开
+- 新结构：`Config.ModelDefaults map[string]ModelDefaultEntry`（key = 真实模型名；value 含 `Providers []string`（可选，不写 = 通配所有 provider）、`Capabilities []string`、`MaxContextTokens int64`），按需展开
 - 字段移除：`EndpointGroup.Capabilities`、`EndpointGroup.MaxContextTokens`、`core.Endpoint.ExtraCapabilities`、`core.Endpoint.OwnMaxContextTokens`——共 4 个字段直接删
 - 合并逻辑简化：`buildEndpoints` 的 `mergeCapabilities` / `effMaxContextTokens` 三行改成"查表"一行；`core.Endpoint` 的 `ExtraCapabilities` / `OwnMaxContextTokens` 移除，`HasCapability` 的 `Capabilities` 字段含义不变（仍是已解析的完整集合）
 - `vmr check` 的 `extra_capabilities=…` / `max_context_tokens=…` 行删除
@@ -691,7 +675,7 @@ model_defaults:
 
 改后：
 
-- `model_defaults[minimax][MiniMax-M3]: { max_context_tokens: 512000, capabilities: [text, tools, image, audio, video, thinking] }`——事实只写一次
+- `model_defaults["MiniMax-M3"]: { max_context_tokens: 512000, capabilities: [text, tools, image, audio, video, thinking], providers: [openrouter, minimax] }`——事实只写一次
 - `agent` 模型自己**不写**这两个字段（直接继承 model_defaults）
 - `cheap.max_context_tokens: 128000`（虚拟模型层显式 override，**降级**）
 
@@ -719,7 +703,7 @@ model_defaults:
 
 ## F.1 `pricing.overrides` —— 不可 map 化（顺序承载语义）
 
-overrides 不是"按模型查表"，是**有序规则链**：Explicit 规则（显式费率）first-match-wins 即终止，**Discount 规则沿链逐级组合**（如 `[wildcard discount 0.6, 某模型显式费率]` = 该模型费率 × 0.6）。map 化会摧毁 discount 组合链的表达。而它唯一的 footgun（新规则被先前的 Explicit wildcard 兜底成死代码）已经由 load error 拦截（见 B.3），不需要用结构去防。**维持 list。**
+overrides 不是"按模型查表"，是**有序规则链**：Explicit 规则（显式费率）first-match-wins 即终止，**Discount 规则沿链逐级组合**（如 `[wildcard discount 0.6, 某模型显式费率]` = 该模型费率 × 0.6）。map 化会摧毁 discount 组合链的表达。而它唯一的 footgun（新规则被先前的 Explicit wildcard 兜底成死代码）已经由 load error 拦截（`pricing.go` resolvePricing 拒绝"永远不可激活"的 Explicit 规则），不需要用结构去防。**维持 list。**
 
 ## F.2 `quota.limits` —— map 化无益
 
@@ -758,13 +742,11 @@ map 化需要编造 key（`requests/1min` 之类字符串拼接），metric/ever
 | 3 | C.1 `Provider.Disabled` 临时下线开关 | 运营高频 + 架构简洁度 | 临时切走 1 字段 + reload | 1 字段 + 1 过滤点 + check 警告 | 单独 PR 即可 |
 | 4 | E.1+E.2 model_defaults + 移除 endpoint 覆盖 | 架构简洁度 + 事实归一 | 横向"按真实模型声明" + 4 字段净减 | 略大（牵动 Core.md 文档） | 与 mock.yaml 重写一并做 |
 | 5 | A.1 timeouts/ttl 归集 + Duration 文法统一 | 用户认知负担 | 5 套时间语法 → 2 套 | ~40 行 Go | 与 A.2 一起做 |
-| 6 | A.2 TTL 零值消歧（`forever` 关键字） | 架构简洁优雅 | 零值不再"既是 X 又是 Y" | ~30 行 Go | 与 A.1 一起做 |
-| 7 | B.4 priority 注释反向（事实修正） | 易学性 | 防止用户学错 priority 语义 | 几行 mock 文本 | 优先做（误导性最强） |
-| 8 | B.1/B.2/B.3 mock 零碎清理 | 易学性 | 注释/示例正确 | 几行 mock 文本 | 顺手做 |
-| 9 | B.5 UserGuide 补注（proxy / pricing 角色） | 易维护性 | 澄清潜在误解 | ~10 行文档 | 中英同步 |
+| 6 | A.2 TTL 零值消歧（取消"永久"语义） | 架构简洁优雅 | 零值不再"既是 X 又是 Y" | ~50 行 Go；Breaking Change 需 CHANGELOG 标明 | 与 A.1 一起做；落地前需设计评审确认迁移方案 |
+| 7 | mock 零碎清理（priority 注释反向、`strategy` / `USD` / `model_multipliers` 注释） | 易学性 | 防止用户学错 priority 语义 | 几行 mock 文本 | 顺手做；不在 schema 决策流程 |
 | 10 | D.3 token_weights/multipliers YAML 锚点示例 | 用户痛点真实存在 | 多条 Limit 共享不必复制 | 零代码 | 示例/文档 |
 
-**不做清单**（防止反复重提）：F.1 pricing.overrides map 化、F.2 quota.limits map 化、F.3 providers map 化、F.4 api_keys map 顺序本轮不修、F.5 账号级 api_keys 展开与二象性统一维持现状、账号级 token_weights 回提（D.3）、B.5 `pricing` 改名 `billing`（术语替换成本与收益相抵）。
+**不做清单**（防止反复重提）：F.1 pricing.overrides map 化、F.2 quota.limits map 化、F.3 providers map 化、F.4 api_keys map 顺序本轮不修、F.5 账号级 api_keys 展开与二象性统一维持现状、账号级 token_weights 回提（D.3）、`pricing` 改名 `billing`（术语替换成本与收益相抵）。
 
 ### 推荐执行顺序
 
@@ -772,7 +754,7 @@ map 化需要编造 key（`requests/1min` 之类字符串拼接），metric/ever
 2. **C.1**（`Provider.Disabled` 临时下线开关）——净增 ~30 行、运营高频痛点，单独一个 PR 即可。
 3. **A.1+A.2**（时间字段归集 + Duration 文法统一 + TTL 零值消歧）——源码近零成本，可读性立竿见影。
 4. **E.1+E.2**（model_defaults + 端点覆盖字段移除）——略大但收益清晰，与 mock.yaml 重写一并做。
-5. **B.4**（priority 注释反向优先修，因为误导性最强） + B.1/B.2/B.3（顺手清） + B.5（UserGuide 补注）——纯文档/mock 收尾。
+5. **mock 零碎清理**（priority 注释反向、`strategy` / `USD` / `model_multipliers` 注释）+ A.3 UserGuide 补注——纯文档/mock 收尾，不在 schema 决策流程。
 6. **D.3**（YAML 锚点示例）——零成本，独立微 PR。
 
 ## G.2 落地注意事项
@@ -788,12 +770,12 @@ map 化需要编造 key（`requests/1min` 之类字符串拼接），metric/ever
 
 ## G.3 结论
 
-1. **顶层字段归集**：A.1 `timeouts:` / `ttl:` 子块 + Duration 文法统一；A.2 `forever` 关键字消歧零值语义，登记 `max_attempts` / `max_concurrency` 的 `0 = 无上限` 文档要求。
+1. **顶层字段归集**：A.1 `timeouts:` / `ttl:` 子块 + Duration 文法统一；A.2 取消 TTL 字段的"永久"语义（拒绝 `forever` 等关键字，`0` = 用默认，需要长期保留写大数如 `90000d`），支持 `d/w/mo/y` 多单位，登记 `max_attempts` / `max_concurrency` 的 `0 = 无上限` 文档要求。**A.2 是 Breaking Change**，CHANGELOG 必标。
 2. **Provider 块新增 1 字段**：C.1 `Provider.Disabled` 临时下线开关。
 3. **endpoints 二层 map 化**（D.1）：与 `base_url` 同构；fallback 联动 map 化 + 不可达告警（D.2）。
 4. **声明与默认值机制升级**（E.1+E.2）：`capabilities` / `max_context_tokens` 提至顶层 `model_defaults` 表（按 (provider, model) 寻址，两字段按维度独立回退）；endpoint 级覆盖字段移除（4 字段净减），但 **override 概念保留在虚拟模型层**（用户场景里"同一真实模型在不同虚拟模型下走不同上限"是正当需求）。
 5. **`token_weights` / `model_multipliers` 维持 Limit 内下沉**（D.3）：账号级回提已被 Quota 设计文档 P3 推翻；多条 Limit 共享同一份系数用 YAML 锚点解决（零代码），defaults 继承仅在真实痛点出现时再上。
 6. **明确不做的边界**（F）：pricing.overrides / quota.limits / providers 的 map 化、`api_keys` map 顺序有序化与二象性统一（维持现状）、`pricing` 改名 `billing`、账号级 token_weights 回提——各自的理由已在 F 节登记在案。
-7. **mock.yaml 文本层零碎观察**（B）：四类——strategy/USD 冗余（B.1/B.2）、注释过时（B.3）、priority 注释反向（B.4，最优先修）、`pricing` 命名歧义文档补注（B.5，不改）。
+7. **mock.yaml 文本层零碎观察**：priority 注释反向、strategy/USD 冗余、注释过时——都是示例文件层面，不进入 schema 决策流程；仅作"顺手做"的修整项（V1 曾单列 B 节讨论，本轮取消：mock 是示例，准确与否与 schema 重构正交）。
 8. **执行顺序**（G.1）：D.1+D.2 → C.1 → A.1+A.2 → E.1+E.2 → B 收尾 → D.3 零成本微 PR。
 9. **本文件不构成 schema 变更的批准**——任何落地都需经设计评审，并在 `KNOWN_ISSUES.md` 登记。
