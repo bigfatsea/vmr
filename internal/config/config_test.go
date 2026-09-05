@@ -802,12 +802,13 @@ func TestModelStickyExplicitFalse(t *testing.T) {
 }
 
 // TestOpenAIResponsesProtocolAccepted locks in that a third protocol needs
-// zero config-package code changes to become valid config: base_url and
-// EndpointGroup.Protocol are both validated purely against the adapter
-// registry (adapter.Get), never a hardcoded "openai-completions"/"anthropic-messages"
-// string list — see config.go's validate(). Registering the new adapter (this
-// file's blank import above) is the only thing that made this YAML valid;
-// nothing in this package itself was touched to allow it.
+// zero config-package code changes to become valid config: base_url's keys
+// and the endpoints:/fallback_endpoints: protocol-map keys are both validated
+// purely against the adapter registry (adapter.Get), never a hardcoded
+// "openai-completions"/"anthropic-messages" string list — see config.go's
+// validate(). Registering the new adapter (this file's blank import above)
+// is the only thing that made this YAML valid; nothing in this package
+// itself was touched to allow it.
 func TestOpenAIResponsesProtocolAccepted(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:9900

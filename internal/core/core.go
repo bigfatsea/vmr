@@ -188,8 +188,8 @@ type Endpoint struct {
 	SoftBlockFailover bool
 	// StickyTTL is how long a sticky preference for this endpoint stays
 	// valid, resolved at BuildSnapshot time from the endpoint's own
-	// config.EndpointConfig.StickyTTL override or, absent that, the global
-	// config.Config.StickyTTL default.
+	// config.EndpointGroup.StickyTTL override or, absent that, the global
+	// config.Config.TTL.Sticky default.
 	StickyTTL time.Duration
 
 	// Quota is this endpoint's provider-level quota spec, resolved at

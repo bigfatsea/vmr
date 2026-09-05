@@ -1,7 +1,7 @@
 # Ver 2026-08-28, by Sonnet 5
 # Minimal working vmr config — copy to config.yaml, export one API key, run.
 # This is the "just get it running" template. For every knob (failover tuning,
-# quota pacing, sticky TTL, proxies, multi-account merge, per-endpoint
+# quota pacing, sticky TTL, proxies, multi-account merge, model_defaults
 # capabilities), see config.example.yaml — the fully annotated reference.
 
 listen: 127.0.0.1:8800

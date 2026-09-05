@@ -1,7 +1,7 @@
 # Ver 2026-08-28, by Sonnet 5
 # 最小可用 vmr 配置 —— 复制为 config.yaml，导出一个 API key，即可运行。
 # 这是"先跑起来"的模板。所有旋钮（failover 调优、额度配速、sticky TTL、
-# 代理、多账号合并、按端点 capabilities）见 config.example.yaml —— 完整注解参考。
+# 代理、多账号合并、model_defaults capabilities）见 config.example.yaml —— 完整注解参考。
 
 listen: 127.0.0.1:8800
 

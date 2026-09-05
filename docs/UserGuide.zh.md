@@ -39,7 +39,7 @@
 
 ### 配置文件结构
 
-`providers` 是一个扁平列表——一个账号一条，不管它实际讲三种入口协议（`openai-completions` / `anthropic-messages` / `openai-responses`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 列表里每一条自带 `protocol` 字段，所以同一个虚拟模型名下可以同时挂一条 openai-completions 协议的候选列表和一条 anthropic-messages 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
+`providers` 是一个扁平列表——一个账号一条，不管它实际讲三种入口协议（`openai-completions` / `anthropic-messages` / `openai-responses`）里的几种。`base_url` 本身按协议分 key，所以一个账号的两个协议面写在同一条里，不需要重复声明两遍。`models` 按虚拟模型名分组；`endpoints` 本身按协议分 key，所以同一个虚拟模型名下可以同时挂一条 openai-completions 协议的候选列表和一条 anthropic-messages 协议的候选列表——两个入口各自独立可达。一条 endpoint-group 的 `models:` 列表可以写多个上游模型名，每个展开成独立的、各自健康跟踪的候选，共享这条 entry 的其余字段：
 
 ```yaml
 listen: 127.0.0.1:8800

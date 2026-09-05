@@ -314,7 +314,7 @@ Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意�
 ### 6.2 健康：冷却 + 半开恢复探测（后台探测）
 
 * 失败按类别计冷却：Transient 2s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 与 Transient 优先 `Retry-After`（429/503 都可能携带），**但同样封顶 1h**——Retry-After 是上游可控输入，一个畸形的超大值不该把端点锁死到进程重启。请求侧误配三类零冷却：内容合规/上下文超限/vendor 约束拒绝（ErrContent/ErrContextLimit/ErrQuirk）。
-* 冷却中被健康过滤剔除；到期进入半开，此时半开端点永远不放行真实请求：发现某个端点半开且当前没有探测在跑，就用 `Health.Acquire` 抢下单飞名额，起一个后台 goroutine（`internal/router/probe.go` 的 `runProbe`）发一个 `internal/probe` 构造的最小请求（要求模型原样回显一个一次性 nonce，`internal/probe.Echoed` 做子串校验），真实请求本身仍旧把这个端点当不可用处理，直接路由到下一候选。探测结果走跟真实请求完全相同的 `ad.ClassifyError` 判定，落到 `ReportSuccess`/`ReportFailure`/`ReportNeutral` 三者之一——2xx 视为恢复（回显没对上只记日志、不惩罚，避免模型偶尔不遵循指令误伤一个其实健康的端点）；4xx 且分类为 `ErrClient`/`ErrContent`/`ErrContextLimit`/`ErrQuirk` 视为"探测请求本身的问题，与端点健康无关"（`ReportNeutral`）；其余（含探测超时，受 `probe_timeout` 约束，默认 15s）视为真失败（`ReportFailure`，按原分类计相应冷却）。这条路径要解决的问题：如果放任"谁先撞上半开端点谁就当探针"，探针请求本身很大很慢时（比如一段几十万 token 的长对话），恢复检测的时长就跟这个具体请求的体量强绑定，期间同一进程里所有其他并发调用方也会被连带拖累；探测跟真实流量解耦之后，这个连带效应被消除，真实请求永远不必等探测、也不会因为探测变慢。
+* 冷却中被健康过滤剔除；到期进入半开，此时半开端点永远不放行真实请求：发现某个端点半开且当前没有探测在跑，就用 `Health.Acquire` 抢下单飞名额，起一个后台 goroutine（`internal/router/probe.go` 的 `runProbe`）发一个 `internal/probe` 构造的最小请求（要求模型原样回显一个一次性 nonce，`internal/probe.Echoed` 做子串校验），真实请求本身仍旧把这个端点当不可用处理，直接路由到下一候选。探测结果走跟真实请求完全相同的 `ad.ClassifyError` 判定，落到 `ReportSuccess`/`ReportFailure`/`ReportNeutral` 三者之一——2xx 视为恢复（回显没对上只记日志、不惩罚，避免模型偶尔不遵循指令误伤一个其实健康的端点）；4xx 且分类为 `ErrClient`/`ErrContent`/`ErrContextLimit`/`ErrQuirk` 视为"探测请求本身的问题，与端点健康无关"（`ReportNeutral`）；其余（含探测超时，受 `timeouts.probe` 约束，默认 15s）视为真失败（`ReportFailure`，按原分类计相应冷却）。这条路径要解决的问题：如果放任"谁先撞上半开端点谁就当探针"，探针请求本身很大很慢时（比如一段几十万 token 的长对话），恢复检测的时长就跟这个具体请求的体量强绑定，期间同一进程里所有其他并发调用方也会被连带拖累；探测跟真实流量解耦之后，这个连带效应被消除，真实请求永远不必等探测、也不会因为探测变慢。
 * **探针槽必须在每种结局下都归还**——中性结局共四类：内容拦截（ErrContent）、上下文超限（ErrContextLimit）、厂商协议约束拒绝（ErrQuirk）、ErrClient（坏请求原样返回）；漏掉任何一类的释放，探针一旦撞上对应类型的请求，`probing` 就会永久为 true，端点锁死到进程重启（这个不变式由回归测试锁定：`internal/server/active_probe_test.go`）。`upstreamHint` 命中的 `ErrEndpoint` 必须真的走到 `ReportFailure`、不能被误并进上面的中性分支——这条路径的同步 `tryOne` 侧由 `TestUpstreamGatewayFailureContinuesFailover`（`server_test.go`）锁定，异步 `runProbe` 侧由镜像的 `TestActiveProbe_UpstreamFailureGoesToReportFailure`（`active_probe_test.go`）锁定，两条路径各一份，互不替代。
 * 客户端主动断连不计入端点失败（与上游健康无关，防状态污染）——真实请求从不持有探针槽，所以断连也不需要额外释放探针的逻辑。
 * **配额窗口 vs 余额耗尽不做区分**：两者都归 ErrEndpoint（10min 起指数退避封顶 1h）。不对"N 小时窗口配额"单设更长冷却（如 5h 后再试）——厂商错误信号无法可靠区分两种耗尽，且现行封顶 1h 意味着最坏情况每小时只花一次失败探针请求，充值/窗口刷新后一小时内自动回归；专设长冷却省下的探针成本可忽略，代价却是恢复迟钝。
@@ -360,7 +360,7 @@ for _, ep := range route.Endpoints {
 }
 ```
 
-**诊断**：过滤后候选集为空是最容易让用户困惑的情形（"为什么明明配了好几个端点却说没有可用的"）。只在这条"空候选集"的失败路径上（不在热路径）额外跑一遍，找出是哪个 Condition 淘汰了最后剩下的端点，把原因写进错误消息（`rejected by condition(s): image`），不复用容易误导的"all cooling down or none configured"文案。`vmr check` 同步把每个端点声明的 `capabilities`/`max_context_tokens` 打印出来，让配置缺口在运行前就可见。
+**诊断**：过滤后候选集为空是最容易让用户困惑的情形（"为什么明明配了好几个端点却说没有可用的"）。只在这条"空候选集"的失败路径上（不在热路径）额外跑一遍，找出是哪个 Condition 淘汰了最后剩下的端点，把原因写进错误消息（`rejected by condition(s): image`），不复用容易误导的"all cooling down or none configured"文案。`vmr check` 同步展示每个模型的 `capabilities`/`max_context_tokens`；当某个端点的实际生效值来自 `model_defaults` 的精确匹配、并非模型自身声明或通配兜底时，还会在该端点行补一条解析结果，让配置缺口在运行前就可见。
 
 配置侧，真实模型的能力与上下文上限集中在顶层 `model_defaults:` 中声明（按真实模型名寻址，支持可选的 `"*"` 通配兜底；`providers` 列表可选，用于限制生效的账号范围），同一真实模型的事实只写一次。虚拟模型层保留 `VirtualModel.Capabilities []string` / `VirtualModel.MaxContextTokens int64` 作为**显式覆盖**（按维度独立覆盖/降级，例如 `cheap` 将某个大模型的窗口降级为 128000）：
 
@@ -454,7 +454,8 @@ func (r *Registry) Set(key, endpointKey string)  // 命中时刷新 mtime，用�
 **接入点**（`router.Serve`，紧接条件过滤和既有排序之后）：亲和性重排只在已经通过健康与条件过滤的候选集里生效（找不到匹配端点、或找到但已过 TTL，都直接跳过，什么都不做）——这保证它永远不会把一个当前不健康或不满足本次请求硬性条件的端点复活。粘性指针在**每一次成功完成请求后都更新**，包括 failover 后的成功，不只是第一次建立时——这样一次故障转移会让指针自动跟着移动到"实际生效缓存"真正所在的端点，是自愈设计，不需要额外的失效检测逻辑。
 
 ```yaml
-sticky_ttl: 10m                     # 全局默认，覆盖 Anthropic/OpenAI/MiniMax 的典型区间；硬上限 24h
+ttl:
+  sticky: 10m                       # 全局默认，覆盖 Anthropic/OpenAI/MiniMax 的典型区间；硬上限 24h
 
 model_defaults:
   MiniMax-M3:
@@ -512,7 +513,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 
 **范围**：只处理请求里的内联 base64 图片（OpenAI `image_url` 的 data URI／Anthropic `source.type=base64`）；不处理 response，也不 fetch 远程图片 URL——两者都超出"改写本地已有字节"的边界。与路线图规划的敏感词过滤插件共享同一接入点（body 解析后、`router.Serve` 之前），但不是同一套机制：图片降采样是具体、确定的处理，不经过预留的插件注册表。
 
-**开关，全局 + 逐虚拟模型覆盖**：全局配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。每个 virtual model 也可以在 `models.<name>.image_downscale` 单独设置，**模型自身的值优先于全局值**；不写则继承全局。`config.VirtualModel.ImageDownscaleMaxPx` 是 `*int` 而非 `int`：nil 代表"未设置，继承全局"，非 nil（含指向 0 的指针）代表"模型显式设置"，0 在模型层面是明确的"强制关闭"——即使全局开着，这个模型也不降采样。用 `int` 存不下这个区分（0 到底是"没写"还是"写了 0"），这是选指针类型的唯一原因。负数（全局或模型级）是配置错误，加载期直接拒绝（Fail-fast，与 `max_attempts`/`max_concurrency`/`audit_retention_days` 的校验一致）。
+**开关，全局 + 逐虚拟模型覆盖**：全局配置项 `image_downscale`（int，长边像素上限；0/缺省=关闭）——开关即参数，不设独立的 enabled 字段。每个 virtual model 也可以在 `models.<name>.image_downscale` 单独设置，**模型自身的值优先于全局值**；不写则继承全局。`config.VirtualModel.ImageDownscaleMaxPx` 是 `*int` 而非 `int`：nil 代表"未设置，继承全局"，非 nil（含指向 0 的指针）代表"模型显式设置"，0 在模型层面是明确的"强制关闭"——即使全局开着，这个模型也不降采样。用 `int` 存不下这个区分（0 到底是"没写"还是"写了 0"），这是选指针类型的唯一原因。负数（全局或模型级）是配置错误，加载期直接拒绝（Fail-fast，与 `max_attempts`/`max_concurrency`/`ttl.audit_retention` 的校验一致）。
 
 运行时对应关系：`router.ModelRoute` 携带同名的 `ImageDownscaleMaxPx *int` 字段（`BuildSnapshot` 从 `VirtualModel` 透传），并提供 `EffectiveImageDownscaleMaxPx(globalMaxPx int) int` 方法解出对某个模型实际生效的上限——nil 接收者安全（未知模型直接回退全局，调用方不用先判空）。`server.chatHandler` 因此需要在做降采样之前先解出请求的虚拟模型名（`adapter.TopLevelProbe`）：JSON 探测解析（`model`/`stream` 两个字段）在并发闸获取与图片降采样**之前**完成——探测本身够便宜，不需要等并发闸，这个顺序也让"坏 JSON / 缺 model"这两类 400 提前返回，不再白占一个并发槽位。
 
@@ -539,7 +540,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 - **Key**：`sha256(原始图片字节)` + 目标 `maxPx`（maxPx 必入 key——同一张图对不同虚拟模型可能配不同目标）。文件名 `<hex>-<maxPx>.jpg`。
 - **目录**：配置项 `image_cache_dir`；未设置时走 `internal/rundir.Resolve` 三层默认（`~/.vmr/image_cache` → 系统临时目录下 `vmr_image_cache` → `./image_cache`），与审计的 `log_dir` 共用同一套公式。用持久目录而非系统临时目录——macOS 会清理约 3 天未访问的临时目录条目。
 - **查找时机**：只在"确认需要处理"（`longSide > maxPx` 且未触发解压炸弹防护）之后才算哈希、查缓存——绝大多数图片不需要降采样。
-- **失效**：按最近命中时间（mtime）的 TTL（`image_cache_ttl_days`，缺省 7 天；命中时 `os.Chtimes` 刷 mtime，语义是"最近使用"）。**不设容量上限**——体积由"源图片数 × maxPx 种类 × TTL 窗口"界定，实践中量级有限；真出现磁盘问题再按路线图补。与 `audit_retention_days` 的"0=永久保留"刻意不同：审计有取证价值、删除是数据丢失风险；图片缓存纯粹是优化，主动清理是更安全的默认。
+- **失效**：按最近命中时间（mtime）的 TTL（`ttl.image_cache`，缺省 7 天；命中时 `os.Chtimes` 刷 mtime，语义是"最近使用"）。**不设容量上限**——体积由"源图片数 × maxPx 种类 × TTL 窗口"界定，实践中量级有限；真出现磁盘问题再按路线图补。默认值比 `ttl.audit_retention`（默认 90 天）短得多是刻意的：审计有取证价值，删除是数据丢失风险；图片缓存纯粹是优化，没有"长期保留"的理由，更短的默认 TTL 与更主动的清理都是更安全的选择。
 - **触发/写入**：不起 ticker——仿审计 housekeeping 的"事件触发 + 每目录每天至多一次"节流；`os.CreateTemp` + `os.Rename` crash-safe，失败静默忽略（fail-open）。
 
 `vmr.sh` 对目录的唯一参与：用 `"$BIN" check -c "$CFG" log` 查出 `log_dir` 把自己的 server stderr 日志放旁边——这个查询会完整加载校验 config.yaml，所以只在真要用到 `$LOG_DIR` 的分支（`start`/`service install`/`logs`）才调用，不在脚本顶层无条件跑（否则 config 损坏时连 `stop`/`status` 都会因它退出，而那正是最需要能停进程的时刻）。
@@ -653,7 +654,7 @@ Agent 场景每轮请求都重发完整对话历史，单日审计文件可达 1
 
 * **触发时机**：复用 `Logger.Write` 已有的"日期变化即轮转"判断（无新增定时器/轮询）——检测到 `date != l.date` 时，除了切到新文件，额外对目录做一次 housekeeping 扫描；`New()` 也在启动时扫一次，补上进程重启期间错过的轮转。两处都异步执行（独立 goroutine，`atomic.Bool` 防止扫描重叠），绝不阻塞审计写入或请求服务。
 * **压缩**：zstd（`github.com/klauspost/compress/zstd`，纯 Go、无 cgo；库默认压缩级别，未手工调参）。选它是因为 stdlib 的 `compress/gzip` 只有 32KB 滑动窗口，看不到相隔几十万到百万字节的跨行重复，实测压缩比被死死摁在 ~3.3×；zstd 默认窗口是 MB 级别，天然覆盖这种重复模式，实测压缩比 20~75×。写入临时文件（`.zst.tmp`）→ 校验 → `rename` 落地 → 确认落地后才删除原文件，中途崩溃不会丢数据也不会留半截 `.zst`；重启后遇到"明文+`.zst` 同时存在"（rename 后、删除原文件前崩溃）视为续跑，直接补删原文件，不重新压缩。
-* **保留**：配置项 `audit_retention_days`（缺省 **0 = 永久保留，不清理**）。默认关闭是刻意的产品判断——审计日志是 `vmr report` 成本核算的唯一数据源，静默按天数删除对没读文档的用户是数据丢失风险，需要显式设置天数才启用。
+* **保留**：配置项 `ttl.audit_retention`（`CalendarDuration`，支持 `d`/`w`/`mo`/`y` 单位，大小写不敏感；`0`/未写 = 用默认 90 天）。不支持任何"永久保留"语义——`forever`/`permanent`/`never` 这类关键字在加载期直接拒绝；真正需要长期保留的部署显式写一个足够大的数值（如 `90000d` ≈ 246 年）。审计日志是 `vmr report` 成本核算的唯一数据源，删除是数据丢失风险，所以默认值选得偏保守（90 天而非更短），但"用户完全不管这个字段也不会丢数据"不再是设计前提——依赖旧版"0 = 永不删除"语义的部署升级后必须显式改写，否则 90 天后开始清理（`CHANGELOG.md` 的 Breaking Change 记录）。
 * **零全盘扫描**：审计文件名自带日期（`vmr-audit-YYYY-MM-DD.jsonl[.zst]`），压缩/保留判定只需一次 `os.ReadDir`（目录内条目数 = 保留的天数，不是磁盘总量）+ 文件名正则取日期比较，不解析文件内容、不 `stat` 全盘。同一次目录扫描里，一个文件如果"既该压缩又已过保留期"，本轮就直接压缩后立即删除，不用等到下一天的扫描才清理。
 * **`vmr report` 的配套**：`Build` 按扩展名分支，`.zst` 输入透明解压后再喂给同一套 JSONL 解析——历史压缩文件与当天明文文件可以混在同一次 glob 里（`vmr report 'vmr-audit-*.jsonl*'`），调用方不需要关心哪个是哪个。
 
@@ -668,7 +669,6 @@ api_keys:                     # 可选：vmr 自身鉴权（Bearer 或 x-api-key
   - ${VMR_KEY_OPENCLAW}       #   client_key_tag = audit.KeyTag(该 key)，供 vmr report 按调用方分组导出。
                               #   旧的单把 api_key 已移除，配置里仍写着会被当作未知字段拒绝加载
 max_attempts: 0               # 上游尝试数上限；缺省 0 = 不限，试遍所有可用候选（正数用于约束尾延迟）
-probe_timeout: 15s            # 半开端点一次后台恢复探测的时间上限（缺省 15s，远小于 response_header 的 120s——探测要的是快且便宜，等不到就是等不到）；只做全局开关，不支持按模型覆盖（刻意的 YAGNI）
 max_request_body_mb: 8        # 入站请求体大小上限（缺省 8，超限 413）；仅为稳定性考虑，与审计记录无关——vmr 接受的请求，审计里永远是完整的那一份
 max_concurrency: 8            # 全局并发上限（缺省 0 = 不限）
 https_proxy: http://...       # 可选：https 型 base_url 的代理服务器地址。这是 vmr 用代理的唯一途径——代理环境变量被有意忽略；想引用它就显式写 ${HTTPS_PROXY}。只声明代理在哪，不代表默认开启，见下方 providers[].proxy
@@ -676,13 +676,17 @@ http_proxy: http://...        # 可选：http 型 base_url 同理（如局域网
 log_dir: ~/.vmr/logs          # 可选：审计日志目录。显式值原样使用（~/ 展开）；缺省 ~/.vmr/logs（三层默认，见「请求图片自动降采样」）。改动需重启生效
 image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录。规则同上，缺省 ~/.vmr/image_cache；随热重载即时生效
 image_downscale: 0            # 请求内联图片长边像素上限；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
-image_cache_ttl_days: 7       # 降采样结果缓存的失效期；缺省/非正数 = 7 天
-audit_retention_days: 0       # 审计文件保留天数；缺省 0 = 永久保留，不清理；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
-sticky_ttl: 10m                # Sticky Model 粘性偏好的全局默认有效期；缺省/非正数 = 10 分钟，硬上限 24 小时（超过拒绝加载）。按端点可覆盖（下方 endpoints.sticky_ttl）
-timeouts:
+
+timeouts:                     # 等多久——请求路径上的各类超时上限，Go Duration 文法（10s/2m/1h）
   connect: 10s                # 连接上游（缺省 10s）
   response_header: 120s       # 上游首字节（缺省 120s）
   stream_idle: 120s           # 上游 body 静默看门狗（缺省 120s）：SSE 流、非流式响应体、错误响应体的读取全部受此约束——响应头之后的一切上游读取都有超时兜底，任何上游停滞都不能把请求永久卡住
+  probe: 15s                  # 半开端点一次后台恢复探测的时间上限（缺省 15s，远小于 response_header 的 120s——探测要的是快且便宜，等不到就是等不到）；只做全局开关，不支持按模型覆盖（刻意的 YAGNI）
+
+ttl:                          # 活多久——生命周期/淘汰，扩展 Duration 文法（d/w/mo/y，大小写不敏感；裸整数按天解释）
+  sticky: 10m                 # Sticky Model 粘性偏好的全局默认有效期；0/未写 = 用默认 10 分钟，硬上限 24 小时（超过拒绝加载）。按端点可覆盖（下方 endpoints.sticky_ttl）
+  image_cache: 7d             # 降采样结果缓存的失效期；0/未写 = 用默认 7 天
+  audit_retention: 90d        # 审计文件保留天数；0/未写 = 用默认 90 天；不支持"永久保留"语义（forever/permanent/never 拒绝加载），需要长期保留显式写一个足够大的值（如 90000d）；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
 
 providers:                       # "我有什么"——扁平列表，一个账号一条
   - name: <name>
@@ -694,18 +698,36 @@ providers:                       # "我有什么"——扁平列表，一个账�
                                # 没有全局默认可继承，每个 provider 独立、显式决定）。没有环境变量回退。
                                # true 但没配对应 scheme 的代理地址是校验错误（拒绝加载）。yaml.v3 是
                                # YAML 1.2，必须写 true/false（on/off 不是 bool）
+    disabled: false            # 可选布尔开关，缺省 false：true = 临时下线整个 provider（及其展开出的所有
+                               # endpoint）——不参与路由、不建 quota 计数器；vmr check 对仍引用它的
+                               # model/fallback 逐条给 warning（不是 error）。运营场景的"整体切走再切
+                               # 回"只改这一个字段 + 热重载，不用动任何 model 结构
 
 # fallback_endpoints: 顶层字段，可选——按协议分 key 的 map，和 models.<name>.endpoints
 # 完全同构；每个协议桶里的记录会被追加到
 # 每个虚拟模型在该协议上 try-order 的末尾（只追加到已经有对应协议入口的模型
 # 上，不会凭空开一个新入口）；
 # priority 在这里例外地是必填项且必须 > 0（省略/0 会悄悄和模型自己的真实
-# 端点抢占同一档位）；一个虚拟模型可以用 fallback: false 完全不参与。
+# 端点抢占同一档位）；一个虚拟模型可以用 fallback: false 完全不参与——如果一个
+# 协议 key 下所有引用它的模型都不参与（或压根没有模型引用），vmr check 会给
+# 一条 warning（配了一条永远不会生效的 fallback）。
 fallback_endpoints:
   openai-completions:
     - providers: [p1, p2]         # 见下面 endpoints 的 providers 说明——同一批可互换账号
       models: [<上游真实模型名>]
       priority: 98                # 必填且 > 0，这一点和普通 endpoint-group 不同
+
+model_defaults:                  # 真实模型"它到底支持什么/多大上下文"的横向声明——按真实模型名寻址，
+                                  # 同一模型在多个虚拟模型下共享同一份事实，只写一次；可整块省略，
+                                  # 省略/未匹配到的模型走 unconstrained（不限制）
+  "*":                          # 可选；通配兜底基线，没被下面精确匹配命中的模型都落到这里
+    capabilities: [text, tools]
+  <真实模型名>:
+    capabilities: [text, tools, image] # 可选；该模型支持的能力全集
+    max_context_tokens: 512000         # 可选；该模型的上下文窗口上限；与 capabilities 各自独立回退
+                                        # （只声明其中一个字段不会挡住另一个字段继续往通配/unconstrained 查）
+    providers: [<name>, ...]           # 可选；仅对列出的 provider 生效（缺省对全部 provider 生效）——
+                                        # 同一模型在不同 provider 下可以分别声明不同能力/窗口
 
 models:                          # "对外叫什么、按什么顺序用"——按虚拟模型名分组，协议信息作为 endpoints 的 map key
   <virtual-model-name>:
@@ -715,24 +737,10 @@ models:                          # "对外叫什么、按什么顺序用"——�
                                  # 会话亲和的单次调用场景才需要显式写 false
     fallback: true               # 可选；是否参与上面 fallback_endpoints: 的注入，*bool，缺省视为 true；
                                  # 只有需要严格隔离、不想被全局兜底覆盖的模型才需要显式写 false
-model_defaults:
-  "*":                          # 可选；通配兜底基线
-    capabilities: [text, tools]
-  <真实模型名>:
-    capabilities: [text, tools, image] # 可选；该模型支持的能力全集
-    max_context_tokens: 512000         # 可选；该模型的上下文窗口上限
-    providers: [<name>, ...]           # 可选；仅对列出的 provider 生效（缺省对全部 provider 生效）
-
-models:
-  <虚拟模型名>:
-    strategy: [priority]       # 缺省 [priority]
-    image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效；写 0 表示对这个模型强制关闭，即使全局开着
-    sticky: true                # 可选；Sticky Model 开关，*bool，缺省（不写）视为 true；只有确实不需要
-                                 # 会话亲和的单次调用场景才需要显式写 false
-    fallback: true               # 可选；是否参与上面 fallback_endpoints: 的注入，*bool，缺省视为 true；
-                                 # 只有需要严格隔离、不想被全局兜底覆盖的模型才需要显式写 false
-    capabilities: [text]         # 可选；显式覆盖 model_defaults 的 capabilities
-    max_context_tokens: 128000    # 可选；显式覆盖 model_defaults 的 max_context_tokens（例如降级窗口）
+    capabilities: [text]         # 可选；显式覆盖/降级 model_defaults 解出的 capabilities——虚拟模型层是
+                                 # 唯一保留 override 的地方，endpoint 级覆盖已随本轮移除
+    max_context_tokens: 128000    # 可选；显式覆盖/降级 model_defaults 解出的 max_context_tokens（例如
+                                 # 把某个大模型的窗口在这个虚拟模型下降级到更小的值）
     endpoints:
       openai-completions:         # openai-completions | anthropic-messages | openai-responses | 未来任何已注册的 adapter 名——map key 即协议，
                                   # 引用的 provider 必须在这个协议下声明了 base_url；同一虚拟模型名可以同时挂多个不同
@@ -746,7 +754,7 @@ models:
           priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
           role_map:               # 可选；这条 entry 拒收的 role → 改写成什么，缺省不改写
             developer: system     # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
-          sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效——挂在端点而不是
+          sticky_ttl: 2h          # 可选；覆盖全局 ttl.sticky，只对这一个端点生效——挂在端点而不是
                                  # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
 ```
 
@@ -758,9 +766,11 @@ models:
 
 **Provider 级 `api_keys:`（同账号多把 Key，与顶层鉴权 `api_keys` 无关）**：`providers[]` 条目可用 `api_keys: {label: key, ...}` 代替单把 `api_key:`（二选一）。`config.Parse` 里的纯配置期展开（`internal/config/apikeys.go`）：`name` 展开成 `<name>-<label>` 命名的独立 `Provider`，`base_url`/`proxy`/`quota`/`pricing` 共享，配置里对原名的引用自动改写。每把 Key 就是一个完全等价的独立 `Provider`——独立健康跟踪、独立 Sticky、独立配额账本。**展开顺序不保证**（`api_keys` 是普通 Go map）：没配 `quota:` 时排第一的是哪把 Key 不保证，但能从 `vmr check` 输出看到实际顺序；配了 `quota:` 则顺序无关，按各自额度水位打分。刻意不做——把多把物理 Key 合并进*一个* `core.Endpoint`（破坏 `Endpoint` 构造后不可变、`HealthKey()` 只算一次这条贯穿 health/sticky/quota 的假设），以及按错误类型分层的「Key 级降级 vs Provider 级跳过」Failover（`classify.go` 目前 402/404 同归 `ErrEndpoint`）——见 `KNOWN_ISSUES` 的 ProviderGroup 记录。
 
-**校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoints/fallback_endpoints 的协议 key 必须已注册（key 层一次校验覆盖整个桶）、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`sticky_ttl` 必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`max_attempts` / `max_concurrency` / `audit_retention_days` / `image_downscale` / 模型级 `image_downscale`）加载期直接拒绝，`image_cache_ttl_days` 非正数钳为默认 7。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
+**`Provider.Disabled`（临时下线开关）**：运营场景下临时切走一个 provider（账号被限流、商用 API 突然返 5xx、协议升级、临时维护），改回时再切回——不动 model 结构。`disabled: true` 等价于"在所有下游消费点把它当作不存在"：`BuildSnapshot` 入口构造一个 `enabled` 集合（唯一的过滤点，下游 `buildEndpoints`/`BuildQuotaSpecsDisabled` 一律查它，不在两处各自重判 `p.Disabled`，避免 reload 序列上的漂移），disabled provider 不出现在任何路由候选里，也不为它建 quota 计数器（避免留一个无主的计数器）。全部 endpoint 都指向 disabled provider 的 `(protocol, model)` 走常规的"没有候选"失败路径，不是 unknown-model。`Config.Check` 对 disabled provider 跳过 `api_key` 缺失告警（下线的账号没配 key 不算问题），但对仍引用它的 model/fallback 给一条 `SeverityWarning`（逐引用点各发一条，不合并）——用户意图很清楚（下线），不是拼写错误，但要让人看得见"这条引用现在没有流量"。默认 `false`：`disabled` 表达的是非常态运营操作，默认值代表常态（provider 在线）。改这一个字段触发热重载即可恢复，不单独保留一个"disable 期间仍可观察"的通道。
 
-**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`probe_timeout` 没有明显小于 `response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型 capabilities/max_context_tokens 展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
+**校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoints/fallback_endpoints 的协议 key 必须已注册（key 层一次校验覆盖整个桶）、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`ttl.sticky`（全局与端点级 `sticky_ttl`）必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`max_attempts` / `max_concurrency` / `image_downscale` / 模型级 `image_downscale`）加载期直接拒绝；`ttl.*` 三个字段（`sticky`/`image_cache`/`audit_retention`）是 `CalendarDuration`，`<= 0` 一律用各自默认值，`forever`/`permanent`/`never` 这类关键字显式拒绝加载——没有任何字段支持"永久"语义。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
+
+**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`timeouts.probe` 没有明显小于 `timeouts.response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点、disabled provider 仍被引用、fallback_endpoints 某协议 key 对所有虚拟模型都不可达。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型 capabilities/max_context_tokens 展示，以及当某个端点的实际生效值来自 `model_defaults` 而非模型自身声明时，逐端点补一行解析结果）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
 
 CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 capabilities/max_context_tokens/image_downscale/sticky 标记、每个端点的 sticky_ttl/role_map、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
@@ -808,7 +818,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 默认目录公式（~/.vmr → temp → cwd）单点实现于 `internal/rundir`，`vmr.sh` 靠 `vmr check -c <cfg> {log\|cache}` 查询生效值，不在 bash 里重写一份 | bash 自己复刻同一套判断逻辑 | 两份独立实现迟早会跑偏——公式只写一遍、bash 只负责问答，结构上排除了跑偏的可能 |
 | `log_dir`/`image_cache_dir` 显式值原样使用，不追加子目录（开头 `~/` 展开）；未设置才落到 `~/.vmr/logs`/`~/.vmr/image_cache` | 无论是否设置都统一追加子目录 | 用户显式设置这个字段，语义就是"这是我要的目录"，再悄悄拼一层子目录会让人诧异；子目录命名空间只在"我们自己选的默认值"这个场景下才有意义 |
 | 目录是 config 字段 `log_dir`/`image_cache_dir`，没有对应的环境变量 | 环境变量（或 env 覆盖 config 的双通道） | 与代理同一判断：vmr 往哪写数据必须在 config.yaml 里读得出来，隐式环境状态是排障时最难想到的旋钮；service 模式的 env 文件只需要 config 显式引用的 `${VAR}` 一条通道，不需要额外注入目录变量。代价：`vmr check log`/`cache` 依赖 config（须带 `-c`）；`log_dir` 热重载改不动（audit logger 启动时打开一次，重载打"需重启"提示），`image_cache_dir` 照常热生效 |
-| 默认目录用持久的 `~/.vmr/`，不用系统临时目录 | 系统临时目录 | macOS 会定期清理约 3 天未访问的临时目录条目；"审计默认永久保留"与"默认目录会被 OS 清理"自相矛盾。图片缓存同理——它的价值就在跨天的字节级复用（上游 prompt cache 按字节匹配） |
+| 默认目录用持久的 `~/.vmr/`，不用系统临时目录 | 系统临时目录 | macOS 会定期清理约 3 天未访问的临时目录条目；审计默认保留 90 天（`ttl.audit_retention`），跟"默认目录会被 OS 清理"自相矛盾。图片缓存同理——它的价值就在跨天的字节级复用（上游 prompt cache 按字节匹配） |
 | Retry-After 冷却封顶 1h | 无条件信任上游值 | Retry-After 是上游可控输入；封顶与 Auth/Endpoint 的 longCap 一致，最坏情况每小时一次失败探针，恢复及时性优先 |
 | Endpoint 键（HealthKey/Name）加协议前缀（`protocol/provider/model`） | 保持两段式 `provider/model` | provider 名允许跨协议复用之后，同名同 Key 同上游模型串会在两段式键下撞车，把两个真实不同的端点误判成同一个健康状态实体；三段式从根上消除这个碰撞面，代价是 `X-VMR-Endpoint` 的格式多一段，是人读字符串，没有内部逻辑解析它（审计 `attempts[].endpoint` 是独立拼接的 `:` 分隔三段式，不共用这个方法） |
 | Endpoint priority 字段保留但可选，鼓励省略、靠列表顺序 | 删掉 priority，强制纯列表顺序 | 稳定排序下全员缺省 priority=0 就是列表顺序，日常写法已经不需要这个字段；但删掉它会丢失"这几个是同一档位，组内再按 weight/latency 决胜"这类分层表达能力，为未来的排序维度组合保留逃生舱 |
@@ -822,7 +832,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | Strip "Thinking Process:" 启发式只对 thinking=medium 触发 | 总是触发 | OpenClaw 的 `Reasoning: off` 是 UI 开关，**不影响模型行为**——模型在 thinking=medium 下不写 `<think>` 标签，直接以纯文本 "Thinking Process:" + 编号小节 1-5 + Final Polish 草稿输出思考。**触发守卫：首个 `"content":"` 值以 "Thinking Process:" 字面量开头**——没有这道守卫，任何合法回复只要含有 "Looks good. Pro" 这类短语（比如代码评审说"Looks good. Proceed"）就会被误判成思考形态，前置内容被静默丢弃。启发式看的是 SSE `\n\n` 分隔的 data: line（JSON-escaped 内容里没有真实 `\n\n`），丢弃含 thinking 的中间 line，保留首条（role marker）和末条（含 "Pro" 标记），从 `Pro` / `Proceed` 之后开始截取最终回复；marker 即首行时原地截取不复制，重组时保留末尾空元素以维持 `[DONE]` 前的 SSE 分隔 |
 | 审计历史文件压缩用 zstd（整文件、轮转时触发），不做单条记录压缩 | 逐条记录 base64/zip 编码 | 单条记录粒度的压缩（无论 gzip 还是 zip+base64）天花板很低，因为 Agent 场景的冗余主要在跨记录（同一会话每轮重发历史），压缩窗口锁在一条记录内根本看不见；整文件 zstd（默认窗口已是 MB 级）能覆盖这种跨行重复，压缩比高一个数量级。逐条压缩还会打破"合法 JSON 原样嵌入、可直接 jq 查询"的契约，且落在写路径上；整文件压缩挂在轮转边界，只碰不再写入的历史文件，当天文件保持明文可查询 |
 | 压缩/保留复用 Logger 已有的按日轮转边界触发，不设独立 ticker/cron | 周期性 timer 扫描 / 依赖外部 logrotate | 审计文件名自带日期，一次 `os.ReadDir` 即可判定压缩与保留对象，不需要周期性触发就能保证"至多晚一天生效"；新增 ticker 是额外的 goroutine 生命周期管理，外部 logrotate 依赖破坏 vmr"单二进制自包含"的定位 |
-| `audit_retention_days` 缺省 0（永久保留） | 缺省一个"合理"天数（如 30） | 审计日志是 `vmr report` 成本核算的唯一数据源，非用户主动设置就被静默删除的风险 > 磁盘空间收益；压缩（无条件发生）已经解决了大头的磁盘占用问题，保留期清理是可选的第二层 |
+| `ttl.audit_retention` 的 `0`/未写 = 用默认 90 天，不支持任何"永久保留"关键字（`forever`/`permanent`/`never` 拒绝加载） | 缺省 `0` = 永不删除，需要具体天数才启用清理 | 早期设计让 `0` 兼表"用默认"和"永不删除"两种相反意图，是历史遗留的怪异零值语义；审计日志是 `vmr report` 成本核算的唯一数据源，删除是数据丢失风险，但"零值天然安全"这个前提本身站不住——默认值给得足够保守（90 天，压缩已经解决了大头的磁盘占用）比保留一个双关的零值更清楚。真正需要长期保留的部署显式写一个足够大的数值（如 `90000d`），这是用户的明确选择，不是字段的隐藏极性（Breaking Change，见 `CHANGELOG.md`） |
 | model 改写用字节 splice，只动顶层 `model` 值 | `map[string]json.RawMessage` 全量 unmarshal + 重新序列化 | 每次 failover attempt 都要重复这个操作——整体 unmarshal 再重新序列化是主路径上最大的单项 CPU 成本，且会改写键序/空白，偏离"直连等价"。splice 单趟免分配扫描 + 三段拼接，客户端原文除 model 值外逐字节保留；扫不动的形态回退到 unmarshal 路径，行为不变 |
 | `BuildRequest` 一并返回出站 body；`audit.EncodeBody` 引用不克隆 | router 用 `GetBody()+io.ReadAll` 再读一份；EncodeBody 防御性拷贝 | 改写后的 body 本来就在 adapter 手里，为审计再拷两份纯属浪费（大 body 每 attempt 多两次全量拷贝）。代价是一条所有权契约：交给 EncodeBody 的 slice 此后不得改写——五个调用点（client 请求缓冲、recorder 响应缓冲、attempt 出站 body、上游错误 body、归一化 pre-strip 快照）都是终态字节，契约天然成立 |
 | 代理纯显式两级解析：provider 级 `proxy`（缺省 false，无全局默认可继承）→ `http(s)_proxy` 的 URL，无环境变量回退；按解析结果分组建 Client | `http(s)_proxy` 一配上就对全体 provider 默认生效 / `ProxyFromEnvironment` / config 优先 + env 回退 / 每请求动态 Proxy 回调 / config 级 `no_proxy` 清单 / 一层可翻转的全局默认开关 | "配了代理 URL 就默认全体生效"混淆了"代理在哪"和"要不要用"：给单个海外 provider 配代理会把所有 provider 都导流进去，要靠补漏式 `proxy: false` 收住。env 回退不采用：隐式旋钮悄悄决定流量走向、排障时最难想到——流量去哪必须在 config.yaml 里读得出来，要引用 env 就显式写 `${HTTPS_PROXY}`。provider 级布尔开关粒度恰好（provider ≙ base_url ≙ host），config 级 `no_proxy` 因此多余。全显式的附带收益：`proxy: true` 无代理可跟从变成静态可判的校验错误；解析不依赖运行环境，热重载语义完整。不做每请求回调——解析对 provider 是静态的，快照期分组建 Client（典型 1~2 组，请求期零开销）。曾有过一层"跟随全局 `proxy` 开关"供反向部署场景整体翻转，实测从未用过，已删 |
@@ -915,7 +925,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `internal/respnorm`（原 `router.respStream`）的 `Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |
 | 健康注册表中被配置删除的端点条目跨热重载残留 | 每条目几十字节，重启清零 | 有界（≤ 历史配置的端点总数），加清理逻辑需要 diff 新旧快照，复杂度不成比例 |
 | 测试里存在三个各自为政的 mock 上游（`upstream`/`probeUpstream`/`stallingUpstream`） | 各 30~50 行，职责不同（脚本化状态 / 探针时序 / 停滞） | 测试代码合并会互相牵连；等真实收敛需求出现再说 |
-| `runProbe`（半开端点后台探测）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `probe_timeout` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |
+| `runProbe`（半开端点后台探测）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `timeouts.probe` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |
 | `audit.Logger.Close` 不等待后台 housekeeping 收尾 | `hkWG.Wait()` 只给测试用 | 压缩 crash-safe（tmp+rename+重启续跑），housekeeping 只碰已轮转的历史文件、与 Close 关闭的当日 fd 零交集；让关停阻塞在一次可能数 GB 的 zstd 上没有收益。Close 后的迟到 Write 由 `closed` 标志拒绝，不会重开文件 |
 | `vmr report` 不区分 `vmr replay --record` 产出的记录（`replay_of` 字段）与真实流量 | 指向包含两者的 glob 时，回放记录会被当普通请求计入统计 | 属于用户主动行为——`--record` 默认不写、写了也是独立文件，只有显式把 glob 指向它才会混入；混入本身有时是期望行为（比如想验证回放请求的 token 用量）。真出现"不小心混进日常统计"的抱怨再加过滤 |
 

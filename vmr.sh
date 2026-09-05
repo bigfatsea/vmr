@@ -130,9 +130,10 @@ warn_if_stale() {
 # config.
 #
 # Audit files rotate daily and auto-compress to .zst on rotation (20-75x
-# smaller; vmr report reads both transparently). They're kept forever unless
-# you set audit_retention_days in config.yaml — that's the supported way to
-# expire them; see the design doc §9.5 (the standalone compression analysis was folded in there).
+# smaller; vmr report reads both transparently). They're kept for 90 days by
+# default; set ttl.audit_retention in config.yaml to change that (a large
+# value like 90000d for effectively-forever, since there's no literal
+# "forever" setting) — see the design doc §9.5 (the standalone compression analysis was folded in there).
 resolve_log_dir() {
   # NOT `[[ cond ]] && action`: with that form, a false test as the LAST
   # statement of a function makes the function return non-zero, and under

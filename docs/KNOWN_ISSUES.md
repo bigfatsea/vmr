@@ -381,7 +381,7 @@
 #### 2.85 [低，b 已落地 2026-09-05；a 待定] 半开恢复的深度退避解除策略：低流量/单候选部署恢复尾延迟
 
 - **落地（2026-09-05，方案 b）**：`buildCandidates`（经 `healthFilter`，`internal/router/candidates.go`）新增 last-resort：候选全空（`healthOK` 为空）且存在至少一个半开（cooldown 已过期、仅 `fails>0`）端点时，释放其中退避最浅的一个（`ReportNeutral`，终态释放 `Classify` 刚占的 single-flight 名额，不动 `fails`/cooldown）作为本轮真实候选，走和普通端点完全相同的 `tryOne`/`Acquire`/`ReportSuccess` 路径——真实成功直接清零 `fails`，不再需要多轮探针衰减。同一轮里其余半开端点不受影响，仍正常派后台探针。与既有的 `ctxFallback`（"估计值不该清空非空候选集，交给一次真实尝试去判断"）是同一条设计原则在健康过滤上的延伸，`X-VMR-Route-Reason` 新增 `health_fallback=1` 标记可观测。
-- **边界（有意的取舍，非缺陷）**：若被释放的端点其实仍未恢复，这次真实请求要等到 `response_header` 超时（默认 120s，可配）才失败，而不是秒回 503——因为这条路径复用的是真实流量的 upstream client，不是 `probe_timeout` 那条专门收窄过的探针路径。只在"反正所有候选都会 503"的极端场景触发，不影响任何本来能成功的请求；`internal/server/active_probe_test.go` 的 `TestActiveProbe_HalfOpenEndpointServedAsLastResort` 钉死这个边界。
+- **边界（有意的取舍，非缺陷）**：若被释放的端点其实仍未恢复，这次真实请求要等到 `response_header` 超时（默认 120s，可配）才失败，而不是秒回 503——因为这条路径复用的是真实流量的 upstream client，不是 `timeouts.probe` 那条专门收窄过的探针路径。只在"反正所有候选都会 503"的极端场景触发，不影响任何本来能成功的请求；`internal/server/active_probe_test.go` 的 `TestActiveProbe_HalfOpenEndpointServedAsLastResort` 钉死这个边界。
 - **残留（方案 a，待定，未排期）**：探针成功 1 次即允许该端点参与常规路由（保留 `fails` 深度，后续真实请求失败则在原深度继续退避、成功则清零）——面向"候选不止一个、但都半开"这种 b 没有覆盖的场景（b 只释放候选全空时的那一个）。需要设计草案 + 回摆回归测试，比 b 复杂得多：横跨多个请求累积信任、有真实 flap 风险。触发时机：出现"多候选同时半开、b 释放的那个不巧还没恢复"的真实报告。
 
 
@@ -495,6 +495,7 @@
 - **背景**：`ConfigShape_Simplification_2026-09_v2.md` 经设计评审后落地（A.1+A.2+A.3、C.1、D.1+D.2、E.1+E.2；D.3 锚点示例除外），无兼容层，Breaking 项已在 CHANGELOG `[Unreleased]` 登记。落地时敲定的悬决项与新增取舍：
   - **`ttl` 时间换算**：`CalendarDuration` 用固定长度近似（d=24h、w=7d、mo=30d、y=365d，与 quota `every: 1mo` 同约定），额外接受裸整数=天（旧 `*_days` 数值的迁移路径）；TTL→天数换算**向上取整**（亚天值至少 1 天），避免 12h 被截断为 0 恰好落进 audit/imgprep 的"0 = 不删/不淘汰"旧语义。
   - **`model_defaults` 无合并规则**：同一模型名重复 key 由 YAML 自身拒绝；exact key 与 `"*"` 通配同时匹配是回退链（exact 优先），不是合并——V2 文档"待敲定项"的取 max/后写覆盖问题因此不存在。
+  - **同一模型名在 `model_defaults` 里只能有一条声明**：这是上一条"重复 key 拒绝"的直接推论，登记为明确的表达力边界而非留白——`Config.ModelDefaults` 是 `map[string]ModelDefaultEntry`，一个真实模型名至多一条 entry（可选 `providers:` 子集限定）。V2 文档 E.1 举的例子（同一模型 `claude-3-7-sonnet` 在 `anthropic` 上 200k、在 `openrouter` 上另开一条 100k 的限定声明）**在当前实现下写不出来**——第二条 `providers: [openrouter]` 限定条目会与已有的 `claude-3-7-sonnet` key 冲突。今天能表达的是"一条 entry，可选整体限定到某个 provider 子集，其余 provider 落到 `"*"` 通配或 unconstrained"，不是"同一模型对不同 provider 子集各开一条不同取值的声明"。这种场景目前只能靠虚拟模型层 `override` 绕：把需要不同上限的那个 (provider, model) 对拆到单独的虚拟模型上，用该虚拟模型的显式 `max_context_tokens` 覆盖——但如果两个 provider 就是要挂在**同一个**虚拟模型的同一份 `endpoints:` 里，这条路径也走不通（虚拟模型层覆盖对该模型下所有 provider 一视同仁）。是否要为此把 `ModelDefaults` 改成允许每模型多条声明（如 `map[string][]ModelDefaultEntry`），待后续真实需求出现再评估。
   - **`BuildQuotaSpecs` 双形态**：`BuildSnapshot` 路径走 `BuildQuotaSpecsDisabled`（跳过 disabled provider，不留无主计数器）；`BuildQuotaSpecs` 保持原行为供 `replay.chargeReplay` 使用（replay 定向单个 (provider, model)，解析其 quota spec 与在线路由状态无关，是正确语义而非兼容残留）。
   - **全 disabled endpoint-group 保留空 route**：`(protocol, virtual model)` 路由仍在但零 endpoint，走常规 no-candidates 失败路径而非 unknown-model（测试钉住）；若未来想让空 route 从 `/status` 消失再重估。
   - **disabled 引用告警逐引用点发**：一个 disabled provider 被 N 处引用产生 N 条 warning（每条点名具体引用位置）；若嫌吵再聚合为 per-provider 一条。

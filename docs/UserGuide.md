@@ -39,7 +39,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
 
 ### Config layout
 
-`providers` is a flat list — one entry per upstream account, however many of the three ingress protocols (`openai-completions` / `anthropic-messages` / `openai-responses`) it actually speaks. `base_url` is itself keyed by protocol, so one entry covers both faces of an account instead of declaring it twice. `models` is keyed by virtual-model name; each entry under `endpoints` carries its own `protocol` field, so one virtual model can mix an openai-completions candidate list and an anthropic-messages one under the same name — each independently reachable only from its own ingress. An endpoint-group's `models:` list can name more than one upstream model, each expanding into its own independently health-tracked candidate sharing the rest of that entry's fields:
+`providers` is a flat list — one entry per upstream account, however many of the three ingress protocols (`openai-completions` / `anthropic-messages` / `openai-responses`) it actually speaks. `base_url` is itself keyed by protocol, so one entry covers both faces of an account instead of declaring it twice. `models` is keyed by virtual-model name; `endpoints` under it is itself keyed by protocol, so one virtual model can mix an openai-completions candidate list and an anthropic-messages one under the same name — each independently reachable only from its own ingress. An endpoint-group's `models:` list can name more than one upstream model, each expanding into its own independently health-tracked candidate sharing the rest of that entry's fields:
 
 ```yaml
 listen: 127.0.0.1:8800
