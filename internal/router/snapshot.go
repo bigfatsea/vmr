@@ -102,7 +102,20 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 // independent *core.Endpoint values, in list order.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
-	quotaSpecs := BuildQuotaSpecs(cfg.Providers)
+	// Single filtering point for Provider.Disabled — every downstream
+	// consumer (buildEndpoints' (provider,model) expansion, fallback
+	// injection, BuildQuotaSpecsDisabled) keys off this map. Don't scatter
+	// p.Disabled checks at each consumer: hot-reload sequences would then
+	// need every consumer updated in lockstep or routes would silently
+	// drift (BuildQuotaSpecs would skip a disabled provider but
+	// buildEndpoints would still emit its endpoints, etc.). One map, one
+	// filter. Everything downstream follows for free: /status lists only
+	// endpoints a snapshot can actually route to; hot reload needs no new
+	// mechanism (snapshot swaps atomically; sticky re-checks candidates
+	// per request, so pinned sessions just fail over past a disabled
+	// provider); quota registry Prune drops the stranded bucket on install.
+	enabled := enabledProviders(cfg.Providers)
+	quotaSpecs := BuildQuotaSpecsDisabled(cfg.Providers, enabled)
 	for name, m := range cfg.Models {
 		dims, err := strategy.Build(m.Strategy)
 		if err != nil {
@@ -112,7 +125,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		fallbackOK := m.Fallback == nil || *m.Fallback
 		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
 		for _, eg := range m.Endpoints {
-			eps, err := buildEndpoints(cfg, quotaSpecs, m, eg, cfg.StickyTTL.D(), false)
+			eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, eg, cfg.StickyTTL.D(), false)
 			if err != nil {
 				return nil, fmt.Errorf("model %q: %w", name, err)
 			}
@@ -131,7 +144,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 				if !ok {
 					continue
 				}
-				eps, err := buildEndpoints(cfg, quotaSpecs, m, fb, cfg.StickyTTL.D(), true)
+				eps, err := buildEndpoints(cfg, quotaSpecs, enabled, m, fb, cfg.StickyTTL.D(), true)
 				if err != nil {
 					return nil, fmt.Errorf("model %q: fallback_endpoints[%d]: %w", name, i, err)
 				}
@@ -152,9 +165,12 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 
 // buildEndpoints expands one EndpointGroup (fromFallback marks whether it's
 // a FallbackEndpoints entry) into its *core.Endpoint values — outer loop
-// over Models, inner loop over eg.Providers. Each returned Endpoint is
-// already Freeze()'d.
-func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m config.VirtualModel, eg config.EndpointGroup, globalStickyTTL time.Duration, fromFallback bool) ([]*core.Endpoint, error) {
+// over Models, inner loop over eg.Providers. Providers absent from
+// `enabled` (Provider.Disabled = true) are silently skipped — that's the
+// stated intent of the switch ("carries no traffic until re-enabled"),
+// and the check warning is what makes it visible. Each returned Endpoint
+// is already Freeze()'d.
+func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, enabled map[string]bool, m config.VirtualModel, eg config.EndpointGroup, globalStickyTTL time.Duration, fromFallback bool) ([]*core.Endpoint, error) {
 	ad, ok := adapter.Get(eg.Protocol)
 	if !ok { // defensive; config.validate already checked this
 		return nil, fmt.Errorf("unknown adapter type %q (available: %v)", eg.Protocol, adapter.Names())
@@ -179,6 +195,9 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, m
 	var eps []*core.Endpoint
 	for _, upstreamModel := range eg.Models {
 		for _, providerName := range eg.Providers {
+			if !enabled[providerName] {
+				continue // Provider.Disabled — see enabledProviders below
+			}
 			p, ok := cfg.ProviderByName(providerName)
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("unknown provider %q", providerName)
@@ -242,6 +261,45 @@ func BuildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
 			limits[i] = lc.Resolved
 		}
 		out[p.Name] = &core.QuotaSpec{Limits: limits}
+	}
+	return out
+}
+
+// BuildQuotaSpecsDisabled is BuildQuotaSpecs plus the Provider.Disabled
+// filter — the BuildSnapshot-side companion, since BuildSnapshot must NOT
+// leave a stranded counter bucket for an account carrying no traffic.
+// Internal/replay is unchanged: it deliberately builds a core.Endpoint for
+// a specific (provider,model) pair and reuses BuildQuotaSpecs' shape.
+func BuildQuotaSpecsDisabled(providers []config.Provider, enabled map[string]bool) map[string]*core.QuotaSpec {
+	out := map[string]*core.QuotaSpec{}
+	for _, p := range providers {
+		if !enabled[p.Name] {
+			continue
+		}
+		if p.Quota == nil {
+			continue
+		}
+		limits := make([]core.Limit, len(p.Quota.Limits))
+		for i, lc := range p.Quota.Limits {
+			limits[i] = lc.Resolved
+		}
+		out[p.Name] = &core.QuotaSpec{Limits: limits}
+	}
+	return out
+}
+
+// enabledProviders returns the set of provider names that should be live
+// in the routing half — the inverse of Provider.Disabled. Single source
+// of truth used by BuildSnapshot (route expansion, fallback injection)
+// and BuildQuotaSpecsDisabled, so reload sequences can never drift (one
+// consumer filtering and another not). All providers pass when none
+// declares it (the common case today).
+func enabledProviders(providers []config.Provider) map[string]bool {
+	out := make(map[string]bool, len(providers))
+	for _, p := range providers {
+		if !p.Disabled {
+			out[p.Name] = true
+		}
 	}
 	return out
 }

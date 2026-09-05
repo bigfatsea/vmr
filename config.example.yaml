@@ -205,6 +205,11 @@ providers:
   - name: minimax
     base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}
+    # disabled: true           # temporarily take the whole provider out of routing — every endpoint
+    #                          # expanded from it (including api_keys sub-accounts and fallback references)
+    #                          # is treated as nonexistent: no routes, no /status rows, no quota counter.
+    #                          # Flip back to false and reload to restore. vmr check warns (not errors)
+    #                          # while anything still references a disabled provider.
     # proxy: false               # not needed here — absent already means direct (domestic
     #                            # provider, no need to write this out).
     #

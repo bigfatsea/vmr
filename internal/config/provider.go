@@ -75,6 +75,15 @@ type Provider struct {
 	// only sharpens vmr report's $ estimates. See ProviderPricingConfig's
 	// doc comment (pricing.go).
 	Pricing *ProviderPricingConfig `yaml:"pricing"`
+	// Disabled takes this provider and every endpoint expanded from it
+	// out of routing — equivalent to "doesn't exist" at every consumer
+	// (BuildSnapshot / BuildQuotaSpecs / Check), not a tagged-but-active
+	// state. Intended for temporary takedown (vendor throttling, paid-API
+	// outage, maintenance); flip back to false and reload to restore.
+	// Default false (absent in YAML = online) — "absent = active" is the
+	// intended polarity so a typo'd disabled: true is loud and a routine
+	// config doesn't need to spell it. See ConfigShape_Simplification_2026-09_v2.md C.1.
+	Disabled bool `yaml:"disabled"`
 }
 
 // baseURLCredentialKeys is the fixed blacklist of query-parameter names whose

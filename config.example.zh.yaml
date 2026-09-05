@@ -179,8 +179,12 @@ providers:
   - name: minimax
     base_url: {openai-completions: https://api.minimaxi.com/v1, anthropic-messages: https://api.minimaxi.com/anthropic/v1}
     api_key: ${MINIMAX_PLAN_KEY}
-    # proxy: false               # 这里不需要——不写默认就是直连（国内 provider，
-    #                            # 没必要专门写出来）。
+    # disabled: true             # 临时下线整个 provider(含其全部 endpoint 展开,包括 api_keys
+    #                            # 子账户与 fallback 引用):所有下游消费点都把它当作不存在——不路由、
+    #                            # /status 不出现、不计 quota。改回 false 并 reload 即恢复。
+    #                            # 期间 vmr check 会对仍引用它的 endpoint 给出 warning(不是 error)。
+    # proxy: false               # 这里不需要——不写默认就是直连(国内 provider,
+    #                            # 没必要专门写出来)。
     #
     # quota：额度感知路由（Quota-Aware Routing）——完整设计见
     # docs/VirtualModelRouter_Design_v4_Quota.md，当前实际落地状态见该文档

@@ -17,6 +17,7 @@
   - [角色改写 role_map](#角色改写-role_map)
   - [端点尝试顺序 priority 与 strategy](#端点尝试顺序-priority-与-strategy)
   - [多 Provider 端点组与全局兜底](#多-provider-端点组与全局兜底)
+  - [临时下线一个 provider](#临时下线一个-provider)
   - [环境变量](#环境变量)
 - [请求处理与路由](#请求处理与路由)
   - [透传与归一化](#透传与归一化)
@@ -192,6 +193,22 @@ models:
 ```
 
 一条 fallback 只会挂到那些本来就已经有对应 `protocol` 入口的虚拟模型上——它是给已有入口做增补，绝不会给一个模型凭空开一个它原本没声明过的新入口（一个纯 anthropic-messages 的模型不会被 openai-completions 协议的 fallback 碰到）。一个虚拟模型可以用 `fallback: false` 完全不参与。和普通端点组不同，fallback 记录的 `priority` **必须显式声明且 > 0**——省略/写 0 会让它悄悄和模型自己的真实端点抢占同一档位，而不是老老实实排在后面，这正是 `vmr check` 的加载期校验存在的意义：在请求意外路由到那里之前把这类陷阱拦下来。`vmr check` 打印一条来自 fallback 的端点时会带上末尾的 `fallback` 标注，也会对"某条 fallback 悄悄重复了模型自己已经声明过的端点"这种情况打 ⚠️。
+
+### 临时下线一个 provider
+
+要把一个账号从路由里临时摘出来（厂商限流、商用 API 突然返 5xx、协议升级、维护窗口），而不需要动任何 model 配置——在它的 `providers[]` 记录上写 `disabled: true` 然后保存（热重载会在通常的去抖窗口内生效）：
+
+```yaml
+providers:
+  - name: volcengine
+    base_url: {openai-completions: https://ark.example.com/v3}
+    api_key: ${ARK_KEY_1}
+    disabled: true
+```
+
+`disabled: true` 的语义是：在所有下游消费点把这个 provider **当作不存在**——不是"标记但保留数据"。它的记录（包括经 `api_keys:` 展开出来的每一个子账户端点）不产生任何路由、不出现在任何 try-order 里、`fallback_endpoints:` 里引用了它也不会注入任何端点、`/status` 不出现、也不会建立 quota 计数器。引用它的 endpoint 照常通过校验、`vmr check` 也照样成功——但会对每一条当前不携带流量的引用打一条 ⚠️ warning，下线永远不会是悄无声息的。除此之外的一切照常校验（下线的记录仍必须是结构完整的）。
+
+要恢复，把 `false` 改回去（或删掉这一行）再 reload——路由、健康追踪和 quota 记账都会在下一次快照时一并回来。这里刻意不提供单独的运行时"disable"命令或观察通道：配置文件是事实的唯一来源；被 Sticky Model 粘在这个 provider 上的会话，下一个请求会照常 failover 到剩余候选上。
 
 ### 环境变量
 
