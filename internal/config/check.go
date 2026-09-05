@@ -233,8 +233,8 @@ func (c *Config) checkDisabledReferences() []Issue {
 			Message: fmt.Sprintf("provider %q is disabled but still referenced by %s; it carries no traffic until re-enabled", pn, where)})
 	}
 	for _, name := range fmtutil.SortedKeys(c.Models) {
-		for protocol, groups := range c.Models[name].Endpoints {
-			for _, eg := range groups {
+		for _, protocol := range fmtutil.SortedKeys(c.Models[name].Endpoints) {
+			for _, eg := range c.Models[name].Endpoints[protocol] {
 				for _, pn := range eg.Providers {
 					sayRef(pn, fmt.Sprintf("model %q endpoints.%s", name, protocol))
 				}

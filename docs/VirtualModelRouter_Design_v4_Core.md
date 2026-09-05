@@ -434,9 +434,9 @@ Sticky 会话亲和性与 `model_defaults` 完全正交：Sticky key 是 `(clien
 
 **Key 组成**：`client_key_tag`（既有的 `audit.KeyTag` 机制）作为命名空间，不是主键——`sticky_key = client_key_tag + ":" + hex(sysHash) + ":" + hex(firstMsgHash)`。
 
-**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointGroup.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `Config.StickyTTL`（缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。主要挂 DeepSeek 的端点应该显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。
+**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointGroup.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `ttl.sticky`（`Config.TTL.Sticky`，缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。主要挂 DeepSeek 的端点应该显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。
 
-**内存淘汰与粘性有效性判定是两件事，不共用同一个数字**：一个 `Registry` 里同时装着分钟量级和小时量级的条目，判定粘性有效性时必须用**这条记录当时指向的那个端点**自己的 TTL；内存淘汰则用一个统一的、比任何端点 TTL 都宽松的粗粒度兜底值——`internal/sticky.BackstopTTL`，24 小时，只负责内存卫生，不参与路由决策。这个 24 小时上限由 `config.validate()` 强制保证：全局 `sticky_ttl` 与任意端点的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝，`vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都会挡住这类配置——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录会在写入的 TTL 到期前，先被内存清理兜底删掉）。
+**内存淘汰与粘性有效性判定是两件事，不共用同一个数字**：一个 `Registry` 里同时装着分钟量级和小时量级的条目，判定粘性有效性时必须用**这条记录当时指向的那个端点**自己的 TTL；内存淘汰则用一个统一的、比任何端点 TTL 都宽松的粗粒度兜底值——`internal/sticky.BackstopTTL`，24 小时，只负责内存卫生，不参与路由决策。这个 24 小时上限由 `config.validate()` 强制保证：全局 `ttl.sticky` 与任意端点的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝，`vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都会挡住这类配置——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录会在写入的 TTL 到期前，先被内存清理兜底删掉）。
 
 **架构落地**：独立小包 `internal/sticky`（与 `internal/health` 平行，不塞进 `internal/strategy`——亲和性是独立的运行时状态概念，不是排序/过滤维度）。`Registry` 本身不需要知道任何端点/TTL 的细节——它只是一个带 mtime 的键值存储：
 
