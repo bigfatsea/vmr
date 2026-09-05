@@ -74,24 +74,24 @@ models:
 	}
 }
 
-// TestBuildSnapshotCarriesEndpointRoleMap documents that an endpoint-group's
+// TestBuildSnapshotCarriesEndpointRoleMap documents that a provider's
 // role_map (e.g. remapping "developer" to "system" for providers that reject
 // the former) reaches the endpoint BuildRequest actually sees — closing the
 // gap between internal/jsonscan's coverage of the RewriteRoles byte-splice
 // itself and the config->snapshot->endpoint wiring around it. role_map lives
-// per endpoint-group (not per provider): the same account can back several
-// endpoint-groups with different upstream model families.
+// per provider: the role rejection it repairs is a property of the
+// provider's API implementation, not of any one virtual model.
 func TestBuildSnapshotCarriesEndpointRoleMap(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: mapped, base_url: {openai-completions: https://example.com}, api_key: k1}
+  - {name: mapped, base_url: {openai-completions: https://example.com}, api_key: k1, role_map: {developer: system}}
   - {name: plain, base_url: {openai-completions: https://example.com}, api_key: k2}
 models:
   vm:
     endpoints:
       openai-completions:
-        - {providers: [mapped], models: [m1], role_map: {developer: system}}
+        - {providers: [mapped], models: [m1]}
         - {providers: [plain], models: [m2]}
 `
 	cfg, err := config.Parse([]byte(yaml))
@@ -109,7 +109,7 @@ models:
 		t.Errorf("mapped endpoint: RoleMap[developer] = %q, want %q", got, "system")
 	}
 	if plain.RoleMap != nil {
-		t.Errorf("plain endpoint: RoleMap should be nil (its endpoint-group has no role_map), got %v", plain.RoleMap)
+		t.Errorf("plain endpoint: RoleMap should be nil (its provider has no role_map), got %v", plain.RoleMap)
 	}
 }
 
@@ -262,7 +262,7 @@ models:
 }
 
 // TestBuildSnapshotResolvesStickyDefaultAndOverride locks the *bool ->
-// bool resolution (nil = true) plus the endpoint-level StickyTTL
+// bool resolution (nil = true) plus the provider-level StickyTTL
 // inherit/override split — see
 // docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section.
 func TestBuildSnapshotResolvesStickyDefaultAndOverride(t *testing.T) {
@@ -272,6 +272,7 @@ ttl:
   sticky: 10m
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: https://example.com}, api_key: k2, sticky_ttl: 2h}
 models:
   defaulted:
     endpoints:
@@ -285,9 +286,7 @@ models:
   overridden:
     endpoints:
       openai-completions:
-        - providers: [p1]
-          models: [m1]
-          sticky_ttl: 2h
+        - {providers: [p2], models: [m1]}
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {

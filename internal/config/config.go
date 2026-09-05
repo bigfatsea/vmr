@@ -35,8 +35,8 @@ const (
 	// Calibrated to the shortest common upstream prompt-cache lifetime
 	// (Anthropic's 5-minute default, OpenAI's 5-10 minute window) with a
 	// little headroom — see docs/VirtualModelRouter_Design_v4_Core.md's
-	// Sticky Model section. Endpoints backed by a longer-lived cache (e.g. DeepSeek's disk
-	// cache, hours to days) should override it per-endpoint.
+	// Sticky Model section. Providers backed by a longer-lived cache (e.g.
+	// DeepSeek's disk cache, hours to days) should override it per-provider.
 	DefaultStickyTTL = 10 * time.Minute
 	// DefaultProbeTimeout bounds one background recovery-probe HTTP call
 	// (see timeouts.probe). Deliberately far under
@@ -82,20 +82,6 @@ type EndpointGroup struct {
 	Providers []string `yaml:"providers"`
 	Models    []string `yaml:"models"`
 	Priority  int      `yaml:"priority"`
-
-	// RoleMap rewrites message roles (e.g. {"developer":"system"}) for
-	// requests sent through this entry alone — a provider account can back
-	// several endpoint-groups (different virtual models, different upstream
-	// models) with different role-rejection behavior per model family, so
-	// this lives per entry rather than once per provider.
-	RoleMap map[string]string `yaml:"role_map"`
-
-	// StickyTTL overrides the global ttl.sticky (below) for this endpoint
-	// alone — cache lifetime is a property of the upstream provider, not of
-	// the virtual model, so different endpoints behind the same virtual
-	// model (e.g. a fast in-memory cache vs. DeepSeek's disk cache) can
-	// each declare their own window. nil = inherit the global default.
-	StickyTTL *Duration `yaml:"sticky_ttl"`
 }
 
 // ImageDownscaleMaxPx is a pointer so "unset" (inherit the global
@@ -267,9 +253,9 @@ type Timeouts struct {
 type TTL struct {
 	// Sticky is the global default for how long a Sticky Model affinity
 	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md's
-	// Sticky Model section); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
-	// EndpointGroup.StickyTTL overrides this for endpoints whose upstream
-	// cache lifetime differs (e.g. DeepSeek's disk cache).
+	// Sticky Model section); <=0/absent defaults to DefaultStickyTTL. A
+	// provider whose upstream cache lifetime differs (e.g. DeepSeek's disk
+	// cache) overrides this once via its own sticky_ttl.
 	Sticky Duration `yaml:"sticky"`
 	// ImageCache is the downscale-cache eviction age (downscaled-image cache
 	// entries unused this long are evicted); <=0/absent defaults to

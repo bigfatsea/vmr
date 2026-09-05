@@ -218,11 +218,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		// then sort by protocol/provider/model — so the same provider's
 		// endpoints land next to each other in the report instead of
 		// scattered across wherever each virtual model listed them.
-		seen := collectEndpointTriples(cfg)
-		keys := make([]epKey, 0, len(seen))
-		for k := range seen {
-			keys = append(keys, k)
-		}
+		keys := collectEndpointTriples(cfg)
 		sort.Slice(keys, func(i, j int) bool {
 			if keys[i].protocol != keys[j].protocol {
 				return keys[i].protocol < keys[j].protocol
@@ -237,7 +233,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 			p, _ := cfg.ProviderByName(k.provider)
 			baseURL := p.BaseURL[k.protocol]
 			ad, _ := adapter.Get(k.protocol)
-			ep := &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: k.model, RoleMap: seen[k]}
+			ep := &core.Endpoint{Provider: k.provider, AdapterType: k.protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: k.model, RoleMap: p.RoleMap}
 			if ad != nil {
 				ep.FullURL = ad.ResolveURL(baseURL)
 			}
@@ -280,30 +276,28 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 type epKey struct{ protocol, provider, model string }
 
 // collectEndpointTriples gathers every distinct (protocol, provider, model)
-// triple referenced by any virtual model, with the endpoint-group's RoleMap
-// (first group referencing a given triple wins — the same triple declared
-// with two different role_maps across virtual models is an edge case not
-// worth reconciling here): testEndpoint needs it both to apply the same
-// rewrite real traffic would get and, on failure, to word its hint
-// correctly.
-func collectEndpointTriples(cfg *config.Config) map[epKey]map[string]string {
-	seen := map[epKey]map[string]string{}
+// triple referenced by any virtual model: testEndpoint needs them to apply
+// the same role rewrite real traffic would get (resolved per provider at
+// the call site) and, on failure, to word its hint correctly.
+func collectEndpointTriples(cfg *config.Config) []epKey {
+	seen := map[epKey]bool{}
+	var keys []epKey
 	for _, name := range fmtutil.SortedKeys(cfg.Models) {
 		for _, protocol := range fmtutil.SortedKeys(cfg.Models[name].Endpoints) {
-			groups := cfg.Models[name].Endpoints[protocol]
-			for _, eg := range groups {
+			for _, eg := range cfg.Models[name].Endpoints[protocol] {
 				for _, pn := range eg.Providers {
 					for _, mn := range eg.Models {
 						k := epKey{protocol, pn, mn}
-						if _, ok := seen[k]; !ok {
-							seen[k] = eg.RoleMap
+						if !seen[k] {
+							seen[k] = true
+							keys = append(keys, k)
 						}
 					}
 				}
 			}
 		}
 	}
-	return seen
+	return keys
 }
 
 // envCheck reports whether this provider is reachable without sending an
@@ -462,7 +456,7 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 		hint := ""
 		if ep.AdapterType == core.ProtocolOpenAICompletions {
 			if len(ep.RoleMap) == 0 {
-				hint = ` — no role_map configured; if this provider rejects the "developer" role, add role_map: {developer: system}`
+				hint = fmt.Sprintf(" — no role_map configured; if provider %q rejects the \"developer\" role, add role_map: {developer: system} to its provider definition in config.yaml", ep.Provider)
 			} else {
 				hint = fmt.Sprintf(" — role_map %v is configured; if this is a rejected \"developer\" role, check its target role name", ep.RoleMap)
 			}

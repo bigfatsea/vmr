@@ -182,10 +182,6 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 	if !ok { // defensive; config.validate already checked this
 		return nil, fmt.Errorf("unknown adapter type %q (available: %v)", protocol, adapter.Names())
 	}
-	stickyTTL := globalStickyTTL
-	if eg.StickyTTL != nil {
-		stickyTTL = eg.StickyTTL.D()
-	}
 	var eps []*core.Endpoint
 	for _, upstreamModel := range eg.Models {
 		for _, providerName := range eg.Providers {
@@ -195,6 +191,13 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			p, ok := cfg.ProviderByName(providerName)
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("unknown provider %q", providerName)
+			}
+			// Sticky validity is a per-provider property: the endpoint
+			// inherits its provider's sticky_ttl, falling back to the
+			// global ttl.sticky default.
+			stickyTTL := globalStickyTTL
+			if p.StickyTTL != nil {
+				stickyTTL = p.StickyTTL.D()
 			}
 			baseURL, ok := p.BaseURL[protocol]
 			if !ok { // defensive; config.validate already checked this
@@ -210,7 +213,7 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 				APIKey:           p.APIKey,
 				Model:            upstreamModel,
 				Priority:         eg.Priority,
-				RoleMap:          eg.RoleMap,
+				RoleMap:          p.RoleMap,
 				Capabilities:     effCapabilities,
 				MaxContextTokens: effMaxContextTokens,
 				FromFallback:     fromFallback,

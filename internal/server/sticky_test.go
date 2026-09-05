@@ -93,7 +93,7 @@ func TestSticky_DifferentSystemPromptSameFirstMessageNotPinned(t *testing.T) {
 func TestSticky_TTLExpiry(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	flagP1(u1)
-	// sticky_ttl is per-endpoint (cache lifetime is a
+	// sticky_ttl is per-provider (cache lifetime is a
 	// property of the upstream provider, not of the virtual model), so
 	// it's declared on p2 specifically: that's the endpoint the sticky
 	// entry this test is about will point at.
@@ -101,7 +101,7 @@ func TestSticky_TTLExpiry(t *testing.T) {
 listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
-  - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
+  - {name: p2, base_url: {openai-completions: %s}, api_key: k2, sticky_ttl: 200ms}
 models:
   vm:
     endpoints:
@@ -112,7 +112,6 @@ models:
         - providers: [p2]
           models: [model-two]
           priority: 2
-          sticky_ttl: 200ms
 `, u1.srv.URL, u2.srv.URL))
 
 	chat(t, ts, simpleReq, nil) // establishes p2 stickiness

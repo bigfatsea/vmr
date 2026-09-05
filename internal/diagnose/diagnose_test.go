@@ -30,7 +30,7 @@ import (
 func mkEndpoint(cfg *config.Config, protocol, provider, model string) *core.Endpoint {
 	p, _ := cfg.ProviderByName(provider)
 	baseURL := p.BaseURL[protocol]
-	ep := &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: model}
+	ep := &core.Endpoint{Provider: provider, AdapterType: protocol, BaseURL: baseURL, APIKey: p.APIKey, Model: model, RoleMap: p.RoleMap}
 	if ad, ok := adapter.Get(protocol); ok {
 		ep.FullURL = ad.ResolveURL(baseURL)
 	}
@@ -407,7 +407,7 @@ models:
 }
 
 // TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap covers the fixed
-// config: the same role-rejecting upstream, but this endpoint's role_map
+// config: the same role-rejecting upstream, but this provider's role_map
 // rewrites "developer" to "system" before the request leaves vmr —
 // jsonscan.RewriteRoles applies it inside ad.BuildRequest, so the upstream
 // never sees "developer" at all.
@@ -417,15 +417,14 @@ func TestTestEndpoint_OpenAIDeveloperRole_SucceedsWithRoleMap(t *testing.T) {
 	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai-completions: %q}, api_key: k}
+  - {name: p1, base_url: {openai-completions: %q}, api_key: k, role_map: {developer: system}}
 models:
-  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m], role_map: {developer: system}}]}}
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}
 `, ts.URL)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ep := mkEndpoint(cfg, "openai-completions", "p1", "m")
-	ep.RoleMap = map[string]string{"developer": "system"}
+	ep := mkEndpoint(cfg, "openai-completions", "p1", "m") // RoleMap inherited from the provider
 	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
 	if r.Status != StatusOK {
 		t.Fatalf("status = %s, want ok (detail=%q)", r.Status, r.Detail)

@@ -116,6 +116,30 @@ func (c *Config) validateProviders(quotaNow time.Time) error {
 				}
 			}
 		}
+		if p.StickyTTL != nil {
+			if p.StickyTTL.D() <= 0 {
+				return fmt.Errorf("provider %q: sticky_ttl must be positive", p.Name)
+			}
+			if p.StickyTTL.D() > core.StickyBackstopTTL {
+				return fmt.Errorf("provider %q: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
+					p.Name, p.StickyTTL.D(), core.StickyBackstopTTL, p.StickyTTL.D(), core.StickyBackstopTTL)
+			}
+		}
+		for k, v := range p.RoleMap {
+			if strings.TrimSpace(k) == "" {
+				return fmt.Errorf("provider %q: role_map: empty role name (from)", p.Name)
+			}
+			if strings.TrimSpace(v) == "" {
+				return fmt.Errorf("provider %q: role_map: %q maps to an empty role name", p.Name, k)
+			}
+			if k == v {
+				return fmt.Errorf("provider %q: role_map: %q maps to itself (a no-op rewrite)", p.Name, k)
+			}
+		}
+		if len(p.RoleMap) == 0 && p.RoleMap != nil {
+			p.RoleMap = nil
+			c.Providers[i].RoleMap = nil
+		}
 		if err := validateQuota(p.Name, p.Quota, quotaNow); err != nil {
 			return err
 		}
@@ -237,15 +261,6 @@ func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup, p
 				providerModels[pn] = map[string]bool{}
 			}
 			providerModels[pn][mn] = true
-		}
-	}
-	if eg.StickyTTL != nil {
-		if eg.StickyTTL.D() <= 0 {
-			return fmt.Errorf("%s: sticky_ttl must be positive", ctx)
-		}
-		if eg.StickyTTL.D() > core.StickyBackstopTTL {
-			return fmt.Errorf("%s: sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-				ctx, eg.StickyTTL.D(), core.StickyBackstopTTL, eg.StickyTTL.D(), core.StickyBackstopTTL)
 		}
 	}
 	return nil

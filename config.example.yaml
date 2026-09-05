@@ -21,7 +21,7 @@
 # providers (resolved by name against the
 # providers list above — see providers[] below), and a `models:` list of
 # upstream model names that all share this entry's
-# role_map/sticky_ttl/priority — each (provider, model)
+# priority — each (provider, model)
 # pair expands into its own independent, individually health-tracked
 # endpoint, outer loop over models, inner loop over providers.
 # Capabilities and context ceilings are declared centrally in `model_defaults:`
@@ -392,21 +392,23 @@ providers:
   #     main: ${OPENROUTER_KEY_MAIN}
   #     backup: ${OPENROUTER_KEY_BACKUP}
 
-  # A provider whose API doesn't accept all OpenAI roles can have it rewritten
-  # per endpoint-group (the role_map entries under models.<name>.endpoints
-  # below) — a plain
-  # old->new mapping applied to "role" values inside the top-level "messages"
-  # array before the body is sent upstream. The canonical use case: some
-  # providers (e.g. DashScope/Qianwen) reject the "developer" role OpenAI
-  # introduced for o1/o3-series models — mapping it back to "system" makes
-  # those clients work without any client-side change. role_map lives on the
-  # endpoint-group rather than the provider: the same account can back several
-  # virtual models with different upstream model families, and not all of
-  # them necessarily need the same rewrite. Only the specific roles listed
-  # are affected; every other byte of the request is preserved.
+  # A provider whose API doesn't accept all OpenAI roles can have them
+  # rewritten via its own role_map — a plain old->new mapping applied to
+  # "role" values inside the top-level "messages" array before the body
+  # is sent upstream, for every endpoint backed by this account. The
+  # canonical use case: some providers (e.g. DashScope/Qianwen) reject
+  # the "developer" role OpenAI introduced for o1/o3-series models —
+  # mapping it back to "system" makes those clients work without any
+  # client-side change. Only the specific roles listed are affected;
+  # every other byte of the request is preserved. A provider may also
+  # declare sticky_ttl to override the global ttl.sticky for all its
+  # endpoints (e.g. DeepSeek's disk-based prompt cache lasts hours to
+  # days — far beyond the 10-minute global default).
   # - name: dashscope
   #   base_url: {openai-completions: https://dashscope.aliyuncs.com/compatible-mode/v1}
   #   api_key: ${DASHSCOPE_PLAN_KEY}
+  #   role_map: {developer: system}
+  #   # sticky_ttl: 2h
 
 models:
   coding:
@@ -416,13 +418,13 @@ models:
     # to 0) keep this file order, so listing them in the order you want
     # them tried is enough.
     #
-    # capabilities/max_context_tokens (condition routing) and sticky_ttl
-    # (Sticky Model) are all optional and default to "unconstrained" /
-    # "inherit the global default" — omitting them, as every endpoint
-    # below does, is identical to how this file behaved before these
-    # fields existed. sticky itself (session affinity) defaults to true
-    # per virtual model; see the "cheap" model below for the opt-out and
-    # per-endpoint override forms. Full reference: docs/UserGuide.md
+    # capabilities/max_context_tokens (condition routing) are optional and
+    # default to "unconstrained" — omitting them, as every endpoint below
+    # does, is identical to how this file behaved before these fields
+    # existed. sticky itself (session affinity) defaults to true per
+    # virtual model; see the "cheap" model below for the opt-out form.
+    # Role rewrites and sticky-TTL overrides live on the provider (see
+    # providers: above), not here. Full reference: docs/UserGuide.md
     # "Condition-based routing" / "Sticky Model".
     endpoints:
       openai-completions:
@@ -454,8 +456,9 @@ models:
           models: [tencent/hy3-preview, qwen/qwen3-max]
         - providers: [deepseek]
           models: [deepseek-v4-flash]
-          # sticky_ttl: 2h   # DeepSeek's disk-based prompt cache lasts hours to days —
-                              # override the global sticky_ttl for just this endpoint
+          # DeepSeek's disk-based prompt cache lasts hours to days — give
+          # this provider sticky_ttl: 2h under providers: above to inherit
+          # it on every deepseek endpoint (see the commented example there)
 
   # "agent" mixes all three ingress protocols under one virtual model name:
   # the openai-completions entry is reachable only from POST /v1/chat/completions,

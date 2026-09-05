@@ -1,0 +1,106 @@
+# Ver 2026-09-15, by Sonnet 5
+# pricing.mock.yaml — 用假数据填入 pricing 补充/标准表支持的全部字段。
+# 通过 config.yaml 的 `pricing.supplement: ./pricing.mock.yaml`(或 `standard:`)
+# 引用。表层职责是为标准表没覆盖的模型或自身有协商价/折扣的模型
+# 补行 —— 注意表自身只能 USD,顶层非 USD 会被 parseTable 拒绝。
+#
+# 注意:
+#  * 所有金额均为 每 1,000,000 tokens(currency 决定单位)。
+#  * 缺省 currency 顶层非 USD 即 reject;行级 currency 走本表 exchange_rate 转换。
+#  * 字段缺失代表"未知",不等同于免费;想标免费请显式写 0.0。
+#  * 键最多一段 "/"(vendor/basename 或裸名);org/path 前缀被 ModelBasename
+#    剥离,过深键会在加载时报错,根本看不见。
+#  * 注释中 〔冲突示例〕 字段同时启用将导致 parseTable / Merge 报错,仅展示其一。
+
+currency: USD
+generated_at: "2026-09-15"
+exchange_rate:
+  CNY: 7.1              # 本表自包含的汇率;若此处未列,回落至 config.yaml 的
+                        # pricing.exchange_rate。USD 自身 = 1.0,不需要条目
+  EUR: 0.92             # 多币种示例
+  # 〔冲突示例〕重复键  ← 写两份相同 key 会被 reject("duplicate key")
+  # JPY: 150.0
+
+rates:
+  # ─── 标准 USD 行(顶层 currency:USD 即用此;行级 currency 留空) ───
+  - key: mock-vendor/mock-model-pro
+    in_fresh: 3.0
+    cache_read: 0.3
+    cache_write: 3.75
+    out: 15.0
+
+  # ─── 行级 currency:CNY(顶层仍 USD)—— 通过本表 exchange_rate 转 USD ───
+  - key: mock-domestic-vendor/mock-model-cn
+    currency: CNY       # 此行原始报价是 CNY;表归一化前先通过上面 CNY:7.1 转 USD
+    in_fresh: 21.3
+    cache_read: 2.13
+    cache_write: 26.625
+    out: 106.5
+
+  # ─── cache_write 留空("未知",不等同于 0;Complete() 会判 incomplete) ───
+  - key: mock-vendor/mock-model-cachegap
+    in_fresh: 1.0
+    cache_read: 0.1
+    # cache_write:   留空 —— 故意演示"missing"≠"free";metric:cost 会 fail
+    out: 4.0
+
+  # ─── cache_read 显式 0.0("真的免费",与 nil 在 Rate 里是不同语义) ───
+  - key: mock-vendor/mock-model-freeread
+    in_fresh: 2.0
+    cache_read: 0.0     # 显式免费 —— Complete() 视为完整
+    cache_write: 2.5
+    out: 8.0
+
+  # ─── 裸名(无 "/",)── 不带 org 前缀的最小合法 key ───
+  - key: mock-basename-only
+    in_fresh: 0.5
+    cache_read: 0.05
+    cache_write: 0.625
+    out: 2.0
+
+  # ─── EUR 行级 currency(走 EUR:0.92 转 USD) ───
+  - key: mock-eu-vendor/mock-model-eu
+    currency: EUR
+    in_fresh: 2.76
+    cache_read: 0.276
+    cache_write: 3.45
+    out: 13.8
+
+  # 〔冲突示例〕 key 超过一段 "/"  ← 加载即 reject("must be vendor/basename")
+  # - key: too/deep/org/path/basename
+  #   in_fresh: 1.0
+  #   cache_read: 0.1
+  #   cache_write: 1.25
+  #   out: 4.0
+
+  # 〔冲突示例〕 负数  ← parseTable 校验时 reject("negative")
+  # - key: mock-vendor/mock-model-bad
+  #   in_fresh: -1.0
+  #   cache_read: 0.1
+  #   cache_write: 1.25
+  #   out: 4.0
+
+  # 〔冲突示例〕 NaN / Inf  ← reject("is NaN" / "is Inf")
+  # - key: mock-vendor/mock-model-nan
+  #   in_fresh: .nan
+  #   cache_read: 0.1
+  #   cache_write: 1.25
+  #   out: 4.0
+
+aliases:
+  # ─── 网关/代理的私有 model id → 真正的第一方模型 ───
+  mock-gateway-thinking-tier: mock-vendor/mock-model-pro
+  mock-gateway-flash-tier: mock-basename-only
+
+  # ─── 平台 resell 别家第一方 + 自家线的歧义场景 ───
+  mock-aggregator-alias: mock-vendor/mock-model-pro
+
+  # ─── 旧名 / 退役名的别名 ───
+  mock-old-name: mock-vendor/mock-model-pro
+
+  # 〔冲突示例〕 别名指向不存在 key  ← ValidateAliases reject
+  # mock-broken-alias: nonexistent-vendor/nonexistent-model
+
+  # 〔冲突示例〕 别名指向另一个别名(链式跳转) ← ValidateAliases reject,只允许一跳
+  # mock-chain-start: mock-chain-middle
+  # mock-chain-middle: mock-vendor/mock-model-pro

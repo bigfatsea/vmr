@@ -318,7 +318,7 @@ var fuzzRoleMap = map[string]string{"developer": "system", "user": "human"}
 // hand-written scanner in this package (descends into an array, then into
 // each element object, tracking a "role" key match) and, unlike
 // RewriteModel/RewriteStream, previously had no fuzz coverage at all despite
-// running on every request whose endpoint-group configures role_map.
+// running on every request whose provider configures role_map.
 func FuzzRewriteRoles(f *testing.F) {
 	seeds := []string{
 		`{"model":"vm","messages":[{"role":"developer","content":"hi"}]}`,

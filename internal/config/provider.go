@@ -84,6 +84,22 @@ type Provider struct {
 	// intended polarity so a typo'd disabled: true is loud and a routine
 	// config doesn't need to spell it. See ConfigShape_Simplification_2026-09_v2.md C.1.
 	Disabled bool `yaml:"disabled"`
+
+	// RoleMap rewrites message roles (e.g. {"developer":"system"}) for
+	// every request sent to this provider account — the rejection of
+	// roles a provider's gateway doesn't recognize is a property of its
+	// OpenAI-compatible API implementation (the canonical case:
+	// DashScope/Qianwen rejecting the "developer" role OpenAI introduced
+	// for o1/o3-series), not of any one virtual model, so the rewrite
+	// lives here rather than per endpoint-group. nil = no remapping.
+	RoleMap map[string]string `yaml:"role_map"`
+
+	// StickyTTL overrides the global ttl.sticky for every endpoint backed
+	// by this provider account — prompt-cache lifetime is a property of
+	// the upstream provider's infrastructure (e.g. DeepSeek's disk cache,
+	// hours to days, vs. the 5-10 minute window the global default
+	// calibrates to). nil = inherit the global ttl.sticky.
+	StickyTTL *Duration `yaml:"sticky_ttl"`
 }
 
 // baseURLCredentialKeys is the fixed blacklist of query-parameter names whose

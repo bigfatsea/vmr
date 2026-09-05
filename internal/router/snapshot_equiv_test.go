@@ -27,12 +27,10 @@ import (
 // legacyEndpointGroup mirrors the pre-map EndpointGroup: a flat list entry
 // carrying its own protocol.
 type legacyEndpointGroup struct {
-	Protocol  string            `yaml:"protocol"`
-	Providers []string          `yaml:"providers"`
-	Models    []string          `yaml:"models"`
-	Priority  int               `yaml:"priority"`
-	RoleMap   map[string]string `yaml:"role_map"`
-	StickyTTL *config.Duration  `yaml:"sticky_ttl"`
+	Protocol  string   `yaml:"protocol"`
+	Providers []string `yaml:"providers"`
+	Models    []string `yaml:"models"`
+	Priority  int      `yaml:"priority"`
 }
 
 type legacyVirtualModel struct {
@@ -92,8 +90,6 @@ func bucketByProtocol(t *testing.T, legacy []legacyEndpointGroup) map[string][]c
 			Providers: le.Providers,
 			Models:    le.Models,
 			Priority:  le.Priority,
-			RoleMap:   le.RoleMap,
-			StickyTTL: le.StickyTTL,
 		}
 		out[le.Protocol] = append(out[le.Protocol], ne)
 	}
@@ -108,6 +104,8 @@ providers:
   - name: p2
     base_url: {openai-completions: https://p2.example.com/v1, anthropic-messages: https://p2.example.com/anthropic}
     api_key: k2
+    sticky_ttl: 2h
+    role_map: {developer: system}
   - name: p3
     base_url: {openai-responses: https://p3.example.com/v1}
     api_key: k3
@@ -123,8 +121,6 @@ models:
         providers: [p2]
         models: [m3]
         priority: 5
-        sticky_ttl: 2h
-        role_map: {developer: system}
       - protocol: anthropic-messages
         providers: [p1]
         models: [m4]
@@ -161,6 +157,8 @@ providers:
   - name: p2
     base_url: {openai-completions: https://p2.example.com/v1, anthropic-messages: https://p2.example.com/anthropic}
     api_key: k2
+    sticky_ttl: 2h
+    role_map: {developer: system}
   - name: p3
     base_url: {openai-responses: https://p3.example.com/v1}
     api_key: k3
@@ -175,8 +173,6 @@ models:
         - providers: [p2]
           models: [m3]
           priority: 5
-          sticky_ttl: 2h
-          role_map: {developer: system}
       anthropic-messages:
         - providers: [p1]
           models: [m4]

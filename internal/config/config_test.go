@@ -200,18 +200,18 @@ func TestCustomTimeouts(t *testing.T) {
 	}
 }
 
-// TestRoleMapConfig/TestRoleMapUnsetIsNil pin role_map's new home: per
-// endpoint-group (models.<name>.endpoints[].role_map), not per provider —
-// the same account can back several endpoint-groups with different upstream
-// model families, not all of which necessarily need the same role rewrite.
+// TestRoleMapConfig/TestRoleMapUnsetIsNil pin role_map's home: per
+// provider (providers[].role_map) — the rejection of roles a provider's
+// gateway doesn't recognize is a property of its API implementation, not
+// of any one virtual model.
 func TestRoleMapConfig(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          role_map:\n            developer: system", 1)
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    role_map:\n      developer: system", 1)
 	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := cfg.Models["m1"].Endpoints["openai-completions"][0].RoleMap
+	got := cfg.Providers[0].RoleMap
 	if len(got) != 1 || got["developer"] != "system" {
 		t.Errorf("role_map: got %v, want map[developer:system]", got)
 	}
@@ -223,8 +223,38 @@ func TestRoleMapUnsetIsNil(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Models["m1"].Endpoints["openai-completions"][0].RoleMap; got != nil {
+	if got := cfg.Providers[0].RoleMap; got != nil {
 		t.Errorf("role_map should be nil when omitted, got %v", got)
+	}
+}
+
+// TestRoleMapEmptyNormalized pins the load-time normalization: a role_map
+// written but left empty must not survive as a non-nil empty map.
+func TestRoleMapEmptyNormalized(t *testing.T) {
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    role_map: {}", 1)
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Providers[0].RoleMap; got != nil {
+		t.Errorf("empty role_map should be normalized to nil, got %v", got)
+	}
+}
+
+// TestRoleMapInvalid pins the per-entry validation: blank names, blank
+// targets and self-mappings are all load errors.
+func TestRoleMapInvalid(t *testing.T) {
+	for name, frag := range map[string]string{
+		"blank from":   "role_map:\n      \"\": system",
+		"blank to":     "role_map:\n      developer: \"\"",
+		"self-mapping": "role_map:\n      system: system",
+	} {
+		yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    "+frag, 1)
+		t.Setenv("VMR_TEST_KEY", "sk-test-123")
+		if _, err := Parse([]byte(yaml)); err == nil {
+			t.Errorf("%s: expected a load error, got none", name)
+		}
 	}
 }
 
@@ -709,42 +739,44 @@ func TestStickyTTLGlobalOverride(t *testing.T) {
 	}
 }
 
-func TestStickyTTLPerEndpointOverride(t *testing.T) {
+func TestStickyTTLPerProviderOverride(t *testing.T) {
 	// nil (unset) vs. an explicit override must both be representable —
 	// same *Duration pattern as ImageDownscaleMaxPx.
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 2h", 1)
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    sticky_ttl: 2h", 1)
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
-	if eg.StickyTTL == nil {
-		t.Fatal("expected a non-nil per-endpoint StickyTTL override")
+	if cfg.Providers[0].StickyTTL == nil {
+		t.Fatal("expected a non-nil per-provider StickyTTL override")
 	}
-	if eg.StickyTTL.D() != 2*time.Hour {
-		t.Errorf("endpoint StickyTTL = %v, want 2h", eg.StickyTTL.D())
+	if cfg.Providers[0].StickyTTL.D() != 2*time.Hour {
+		t.Errorf("provider StickyTTL = %v, want 2h", cfg.Providers[0].StickyTTL.D())
 	}
 
-	// The base fixture's endpoint doesn't set it — nil means "inherit the
+	// The base fixture's provider doesn't set it — nil means "inherit the
 	// global default", not "zero".
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	base, err := Parse([]byte(validYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if base.Models["m1"].Endpoints["openai-completions"][0].StickyTTL != nil {
-		t.Error("expected a nil per-endpoint StickyTTL when not set (inherit global)")
+	if base.Providers[0].StickyTTL != nil {
+		t.Error("expected a nil per-provider StickyTTL when not set (inherit global)")
 	}
 }
 
 func TestStickyTTLNonPositiveRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 0s", 1)
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    sticky_ttl: 0s", 1)
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	if _, err := Parse([]byte(yaml)); err == nil {
 		t.Error("sticky_ttl: 0s must be rejected at load (a zero-duration affinity window is meaningless)")
 	}
 }
 
 // TestStickyTTLGlobalAboveBackstopRejected and
-// TestStickyTTLPerEndpointAboveBackstopRejected lock the fix for the gap
+// TestStickyTTLPerProviderAboveBackstopRejected lock the fix for the gap
 // flagged in the previous review: internal/sticky.Registry evicts an idle
 // entry from its map after sticky.BackstopTTL (24h) independent of any
 // endpoint's own StickyTTL, so a configured ttl.sticky above that value
@@ -758,10 +790,11 @@ func TestStickyTTLGlobalAboveBackstopRejected(t *testing.T) {
 	}
 }
 
-func TestStickyTTLPerEndpointAboveBackstopRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          sticky_ttl: 48h", 1)
+func TestStickyTTLPerProviderAboveBackstopRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    sticky_ttl: 48h", 1)
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
 	if _, err := Parse([]byte(yaml)); err == nil {
-		t.Error("per-endpoint sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
+		t.Error("per-provider sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
 	}
 }
 

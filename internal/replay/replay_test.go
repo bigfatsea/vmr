@@ -397,91 +397,8 @@ func TestRun_RejectsNonObjectBody(t *testing.T) {
 	}
 }
 
-// TestResolveRoleMap_ReturnsNilByDefault covers the common case: no role_map
-// configured means the endpoint must carry nil (not an empty map), so
-// BuildRequest skips the role rewrite — same as live traffic.
-func TestResolveRoleMap_ReturnsNilByDefault(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      openai-completions:
-        - {providers: [p1], models: [m]}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := resolveRoleMap(cfg, "openai-completions", "vm", "p1"); got != nil {
-		t.Errorf("resolveRoleMap = %v, want nil", got)
-	}
-}
-
-func TestResolveRoleMap_ReturnsConfiguredMap(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      openai-completions:
-        - {providers: [p1], models: [m], role_map: {developer: system}}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := resolveRoleMap(cfg, "openai-completions", "vm", "p1")
-	if got == nil {
-		t.Fatal("resolveRoleMap = nil, want non-nil map")
-	}
-	if got["developer"] != "system" || len(got) != 1 {
-		t.Errorf("resolveRoleMap = %v, want {developer: system}", got)
-	}
-}
-
-func TestResolveRoleMap_UnknownProtocolReturnsNil(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      openai-completions:
-        - {providers: [p1], models: [m], role_map: {developer: system}}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := resolveRoleMap(cfg, "anthropic-messages", "vm", "p1"); got != nil {
-		t.Errorf("resolveRoleMap = %v, want nil for non-matching protocol", got)
-	}
-}
-
-func TestResolveRoleMap_UnknownProviderReturnsNil(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
-listen: 127.0.0.1:0
-providers:
-  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
-models:
-  vm:
-    endpoints:
-      openai-completions:
-        - {providers: [p1], models: [m], role_map: {developer: system}}
-`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := resolveRoleMap(cfg, "openai-completions", "vm", "ghost"); got != nil {
-		t.Errorf("resolveRoleMap = %v, want nil for non-matching provider", got)
-	}
-}
-
 // TestBuildReplayEndpoint_CarriesRoleMap proves the endpoint buildReplayEndpoint
-// assembles carries the matching EndpointGroup's role_map — the fix for a
+// assembles carries the provider's role_map — the fix for a
 // real gap: ep is hand-built here (never passing through BuildSnapshot, the
 // one place live endpoints get their RoleMap copied on), so a configured
 // role_map used to be silently dropped and the replayed request would fail
@@ -493,12 +410,12 @@ func TestBuildReplayEndpoint_CarriesRoleMap(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 providers:
-  - {name: p1, base_url: {openai-completions: https://api.example.com/v1}, api_key: real-provider-key}
+  - {name: p1, base_url: {openai-completions: https://api.example.com/v1}, api_key: real-provider-key, role_map: {developer: system}}
 models:
   vm:
     endpoints:
       openai-completions:
-        - {providers: [p1], models: [upstream-model], role_map: {developer: system}}
+        - {providers: [p1], models: [upstream-model]}
 `
 	if err := os.WriteFile(cfgPath, []byte(yaml), 0o600); err != nil {
 		t.Fatal(err)

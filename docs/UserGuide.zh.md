@@ -130,7 +130,7 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 
 ### 角色改写 role_map
 
-有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 `models.<name>.endpoints` 的某条 try-order entry 下写 `role_map: {developer: system}`，vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。这个开关挂在 endpoint-group 一级，不是挂在 provider 或整个虚拟模型上——因为同一个账号可能背靠好几个虚拟模型、好几族不同的上游模型，不见得都要用同一套改写规则；某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 entry 保持默认行为：所有 role 原样通过。
+有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 自己身上写 `role_map: {developer: system}`（即 `providers[].role_map`），vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。挂在 provider 一级声明一次即可：它修复的 role 拒收是该 provider 的 API 实现属性，不属于任何某个虚拟模型——该账号名下的所有端点自动继承。某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。空白 role 名、空白目标值、以及自映射（`system: system`）在加载时直接拒绝。
 
 ### 端点尝试顺序 priority 与 strategy
 
@@ -309,6 +309,12 @@ Sticky 会话亲和性与 `model_defaults` 完全正交：Sticky 的路由键始
 ttl:
   sticky: 10m                # 全局默认：粘性偏好保持有效的时长
 
+providers:
+  - name: deepseek
+    base_url: {openai-completions: https://api.deepseek.com/v1}
+    api_key: ${DEEPSEEK_API_KEY}
+    sticky_ttl: 2h           # DeepSeek 磁盘缓存寿命数小时到数天——账号级声明一次
+
 models:
   agent:
     # sticky: true 是默认值，不用写；只有真正的单次调用场景（没有多轮价值可保护）
@@ -320,12 +326,12 @@ models:
           # 继承全局的 10 分钟 ttl.sticky
         - providers: [deepseek]
           models: [deepseek-chat]
-          sticky_ttl: 2h    # DeepSeek 磁盘缓存寿命数小时到数天——单独为这个端点覆盖
+          # 继承 deepseek 在 provider 级声明的 sticky_ttl: 2h
 ```
 
 - **身份识别**：对话锚点取自 system prompt **和**第一条非 system 消息的哈希——两者都只哈希、从不记录或以其他方式暴露。两个恰好用同一句话开场的不同 Agent 不会被混同，因为它们的 system prompt（进而它们在上游真正的缓存前缀）不同；如果只哈希首条用户消息、不含 system prompt，恰好会漏掉这个场景。
-- **`sticky_ttl` 是端点级的，不是模型级的**——缓存寿命是上游厂商的属性（Anthropic/OpenAI/MiniMax 大约 5-10 分钟；DeepSeek 数小时到数天），所以同一个虚拟模型下的不同端点可以各自声明自己的窗口，不必强行统一成一个值。全局 `ttl.sticky`（默认 10 分钟；`0`/不写 = 默认）是没有显式覆盖的端点的兜底值。
-- **`ttl.sticky` 与端点级 `sticky_ttl` 都不能超过 24 小时**——粘性注册表自己会在一条记录闲置 24 小时后把它从内存里清掉，不管端点自己声明的 TTL 是多少，所以写一个更长的值能加载成功，但会悄悄失效。`vmr check`/`vmr start`/热加载都会拒绝这类配置，并在报错里点名是哪个模型/端点。
+- **`sticky_ttl` 是 provider 级的，不是模型级的**——缓存寿命是上游厂商基础设施的属性（Anthropic/OpenAI/MiniMax 大约 5-10 分钟；DeepSeek 数小时到数天），所以一个 provider 声明一次自己的窗口，它名下所有端点自动继承。全局 `ttl.sticky`（默认 10 分钟；`0`/不写 = 默认）是没有显式覆盖的 provider 的兜底值。按 provider 而非按模型声明，也让多账号端点组保持可用：`providers: [openrouter, deepseek]` 在同一条 try-order entry 内也各自保留自己的 TTL。
+- **`ttl.sticky` 与 provider 级 `sticky_ttl` 都不能超过 24 小时**——粘性注册表自己会在一条记录闲置 24 小时后把它从内存里清掉，不管端点自己声明的 TTL 是多少，所以写一个更长的值能加载成功，但会悄悄失效。`vmr check`/`vmr start`/热加载都会拒绝这类配置，并在报错里点名是哪个 provider。
 - 亲和性只会在已经通过健康检查和条件过滤的端点里重新排序——一个之后变得不健康、或者不再满足某项必要能力的端点，不会仅仅因为它是上次的粘性选择就被复活。
 - 每次成功完成请求（含 failover 后的成功）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
 

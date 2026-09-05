@@ -19,7 +19,7 @@
 # 对应 "openai-responses"），每个协议 key 下的一条记录是一个 try-order 候选：一个或多个
 # provider（按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
 # `models:` 上游模型名列表，这些模型名共享这一条的
-# role_map/sticky_ttl/priority——每个 (provider, model) 对
+# priority——每个 (provider, model) 对
 # 都会展开成各自独立、单独做健康跟踪的端点，外层按 models 循环、内层按
 # providers 循环。上游真实模型的能力与上下文上限集中在顶层 `model_defaults:`
 # 统一声明（支持可选的 "*" 通配）；虚拟模型层可以显式覆盖任意维度（如对模型窗口进行降级）。
@@ -330,17 +330,20 @@ providers:
                                      # 复用同一个变量，只是为了让这份文件在只设了一个
                                      # key 的情况下也能干净地加载通过
 
-  # 如果某个 provider 的 API 不接受全部 OpenAI 角色，可以按端点组
-  # （下面 models.<name>.endpoints 下的各条 role_map）做重写——一份简单的旧值->新值
-  # 映射，在请求体发往上游之前应用到顶层 "messages" 数组里的 "role" 字段上。
+  # 如果某个 provider 的 API 不接受全部 OpenAI 角色，可以在它自己的
+  # role_map 上做重写——一份简单的旧值->新值映射，在请求体发往上游之前应用到
+  # 顶层 "messages" 数组里的 "role" 字段上，对该账号下的所有端点生效。
   # 典型场景：有些 provider（比如 DashScope/通义千问）拒绝 OpenAI 给 o1/o3 系列
   # 模型引入的 "developer" 角色——把它映射回 "system" 就能让这些客户端在完全
-  # 不改客户端代码的情况下正常工作。role_map 挂在端点组上而不是 provider 上：
-  # 同一个账号可能同时支撑好几个使用不同上游模型族的虚拟模型，不是所有虚拟模型
-  # 都需要同一套重写。只有列出的那些角色会被影响；请求的其余每个字节都原样保留。
+  # 不改客户端代码的情况下正常工作。同一个 provider 也可以声明 sticky_ttl，
+  # 覆盖全局 ttl.sticky（如 DeepSeek 基于磁盘的 prompt cache 能维持几小时到
+  # 几天——远超 10 分钟的全局默认值）。只有列出的那些角色会被影响；
+  # 请求的其余每个字节都原样保留。
   # - name: dashscope
   #   base_url: {openai-completions: https://dashscope.aliyuncs.com/compatible-mode/v1}
   #   api_key: ${DASHSCOPE_PLAN_KEY}
+  #   role_map: {developer: system}
+  #   # sticky_ttl: 2h
 
 models:
   coding:
@@ -349,12 +352,12 @@ models:
     # 下面这些端点都没有显式写 priority——都缺省是 0，打平的情况下按本文件里
     # 出现的顺序排列，所以只要按你想尝试的顺序把它们列出来就够了。
     #
-    # capabilities/max_context_tokens（条件路由）和 sticky_ttl（Sticky Model）
-    # 都是可选的，缺省是"不受约束"/"继承全局默认值"——像下面每条端点一样不写它
-    # 们，行为和这些字段还不存在时完全一样。sticky 本身（会话亲和性）每个虚拟
-    # 模型默认是 true；下面的 "cheap" 模型示例演示了怎么整体关掉、以及按端点单
-    # 独覆盖的写法。完整参考见 docs/UserGuide.zh.md 的"基于条件的路由"/
-    # "Sticky Model" 一节。
+    # capabilities/max_context_tokens（条件路由）都是可选的，缺省是"不受约束"
+    # ——像下面每条端点一样不写它们，行为和这些字段还不存在时完全一样。
+    # sticky 本身（会话亲和性）每个虚拟模型默认是 true；下面的 "cheap" 模型示例
+    # 演示了怎么整体关掉。role 重写与 sticky-TTL 覆盖在 provider 上声明
+    # （见上方 providers:），不在这里。完整参考见 docs/UserGuide.zh.md 的
+    # "基于条件的路由"/"Sticky Model" 一节。
     endpoints:
       openai-completions:
         - providers: [openrouter]
@@ -382,8 +385,9 @@ models:
           models: [tencent/hy3-preview, qwen/qwen3-max]
         - providers: [deepseek]
           models: [deepseek-v4-flash]
-          # sticky_ttl: 2h   # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——
-                              # 只针对这一条端点覆盖全局 sticky_ttl
+          # DeepSeek 基于磁盘的 prompt cache 能维持几小时到几天——在上方
+          # providers: 里给这个 provider 写 sticky_ttl: 2h，它名下的所有
+          # deepseek 端点都会继承（见那里的注释示例）
 
   # "agent" 在同一个虚拟模型名下混合了全部三种入口协议：openai-completions 协议的记录只能
   # 从 POST /v1/chat/completions 到达，anthropic-messages 协议的记录只能从

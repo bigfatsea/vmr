@@ -103,7 +103,7 @@ Upstream   ├─ 2xx → 响应归一化 → 转发 → 上报健康成功 → 
 * **流式只在首字节发出前允许 failover**；实现上该约束自然成立——仅上游 2xx 后才开始向客户端写，此前的一切失败都发生在写出之前。首字节后的上游错误只能断流并记日志。
 * **失败语义**：有真实上游尝试 → 原样返回最后一次上游错误（status+headers+body，`Retry-After` 等原样到达客户端，保留客户端可解析的厂商错误结构）；无候选可试 → 503，消息按具体原因区分（全员冷却中、或某个 Condition 拒绝了全部候选，见「调度与健康」）。凡进入 failover 循环的响应带 `X-VMR-Attempts` 与 `X-VMR-Route-Reason`（成功另带 `X-VMR-Endpoint`），有过失败尝试时再带 `X-VMR-Failover`；路由之前被拒的请求（401/404/413/坏 JSON）不带。`X-VMR-Route-Reason` 形如 `pick=sticky eligible=2/5 cooldown=1 conditions=2 ctx_fallback=1`，`pick` 三选一（`order`/`quota`/`sticky`，优先级依次升高——额度感知重排真正换了队首时给 `pick=quota`，见 §6.6），只印真正发生过的部分（最常见的按序选中只剩 `pick=order eligible=3/3`）；`X-VMR-Failover` 形如 `deepseek/deepseek-v4:429, minimax/m2:500`，无 HTTP 响应的构建/网络失败记 `:err`。两者都沿用既有的 `X-VMR-*` 例外（§5.4），内容不超出 `X-VMR-Endpoint` 已暴露的范围。**实现约束**：`X-VMR-Failover` 必须在每次尝试**之前**写入截至目前的失败——成功的那次尝试在 `forwardSuccess` 内部自行 `WriteHeader` 后直接返回，不再回到 `Serve`，循环后才写就只有全败路径生效。
 
-* **`role_map`：按 endpoint-group 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）。`models.<name>.endpoints` 的某条 entry 下配 `role_map: {developer: system}`，`jsonscan.RewriteRoles`（`internal/jsonscan/rewrite.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`TopLevelValues`/`SkipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。挂在 endpoint-group 一级而非 provider——同一账号可能背靠不止一个虚拟模型/上游模型族，不见得都需要同一套改写规则；`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.EndpointGroup.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
+* **`role_map`：按 provider 做 role 改写**：部分 OpenAI 兼容 provider 会拒收它上游不认识的 role（典型：DashScope/千问拒收 OpenAI 为 o1/o3 系列引入的 `developer` role）——role 拒收发生在 provider 网关入口的枚举校验层，是该 provider API 实现的属性而非某个模型的属性，故 `role_map: {developer: system}` 挂在 `providers[]` 条目上，账号下所有端点自动继承。`jsonscan.RewriteRoles`（`internal/jsonscan/rewrite.go`）在 `RewriteModel` 之后、发出请求之前，用同一套字节级扫描/拼接手法（`TopLevelValues`/`SkipJSONValue` 与 `RewriteModel` 共享）定位顶层 `messages` 数组里每个消息对象的 `"role"` 键，命中 `role_map` 就地替换值，其余字节（键序、空白、消息正文、未知字段）原样保留；未命中任何映射时零拷贝返回原 slice。加载期校验拒绝空白 role 名/空白目标值/自映射（`system: system`），空 map 规整为 nil。`core.Endpoint.RoleMap` 随 `BuildSnapshot` 从 `config.Provider.RoleMap` 原样传下去。审计日志无需为此单独打标：`Attempt.Request.Body` 记录的就是改写后、真正发给上游的字节，与改写前的客户端原始请求对照即可看出差异（同 `RewriteModel` 的既有做法，未走 `Attempt.Norm`——那个字段专属响应侧归一化）。
 
 ### 4.2 模块划分
 
@@ -432,9 +432,9 @@ Sticky 会话亲和性与 `model_defaults` 完全正交：Sticky key 是 `(clien
 
 **Key 组成**：`client_key_tag`（既有的 `audit.KeyTag` 机制）作为命名空间，不是主键——`sticky_key = client_key_tag + ":" + hex(sysHash) + ":" + hex(firstMsgHash)`。
 
-**TTL 挂在端点，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 的属性，不是虚拟模型的属性，一个虚拟模型完全可能同时挂快缓存和慢缓存两种端点。`EndpointGroup.StickyTTL *Duration` 覆盖单个端点，未设置继承全局 `ttl.sticky`（`Config.TTL.Sticky`，缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。主要挂 DeepSeek 的端点应该显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。
+**TTL 挂在 provider，不是虚拟模型**：调研 Anthropic/OpenAI/MiniMax/DeepSeek 四家官方 prompt cache 寿命，前三家落在 5-10 分钟区间，DeepSeek 磁盘缓存"数小时到数天"，差 2-3 个数量级——cache 寿命是上游 provider 基础设施的属性，不是虚拟模型的属性。`Provider.StickyTTL *Duration` 在账号级声明一次、账号下所有端点自动继承，未设置继承全局 `ttl.sticky`（`Config.TTL.Sticky`，缺省 10 分钟，覆盖 Anthropic 下限和 OpenAI 典型区间）。挂 DeepSeek 的 provider 应显式声明 `sticky_ttl: 2h` 才能吃到磁盘缓存的真实收益。粘性本质是尽力而为的软亲和——TTL 与真实缓存寿命的少量偏差只损失一次缓存优惠、不影响路由正确性，而聚合网关（如 OpenRouter）背后的物理实例调度在 VMR 视角不可观测，强行细分到 provider+model 属于伪精确；挂在 provider 而非端点还解除了多账号端点组（`providers: [openrouter, deepseek]`）内属性强制共享的历史耦合。
 
-**内存淘汰与粘性有效性判定是两件事，不共用同一个数字**：一个 `Registry` 里同时装着分钟量级和小时量级的条目，判定粘性有效性时必须用**这条记录当时指向的那个端点**自己的 TTL；内存淘汰则用一个统一的、比任何端点 TTL 都宽松的粗粒度兜底值——`internal/sticky.BackstopTTL`，24 小时，只负责内存卫生，不参与路由决策。这个 24 小时上限由 `config.validate()` 强制保证：全局 `ttl.sticky` 与任意端点的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝，`vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都会挡住这类配置——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录会在写入的 TTL 到期前，先被内存清理兜底删掉）。
+**内存淘汰与粘性有效性判定是两件事，不共用同一个数字**：一个 `Registry` 里同时装着分钟量级和小时量级的条目，判定粘性有效性时必须用**这条记录当时指向的那个端点**自己的 TTL；内存淘汰则用一个统一的、比任何端点 TTL 都宽松的粗粒度兜底值——`internal/sticky.BackstopTTL`，24 小时，只负责内存卫生，不参与路由决策。这个 24 小时上限由 `config.validate()` 强制保证：全局 `ttl.sticky` 与任意 provider 级的 `sticky_ttl` 只要超过 `internal/sticky.BackstopTTL`，配置在加载阶段直接拒绝，`vmr check`/`vmr start`/热重载三处共用同一个 `validate()`，都会挡住这类配置——否则会出现"配置写了却不生效"的静默陷阱（该端点的粘性记录会在写入的 TTL 到期前，先被内存清理兜底删掉）。
 
 **架构落地**：独立小包 `internal/sticky`（与 `internal/health` 平行，不塞进 `internal/strategy`——亲和性是独立的运行时状态概念，不是排序/过滤维度）。`Registry` 本身不需要知道任何端点/TTL 的细节——它只是一个带 mtime 的键值存储：
 
@@ -469,9 +469,8 @@ models:
       openai-completions:
         - providers: [minimax]        # 跟随全局 10 分钟
           models: [MiniMax-M3]
-        - providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
-          models: [deepseek-chat]
-          sticky_ttl: 2h
+        - providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，provider 级声明一次
+          models: [deepseek-chat]     # （providers: 下 deepseek 条目配 sticky_ttl: 2h）
 
   one-shot-summarizer:              # 单次摘要调用，没有多轮价值，显式关闭 sticky
     sticky: false
@@ -682,7 +681,7 @@ timeouts:                     # 等多久——请求路径上的各类超时上
   probe: 15s                  # 半开端点一次后台恢复探测的时间上限（缺省 15s，远小于 response_header 的 120s——探测要的是快且便宜，等不到就是等不到）；只做全局开关，不支持按模型覆盖（刻意的 YAGNI）
 
 ttl:                          # 活多久——生命周期/淘汰，扩展 Duration 文法（d/w/mo/y，大小写不敏感；裸整数按天解释）
-  sticky: 10m                 # Sticky Model 粘性偏好的全局默认有效期；0/未写 = 用默认 10 分钟，硬上限 24 小时（超过拒绝加载）。按端点可覆盖（下方 endpoints.sticky_ttl）
+  sticky: 10m                 # Sticky Model 粘性偏好的全局默认有效期；0/未写 = 用默认 10 分钟，硬上限 24 小时（超过拒绝加载）。按 provider 可覆盖（providers[].sticky_ttl）
   image_cache: 7d             # 降采样结果缓存的失效期；0/未写 = 用默认 7 天
   audit_retention: 90d        # 审计文件保留天数；0/未写 = 用默认 90 天；不支持"永久保留"语义（forever/permanent/never 拒绝加载），需要长期保留显式写一个足够大的值（如 90000d）；历史文件压缩为 .zst 与此项无关，无条件在轮转时发生
 
@@ -691,6 +690,10 @@ providers:                       # "我有什么"——扁平列表，一个账�
     base_url: {openai-completions: https://..., anthropic-messages: https://...}  # 按协议分 key 的 map，至少声明一个；
                                  # 必须自带版本号；openai 型拼 /chat/completions，anthropic 型拼 /messages
     api_key: ${ENV_VAR}        # 支持 ${VAR} 展开；未设置的变量展开为空串；两个协议面共享同一把 key
+    role_map:                  # 可选；该账号拒收的 role → 改写成什么，缺省不改写；账号下所有端点自动继承
+      developer: system        # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
+    sticky_ttl: 2h             # 可选；覆盖全局 ttl.sticky，该账号下所有端点自动继承——prompt cache 寿命
+                               # 是上游 provider 基础设施的属性；同样受 24 小时硬上限约束
     proxy: false               # 可选布尔开关，缺省 false：true = 该 provider 走 http(s)_proxy（海外厂商的
                                # 推荐写法）；false/缺省 = 直连（国内厂商的典型写法，也是唯一的缺省值——
                                # 没有全局默认可继承，每个 provider 独立、显式决定）。没有环境变量回退。
@@ -750,10 +753,6 @@ models:                          # "对外叫什么、按什么顺序用"——�
                                           # 跟踪的端点——外层按 models 循环、内层按 providers 循环，
                                           # 共享本条 entry 的其余字段
           priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
-          role_map:               # 可选；这条 entry 拒收的 role → 改写成什么，缺省不改写
-            developer: system     # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
-          sticky_ttl: 2h          # 可选；覆盖全局 ttl.sticky，只对这一个端点生效——挂在端点而不是
-                                 # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
 ```
 
 **扁平 provider 列表 + 按协议分 key 的 base_url 和 endpoints，而不是别的嵌套方式**：provider 是扁平列表，`name` 是显式字段，`base_url` 是按协议分 key 的 map——同一账号的两个协议面（如 MiniMax）合并成一条 provider 条目而不是重复两份。协议是 `models.<name>.endpoints`（和顶层 `fallback_endpoints`）的 map key，与 `base_url` 同构：某条 endpoint-group 引用的 provider 必须在所在 key 对应的协议下声明了 base_url——跨协议引用不是配置写不出来，而是加载期"provider 没有这个协议的 base_url"错误。同一个 virtual model 名下可以同时放一个 `openai-completions` 桶和一个 `anthropic-messages` 桶，两个入口各自独立可达（`router.BuildSnapshot` 按协议 key 拆成两条独立路由）。`Endpoint` 的 `HealthKey()`/`Name()`（进而健康 key、`X-VMR-Endpoint`、实时日志）是三段式 `<protocol>/<provider>/<model>`——两个协议面用同一 provider 名、同一 API Key，两段式的 `provider/model` 键会把它们的健康状态错认成同一个端点。**审计日志的 `attempts[].endpoint` 是独立拼接的展示字符串，不复用 `Name()`**：同样三段但用 `:` 分隔（`<protocol>:<provider>:<model>`），因为审计侧另有三个结构化字段 `protocol`/`provider`/`model`——`endpoint` 纯粹是给人读的标签，程序需要这三段时应该直接读结构化字段，不解析任何分隔符；两处的三段式含义相同，只是各自独立维护，分隔符不必强求一致。**兼容旧格式日志**：一部分历史留存的审计文件的 attempt 只有 `endpoint`（`/` 分隔），没有 `protocol`/`provider`/`model` 三个结构化字段——`internal/report` 的 `attemptUpstream()` 在三个字段皆空时按 `SplitN(endpoint, "/", 3)` 拆出三段（只切前两个分隔符，不切整串：model 段本身可能带 `/`，例如 OpenRouter 的 `z-ai/glm-5.2`，`Split` 会把它切成 4 段而不是 3 段，误判为"格式不认识"，`SplitN` 才能正确保留），使 `realModel()`、详单索引的 `VM/API` 列在混用新旧格式日志时都不会退化成 `none`/`-`。
@@ -766,11 +765,11 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **`Provider.Disabled`（临时下线开关）**：运营场景下临时切走一个 provider（账号被限流、商用 API 突然返 5xx、协议升级、临时维护），改回时再切回——不动 model 结构。`disabled: true` 等价于"在所有下游消费点把它当作不存在"：`BuildSnapshot` 入口构造一个 `enabled` 集合（唯一的过滤点，下游 `buildEndpoints`/`BuildQuotaSpecsDisabled` 一律查它，不在两处各自重判 `p.Disabled`，避免 reload 序列上的漂移），disabled provider 不出现在任何路由候选里，也不为它建 quota 计数器（避免留一个无主的计数器）。全部 endpoint 都指向 disabled provider 的 `(protocol, model)` 走常规的"没有候选"失败路径，不是 unknown-model。`Config.Check` 对 disabled provider 跳过 `api_key` 缺失告警（下线的账号没配 key 不算问题），但对仍引用它的 model/fallback 给一条 `SeverityWarning`（逐引用点各发一条，不合并）——用户意图很清楚（下线），不是拼写错误，但要让人看得见"这条引用现在没有流量"。默认 `false`：`disabled` 表达的是非常态运营操作，默认值代表常态（provider 在线）。改这一个字段触发热重载即可恢复，不单独保留一个"disable 期间仍可观察"的通道。
 
-**校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoints/fallback_endpoints 的协议 key 必须已注册（key 层一次校验覆盖整个桶）、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`ttl.sticky`（全局与端点级 `sticky_ttl`）必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`max_attempts` / `max_concurrency` / `image_downscale` / 模型级 `image_downscale`）加载期直接拒绝；`ttl.*` 三个字段（`sticky`/`image_cache`/`audit_retention`）是 `CalendarDuration`，`<= 0` 一律用各自默认值，`forever`/`permanent`/`never` 这类关键字显式拒绝加载——没有任何字段支持"永久"语义。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
+**校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoints/fallback_endpoints 的协议 key 必须已注册（key 层一次校验覆盖整个桶）、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`ttl.sticky`（全局与 provider 级 `sticky_ttl`）必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`role_map` 拒绝空白 role 名/空白目标值/自映射，空 map 规整为 nil；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`max_attempts` / `max_concurrency` / `image_downscale` / 模型级 `image_downscale`）加载期直接拒绝；`ttl.*` 三个字段（`sticky`/`image_cache`/`audit_retention`）是 `CalendarDuration`，`<= 0` 一律用各自默认值，`forever`/`permanent`/`never` 这类关键字显式拒绝加载——没有任何字段支持"永久"语义。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
 
 **`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`timeouts.probe` 没有明显小于 `timeouts.response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点、disabled provider 仍被引用、fallback_endpoints 某协议 key 对所有虚拟模型都不可达。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型 capabilities/max_context_tokens 展示，以及当某个端点的实际生效值来自 `model_defaults` 而非模型自身声明时，逐端点补一行解析结果）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
 
-CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 capabilities/max_context_tokens/image_downscale/sticky 标记、每个端点的 sticky_ttl/role_map、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
+CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 capabilities/max_context_tokens/image_downscale/sticky 标记、每个端点继承到的 sticky_ttl/role_map、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
 **上游代理：显式配置，两级解析，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器 URL，本身不替任何 provider 打开代理。是否走代理完全由 provider 自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，无全局默认可继承）；`true` 时按 base_url 的 scheme 选用 `http_proxy`/`https_proxy`。**推荐**：只给个别需要代理的 provider（典型是访问受限的海外厂商）写 `proxy: true`，其余不写——新增 provider 默认直连、不会意外被牵连。**没有环境变量回退**：一个只在某次交互式 shell 里临时设过的 `HTTPS_PROXY` 被悄悄读取，会让接下来启动的所有实例把全部上游流量导进代理——流量去哪必须在 config.yaml 里读得出来；要引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但没配对应 scheme 的代理地址是校验错误。实现不做每请求动态判断：`router.Install` 按解析结果分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，请求期零额外开销；代理值随热重载即时生效。
 
@@ -849,10 +848,10 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | `vmr report` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755 | details/、索引、报表与 vmr-requests.json 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600，派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异，单用户机器上无感知 |
 | 条件路由用新接口 `Condition`（elimination，感知请求），不扩展 `Dimension` | 给 `Dimension.Compare` 加一个 request 参数 | `Dimension` 的现有实现（priority）和未来实现（weight/latency）本来就不需要看请求，硬塞一个参数会强迫每个排序维度都感知请求；`Condition` 语义上是准入不是排序，混进同一个接口是把两种不同的事情绑在一起。两个接口平行存在，`router.Serve` 分两步跑，互不干扰 |
 | 上下文长度条件（`WithinContext`）不注册进 `Condition` 接口，单独一个函数 | 也注册成一个普通 Condition | 唯一需要"全体拒绝时不能真的拒绝"这个降级行为的条件，其余（image/tools）都是确定性的，全体拒绝就该直接拒绝——为一个目前只有一个成员的特例改动整个接口的语义不划算，`router.Serve` 里两行代码就能表达清楚这个特例 |
-| `sticky_ttl` 挂在 `EndpointGroup`，不是 `VirtualModel` | 挂在虚拟模型层级 | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 的属性，不是虚拟模型的属性；模型级设计会逼着用户把不同缓存寿命的端点拆成不同虚拟模型才能各自配置 TTL，端点级消除了这个别扭 |
+| `sticky_ttl` 挂在 `Provider`（账号级声明一次，账号下端点全部继承），不是 `VirtualModel`/`EndpointGroup` | 挂在虚拟模型或端点层级 | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 基础设施的属性；粘性是软亲和，少量 TTL 偏差只损失一次缓存优惠不影响路由正确性，聚合网关背后实例调度不可观测、细分到 provider+model 属于伪精确；账号级声明消除了多账号端点组内属性强制共享的耦合与跨虚拟模型的重复配置 |
 | Sticky Model 的会话指纹（`adapter.SessionFingerprint`）不与 `internal/report/session.go` 的离线分组算法共用实现，也不写入审计日志 | 抽一个共享函数，把在线算出的哈希落盘给 `session.go` 读 | 两者风险取舍相反（`session.go` 容忍 system prompt 逐轮漂移，Sticky Model 不能），共用一份实现要么污染其中一方的语义，要么两边都要加分支；`session.go` 的哈希是它本来就要做的整体消息遍历的免费副产品，调用一个为在线场景优化的字节扫描函数换不来速度收益，日志落盘也没有真实消费者 |
 | Sticky Model 默认开启（`VirtualModel.Sticky *bool`，`nil` 视为 `true`） | 默认关闭，显式 opt-in | 实测两次 md5（system prompt + 首条消息，通常几 KB 到几十 KB）相对一次真实 LLM 请求往返可以忽略，不是需要用户权衡是否值得开启的成本；agent 多轮会话又是 vmr 的核心场景，默认关闭只会让大多数用户忘记开启而拿不到本该有的收益 |
-| `sticky_ttl`（全局与端点级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
+| `sticky_ttl`（全局与 provider 级）增加 24 小时硬上限校验，超过直接拒绝加载 | 只在设计文档里承诺"内存淘汰兜底值比任何端点 TTL 都宽松"，不做代码校验 | 承诺没有代码校验就是没有承诺——`internal/sticky.Registry` 的内存淘汰兜底值固定 24 小时，用户配置一个更长的 `sticky_ttl` 会加载成功但静默失效（粘性记录在写入的 TTL 到期前就先被兜底清理删掉），且没有任何错误提示。校验成本是一次数值比较，配置期直接拒绝换来的是运行时零意外 |
 | Responses 协议命名用 `openai-responses`，独立协议字符串、独立 `base_url` key，不复用 `openai-completions` | 复用 `protocol: openai-completions` 字符串，靠某种"子模式"字段在 Adapter 内部分叉；或裸用 `"responses"` | `protocol` 字符串在整个架构里等价于"选哪个 Adapter"，给同一个字符串塞两种完全不同的请求体形状/错误词表/流式解析逻辑，会把这条现在成立的单射关系破坏掉，代价只是 provider 配置里多写一行 `base_url`（哪怕 DeepSeek/OpenRouter 的 Responses 端点和 Chat Completions 端点是同一个 host）；裸 `"responses"` 语义上比协议族名更宽泛、也更容易和未来其他厂商的同名概念混淆，`openai-responses` 自解释且和现有 `openai-completions`/`anthropic-messages` 命名同构 |
 | Responses 协议第一版归一化器不做任何 quirk 检测，直接短路到真流式 | 给 Responses 的 typed SSE 事件（如 `"delta":"..."`）也加一套 marker 表，复刻 Chat Completions 的"确认命中形态才缓冲"判定 | Responses 协议原生把 reasoning 做成独立 typed Item，从设计上就不会出现 MiniMax 那种"思考混进 content"的怪癖——没有已知怪癖形态可确认，猜测性地加 marker 表是无凭无据的过度设计；`newRespStream` 的协议短路（直接进 `modePassthrough`）与 `!isSSE` 那条已有短路是同一逻辑：没有已知怪癖就不等待判定 |
 | `previous_response_id`/`store:true` 不在 vmr 侧拦截，交给上游自然拒绝 | vmr 主动校验并拒绝这两个字段，或做特殊的 failover 保护逻辑 | 调研到 vmr 目前唯二提供 Responses 兼容面的上游（DeepSeek、OpenRouter）都在协议层强制无状态（`store:true`/非空 `previous_response_id` 直接 400），这个问题现状下并不存在；vmr 的"协议内透传、不替客户端做校验"原则决定了不该主动剥离或拦截客户端发送的字段——真正需要处理"有状态续接端点不可跨候选替换"这个第一性原理问题，要等接入一个真支持它的上游（如 OpenAI 官方账号）才有意义，到时候的方向是扩展 Sticky Model 的强度而不是发明新的错误分类规则 |

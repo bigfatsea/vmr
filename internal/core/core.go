@@ -162,7 +162,7 @@ type Endpoint struct {
 	APIKey      string
 	Model       string
 	Priority    int
-	RoleMap     map[string]string // per-provider role remapping (e.g. {"developer":"system"}); nil = no remapping
+	RoleMap     map[string]string // per-provider role remapping (e.g. {"developer":"system"}), from the backing Provider's role_map; nil = no remapping
 
 	// Capabilities is a free-form allowlist (e.g. "image", "tools",
 	// "thinking") — the *effective* set actually used for condition
@@ -183,8 +183,8 @@ type Endpoint struct {
 	// display-only (vmr check), no effect on health/sticky/quota/Sort.
 	FromFallback bool
 	// StickyTTL is how long a sticky preference for this endpoint stays
-	// valid, resolved at BuildSnapshot time from the endpoint's own
-	// config.EndpointGroup.StickyTTL override or, absent that, the global
+	// valid, resolved at BuildSnapshot time from the backing provider's
+	// config.Provider.StickyTTL override or, absent that, the global
 	// config.Config.TTL.Sticky default.
 	StickyTTL time.Duration
 

@@ -131,7 +131,7 @@ vmr pre-computes each provider's complete upstream URL at initialization by appe
 
 ### Role remapping (role_map)
 
-Some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` under a `models.<name>.endpoints` try-order entry rewrites matching `"role"` values inside the top-level `messages` array (or, for an entry under the `openai-responses` key, the top-level `input` array) before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Scoped to the endpoint-group, not the provider or the virtual model as a whole, since the same account can back several endpoint-groups (different virtual models, different upstream model families) that don't all necessarily need the same rewrite; a model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for an entry whose upstream accepts every role as-is — the default.
+Some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` on the provider itself (`providers[].role_map`) rewrites matching `"role"` values inside the top-level `messages` array (or, for an endpoint under the `openai-responses` key, the top-level `input` array) before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Declared once per provider, since the role rejection it repairs is a property of that provider's API implementation, not of any one virtual model — every endpoint backed by the account inherits it. A model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for a provider whose upstream accepts every role as-is — the default. Blank role names, blank targets, and self-mappings (`system: system`) are rejected at load.
 
 ### Endpoint try-order (priority and strategy)
 
@@ -309,6 +309,12 @@ Upstream prompt caches are keyed on an exact byte prefix. If a multi-turn agent 
 ttl:
   sticky: 10m                # global default: how long a sticky preference stays valid
 
+providers:
+  - name: deepseek
+    base_url: {openai-completions: https://api.deepseek.com/v1}
+    api_key: ${DEEPSEEK_API_KEY}
+    sticky_ttl: 2h           # DeepSeek's disk-based cache lasts hours to days — declare once for the account
+
 models:
   agent:
     # sticky: true is the default — omit it. Only a genuinely one-shot
@@ -320,12 +326,12 @@ models:
           # inherits the global 10-minute ttl.sticky
         - providers: [deepseek]
           models: [deepseek-chat]
-          sticky_ttl: 2h    # DeepSeek's disk-based cache lasts hours to days — override per endpoint
+          # inherits deepseek's provider-level sticky_ttl: 2h
 ```
 
 - **Identity**: a conversation is fingerprinted from its system prompt *and* first non-system message — both hashed, never logged or otherwise exposed. Two different agents that happen to open with the same line don't collide, because their system prompts (and therefore their actual upstream cache prefixes) differ; hashing only the first user message, without the system prompt, would have missed exactly that case.
-- **`sticky_ttl` is per-endpoint, not per-model** — cache lifetime is a property of the upstream provider (Anthropic/OpenAI/MiniMax: roughly 5–10 minutes; DeepSeek: hours to days), so endpoints behind the same virtual model can each declare their own window instead of forcing one value on all of them. The global `ttl.sticky` (default 10 minutes; `0`/absent = default) is the fallback for endpoints that don't override it.
-- **`ttl.sticky` and per-endpoint `sticky_ttl` can't exceed 24 hours** — the sticky registry itself drops an idle entry from memory after 24 hours regardless of what any endpoint's TTL says, so a longer setting would load but silently stop taking effect. `vmr check`/`vmr start`/hot reload all reject a config that tries it, with an error naming the offending model/endpoint.
+- **`sticky_ttl` is per-provider, not per-model** — cache lifetime is a property of the upstream provider's infrastructure (Anthropic/OpenAI/MiniMax: roughly 5–10 minutes; DeepSeek: hours to days), so a provider declares its own window once and every endpoint backed by it inherits it. The global `ttl.sticky` (default 10 minutes; `0`/absent = default) is the fallback for providers that don't override it. Declaring it per-provider instead of per-model is also what keeps multi-account endpoint-groups usable: `providers: [openrouter, deepseek]` keeps each account's own TTL even inside one try-order entry.
+- **`ttl.sticky` and per-provider `sticky_ttl` can't exceed 24 hours** — the sticky registry itself drops an idle entry from memory after 24 hours regardless of what any endpoint's TTL says, so a longer setting would load but silently stop taking effect. `vmr check`/`vmr start`/hot reload all reject a config that tries it, with an error naming the offending provider.
 - Affinity only ever reorders within the endpoints that already passed health and condition filtering — an endpoint that's since become unhealthy or lost a required capability is never resurrected just because it was the sticky pick last time.
 - The pointer moves on every successful completion, including a failover success, so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
 
