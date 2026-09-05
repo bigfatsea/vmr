@@ -27,17 +27,25 @@ func driveHalfOpenViaFailover(t *testing.T, ts *httptest.Server, u *probeUpstrea
 	time.Sleep(1100 * time.Millisecond) // Retry-After: 1 → half-open now
 }
 
-// TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic: a single-endpoint
-// route where that one endpoint is half-open and currently parked (would
-// hang if a real request reached it). The real request must come back fast
-// with "no candidates" rather than hang waiting on — or being served
-// through — the half-open endpoint.
-func TestActiveProbe_HalfOpenEndpointExcludedFromRealTraffic(t *testing.T) {
+// TestActiveProbe_HalfOpenEndpointServedAsLastResort: a single-endpoint route
+// where that one endpoint is half-open. With no other candidate to fall back
+// to, buildCandidates's last-resort fallback (T2-b, see
+// docs/KNOWN_ISSUES.md §2.85 and internal/router/candidates.go's
+// healthFilter) releases it and lets this real request try it directly,
+// instead of 503-ing immediately without even trying. If the endpoint is
+// still actually down, the request pays for that discovery — bounded by the
+// ordinary response_header timeout, not probe_timeout (probes stay
+// deliberately fast; a real attempt is held to the same patience any other
+// real request gets) — and still ends in "no candidates", just later than an
+// immediate local rejection would have.
+func TestActiveProbe_HalfOpenEndpointServedAsLastResort(t *testing.T) {
 	t.Parallel()
 	u := newProbeUpstream(t)
 	ts := newRouterServer(t, fmt.Sprintf(`
 listen: 127.0.0.1:0
 probe_timeout: 200ms
+timeouts:
+  response_header: 300ms
 providers:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
 models:
@@ -47,23 +55,28 @@ models:
 `, u.srv.URL))
 	driveHalfOpen(t, ts, u) // leaves fails=1, cooldown expired
 
-	u.mode.Store("block") // if real traffic reached p1, this would hang until released/timed out
+	u.mode.Store("block") // p1 is still actually down — this is the "recovery guess was wrong" case
 
 	start := time.Now()
 	resp, _ := chat(t, ts, simpleReq, nil)
 	elapsed := time.Since(start)
 	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("status=%d, want 503 (no candidates — the only endpoint is half-open)", resp.StatusCode)
+		t.Fatalf("status=%d, want 503 (p1 was tried as a last resort and failed — still no candidates left)", resp.StatusCode)
 	}
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("request took %s — it must return immediately, not wait on the half-open endpoint's probe (probe_timeout=200ms)", elapsed)
+	if elapsed < 300*time.Millisecond {
+		t.Errorf("request took %s — it should have actually waited out response_header (300ms) trying p1, not rejected locally without an attempt", elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("request took %s — a last-resort attempt must still be bounded by response_header, not hang indefinitely", elapsed)
 	}
 
 	select {
 	case <-u.entered:
-		// good: the real request's arrival triggered a background probe.
+		// good: the real request itself reached p1 (this is the last-resort
+		// path — no separate background probe is dispatched for the one
+		// endpoint that was released to carry the real request instead).
 	case <-time.After(1 * time.Second):
-		t.Error("no probe request reached the half-open endpoint — a background probe should have launched")
+		t.Error("no request reached the half-open endpoint — the last-resort fallback should have tried it")
 	}
 }
 

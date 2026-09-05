@@ -29,13 +29,14 @@ import (
 // routeReason describes how the candidate list for one request was arrived
 // at. Every field is a count the failover loop already had on hand.
 type routeReason struct {
-	total       int    // endpoints configured for this virtual model
-	healthOK    int    // survived the health filter
-	afterCond   int    // survived hard capability conditions
-	ctxFallback bool   // every declared context window looked too small; fell back
-	quota       bool   // Quota-Aware Routing's reorderByQuota actually moved the front candidate
-	sticky      bool   // a sticky pointer reordered the list
-	pin         string // pinned routing (X-VMR-Provider/X-VMR-Target-Model) narrows candidates; empty = none
+	total          int    // endpoints configured for this virtual model
+	healthOK       int    // survived the health filter
+	afterCond      int    // survived hard capability conditions
+	ctxFallback    bool   // every declared context window looked too small; fell back
+	healthFallback bool   // every endpoint was cooling/half-open; released the shallowest-backoff one as a last resort
+	quota          bool   // Quota-Aware Routing's reorderByQuota actually moved the front candidate
+	sticky         bool   // a sticky pointer reordered the list
+	pin            string // pinned routing (X-VMR-Provider/X-VMR-Target-Model) narrows candidates; empty = none
 }
 
 // String renders only what actually happened: the overwhelmingly common
@@ -70,6 +71,9 @@ func (rr routeReason) String() string {
 	}
 	if rr.ctxFallback {
 		parts = append(parts, "ctx_fallback=1")
+	}
+	if rr.healthFallback {
+		parts = append(parts, "health_fallback=1")
 	}
 	return strings.Join(parts, " ")
 }

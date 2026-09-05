@@ -38,27 +38,9 @@ type candidateSet struct {
 // docs' Condition-based Routing and Scheduling Flow sections. Every step
 // only ever removes or reorders; none mutates the endpoints themselves.
 func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.CanonicalRequest, route *ModelRoute, r *http.Request, now time.Time) candidateSet {
-	// Health filter (read-only) + stable multi-key sort.
-	//
-	// A half-open endpoint (fails>0, cooldown expired) never gets touched by
-	// real traffic at all — instead the first caller to notice it's unprobed
-	// claims the single-flight slot (Classify's needsProbe return, which sets
-	// probing itself — the per-candidate loop's Acquire below is only a race
-	// guard) and hands it to a background probe goroutine, then
-	// treats the endpoint as unavailable for THIS request exactly as if
-	// Acquire had failed. Real requests never wait on that probe and are
-	// never diverted for as long as it takes to resolve — only for as long
-	// as it takes to notice it needs to run.
-	healthOK := make([]*core.Endpoint, 0, len(route.Endpoints))
-	for _, ep := range route.Endpoints {
-		available, needsProbe := rt.Health.Classify(ep.HealthKey(), now)
-		if needsProbe {
-			go rt.runProbe(ep, snap)
-		}
-		if available {
-			healthOK = append(healthOK, ep)
-		}
-	}
+	// Health filter (read-only) + stable multi-key sort. See healthFilter's
+	// doc comment for the half-open/last-resort semantics.
+	healthOK, lastResort := rt.healthFilter(route.Endpoints, snap, now)
 
 	// Hard capability conditions (image/tools/…, see internal/strategy) are
 	// certainties — a request either needs a capability or it doesn't, an
@@ -98,6 +80,14 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 	// fails below exactly like any other no-available-endpoint request,
 	// with the pin named in the message. No pin headers = no-op.
 	candidates, reason.pin = applyPinToCandidates(candidates, r)
+	if lastResort != nil {
+		for _, ep := range candidates {
+			if ep == lastResort {
+				reason.healthFallback = true
+				break
+			}
+		}
+	}
 	strategy.Sort(candidates, route.Dims)
 
 	// Quota-Aware Routing: within each priority tier Sort just established,
@@ -134,4 +124,74 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 		}
 	}
 	return candidateSet{endpoints: candidates, healthOK: healthOK, reason: reason, stickyKey: stickyKey}
+}
+
+// healthFilter runs the health-availability filter over endpoints and
+// returns the ones the rest of buildCandidates's pipeline may consider.
+//
+// A half-open endpoint (fails>0, cooldown expired) never gets touched by
+// real traffic at all — instead the first caller to notice it's unprobed
+// claims the single-flight slot (Classify's needsProbe return, which sets
+// probing itself — the per-candidate loop's Acquire in router.go is only a
+// race guard) and hands it to a background probe goroutine, then treats the
+// endpoint as unavailable for THIS request exactly as if Acquire had failed.
+// Real requests never wait on that probe and are never diverted for as long
+// as it takes to resolve — only for as long as it takes to notice it needs
+// to run.
+//
+// Exception — the last resort: health-filter unavailability is an estimate
+// ("hasn't been re-verified yet"), not a certainty the same way a hard
+// capability mismatch is (the same principle buildCandidates's own
+// context-length fallback applies to its own estimate). When every endpoint
+// is either hard-cooling or merely half-open, don't let that estimate empty
+// the whole candidate set: release the single-flight slot Classify just
+// claimed (ReportNeutral — a terminal, side-effect-free release, not a
+// health verdict) on whichever half-open endpoint has the shallowest
+// backoff, and return it alongside the rest of healthOK so one real attempt
+// decides instead of a guess. It flows through the ordinary
+// tryOne/Acquire/ReportSuccess path in router.go like any other candidate; a
+// real success clears fails outright instead of the probe path's one-step
+// decay. If it doesn't survive a hard-condition/context/pin filter further
+// down buildCandidates's pipeline, no probe was spent on it this round — the
+// next request's Classify call reclaims the slot fresh, exactly as if this
+// round had never run. The caller (buildCandidates) checks whether the
+// returned lastResort actually survived, to set routeReason.healthFallback.
+func (rt *Router) healthFilter(endpoints []*core.Endpoint, snap *Snapshot, now time.Time) (healthOK []*core.Endpoint, lastResort *core.Endpoint) {
+	healthOK = make([]*core.Endpoint, 0, len(endpoints))
+	halfOpen := make([]*core.Endpoint, 0, len(endpoints))
+	for _, ep := range endpoints {
+		available, needsProbe := rt.Health.Classify(ep.HealthKey(), now)
+		if needsProbe {
+			halfOpen = append(halfOpen, ep)
+		}
+		if available {
+			healthOK = append(healthOK, ep)
+		}
+	}
+	if len(healthOK) == 0 && len(halfOpen) > 0 {
+		lastResort = rt.shallowestFails(halfOpen, now)
+		rt.Health.ReportNeutral(lastResort.HealthKey())
+		healthOK = append(healthOK, lastResort)
+	}
+	for _, ep := range halfOpen {
+		if ep != lastResort {
+			go rt.runProbe(ep, snap)
+		}
+	}
+	return healthOK, lastResort
+}
+
+// shallowestFails picks whichever half-open endpoint has the least
+// consecutive-failure depth — the one likeliest to have already recovered —
+// for the last-resort fallback above. Ties break on config order, the same
+// determinism the rest of the pipeline relies on.
+func (rt *Router) shallowestFails(eps []*core.Endpoint, now time.Time) *core.Endpoint {
+	best := eps[0]
+	bestFails := rt.Health.Status(best.HealthKey(), now).Fails
+	for _, ep := range eps[1:] {
+		if f := rt.Health.Status(ep.HealthKey(), now).Fails; f < bestFails {
+			best, bestFails = ep, f
+		}
+	}
+	return best
 }

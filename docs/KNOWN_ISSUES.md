@@ -19,10 +19,10 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危 4（`2.2`/`2.17`/`2.18`/`2.85`），其余均为低危。
+- **§2 分布**：高危 0；中危 3（`2.2`/`2.17`/`2.18`），其余均为低危。
 - **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.89 / §2.90 / §2.91。
 - **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——`Endpoint.PricingRate` 改持 `pricing.FoldSpec` 折叠出的 `*core.Rate`，cost 计费热路径字段直读（`core.Rate.Cost`），override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界；成本公式 SSOT 收敛到 `core.Rate.Cost`（`pricing.Rate.Cost` 委托之），`FoldSpec` 的 nil→nil 契约照旧。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
-- **2026-09-05 已闭环**（T1/T3/T4 多 Agent 批次）：`imgprep` 递归下钻 Anthropic `tool_result` 嵌套图片；`reqdetail` 角色归属走 `chatmsg.ExtractReasoning`（三级回退）、`ctxgraph` 新增官方单条消息散列入口 `HashMsgJSON` 并让 story 前导系统哈希归位；`ctxgraph` 解析缓存改按内容哈希为 key、删除 mtime 消歧。详见 `CHANGELOG` `[Unreleased]` 及下文 §1.4 对应条目更新。
+- **2026-09-05 已闭环**（T1/T2b/T3/T4 多 Agent 批次）：`imgprep` 递归下钻 Anthropic `tool_result` 嵌套图片；`reqdetail` 角色归属走 `chatmsg.ExtractReasoning`（三级回退）、`ctxgraph` 新增官方单条消息散列入口 `HashMsgJSON` 并让 story 前导系统哈希归位；`ctxgraph` 解析缓存改按内容哈希为 key、删除 mtime 消歧；`buildCandidates` 新增健康过滤 last-resort（候选全空时释放退避最浅的半开端点，见 §2.85）。详见 `CHANGELOG` `[Unreleased]` 及下文 §1.4/§2.85 对应条目更新。
 - **2026-09-05 已闭环**（独立复核发现，quota role 展示层）：`/status`/`vmr status`/`vmr check` 的 bucket/gate `role=` 判定收敛到单一函数 `internal/quota.Role(limits, li, model)`，按行的 Scope 选 judging set——共享行（`model==""`）收窄成"同样覆盖全体模型的 Limit"（排除限定列表 Limit：它只为自己点名的模型竞争，混合 Scope 且该列表周期更长时，旧的全量视角会把共享池错标成闸，而受害的正是没有专属行的模型）；`vmr check` 对限定单个具名模型的 Limit 现在也按该模型的 `applicableLimits` 精确计算（不再是全量近似）——只有通配 `["*"]` 或列出多个模型的 Limit 仍是全量近似 + note 指向 `/status`（结构性：一条静态行给不出对多个模型各自不同的正确答案）。同时把 `Role` 的桶身份判定从字段值相等改成按 `limits` 原始下标比较——共享池与一条 metric/period/amount/since 恰好全等的通配 Limit（合法配置，不撞校验）用值判等无法区分，会被一起误标成桶。均为纯展示修正，非混合 Scope 且非该值巧合相等的配置零变化，路由/计费/评分零影响。详见 `CHANGELOG` `[Unreleased]`、`internal/quota/score_test.go`（`TestRole_*`）、`internal/router/quota_multilimit_test.go`、`cmd/vmr/cmd_check_quota_test.go`。
 - **2026-09-04 已闭环**：`ScoreForLimits` 闸归并二值化（原 §2.88，N3 裁决采纳「闸 = 带安全余量的厂商限流本地代理」语义：活着的闸不参与评分，烧断的闸归零沉底到窗口重置；旧 `min(1, raw)` 硬封顶把带闸账号的桶抢跑加分压死在 ≤1.0 的病灶随之消除）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-03 已闭环**：一批三方 review 核实后的小修（错误分类补 `error.code`、config 加载期禁 provider 名冒号 / 校验 strategy、keyless 自建上游按地址分级、探针仅 2xx 扣配额、anthropic 损坏图片仍计入 `HasImage`、`.parse-cache` mtime 消歧、md/html 行为指标统一、LLM detector 并发限时、`metric:cost` estimated 口径分侧等），详见 `CHANGELOG` `[Unreleased]`。删除的 §2 条目：`2.65`/`2.71`/`2.72`/`2.76`/`2.78`/`2.81`/`2.82`/`2.83`/`2.84`。
@@ -48,7 +48,7 @@
 - **`health.Registry.Available` 无生产调用方，但不是死代码**：它是唯一无副作用的路由资格查询（`Acquire` 会占用 half-open 探针名额），`health` 与 `router` 的测试断言端点状态都靠它——用 `Acquire` 去查会改变被断言的状态。「无生产调用方」不等于「可删」。
 - **`fails` 的语义是「当前退避曲线下的连续失败深度」，跨曲线切换重置为 1**：`ErrAuth`/`ErrEndpoint` 走 10min 起的 long 曲线，其余走 2s 起的 transient 曲线——两条曲线基数差 300 倍，共用一个深度计数器会让一串 5xx（transient 才退到 32s）后的一次 401 直接顶到 1h 封顶。**适用于**：判断"这个端点在当前故障模式下连续失败了几次"。**不适用于**：当作"这个端点历史上一共失败了多少次"的累计量——它不是，也从不是。`internal/server/active_probe_test.go` 因此不能再用 `fails >= 2` 当"走的是 ReportFailure 不是 ReportNeutral"的代理判据，只有 `last_error` 能区分两者。
 - **`ReleaseProbe` 与 `ReportNeutral` 行为相同但保留为两个方法**：前者是"名额先还、健康结论稍后再报"（`forwardSuccess` 在流真正跑完前用它），后者是"这次结果对健康没有信息量，到此为止"。合一会让 `forwardSuccess` 的调用点读起来像已经下了终局结论，而它恰恰还没有。
-- **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→2s 冷却→探针成功→满额流量→429 的循环成因。**已知均衡态**：探针成功与真实失败交替时深度在两档间振荡（如 2↔3），不是单调加深；钉死的保证是"没有真实成功就永不归零、永不回到最浅档"。
+- **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→2s 冷却→探针成功→满额流量→429 的循环成因。钉死的保证是"没有真实成功就永不归零、永不回到最浅档"。**订正（2026-09-05）**：本条曾写"探针成功与真实失败交替时深度在两档间振荡（如 2↔3）"——在 `Classify` 的单锁模型下这个场景不成立：`fails>0` 的端点对真实流量恒 `available=false`，真实流量根本到不了它，也就谈不上"真实失败"（§2.85 已指出这处过时，这里一并订正）。唯一的例外是 §2.85 的 last-resort：候选全空时释放的那一个半开端点会真的收真实流量，因此确实可能经历真实失败——但那时它已经是候选集里唯一的端点，不存在"与其他端点振荡"的场景。
 - **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
 - **后台探针按 requests 口径计 1，对 token/cost 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token/cost 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
 - **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果在 Windows 上依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。
@@ -378,13 +378,11 @@
 - **为什么待定**：用户 hold。真要做需一个独立的内存态机制（仿 `health.Registry`，请求入口查一次），不是拧 quota 旋钮能得到的。
 
 
-#### 2.85 [中，需先设计] 半开恢复的深度退避解除策略：低流量/单候选部署恢复尾延迟可达分钟级
+#### 2.85 [低，b 已落地 2026-09-05；a 待定] 半开恢复的深度退避解除策略：低流量/单候选部署恢复尾延迟
 
-- **现状**（2026-09-03 核实）：`health.Classify` 对 `s.fails > 0` 的端点恒返回 `available=false`——只发后台探针、绝不给实流量；`ReportProbeSuccess` 每次成功仅 `s.fails--`。一个退避到 `fails=5` 的端点即使上游已恢复，也需 **5 次独立的后台探针先后成功**（每次由一个恰好排到它的真实请求触发）才 `fails` 归零、实流量回归。`buildCandidates` 的 `ctxFallback` 只回退到健康过滤之后的 `hardFiltered`，**没有「候选全空时放行退避最浅端点」的 last-resort**。
-- **影响面**：高流量 + 多候选下缺口窗口是数个请求间隔（秒级）、由 failover 兜住，几乎无感。**低流量 / 单候选 / 全候选同时退避**的部署下，恢复尾延迟可达分钟级（探针频率 ≈ 请求到达率），期间客户端收 503。
-- **注释已订正**：`health.go` 的 `ReportProbeSuccess` doc 曾写「…or a real request completes and ReportSuccess zeroes the count」——`fails>0` 期间实流量到不了该端点，此分支不可达；已改为如实描述（2026-09-03）。原 §1.1「探针成功与真实失败交替时深度在两档间振荡（2↔3）」同样不准确：能到达 `fails>0` 端点的只有后台探针。
-- **可能方案**（需设计草案，有 flap 风险）：(a) 探针成功 1 次即允许该端点参与常规路由（保留 `fails` 深度），后续真实请求失败则在原深度继续退避、成功则清零——把「探针是弱证据」体现在「只给一次尝试机会」而非「压着不放行」；(b) `buildCandidates` 增一条「候选全空且存在仅半开（非硬冷却）端点时，放行退避最浅的一个」的 last-resort。
-- **触发条件**：真实用户在低流量 / 单候选部署报告「上游已恢复但 vmr 仍 503 数分钟」。
+- **落地（2026-09-05，方案 b）**：`buildCandidates`（经 `healthFilter`，`internal/router/candidates.go`）新增 last-resort：候选全空（`healthOK` 为空）且存在至少一个半开（cooldown 已过期、仅 `fails>0`）端点时，释放其中退避最浅的一个（`ReportNeutral`，终态释放 `Classify` 刚占的 single-flight 名额，不动 `fails`/cooldown）作为本轮真实候选，走和普通端点完全相同的 `tryOne`/`Acquire`/`ReportSuccess` 路径——真实成功直接清零 `fails`，不再需要多轮探针衰减。同一轮里其余半开端点不受影响，仍正常派后台探针。与既有的 `ctxFallback`（"估计值不该清空非空候选集，交给一次真实尝试去判断"）是同一条设计原则在健康过滤上的延伸，`X-VMR-Route-Reason` 新增 `health_fallback=1` 标记可观测。
+- **边界（有意的取舍，非缺陷）**：若被释放的端点其实仍未恢复，这次真实请求要等到 `response_header` 超时（默认 120s，可配）才失败，而不是秒回 503——因为这条路径复用的是真实流量的 upstream client，不是 `probe_timeout` 那条专门收窄过的探针路径。只在"反正所有候选都会 503"的极端场景触发，不影响任何本来能成功的请求；`internal/server/active_probe_test.go` 的 `TestActiveProbe_HalfOpenEndpointServedAsLastResort` 钉死这个边界。
+- **残留（方案 a，待定，未排期）**：探针成功 1 次即允许该端点参与常规路由（保留 `fails` 深度，后续真实请求失败则在原深度继续退避、成功则清零）——面向"候选不止一个、但都半开"这种 b 没有覆盖的场景（b 只释放候选全空时的那一个）。需要设计草案 + 回摆回归测试，比 b 复杂得多：横跨多个请求累积信任、有真实 flap 风险。触发时机：出现"多候选同时半开、b 释放的那个不巧还没恢复"的真实报告。
 
 
 #### 2.86 [低，需先设计] `respnorm` 初始 `modeUndecided` 扣留保活帧，慢/排队上游 + inline-content 协议下客户端可能读超时
