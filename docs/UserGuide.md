@@ -261,24 +261,40 @@ All-candidates-failed returns the last upstream error verbatim. Streams only fai
 
 ### Condition-based routing
 
-Endpoints behind one virtual model don't have to be interchangeable. Declare what each one actually supports, and a request that needs something a given endpoint doesn't declare skips it — rather than being tried against an endpoint that's certain to reject it:
+Endpoints behind one virtual model don't have to be interchangeable. Declare what each real model supports centrally in `model_defaults:`, and a request that needs something a given endpoint doesn't declare skips it — rather than being tried against an endpoint that's certain to reject it:
 
 ```yaml
+model_defaults:
+  "*":                                  # optional fallback baseline
+    capabilities: [text, tools]
+  MiniMax-M3:                           # key = real model name
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]    # omit = applies to all providers
+
 models:
   agent:
-    capabilities: [text, tools]        # base: every endpoint below inherits this
-    max_context_tokens: 128000         # base: ditto
+    # inherits MiniMax-M3 defaults (512k, multimodal) and "*" for other models
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          capabilities: [image]          # ADDED to the base -> effective: text, tools, image
-          max_context_tokens: 1000000    # OVERRIDES the base for this endpoint alone
         - providers: [deepseek]
-          models: [deepseek-chat]        # declares neither -> inherits the base as-is
+          models: [deepseek-chat]
+
+  cheap:
+    max_context_tokens: 128000          # explicit virtual model override: downgrade ceiling
+    endpoints:
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
 ```
 
-Both fields are optional at both levels and default to **unconstrained**: a virtual model with no `capabilities` has no base, and an endpoint that doesn't add its own is assumed to support everything the model does (or, absent any declaration anywhere, everything at all) — existing configs behave exactly as before. `capabilities` is *additive* per endpoint (union with the model's base) since `max_context_tokens` is *override-or-inherit* instead (a single number can't be unioned). Once an endpoint's effective capability set is non-empty it's exhaustive (list everything it actually supports, not just what you want checked); `vmr check` prints each virtual model's base and each endpoint's own declared extras/override so a gap is visible before it causes a misroute.
+`capabilities` and `max_context_tokens` are declared centrally in `model_defaults` by real model name, with an optional `"*"` wildcard fallback. Both dimensions fall back independently: an entry specifying only `max_context_tokens` inherits `capabilities` from `"*"` (or unconstrained). A virtual model can explicitly override either dimension (e.g. `cheap` above downgrades the context ceiling to 128k while keeping MiniMax-M3's multimodal capabilities).
+
+Both fields default to **unconstrained**: omitting `model_defaults` entirely, or having no matching entry for a model, treats it as supporting all capabilities with an unlimited context window — existing configs without these fields behave exactly as before. Once an endpoint's effective capability set is non-empty it's exhaustive (list everything it actually supports, not just what you want checked).
+
+Sticky session affinity is orthogonal to `model_defaults`: the sticky routing key always includes the virtual model name (`client_key_tag:sysHash:firstMsgHash` scoped to `virtualModel`), so affinity never leaks across different virtual models that share the same underlying real model.
 
 Two different kinds of condition:
 
@@ -691,7 +707,7 @@ Both are config fields —
 | `POST /v1/responses` | OpenAI Responses ingress (streaming + non-streaming); requires an endpoint under the `openai-responses` key |
 | `GET /v1/models` | virtual model list (parseable by both SDK families) |
 | `GET /health` | liveness only: `{"status":"ok","time":…,"uptime_seconds":…}`. **No credential, any source address** — the one endpoint a container probe, reverse proxy or external monitor can reach without an API key or a 127.0.0.1 source. It reports the current time and uptime rather than a constant `ok` so a cached 200 is distinguishable from a live one. Liveness, never readiness: it stays 200 while every upstream is down, because restarting the router cannot fix an upstream outage — read `/status`'s health block if you want readiness. Nothing about the instance appears here; that is what the next row is for |
-| `GET /status` | process identity & execution context (pid/listen/version/cwd/executable/uptime, plus `base_urls`: the per-protocol client-facing base URL — all `<scheme>://<host>/v1/` — echoed from the request itself (Host header + TLS), not derived from `listen`, so whatever address you asked from is the one to point your client at), config freshness (mtime/stale/reload/issues), concurrency throttles, system resources (memory/goroutines/disk free space), live traffic telemetry (requests/tokens/sticky), one `models` array entry per virtual-model × protocol carrying `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and per-endpoint health incl. each endpoint's own capabilities/context override — so an agent pointing a custom model at vmr can read its context window and abilities straight off this payload — and live quota metrics (auth-gated via `api_keys`) — `vmr status` below is the CLI front end for this payload |
+| `GET /status` | process identity & execution context (pid/listen/version/cwd/executable/uptime, plus `base_urls`: the per-protocol client-facing base URL — all `<scheme>://<host>/v1/` — echoed from the request itself (Host header + TLS), not derived from `listen`, so whatever address you asked from is the one to point your client at), config freshness (mtime/stale/reload/issues), concurrency throttles, system resources (memory/goroutines/disk free space), live traffic telemetry (requests/tokens/sticky), one `models` array entry per virtual-model × protocol carrying `capabilities` (union across endpoints; `[]` = unconstrained), `max_context_tokens` (largest across endpoints; `0` = unlimited) and per-endpoint health (including effective capabilities/context ceiling) — so an agent pointing a custom model at vmr can read its context window and abilities straight off this payload — and live quota metrics (auth-gated via `api_keys`) — `vmr status` below is the CLI front end for this payload |
 | `GET /status.html` | browser visual dashboard: client-side rendered (CSR) single-page dark UI for `/status` data with live auto-refresh (5s/15s/30s/60s), visual health/cooldown countdown badges, interactive API key prompt modal, zero external CDN dependencies, and a link to the live-log page |
 | `GET /log` | the process's live console log as a never-ending `text/plain` stream — one line per log line, byte-identical to what stderr carries: replay of the most recent lines first, then live following, so it replaces `tail -f` in a browser. Auth-gated via `api_keys` like `/status`. No query parameters; the replay window is a fixed in-memory ring (most recent ~512 lines), and an idle connection receives a bare keepalive newline every 30s. This is the access-log view (`routing decisions, token usage, failover`), not the audit JSONL |
 | `GET /log.html` | browser live-log page: dark terminal-style viewer that opens `/log` itself — tries keyless first, falls back to the same API-key prompt as `/status.html` (the two pages share the stored key), pauses auto-scroll when you scroll up, offers manual retry after a disconnect, has a Clear button that wipes the local view (the server-side buffer and live stream are untouched), and links to the status dashboard |

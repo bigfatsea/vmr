@@ -122,6 +122,29 @@ func (c *Config) validateProviders(quotaNow time.Time) error {
 	return nil
 }
 
+func (c *Config) validateModelDefaults() error {
+	for modelKey, entry := range c.ModelDefaults {
+		if strings.TrimSpace(modelKey) == "" {
+			return fmt.Errorf("model_defaults: empty model name")
+		}
+		if entry.MaxContextTokens < 0 {
+			return fmt.Errorf("model_defaults[%q]: max_context_tokens must be >= 0", modelKey)
+		}
+		if entry.Providers != nil && len(entry.Providers) == 0 {
+			return fmt.Errorf("model_defaults[%q]: providers must not be empty when specified", modelKey)
+		}
+		for j, pn := range entry.Providers {
+			if strings.TrimSpace(pn) == "" {
+				return fmt.Errorf("model_defaults[%q]: providers[%d]: empty", modelKey, j)
+			}
+			if _, ok := c.ProviderByName(pn); !ok {
+				return fmt.Errorf("model_defaults[%q]: unknown provider %q", modelKey, pn)
+			}
+		}
+	}
+	return nil
+}
+
 // validateModels validates all virtual model definitions and registers
 // configured (provider, model) pairs into providerModels for pricing resolution.
 func (c *Config) validateModels(providerModels map[string]map[string]bool) error {
@@ -211,9 +234,6 @@ func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup, p
 			}
 			providerModels[pn][mn] = true
 		}
-	}
-	if eg.MaxContextTokens < 0 {
-		return fmt.Errorf("%s: max_context_tokens must be >= 0", ctx)
 	}
 	if eg.StickyTTL != nil {
 		if eg.StickyTTL.D() <= 0 {

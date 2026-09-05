@@ -146,15 +146,20 @@ models:
 func TestAdminStatusModelsAggregateValues(t *testing.T) {
 	const yaml = `
 listen: 127.0.0.1:18800
+model_defaults:
+  m1:
+    capabilities: [text]
+    max_context_tokens: 128000
+  m2:
+    capabilities: [vision]
+    max_context_tokens: 200000
 providers:
   - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
 models:
   vm:
-    capabilities: [text]
-    max_context_tokens: 128000
     endpoints:
       openai-completions:
-        - {providers: [p1], models: [m1], capabilities: [vision], max_context_tokens: 200000}
+        - {providers: [p1], models: [m1, m2]}
 `
 	models := adminStatusModels(t, yaml)
 	if len(models) != 1 {

@@ -166,29 +166,18 @@ type Endpoint struct {
 
 	// Capabilities is a free-form allowlist (e.g. "image", "tools",
 	// "thinking") — the *effective* set actually used for condition
-	// routing, already resolved at BuildSnapshot time as the union of the
-	// endpoint's virtual model's base config.VirtualModel.Capabilities and
-	// this endpoint's own config.EndpointGroup.Capabilities. Empty/nil means
-	// unconstrained — every capability is assumed supported — so existing
-	// configs that don't set either field see no behavior change. Once
-	// non-empty it is exhaustive: a capability the endpoint actually
-	// supports but omits here is treated as unsupported.
+	// routing, resolved at BuildSnapshot time: virtual model override if
+	// non-empty, else config.ModelDefaults lookup (exact model key, then
+	// "*"), else unconstrained (empty/nil). Empty/nil means unconstrained —
+	// every capability is assumed supported. Once non-empty it is exhaustive:
+	// a capability the endpoint actually supports but omits here is treated
+	// as unsupported.
 	Capabilities []string
-	// ExtraCapabilities is this endpoint's own declared
-	// config.EndpointGroup.Capabilities, *before* merging with the model's
-	// base — display-only (vmr check), so a human can see exactly what this
-	// endpoint adds on top of its group's shared floor instead of the
-	// already-merged set in Capabilities above.
-	ExtraCapabilities []string
 	// MaxContextTokens is the effective, already-resolved context-window
-	// ceiling in tokens (this endpoint's own override if set, else its
-	// virtual model's base); 0 means unconstrained.
+	// ceiling in tokens, resolved at BuildSnapshot time: virtual model
+	// override if >0, else config.ModelDefaults lookup (exact model key,
+	// then "*"), else unconstrained (0). 0 means unconstrained.
 	MaxContextTokens int64
-	// OwnMaxContextTokens is this endpoint's own declared
-	// config.EndpointGroup.MaxContextTokens override, 0 if it inherits its
-	// virtual model's base value as-is — display-only (vmr check);
-	// MaxContextTokens above always holds the resolved value routing uses.
-	OwnMaxContextTokens int64
 	// FromFallback marks an endpoint injected from config.Config.
 	// FallbackEndpoints rather than the model's own Endpoints —
 	// display-only (vmr check), no effect on health/sticky/quota/Sort.

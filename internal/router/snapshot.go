@@ -186,16 +186,6 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 	if eg.StickyTTL != nil {
 		stickyTTL = eg.StickyTTL.D()
 	}
-	// Capabilities: union of the virtual model's base list and this
-	// endpoint's own (additive) declaration. MaxContextTokens: this
-	// endpoint's own override if set, else the model's base — a
-	// scalar can't be unioned, so it's override-or-inherit instead.
-	// See config.VirtualModel/config.EndpointGroup's doc comments.
-	effCapabilities := mergeCapabilities(m.Capabilities, eg.Capabilities)
-	effMaxContextTokens := m.MaxContextTokens
-	if eg.MaxContextTokens > 0 {
-		effMaxContextTokens = eg.MaxContextTokens
-	}
 	// endpoint's own explicit value wins; else the model's base; else off.
 	effSoftBlockFailover := eg.SoftBlockFailover != nil && *eg.SoftBlockFailover ||
 		eg.SoftBlockFailover == nil && m.SoftBlockFailover != nil && *m.SoftBlockFailover
@@ -213,23 +203,23 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, protocol)
 			}
+			effCapabilities := resolveModelCapabilities(m, cfg.ModelDefaults, providerName, upstreamModel)
+			effMaxContextTokens := resolveModelMaxContextTokens(m, cfg.ModelDefaults, providerName, upstreamModel)
 			ep := &core.Endpoint{
-				Provider:            providerName,
-				AdapterType:         protocol,
-				BaseURL:             baseURL,
-				FullURL:             ad.ResolveURL(baseURL),
-				APIKey:              p.APIKey,
-				Model:               upstreamModel,
-				Priority:            eg.Priority,
-				RoleMap:             eg.RoleMap,
-				Capabilities:        effCapabilities,
-				ExtraCapabilities:   eg.Capabilities,
-				MaxContextTokens:    effMaxContextTokens,
-				OwnMaxContextTokens: eg.MaxContextTokens,
-				FromFallback:        fromFallback,
-				SoftBlockFailover:   effSoftBlockFailover,
-				StickyTTL:           stickyTTL,
-				Quota:               quotaSpecs[providerName],
+				Provider:          providerName,
+				AdapterType:       protocol,
+				BaseURL:           baseURL,
+				FullURL:           ad.ResolveURL(baseURL),
+				APIKey:            p.APIKey,
+				Model:             upstreamModel,
+				Priority:          eg.Priority,
+				RoleMap:           eg.RoleMap,
+				Capabilities:      effCapabilities,
+				MaxContextTokens:  effMaxContextTokens,
+				FromFallback:      fromFallback,
+				SoftBlockFailover: effSoftBlockFailover,
+				StickyTTL:         stickyTTL,
+				Quota:             quotaSpecs[providerName],
 				// Folded once here, read as a plain value on the hot path —
 				// the override chain never re-resolves per request (see
 				// core.Endpoint.PricingRate's doc comment).
@@ -311,26 +301,54 @@ func enabledProviders(providers []config.Provider) map[string]bool {
 	return out
 }
 
-// mergeCapabilities unions a virtual model's base capabilities with one
-// endpoint's own (additive) declaration, base entries first, deduplicated —
-// nil when both are empty so an endpoint declaring neither stays
-// unconstrained exactly as before these fields existed (see
-// core.Endpoint.Capabilities).
-func mergeCapabilities(base, extra []string) []string {
-	if len(base) == 0 && len(extra) == 0 {
-		return nil
+// resolveModelCapabilities resolves capabilities for a (provider, model) under
+// virtual model m by consulting:
+// 1. Virtual model explicit override
+// 2. model_defaults[model] exact match (if provider matches and non-empty)
+// 3. model_defaults["*"] wildcard fallback (if provider matches and non-empty)
+// 4. nil (unconstrained)
+func resolveModelCapabilities(m config.VirtualModel, defaults map[string]config.ModelDefaultEntry, provider, model string) []string {
+	if len(m.Capabilities) > 0 {
+		return m.Capabilities
 	}
-	seen := make(map[string]bool, len(base)+len(extra))
-	merged := make([]string, 0, len(base)+len(extra))
-	for _, lists := range [][]string{base, extra} {
-		for _, c := range lists {
-			if !seen[c] {
-				seen[c] = true
-				merged = append(merged, c)
-			}
+	if entry, ok := defaults[model]; ok && providerMatches(entry.Providers, provider) && len(entry.Capabilities) > 0 {
+		return entry.Capabilities
+	}
+	if wildcard, ok := defaults["*"]; ok && providerMatches(wildcard.Providers, provider) && len(wildcard.Capabilities) > 0 {
+		return wildcard.Capabilities
+	}
+	return nil
+}
+
+// resolveModelMaxContextTokens resolves context window ceiling for a (provider, model)
+// under virtual model m by consulting:
+// 1. Virtual model explicit override (> 0)
+// 2. model_defaults[model] exact match (if provider matches and > 0)
+// 3. model_defaults["*"] wildcard fallback (if provider matches and > 0)
+// 4. 0 (unconstrained)
+func resolveModelMaxContextTokens(m config.VirtualModel, defaults map[string]config.ModelDefaultEntry, provider, model string) int64 {
+	if m.MaxContextTokens > 0 {
+		return m.MaxContextTokens
+	}
+	if entry, ok := defaults[model]; ok && providerMatches(entry.Providers, provider) && entry.MaxContextTokens > 0 {
+		return entry.MaxContextTokens
+	}
+	if wildcard, ok := defaults["*"]; ok && providerMatches(wildcard.Providers, provider) && wildcard.MaxContextTokens > 0 {
+		return wildcard.MaxContextTokens
+	}
+	return 0
+}
+
+func providerMatches(allowed []string, provider string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, p := range allowed {
+		if p == provider {
+			return true
 		}
 	}
-	return merged
+	return false
 }
 
 // Install atomically swaps in a new snapshot; in-flight requests keep the old one.

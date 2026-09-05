@@ -7,7 +7,10 @@
 // near-duplicate builder.
 package server
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // twoEndpointYAML is the shared fixture for failover/health/probe tests,
 // which repeatedly send the byte-identical simpleReq and expect each call
@@ -74,9 +77,21 @@ models:
 // tests are about condition filtering, not session affinity, and repeated
 // identical requests would otherwise get pinned by it).
 func capabilityYAML(u1, u2, declP1, declP2 string) string {
+	var defs string
+	d1 := strings.TrimSpace(declP1)
+	d2 := strings.TrimSpace(declP2)
+	if d1 != "" || d2 != "" {
+		defs = "model_defaults:\n"
+		if d1 != "" {
+			defs += "  model-one:\n    " + d1 + "\n"
+		}
+		if d2 != "" {
+			defs += "  model-two:\n    " + d2 + "\n"
+		}
+	}
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
-providers:
+%sproviders:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
   - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
@@ -86,19 +101,31 @@ models:
       openai-completions:
         - providers: [p1]
           models: [model-one]
-          priority: 1%s
+          priority: 1
         - providers: [p2]
           models: [model-two]
-          priority: 2%s
-`, u1, u2, declP1, declP2)
+          priority: 2
+`, defs, u1, u2)
 }
 
 // contextLenYAML gives p1 a small declared context window and p2 a large
 // one (or none — unconstrained), both otherwise identical.
 func contextLenYAML(u1, u2 string, p1Max, p2Max string) string {
+	var defs string
+	d1 := strings.TrimSpace(p1Max)
+	d2 := strings.TrimSpace(p2Max)
+	if d1 != "" || d2 != "" {
+		defs = "model_defaults:\n"
+		if d1 != "" {
+			defs += "  model-one:\n    " + d1 + "\n"
+		}
+		if d2 != "" {
+			defs += "  model-two:\n    " + d2 + "\n"
+		}
+	}
 	return fmt.Sprintf(`
 listen: 127.0.0.1:0
-providers:
+%sproviders:
   - {name: p1, base_url: {openai-completions: %s}, api_key: k1}
   - {name: p2, base_url: {openai-completions: %s}, api_key: k2}
 models:
@@ -108,11 +135,11 @@ models:
       openai-completions:
         - providers: [p1]
           models: [model-one]
-          priority: 1%s
+          priority: 1
         - providers: [p2]
           models: [model-two]
-          priority: 2%s
-`, u1, u2, p1Max, p2Max)
+          priority: 2
+`, defs, u1, u2)
 }
 
 // stickyYAML generates test configuration with sticky routing enabled:

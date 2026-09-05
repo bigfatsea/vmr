@@ -12,29 +12,27 @@
 # surfaces from one entry instead of being declared multiple times.
 #
 # models is keyed by virtual-model name only. A virtual model's own top-level
-# `capabilities`/`max_context_tokens` are the *base* shared by every endpoint
-# under it — set once instead of repeating the same declaration on every
-# try-order candidate (see the "agent" example below). A model's
+# `capabilities`/`max_context_tokens` are explicit overrides that take
+# precedence over `model_defaults` (see model_defaults below). A model's
 # `endpoints:` is itself keyed by protocol (the same key set as base_url
 # above — POST /v1/chat/completions for "openai-completions", POST /v1/messages
 # for "anthropic-messages", POST /v1/responses for "openai-responses"), and
 # each entry under a protocol key is one try-order candidate: one or more
 # providers (resolved by name against the
 # providers list above — see providers[] below), and a `models:` list of
-# upstream model names that all share this entry's capabilities/
-# max_context_tokens/role_map/sticky_ttl/priority — each (provider, model)
+# upstream model names that all share this entry's
+# role_map/sticky_ttl/priority — each (provider, model)
 # pair expands into its own independent, individually health-tracked
-# endpoint, outer loop over models, inner loop over providers. An entry's
-# own `capabilities` is *additive* to
-# the model's base (union — declare only what this specific entry adds
-# beyond the shared floor); its own `max_context_tokens` *overrides* the
-# base instead when set (a single number can't be unioned). A virtual model
-# name can mix protocols: give it one bucket under endpoints: openai-completions
-# and another under endpoints: anthropic-messages (or openai-responses), and it
-# becomes reachable — with potentially different upstream candidates — from
-# every one of those ingress protocols at once (see the "agent" example
-# below). A try-order entry can't span two protocols — it lives under
-# exactly one protocol key.
+# endpoint, outer loop over models, inner loop over providers.
+# Capabilities and context ceilings are declared centrally in `model_defaults:`
+# for each real upstream model (with an optional "*" wildcard); a virtual model
+# can explicitly override either dimension (e.g. downgrading a model's window).
+# A virtual model name can mix protocols: give it one bucket under
+# endpoints: openai-completions and another under endpoints: anthropic-messages
+# (or openai-responses), and it becomes reachable — with potentially different
+# upstream candidates — from every one of those ingress protocols at once (see
+# the "agent" example below). A try-order entry can't span two protocols — it
+# lives under exactly one protocol key.
 #
 # openai-responses is newer and narrower than the other two: as of this
 # writing only DeepSeek and OpenRouter document a Responses-compatible
@@ -170,6 +168,17 @@ listen: 127.0.0.1:8800
 #                                   # invented its own model id. A relative path is resolved against THIS
 #                                   # config file's directory, so it works from any working directory; a
 #                                   # path that doesn't exist is a load-time error, not a silent skip.
+
+# Real model defaults: capabilities and context window ceiling for upstream
+# models, shared across all virtual models. Omit entirely if unneeded
+# (unspecified models are unconstrained).
+model_defaults:
+  "*":                          # optional wildcard fallback
+    capabilities: [text, tools]
+  MiniMax-M3:                   # key = real model name
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]   # omit = applies to all providers
 
 # Global fallbacks: appended to the tail of every virtual model's try-order
 # that already has an openai-completions entry (coding/cheap/agent below all
@@ -423,6 +432,7 @@ models:
           models: [deepseek-v4-pro]
 
   cheap:
+    max_context_tokens: 128000  # explicit virtual model override: downgrade context window
     # image_downscale: 0        # per-model override example: force this model
                                  # to skip downscaling even if the global
                                  # setting above is on (omit to inherit it)
@@ -443,15 +453,11 @@ models:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          # capabilities: [image]        # this model has no base capabilities above, so this
-          #                              # endpoint's effective set is exactly [image] alone
-          # max_context_tokens: 1000000  # declare once you want vmr to skip this endpoint
-          #                              # for requests it can't actually serve
           # soft_block_failover: false   # this one endpoint opts out even if the model turned it on
         - providers: [openrouter]
           # A models: list with more than one name expands into that many
           # independent, individually health-tracked endpoints sharing this
-          # entry's provider/protocol/capabilities/priority — tried in list
+          # entry's provider/protocol/priority — tried in list
           # order (each still subject to its own failover/health state).
           models: [tencent/hy3-preview, qwen/qwen3-max]
         - providers: [deepseek]
@@ -466,17 +472,10 @@ models:
   # the three can ask for "agent" and get its own independent try-order
   # list, sharing nothing but the name.
   #
-  # capabilities/max_context_tokens here are the *base* every endpoint below
-  # inherits: both backing models support at least text+tools up to 256k
-  # tokens, so that's declared once instead of on each entry. The minimax
-  # endpoint's own capabilities: [...] list ADDS to the base (union — its
-  # effective set is text,tools,image,audio,video,thinking, not just the
-  # four listed here) and its own max_context_tokens OVERRIDES the base to
-  # 512000 for that endpoint alone; the openrouter entries declare neither,
-  # so they simply inherit the base as-is.
+  # Backing models inherit capabilities and context ceilings from model_defaults
+  # above (MiniMax-M3 gets 512k tokens and full multimodal capabilities, other
+  # models get the "*" baseline).
   agent:
-    capabilities: [text, tools]
-    max_context_tokens: 256000
     endpoints:
       openai-completions:
         - providers: [openrouter, openrouter2]   # multi-account merge: outer loop over models,
@@ -486,8 +485,6 @@ models:
       anthropic-messages:
         - providers: [minimax]
           models: [MiniMax-M3]
-          max_context_tokens: 512000
-          capabilities: [image, audio, video, thinking]
       openai-responses:
         - providers: [openrouter]
           models: [gemini-3.6-flash-high]

@@ -31,8 +31,6 @@ type legacyEndpointGroup struct {
 	Providers         []string          `yaml:"providers"`
 	Models            []string          `yaml:"models"`
 	Priority          int               `yaml:"priority"`
-	Capabilities      []string          `yaml:"capabilities"`
-	MaxContextTokens  int64             `yaml:"max_context_tokens"`
 	RoleMap           map[string]string `yaml:"role_map"`
 	StickyTTL         *config.Duration  `yaml:"sticky_ttl"`
 	SoftBlockFailover *bool             `yaml:"soft_block_failover"`
@@ -97,8 +95,6 @@ func bucketByProtocol(t *testing.T, legacy []legacyEndpointGroup) map[string][]c
 			Providers:         le.Providers,
 			Models:            le.Models,
 			Priority:          le.Priority,
-			Capabilities:      le.Capabilities,
-			MaxContextTokens:  le.MaxContextTokens,
 			RoleMap:           le.RoleMap,
 			StickyTTL:         le.StickyTTL,
 			SoftBlockFailover: le.SoftBlockFailover,
@@ -132,8 +128,6 @@ models:
         models: [m3]
         priority: 5
         sticky_ttl: 2h
-        capabilities: [image]
-        max_context_tokens: 512000
         role_map: {developer: system}
       - protocol: anthropic-messages
         providers: [p1]
@@ -187,8 +181,6 @@ models:
           models: [m3]
           priority: 5
           sticky_ttl: 2h
-          capabilities: [image]
-          max_context_tokens: 512000
           role_map: {developer: system}
       anthropic-messages:
         - providers: [p1]

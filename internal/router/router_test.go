@@ -2,7 +2,6 @@
 package router
 
 import (
-	"reflect"
 	"testing"
 	"time"
 
@@ -115,13 +114,17 @@ models:
 }
 
 // TestBuildSnapshotCarriesConditionRoutingFields checks that
-// capabilities/max_context_tokens reach core.Endpoint unchanged from
-// config, and that an endpoint not declaring them ends up unconstrained
+// capabilities/max_context_tokens from model_defaults reach core.Endpoint,
+// and that an endpoint with no matching declaration ends up unconstrained
 // (nil Capabilities, 0 MaxContextTokens) — see
 // docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing section.
 func TestBuildSnapshotCarriesConditionRoutingFields(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
+model_defaults:
+  m1:
+    capabilities: [text, image, tools]
+    max_context_tokens: 200000
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:
@@ -130,8 +133,6 @@ models:
       openai-completions:
         - providers: [p1]
           models: [m1]
-          capabilities: [text, image, tools]
-          max_context_tokens: 200000
         - providers: [p1]
           models: [m2]
 `
@@ -160,28 +161,43 @@ models:
 	}
 }
 
-// TestBuildSnapshotMergesModelBaseWithEndpointExtra locks the virtual-
-// model-level Capabilities/MaxContextTokens base: an endpoint's own
-// Capabilities is unioned on top of it (additive), its own
-// MaxContextTokens overrides it when set (else inherits it as-is) — see
-// config.VirtualModel/config.EndpointGroup's doc comments.
-func TestBuildSnapshotMergesModelBaseWithEndpointExtra(t *testing.T) {
+// TestBuildSnapshotResolvesModelDefaultsAndOverrides tests the three-tier
+// priority (virtual model override > exact model default > wildcard "*")
+// and per-field independent fallback.
+func TestBuildSnapshotResolvesModelDefaultsAndOverrides(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
+model_defaults:
+  "*":
+    capabilities: [text, tools]
+    max_context_tokens: 256000
+  MiniMax-M3:
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [p1]
+  partial-model:
+    max_context_tokens: 100000
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
+  - {name: p2, base_url: {openai-completions: https://example.com}, api_key: k2}
 models:
-  vm:
-    capabilities: [text, tools]
+  agent:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [MiniMax-M3]
+        - providers: [p2]
+          models: [MiniMax-M3]
+        - providers: [p1]
+          models: [partial-model]
+        - providers: [p1]
+          models: [unknown-model]
+  cheap:
     max_context_tokens: 128000
     endpoints:
       openai-completions:
         - providers: [p1]
-          models: [extra]
-          capabilities: [image]
-          max_context_tokens: 512000
-        - providers: [p1]
-          models: [plain]
+          models: [MiniMax-M3]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -191,65 +207,57 @@ models:
 	if err != nil {
 		t.Fatal(err)
 	}
-	eps := snap.Models["openai-completions"]["vm"].Endpoints
-	extra, plain := eps[0], eps[1]
-
-	for _, cap := range []string{"text", "tools", "image"} {
-		if !extra.HasCapability(cap) {
-			t.Errorf("extra endpoint: HasCapability(%q) = false, want true (base ∪ own)", cap)
+	agentEps := snap.Models["openai-completions"]["agent"].Endpoints
+	// ep 0: p1 / MiniMax-M3 -> exact match (providers contains p1)
+	ep0 := agentEps[0]
+	if ep0.MaxContextTokens != 512000 {
+		t.Errorf("ep0 MaxContextTokens = %d, want 512000 (exact match)", ep0.MaxContextTokens)
+	}
+	for _, cap := range []string{"text", "tools", "image", "audio", "video", "thinking"} {
+		if !ep0.HasCapability(cap) {
+			t.Errorf("ep0 missing capability %s", cap)
 		}
 	}
-	if got := extra.ExtraCapabilities; len(got) != 1 || got[0] != "image" {
-		t.Errorf("extra endpoint: ExtraCapabilities = %v, want [image] (its own declaration, pre-merge)", got)
+
+	// ep 1: p2 / MiniMax-M3 -> exact match providers=[p1] does not match p2, falls back to "*"
+	ep1 := agentEps[1]
+	if ep1.MaxContextTokens != 256000 {
+		t.Errorf("ep1 MaxContextTokens = %d, want 256000 (fallback to wildcard)", ep1.MaxContextTokens)
 	}
-	if extra.MaxContextTokens != 512000 {
-		t.Errorf("extra endpoint: MaxContextTokens = %d, want 512000 (its own override)", extra.MaxContextTokens)
+	if ep1.HasCapability("image") {
+		t.Error("ep1 should not have image capability (wildcard only has text, tools)")
 	}
-	if extra.OwnMaxContextTokens != 512000 {
-		t.Errorf("extra endpoint: OwnMaxContextTokens = %d, want 512000", extra.OwnMaxContextTokens)
+	if !ep1.HasCapability("text") || !ep1.HasCapability("tools") {
+		t.Error("ep1 should have text and tools from wildcard")
 	}
 
-	for _, cap := range []string{"text", "tools"} {
-		if !plain.HasCapability(cap) {
-			t.Errorf("plain endpoint: HasCapability(%q) = false, want true (inherits base)", cap)
-		}
+	// ep 2: p1 / partial-model -> exact has max_context_tokens: 100000, capabilities falls back to "*"
+	ep2 := agentEps[2]
+	if ep2.MaxContextTokens != 100000 {
+		t.Errorf("ep2 MaxContextTokens = %d, want 100000 (per-field exact)", ep2.MaxContextTokens)
 	}
-	if plain.HasCapability("image") {
-		t.Error("plain endpoint: HasCapability(\"image\") = true, want false (base doesn't include it, endpoint added nothing)")
+	if !ep2.HasCapability("text") || !ep2.HasCapability("tools") {
+		t.Error("ep2 should inherit text, tools capabilities from wildcard")
 	}
-	if len(plain.ExtraCapabilities) != 0 {
-		t.Errorf("plain endpoint: ExtraCapabilities = %v, want empty (declared nothing of its own)", plain.ExtraCapabilities)
-	}
-	if plain.MaxContextTokens != 128000 {
-		t.Errorf("plain endpoint: MaxContextTokens = %d, want 128000 (inherits model base)", plain.MaxContextTokens)
-	}
-	if plain.OwnMaxContextTokens != 0 {
-		t.Errorf("plain endpoint: OwnMaxContextTokens = %d, want 0 (no override of its own)", plain.OwnMaxContextTokens)
-	}
-}
 
-// TestMergeCapabilitiesDedup locks mergeCapabilities's exact contract:
-// union of base+extra, base entries first, duplicates collapsed — an
-// endpoint listing a capability its model's base already declares must not
-// end up with it twice in the effective set.
-func TestMergeCapabilitiesDedup(t *testing.T) {
-	tests := []struct {
-		name        string
-		base, extra []string
-		want        []string
-	}{
-		{"both empty", nil, nil, nil},
-		{"base only", []string{"text", "tools"}, nil, []string{"text", "tools"}},
-		{"extra only", nil, []string{"image"}, []string{"image"}},
-		{"no overlap", []string{"text", "tools"}, []string{"image"}, []string{"text", "tools", "image"}},
-		{"overlap deduped", []string{"text", "tools"}, []string{"tools", "image"}, []string{"text", "tools", "image"}},
+	// ep 3: p1 / unknown-model -> both fields fall back to "*"
+	ep3 := agentEps[3]
+	if ep3.MaxContextTokens != 256000 {
+		t.Errorf("ep3 MaxContextTokens = %d, want 256000 (wildcard)", ep3.MaxContextTokens)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := mergeCapabilities(tt.base, tt.extra); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("mergeCapabilities(%v, %v) = %v, want %v", tt.base, tt.extra, got, tt.want)
-			}
-		})
+	if !ep3.HasCapability("text") || !ep3.HasCapability("tools") {
+		t.Error("ep3 should have text, tools from wildcard")
+	}
+
+	// cheap model overrides max_context_tokens to 128000
+	cheapEps := snap.Models["openai-completions"]["cheap"].Endpoints
+	cheapEp := cheapEps[0]
+	if cheapEp.MaxContextTokens != 128000 {
+		t.Errorf("cheapEp MaxContextTokens = %d, want 128000 (virtual model override)", cheapEp.MaxContextTokens)
+	}
+	// cheapEp capabilities still come from MiniMax-M3 exact match
+	if !cheapEp.HasCapability("image") {
+		t.Error("cheapEp should still inherit capabilities from model_defaults exact match")
 	}
 }
 

@@ -561,12 +561,6 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			for _, ep := range route.EffectiveOrder() {
 				key := ep.Provider + "/" + ep.Model
 				var parts []string
-				if len(ep.ExtraCapabilities) > 0 {
-					parts = append(parts, "extra_capabilities="+strings.Join(ep.ExtraCapabilities, ","))
-				}
-				if ep.OwnMaxContextTokens > 0 {
-					parts = append(parts, fmt.Sprintf("max_context_tokens=%d", ep.OwnMaxContextTokens))
-				}
 				if len(ep.RoleMap) > 0 {
 					rm := make([]string, 0, len(ep.RoleMap))
 					for _, from := range fmtutil.SortedKeys(ep.RoleMap) {

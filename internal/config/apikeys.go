@@ -94,6 +94,12 @@ func (c *Config) expandProviderAPIKeys() error {
 			c.FallbackEndpoints[protocol] = groups
 		}
 	}
+	for model, entry := range c.ModelDefaults {
+		if newProviders, ok := rewriteProviderRefs(entry.Providers, rename); ok {
+			entry.Providers = newProviders
+			c.ModelDefaults[model] = entry
+		}
+	}
 	return nil
 }
 

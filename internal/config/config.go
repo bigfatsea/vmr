@@ -83,25 +83,6 @@ type EndpointGroup struct {
 	Models    []string `yaml:"models"`
 	Priority  int      `yaml:"priority"`
 
-	// Capabilities and MaxContextTokens drive condition-based routing (see
-	// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
-	// section). Both are optional and
-	// default to "inherit the virtual model's own base value" (VirtualModel.
-	// Capabilities/MaxContextTokens below), which itself defaults to
-	// "unconstrained" — a config that sets neither the model-level nor the
-	// endpoint-level field sees no behavior change from before these fields
-	// existed.
-	//
-	// Capabilities here is *additive*: it lists capabilities this endpoint
-	// supports on top of the model's own base list (e.g. the base already
-	// says [text, tools]; a stronger backing model can add "image" here
-	// instead of repeating [text, tools, image]) — the effective, exhaustive
-	// set used for filtering is the union of the two. MaxContextTokens
-	// instead *overrides* the model's base when set (a single number can't
-	// be unioned): 0/absent inherits the base value as-is.
-	Capabilities     []string `yaml:"capabilities"`
-	MaxContextTokens int64    `yaml:"max_context_tokens"`
-
 	// RoleMap rewrites message roles (e.g. {"developer":"system"}) for
 	// requests sent through this entry alone — a provider account can back
 	// several endpoint-groups (different virtual models, different upstream
@@ -150,17 +131,13 @@ type VirtualModel struct {
 	Endpoints           map[string][]EndpointGroup `yaml:"endpoints"`
 	ImageDownscaleMaxPx *int                       `yaml:"image_downscale"`
 
-	// Capabilities and MaxContextTokens are the *base* condition-routing
-	// declaration shared by every endpoint under this virtual model —
-	// declaring them once here instead of repeating the same
-	// EndpointGroup.Capabilities/MaxContextTokens on each try-order entry is
-	// the common case when several backing models are otherwise
-	// interchangeable. Both default to "unconstrained" (empty/0) when
-	// absent, same as before this field existed. An individual
-	// EndpointGroup's own Capabilities is unioned on top of this base
-	// (additive: what that specific endpoint supports beyond the group's
-	// shared floor); its own MaxContextTokens overrides this base instead
-	// when set (a scalar can't be unioned). See EndpointGroup's doc comment.
+	// Capabilities and MaxContextTokens are optional explicit overrides for
+	// this virtual model, taking precedence over model_defaults (see
+	// ModelDefaultEntry). Both default to "unconstrained" (empty/0) when
+	// absent from both here and model_defaults. These override model_defaults
+	// per dimension independently: an explicit setting here replaces that
+	// field's value for every endpoint under this model (e.g. allowing a
+	// "cheap" virtual model to downgrade a large backing model's window).
 	Capabilities     []string `yaml:"capabilities"`
 	MaxContextTokens int64    `yaml:"max_context_tokens"`
 
@@ -323,6 +300,26 @@ type TTL struct {
 	AuditRetention CalendarDuration `yaml:"audit_retention"`
 }
 
+// ModelDefaultEntry declares capabilities and context ceiling for a real
+// upstream model across all virtual models that route to it. Keyed by real
+// model name under Config.ModelDefaults ("*" for fallback).
+//
+// Key semantics:
+//   - Capabilities and MaxContextTokens fall back independently per
+//     dimension; they are not bound as an all-or-nothing entry.
+//   - "Unstated = unconstrained" is an architectural invariant: omitting
+//     model_defaults entirely, or having no matching entry for a model,
+//     leaves it unconstrained (empty capabilities / 0 max_context_tokens).
+//   - Providers restricts this entry to the named provider accounts. When
+//     empty or omitted, the declaration applies to all providers.
+//   - Exact model key takes precedence over the "*" wildcard (fallback chain,
+//     not a union/merge).
+type ModelDefaultEntry struct {
+	Providers        []string `yaml:"providers"`
+	Capabilities     []string `yaml:"capabilities"`
+	MaxContextTokens int64    `yaml:"max_context_tokens"`
+}
+
 // Providers is a flat list (protocol is per-provider data, not a grouping
 // key — see Provider.BaseURL); Models is keyed by virtual-model name alone,
 // with protocol as the Endpoints/FallbackEndpoints map key instead (see
@@ -384,9 +381,10 @@ type Config struct {
 	// TTL holds the lifecycle fields (sticky affinity window, image-cache
 	// eviction, audit retention) — see its doc comment for the shared
 	// zero-value polarity (0/absent/negative = use the default).
-	TTL       TTL                     `yaml:"ttl"`
-	Providers []Provider              `yaml:"providers"`
-	Models    map[string]VirtualModel `yaml:"models"`
+	TTL           TTL                          `yaml:"ttl"`
+	ModelDefaults map[string]ModelDefaultEntry `yaml:"model_defaults"`
+	Providers     []Provider                   `yaml:"providers"`
+	Models        map[string]VirtualModel      `yaml:"models"`
 	// FallbackEndpoints is appended to the tail of every virtual model's
 	// try-order — declare a shared catch-all tier once instead of pasting
 	// it onto every VirtualModel.Endpoints bucket. Keyed by protocol like
@@ -580,6 +578,9 @@ func (c *Config) validate() error {
 	}
 	quotaNow := time.Now()
 	if err := c.validateProviders(quotaNow); err != nil {
+		return err
+	}
+	if err := c.validateModelDefaults(); err != nil {
 		return err
 	}
 	providerModels := map[string]map[string]bool{}

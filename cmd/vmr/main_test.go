@@ -199,14 +199,11 @@ models:
 	}
 }
 
-// TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra locks in the display
-// contract for the model-level capabilities/max_context_tokens base: the
-// model line shows the base as declared, an endpoint that adds its own
-// shows only its own addition/override under "extra_capabilities="/
-// "max_context_tokens=" (not the merged effective set — that's what
-// core.Endpoint.Capabilities is for), and an endpoint declaring neither
-// shows a bare "- p=N. provider/model:" with nothing after the colon.
-func TestCmdCheck_ModelCapabilitiesBaseAndEndpointExtra(t *testing.T) {
+// TestCmdCheck_ModelCapabilitiesAndContext locks in that a virtual model
+// declaring capabilities/max_context_tokens renders them in the "=== Models ==="
+// section, and an endpoint renders a bare "- p=N. provider/model:" with nothing
+// after the colon when it carries no role_map/sticky_ttl overrides.
+func TestCmdCheck_ModelCapabilitiesAndContext(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
 providers:
@@ -220,25 +217,17 @@ models:
     endpoints:
       openai-completions:
         - providers: [p1]
-          models: [with-extra]
-          capabilities: [image]
-          max_context_tokens: 512000
-        - providers: [p1]
-          models: [plain]
+          models: [real-model]
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, checkLine(2, "capabilities", "text,tools")) {
-		t.Errorf("model base capabilities not rendered:\n%s", out)
+		t.Errorf("model capabilities not rendered:\n%s", out)
 	}
 	if !strings.Contains(out, checkLine(2, "max_context_tokens", "128000")) {
-		t.Errorf("model base max_context_tokens not rendered:\n%s", out)
+		t.Errorf("model max_context_tokens not rendered:\n%s", out)
 	}
-	wantEndpointLine := padLabel("    - p=0. p1/with-extra:", endpointKeyWidth) + "extra_capabilities=image; max_context_tokens=512000"
-	if !strings.Contains(out, wantEndpointLine) {
-		t.Errorf("endpoint's own extra/override not rendered at column %d:\ngot:  %s\nwant: %q", endpointKeyWidth, out, wantEndpointLine)
-	}
-	if !strings.Contains(out, "- p=0. p1/plain:\n") {
-		t.Errorf("endpoint declaring neither should render a bare label with nothing after the colon:\n%s", out)
+	if !strings.Contains(out, "- p=0. p1/real-model:\n") {
+		t.Errorf("endpoint should render a bare label with nothing after the colon:\n%s", out)
 	}
 }
 

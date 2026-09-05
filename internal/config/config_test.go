@@ -656,55 +656,9 @@ func TestEmptySections(t *testing.T) {
 // docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing and
 // Sticky Model sections) ---
 
-func TestCapabilitiesAndMaxContextTokensOptional(t *testing.T) {
-	// The base fixture declares neither field on its one endpoint-group —
-	// this is the zero-config-migration case every existing config.yaml is in.
-	cfg, err := Parse([]byte(validYAML))
-	if err != nil {
-		t.Fatal(err)
-	}
-	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
-	if len(eg.Capabilities) != 0 {
-		t.Errorf("expected no declared capabilities, got %v", eg.Capabilities)
-	}
-	if eg.MaxContextTokens != 0 {
-		t.Errorf("expected MaxContextTokens 0 (unconstrained), got %d", eg.MaxContextTokens)
-	}
-}
-
-func TestCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1",
-		"priority: 1\n          capabilities: [text, image, tools]\n          max_context_tokens: 200000", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	eg := cfg.Models["m1"].Endpoints["openai-completions"][0]
-	want := []string{"text", "image", "tools"}
-	if len(eg.Capabilities) != len(want) {
-		t.Fatalf("Capabilities = %v, want %v", eg.Capabilities, want)
-	}
-	for i, c := range want {
-		if eg.Capabilities[i] != c {
-			t.Errorf("Capabilities[%d] = %q, want %q", i, eg.Capabilities[i], c)
-		}
-	}
-	if eg.MaxContextTokens != 200000 {
-		t.Errorf("MaxContextTokens = %d, want 200000", eg.MaxContextTokens)
-	}
-}
-
-func TestMaxContextTokensNegativeRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "priority: 1", "priority: 1\n          max_context_tokens: -1", 1)
-	if _, err := Parse([]byte(yaml)); err == nil {
-		t.Error("negative max_context_tokens must be rejected at load, not silently clamped")
-	}
-}
-
 // TestVirtualModelCapabilitiesAndMaxContextTokensParsed locks in the
-// model-level base fields (VirtualModel.Capabilities/MaxContextTokens) —
-// distinct from the endpoint-group-level fields above, which override/add
-// to this base at BuildSnapshot time (see router.mergeCapabilities).
+// model-level override fields (VirtualModel.Capabilities/MaxContextTokens) —
+// which take precedence over model_defaults at BuildSnapshot time.
 func TestVirtualModelCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
 	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:",
 		"  m1:\n    capabilities: [text, tools]\n    max_context_tokens: 128000\n    endpoints:", 1)

@@ -261,24 +261,40 @@ timeouts:
 
 ### 条件路由
 
-同一个虚拟模型背后挂的端点不必是完全等价的。声明每个端点实际支持什么,一条请求需要而某个端点没声明的能力,该端点会被直接跳过——而不是照样把请求打过去,得到一个必然失败的结果:
+挂在同一个虚拟模型后面的端点不一定都是同等能力的。在顶层 `model_defaults:` 中按真实模型声明其所支持的能力，当请求需要某项能力而某个端点未声明时，vmr 会直接跳过它——而不是发给一个注定会拒绝请求的端点：
 
 ```yaml
+model_defaults:
+  "*":                                  # 可选通配兜底基线
+    capabilities: [text, tools]
+  MiniMax-M3:                           # key = 真实模型名
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]    # 不写 = 对所有 provider 生效
+
 models:
   agent:
-    capabilities: [text, tools]        # 基线：下面每个端点都继承这个
-    max_context_tokens: 128000         # 基线：同上
+    # 直接继承 MiniMax-M3 的 defaults（512k 窗口与全模态能力）及其余模型的 "*" 基线
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          capabilities: [image]          # 叠加在基线之上 -> 生效集合是 text, tools, image
-          max_context_tokens: 1000000    # 覆盖基线，只对这个端点生效
         - providers: [deepseek]
-          models: [deepseek-chat]        # 两个都不声明 -> 原样继承基线
+          models: [deepseek-chat]
+
+  cheap:
+    max_context_tokens: 128000          # 虚拟模型层显式覆盖：降级上下文窗口上限
+    endpoints:
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
 ```
 
-两个字段在虚拟模型层和端点层都是可选的，缺省即**不限制**：虚拟模型不声明 `capabilities` 就没有基线，端点不声明自己的就视为支持模型基线里的一切（如果哪一层都没声明，就是什么都支持）——现有配置文件行为完全不变。`capabilities` 在端点层是**叠加**语义（与模型基线取并集）,`max_context_tokens` 则是**覆盖或继承**（单个数值没法取并集）。端点的生效能力集合一旦非空就是穷尽式的（把它真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）；`vmr check` 会把每个虚拟模型的基线、以及每个端点自己声明的叠加/覆盖值打印出来，配置遗漏在这里一眼可见。
+`capabilities` 与 `max_context_tokens` 在顶层 `model_defaults` 中按真实模型名统一声明，支持可选的 `"*"` 通配兜底。两个字段按维度独立回退：一条仅声明了 `max_context_tokens` 的条目，其 `capabilities` 仍继续向 `"*"`（或不限制）回退。虚拟模型层可以显式覆盖任意维度（如上面的 `cheap` 将 MiniMax-M3 的上下文上限降级为 128k，但依然继承其多模态能力）。
+
+两个字段缺省即**不限制**：完全不写 `model_defaults` 块、或者某个模型在表中查无匹配，视为支持一切能力且无上下文限制——现有不使用此特性的配置文件行为完全不变。端点的生效能力集合一旦非空就是穷尽式的（把它真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）。
+
+Sticky 会话亲和性与 `model_defaults` 完全正交：Sticky 的路由键始终包含虚拟模型名（`client_key_tag:sysHash:firstMsgHash` 作用域限定在 `virtualModel` 内），因此不同虚拟模型即使引用同一个真实模型，会话亲和也绝不会跨虚拟模型串扰。
 
 两类条件性质不同：
 
@@ -684,7 +700,7 @@ models:
 | `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要在 `openai-responses` key 下声明端点 |
 | `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
-| `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime，以及 `base_urls`：各协议的客户端入口地址——都是 `<scheme>://<host>/v1/`——从请求本身回显（Host 头 + 是否 TLS）、不是从 `listen` 推导，你用什么地址问的就该用什么地址配客户端）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、每个 虚拟模型 × 协议 一条 `models` 数组项，含 `capabilities`（跨端点并集；空数组 = 不限制）、`max_context_tokens`（跨端点最大值；0 = 不限制）与逐端点健康及各端点自己的 capabilities/context 覆盖——让把 custom model 指向 vmr 的 Agent 能直接读出上下文长度与能力——以及实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |
+| `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime，以及 `base_urls`：各协议的客户端入口地址——都是 `<scheme>://<host>/v1/`——从请求本身回显（Host 头 + 是否 TLS）、不是从 `listen` 推导，你用什么地址问的就该用什么地址配客户端）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、每个 虚拟模型 × 协议 一条 `models`数组项，含 `capabilities`（跨端点并集；空数组 = 不限制）、`max_context_tokens`（跨端点最大值；0 = 不限制）与逐端点健康（含各端点生效的能力/上下文上限）——让把 custom model 指向 vmr 的 Agent 能直接读出上下文长度与能力——以及实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |
 | `GET /status.html` | 浏览器可视化看板：纯客户端渲染 (CSR) 单页面暗黑看板，支持实时自动轮询（5s/15s/30s/60s）、端点健康/冷却倒计时徽章、交互式 API Key 弹窗鉴权、零外部 CDN 依赖，并提供指向实时日志页的链接 |
 | `GET /log` | 进程实时控制台日志，以永不关闭的 `text/plain` 流输出——一行日志对应一行输出，与 stderr 逐字节一致：先回放最近若干行，再持续跟随新行，等于浏览器里的 `tail -f`。与 `/status` 一样受 `api_keys` 鉴权保护。无任何查询参数；回放窗口是固定的内存环形缓冲（最近约 512 行），空闲连接每 30 秒收到一个保活空行。这是 access log 视角（路由决策、token 用量、failover），不是 audit JSONL |
 | `GET /log.html` | 浏览器实时日志页：暗色终端风格查看器，自行打开 `/log`——先尝试不带 Key 直连，失败则弹出与 `/status.html` 相同的 API Key 输入框（两页共用已保存的 Key）；向上滚动时暂停自动滚底，断开后提供手动重试按钮，提供 Clear 按钮一键清空本地显示（不影响服务端缓冲与实时流），并提供指向状态看板的链接 |

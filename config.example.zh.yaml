@@ -12,17 +12,18 @@
 #
 # models 只按虚拟模型名分 key。一个虚拟模型自己顶层的 `capabilities`/
 # `max_context_tokens` 是它下面每个候选端点共享的*基线*——只写一次，不用在每个
-# try-order 候选上重复声明同一套（见下面的 "agent" 示例）。一个模型的
+# models 仅以虚拟模型名为 key。虚拟模型顶层的 `capabilities`/`max_context_tokens`
+# 为显式覆盖，优先级高于 `model_defaults`（见下文 model_defaults）。一个模型的
 # `endpoints:` 本身按协议作 key（和上面 base_url 的 key 同一套——POST /v1/chat/completions
 # 对应 "openai-completions"，POST /v1/messages 对应 "anthropic-messages"，POST /v1/responses
 # 对应 "openai-responses"），每个协议 key 下的一条记录是一个 try-order 候选：一个或多个
 # provider（按名字去上面的 providers 列表里解析，见下面 providers[] 的说明）、以及一份
-# `models:` 上游模型名列表，这些模型名共享这一条的 capabilities/
-# max_context_tokens/role_map/sticky_ttl/priority——每个 (provider, model) 对
+# `models:` 上游模型名列表，这些模型名共享这一条的
+# role_map/sticky_ttl/priority——每个 (provider, model) 对
 # 都会展开成各自独立、单独做健康跟踪的端点，外层按 models 循环、内层按
-# providers 循环。一条记录自己的 `capabilities` 是对模型基线的*叠加*（并集——只需要声明这条相
-# 对共享底线额外多出的部分）；它自己的 `max_context_tokens` 一旦设置就是*覆盖*
-# 基线（一个数字没法做并集）。同一个虚拟模型名可以混合协议：在 endpoints: 下同时给
+# providers 循环。上游真实模型的能力与上下文上限集中在顶层 `model_defaults:`
+# 统一声明（支持可选的 "*" 通配）；虚拟模型层可以显式覆盖任意维度（如对模型窗口进行降级）。
+# 同一个虚拟模型名可以混合协议：在 endpoints: 下同时给
 # openai-completions 和 anthropic-messages（或 openai-responses）两个协议桶，它就能同时从
 # 这几种入口协议访问到——各自可能有不同
 # 的上游候选（见下面的 "agent" 示例）。一条 try-order 记录没法横跨两个协议——
@@ -149,6 +150,16 @@ listen: 127.0.0.1:8800
 #                                   # aliases: 块（裸模型名 → canonical key），给自造了模型 id 的网关用。
 #                                   # 相对路径按**这份 config 文件所在目录**解析，因此从任何工作目录跑
 #                                   # 都成立；指向一个不存在的路径会在加载期报错，不会静默跳过。
+
+# 真实模型默认值：真实上游模型的能力与上下文窗口上限声明，所有虚拟模型共享。
+# 不需要时整块可省略（未声明的模型不受约束）。
+model_defaults:
+  "*":                          # 可选通配兜底
+    capabilities: [text, tools]
+  MiniMax-M3:                   # key = 真实模型名
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]   # 不写 = 对所有 provider 生效
 
 # 全局兜底：追加到每个已经有 openai-completions 协议入口的虚拟模型 try-order 末尾（下面的
 # coding/cheap/agent 都有——claude 是纯 Anthropic 模型，这个块从不会碰到它，
@@ -352,6 +363,7 @@ models:
           models: [deepseek-v4-pro]
 
   cheap:
+    max_context_tokens: 128000  # 虚拟模型层显式覆盖：降级上下文窗口
     # image_downscale: 0        # 按模型覆盖的示例：强制这个模型跳过缩图，即使
                                  # 上面全局设置是开着的（不写就继承全局设置）
     # sticky: false              # 对确实是一次性交互、没有多轮价值需要保护的模型，
@@ -368,14 +380,10 @@ models:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          # capabilities: [image]        # 这个模型上面没有基线 capabilities，所以这条
-          #                              # 端点实际生效的能力集合就是单独的 [image]
-          # max_context_tokens: 1000000  # 一旦声明，vmr 就会跳过这条端点，不把它用于
-          #                              # 那些它实际服务不了的请求
           # soft_block_failover: false   # 即使模型级打开了，这一条端点也单独退出
         - providers: [openrouter]
           # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
-          # 的端点，共享这一条记录的 provider/protocol/capabilities/priority——按
+          # 的端点，共享这一条记录的 provider/protocol/priority——按
           # 列表顺序依次尝试（每一个仍然有自己独立的 failover/健康状态）。
           models: [tencent/hy3-preview, qwen/qwen3-max]
         - providers: [deepseek]
@@ -389,15 +397,9 @@ models:
   # 到达——三种协议上的客户端都可以请求 "agent"，各自拿到自己独立的 try-order
   # 列表，彼此只共享一个名字，别无其他。
   #
-  # 这里的 capabilities/max_context_tokens 是下面每条端点继承的*基线*：两个
-  # 后端模型都至少支持 text+tools、最多 256k token，所以只写一次而不是在每条
-  # 记录上都重复。minimax 端点自己的 capabilities: [...] 列表是在基线上*叠加*
-  # （并集——它实际生效的集合是 text,tools,image,audio,video,thinking，不只是
-  # 这里列出的四个），而它自己的 max_context_tokens 把这一条端点单独*覆盖*成
-  # 512000；openrouter 那几条都没有单独声明，所以就原样继承基线。
+  # 后端模型从上文的 model_defaults 继承能力与上下文上限声明（MiniMax-M3 获得
+  # 512k token 窗口与全模态能力，其余模型继承 "*" 基线）。
   agent:
-    capabilities: [text, tools]
-    max_context_tokens: 256000
     endpoints:
       openai-completions:
         - providers: [openrouter, openrouter2]   # 多账号合并：外层按 models 循环，内层
@@ -407,8 +409,6 @@ models:
       anthropic-messages:
         - providers: [minimax]
           models: [MiniMax-M3]
-          max_context_tokens: 512000
-          capabilities: [image, audio, video, thinking]
       openai-responses:
         - providers: [openrouter]
           models: [gemini-3.6-flash-high]

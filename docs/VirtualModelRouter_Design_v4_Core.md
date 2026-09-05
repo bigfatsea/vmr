@@ -362,24 +362,38 @@ for _, ep := range route.Endpoints {
 
 **诊断**：过滤后候选集为空是最容易让用户困惑的情形（"为什么明明配了好几个端点却说没有可用的"）。只在这条"空候选集"的失败路径上（不在热路径）额外跑一遍，找出是哪个 Condition 淘汰了最后剩下的端点，把原因写进错误消息（`rejected by condition(s): image`），不复用容易误导的"all cooling down or none configured"文案。`vmr check` 同步把每个端点声明的 `capabilities`/`max_context_tokens` 打印出来，让配置缺口在运行前就可见。
 
-配置侧，虚拟模型在 `VirtualModel.Capabilities []string` / `VirtualModel.MaxContextTokens int64` 里声明这个组下所有端点共享的**基线**——同一批可互换的端点通常支持面差不多，写一次即可；端点自己的 `EndpointGroup.Capabilities []string`（`text`/`image`/`audio`/`video`/`tools`/`thinking`，不区分"模态"与"能力"两类——在 Condition 框架里它们是同一种事实）是**叠加**在基线之上的（取并集），`EndpointGroup.MaxContextTokens int64` 则是**覆盖**基线（单个数值没法取并集，声明即覆盖，不声明就原样继承）：
+配置侧，真实模型的能力与上下文上限集中在顶层 `model_defaults:` 中声明（按真实模型名寻址，支持可选的 `"*"` 通配兜底；`providers` 列表可选，用于限制生效的账号范围），同一真实模型的事实只写一次。虚拟模型层保留 `VirtualModel.Capabilities []string` / `VirtualModel.MaxContextTokens int64` 作为**显式覆盖**（按维度独立覆盖/降级，例如 `cheap` 将某个大模型的窗口降级为 128000）：
 
 ```yaml
+model_defaults:
+  "*":
+    capabilities: [text, tools]          # 通配兜底
+  MiniMax-M3:
+    capabilities: [text, tools, image, audio, video, thinking]
+    max_context_tokens: 512000
+    providers: [openrouter, minimax]      # 仅对这两个 provider 生效
+
 models:
   agent:
-    capabilities: [text, tools]          # 基线：下面每个端点都继承
-    max_context_tokens: 128000           # 基线：同上
+    # 不写覆盖字段，直接继承 MiniMax-M3 的完整能力与 512k 窗口
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          capabilities: [image]            # 叠加 -> 生效集合 text,image,tools
-          max_context_tokens: 1000000      # 覆盖基线，只对这个端点生效
         - providers: [deepseek]
-          models: [deepseek-chat]          # 两者都不声明 -> 原样继承基线
+          models: [deepseek-chat]        # 查表无 exact 匹配，回退到 "*"
+
+  cheap:
+    max_context_tokens: 128000          # 虚拟模型层显式覆盖：降级窗口
+    endpoints:
+      openai-completions:
+        - providers: [minimax]
+          models: [MiniMax-M3]
 ```
 
-两个字段在模型层和端点层都是**未声明 = 不限制**（假设支持一切/无上限，保证旧配置零改动迁移，模型层也不声明时端点层的语义和这个字段引入之前完全一样）；端点的生效能力集合一旦非空就是穷尽式的（allowlist）——运营者需要把端点真正支持的能力全部列出来（基线 + 自己叠加的那部分），遗漏会导致端点被误判为不支持而被条件过滤挡在候选之外，这是数组式声明的已知代价，缓解手段就是上面提到的 `vmr check` 展示（现在按模型基线 + 每个端点自己的叠加/覆盖值分层打印）。
+两个字段是**未声明 = 不限制**（查表无匹配时 capabilities 为空、max_context_tokens 为 0，保证现有配置零改动迁移）；端点的生效能力集合一旦非空就是穷尽式的（allowlist）——运营者需要把端点真正支持的能力全部列出来，遗漏会导致端点被误判为不支持而被条件过滤挡在候选之外。
+
+Sticky 会话亲和性与 `model_defaults` 完全正交：Sticky key 是 `(client_key_tag, virtualModel, sysHash, firstMsgHash)`，虚拟模型名作为命名空间的一阶分量，不同虚拟模型即使配同一个真实模型，Sticky 也绝不会跨虚拟模型穿透击穿（`coding` 粘住的后端对 `agent` 完全不可见）。
 
 **四类条件的最终定义**：
 
@@ -442,19 +456,23 @@ func (r *Registry) Set(key, endpointKey string)  // 命中时刷新 mtime，用�
 ```yaml
 sticky_ttl: 10m                     # 全局默认，覆盖 Anthropic/OpenAI/MiniMax 的典型区间；硬上限 24h
 
+model_defaults:
+  MiniMax-M3:
+    capabilities: [text, image, tools]
+    max_context_tokens: 1000000
+  deepseek-chat:
+    capabilities: [text, tools]
+    max_context_tokens: 128000
+
 models:
   agent:                            # sticky 默认开启，不用写 sticky: true
     endpoints:
       openai-completions:
         - providers: [minimax]        # 跟随全局 10 分钟
           models: [MiniMax-M3]
-          capabilities: [text, image, tools]
-          max_context_tokens: 1000000
         - providers: [deepseek]       # 磁盘缓存，寿命远超全局默认，端点级显式覆盖
           models: [deepseek-chat]
           sticky_ttl: 2h
-          capabilities: [text, tools]
-          max_context_tokens: 128000
 
   one-shot-summarizer:              # 单次摘要调用，没有多轮价值，显式关闭 sticky
     sticky: false
@@ -697,26 +715,38 @@ models:                          # "对外叫什么、按什么顺序用"——�
                                  # 会话亲和的单次调用场景才需要显式写 false
     fallback: true               # 可选；是否参与上面 fallback_endpoints: 的注入，*bool，缺省视为 true；
                                  # 只有需要严格隔离、不想被全局兜底覆盖的模型才需要显式写 false
-    capabilities: [text, tools]   # 可选；这个虚拟模型下所有端点共享的能力基线，缺省 = 无基线（不限制）
-    max_context_tokens: 128000    # 可选；同上，端点共享的上下文窗口基线，缺省/0 = 无基线（不限制）
+model_defaults:
+  "*":                          # 可选；通配兜底基线
+    capabilities: [text, tools]
+  <真实模型名>:
+    capabilities: [text, tools, image] # 可选；该模型支持的能力全集
+    max_context_tokens: 512000         # 可选；该模型的上下文窗口上限
+    providers: [<name>, ...]           # 可选；仅对列出的 provider 生效（缺省对全部 provider 生效）
+
+models:
+  <虚拟模型名>:
+    strategy: [priority]       # 缺省 [priority]
+    image_downscale: 512       # 可选；覆盖全局 image_downscale，只对这一个虚拟模型生效；写 0 表示对这个模型强制关闭，即使全局开着
+    sticky: true                # 可选；Sticky Model 开关，*bool，缺省（不写）视为 true；只有确实不需要
+                                 # 会话亲和的单次调用场景才需要显式写 false
+    fallback: true               # 可选；是否参与上面 fallback_endpoints: 的注入，*bool，缺省视为 true；
+                                 # 只有需要严格隔离、不想被全局兜底覆盖的模型才需要显式写 false
+    capabilities: [text]         # 可选；显式覆盖 model_defaults 的 capabilities
+    max_context_tokens: 128000    # 可选；显式覆盖 model_defaults 的 max_context_tokens（例如降级窗口）
     endpoints:
       openai-completions:         # openai-completions | anthropic-messages | openai-responses | 未来任何已注册的 adapter 名——map key 即协议，
                                   # 引用的 provider 必须在这个协议下声明了 base_url；同一虚拟模型名可以同时挂多个不同
                                   # 协议的桶，各入口各自独立可达（见「协议模型」§3）
-      providers: [<name>, ...]  # 必须引用 providers 列表里已定义的账号名；始终是列表——单账号写
+        - providers: [<name>, ...]  # 必须引用 providers 列表里已定义的账号名；始终是列表——单账号写
                                    # providers: [<name>]，多个账号是同一批上游模型的可互换候选时写
                                    # providers: [<name>, ...]（见下方说明段落）
-      models: [<上游真实模型名>, ...]   # 一个或多个；每个 (provider, model) 对展开成独立的、各自健康
+          models: [<上游真实模型名>, ...]   # 一个或多个；每个 (provider, model) 对展开成独立的、各自健康
                                           # 跟踪的端点——外层按 models 循环、内层按 providers 循环，
                                           # 共享本条 entry 的其余字段
-      priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
-      capabilities: [image]        # 可选；叠加在虚拟模型的 capabilities 基线之上（取并集），不是替换；
-                                      # 缺省 = 不额外叠加；生效集合一旦非空就是穷尽式的
-      max_context_tokens: 1000000  # 可选；覆盖虚拟模型的 max_context_tokens 基线（单个数值，覆盖不叠加）；
-                                      # 缺省/0 = 原样继承基线
-      role_map:               # 可选；这条 entry 拒收的 role → 改写成什么，缺省不改写
-        developer: system     # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
-      sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效——挂在端点而不是
+          priority: 1            # 可选；缺省 0，同优先级按文件顺序（稳定排序）——多数场景不必写这个字段，直接按想要的顺序排列 endpoints 即可
+          role_map:               # 可选；这条 entry 拒收的 role → 改写成什么，缺省不改写
+            developer: system     # 例：DashScope 拒收 OpenAI o1/o3 系列的 developer role
+          sticky_ttl: 2h          # 可选；覆盖全局 sticky_ttl，只对这一个端点生效——挂在端点而不是
                                  # 虚拟模型上，因为 prompt cache 寿命是上游 provider 的属性；同样受 24 小时硬上限约束
 ```
 
@@ -730,9 +760,9 @@ models:                          # "对外叫什么、按什么顺序用"——�
 
 **校验规则**：完整清单在 `internal/config` 的 `validate()`。框架——**YAML 严格解析**（`KnownFields`，未知/拼错的键、已移除的单把 `api_key` / `probe_mode` 均直接拒绝加载）；每个 provider 的 `name` 非空且唯一、`base_url` 至少声明一个已注册协议且值是合法 URL；endpoints/fallback_endpoints 的协议 key 必须已注册（key 层一次校验覆盖整个桶）、`providers` 非空且每个都存在并在该协议下声明了 base_url、`models` 非空；`fallback_endpoints` 复用同一套校验，外加 `priority` 必须显式 > 0；`proxy: true` 但没配对应 scheme 的代理是校验错误（配置自身就能陈述的矛盾）；`sticky_ttl` 必须为正且 ≤ `internal/sticky.BackstopTTL`（24h）；`api_keys` 每项 ≥16 字符（`minAPIKeyLen`，防 `audit.KeyTag` 的末 8 位窗口就是整把密钥）。负数字段（`max_attempts` / `max_concurrency` / `audit_retention_days` / `image_downscale` / 模型级 `image_downscale`）加载期直接拒绝，`image_cache_ttl_days` 非正数钳为默认 7。模型级 `image_downscale` 是 `*int`——省略（继承全局）与显式 `0`（强制关闭）在校验后仍是两种状态，是唯一"缺省"与"显式 0"语义不同的字段。
 
-**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`probe_timeout` 没有明显小于 `response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型基线 capabilities/max_context_tokens 与每个端点自己叠加/覆盖值的分层展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
+**`vmr check` 与 `Config.Check`**：validate() 之外还有一层不影响加载、但值得在真正联网之前拦下的"一致性检查"（`internal/config/check.go` 的 `Config.Check() []Issue`）——provider 的 `api_key` 为空、`probe_timeout` 没有明显小于 `response_header`（违反后台探测"绝不占用和真实请求一样长的预算"这条设计前提，见上文 `DefaultProbeTimeout`）、同一个虚拟模型里出现完全重复的 `protocol/provider/model` 端点。这些问题不是 validate() 那种"配置自身就能陈述的矛盾"（校验期硬拒绝），而是"能跑但大概率不是你想要的"，所以拆成单独一层：`vmr check` 把每一条渲染成对应字段后面的 ⚠️，末尾再汇总成 `=== Failed ===` 列表（配合每个字段固定宽度对齐、每个 provider 的 `api_key` 脱敏展示、每个虚拟模型 capabilities/max_context_tokens 展示）；`vmr diagnose` 复用同一个 `Config.Check`，一旦有结果就跳过 Phase 2（Environment）/Phase 3（Connectivity）这两个真正拨网络的阶段——配置还没理顺就没必要浪费时间等连接超时。
 
-CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 image_downscale/sticky 覆盖标记、每个端点的 capabilities/max_context_tokens/sticky_ttl、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
+CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Config.Check` 一致性扫描 + 按生效顺序打印路由表，含每个模型的 capabilities/max_context_tokens/image_downscale/sticky 标记、每个端点的 sticky_ttl/role_map、每个 provider 的生效代理）、`vmr status [-c <cfg>]`（渲染健康与并发）、`vmr report [-o dir] <glob>...`（见「审计日志」）、`vmr check [-c <cfg>] {log|cache}`（打印生效的 `log_dir`/`image_cache_dir`，`vmr.sh` 内部用它定位 server log 落点）、`vmr version`（构建标识，见 §4.3 `instance` 块）。环境变量：**只有一类**——配置内 `${VAR}` 展开引用的任意变量（API Key、可选的 `${HTTPS_PROXY}`、可选的目录……都走这一条）。除此之外 vmr 不读任何环境变量：目录（`log_dir`/`image_cache_dir`）与代理环境变量（`HTTPS_PROXY` 等）均**有意不作为隐式来源**（见下段）。
 
 **上游代理：显式配置，两级解析，默认关闭**：`http_proxy`/`https_proxy` 只声明代理服务器 URL，本身不替任何 provider 打开代理。是否走代理完全由 provider 自己的 `proxy: true`/`false` 决定（缺省 `false` = 直连，无全局默认可继承）；`true` 时按 base_url 的 scheme 选用 `http_proxy`/`https_proxy`。**推荐**：只给个别需要代理的 provider（典型是访问受限的海外厂商）写 `proxy: true`，其余不写——新增 provider 默认直连、不会意外被牵连。**没有环境变量回退**：一个只在某次交互式 shell 里临时设过的 `HTTPS_PROXY` 被悄悄读取，会让接下来启动的所有实例把全部上游流量导进代理——流量去哪必须在 config.yaml 里读得出来；要引用环境变量就显式写 `https_proxy: ${HTTPS_PROXY}`。`proxy: true` 但没配对应 scheme 的代理地址是校验错误。实现不做每请求动态判断：`router.Install` 按解析结果分组建 `http.Client`（典型 1~2 个），同组 provider 共享连接池，请求期零额外开销；代理值随热重载即时生效。
 
