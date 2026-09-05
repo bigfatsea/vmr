@@ -490,6 +490,16 @@
 - **可能方案**：返回 `(value, ok)` 并让消费方显式展示 unknown。
 - **触发条件**：状态看板数字开始参与任何自动决策（而不仅是人看）。
 
+#### 2.81 [已落地登记] 2026-09 配置形态简化（ttl/timeouts 归集、endpoints map 化、`disabled`、`model_defaults`）的后续决策
+
+- **背景**：`ConfigShape_Simplification_2026-09_v2.md` 经设计评审后落地（A.1+A.2+A.3、C.1、D.1+D.2、E.1+E.2；D.3 锚点示例除外），无兼容层，Breaking 项已在 CHANGELOG `[Unreleased]` 登记。落地时敲定的悬决项与新增取舍：
+  - **`ttl` 时间换算**：`CalendarDuration` 用固定长度近似（d=24h、w=7d、mo=30d、y=365d，与 quota `every: 1mo` 同约定），额外接受裸整数=天（旧 `*_days` 数值的迁移路径）；TTL→天数换算**向上取整**（亚天值至少 1 天），避免 12h 被截断为 0 恰好落进 audit/imgprep 的"0 = 不删/不淘汰"旧语义。
+  - **`model_defaults` 无合并规则**：同一模型名重复 key 由 YAML 自身拒绝；exact key 与 `"*"` 通配同时匹配是回退链（exact 优先），不是合并——V2 文档"待敲定项"的取 max/后写覆盖问题因此不存在。
+  - **`BuildQuotaSpecs` 双形态**：`BuildSnapshot` 路径走 `BuildQuotaSpecsDisabled`（跳过 disabled provider，不留无主计数器）；`BuildQuotaSpecs` 保持原行为供 `replay.chargeReplay` 使用（replay 定向单个 (provider, model)，解析其 quota spec 与在线路由状态无关，是正确语义而非兼容残留）。
+  - **全 disabled endpoint-group 保留空 route**：`(protocol, virtual model)` 路由仍在但零 endpoint，走常规 no-candidates 失败路径而非 unknown-model（测试钉住）；若未来想让空 route 从 `/status` 消失再重估。
+  - **disabled 引用告警逐引用点发**：一个 disabled provider 被 N 处引用产生 N 条 warning（每条点名具体引用位置）；若嫌吵再聚合为 per-provider 一条。
+- **拆除触发条件**：无（登记防反复重提；后续若改任一取舍，先改本条再改代码）。
+
 
 ---
 
