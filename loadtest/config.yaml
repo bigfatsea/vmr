@@ -3,16 +3,17 @@
 # at loadtest/mockupstream, never a real provider, and listens on a different
 # port so it can run alongside a real dev instance without clashing.
 #
-# Updated to the flat providers/models schema (commit "Flatten providers to a
-# multi-protocol list...") — this file was missed in that migration and had
-# gone stale (go run ./loadtest/runner failed to parse it) until this pass.
+# Updated to the config-shape 2026-09 reshape (timeouts/ttl, endpoints map,
+# model_defaults) — this file was missed in that migration too and had gone
+# stale (go run ./loadtest/runner failed to parse it) until this pass.
 
 listen: 127.0.0.1:8801     # must match loadtest/addr.VMR (YAML can't import the Go constant, so this one line stays hand-synced)
 max_concurrency: 0          # unlimited — we want to see vmr's natural ceiling, not an artificial gate
 log_dir: ./logs/loadtest    # own subdirectory under logs/ — separate from ~/.vmr/logs and from
                             # any real vmr instance's logs/*.jsonl (runner.go wipes this dir clean
                             # before every run; must never point at a shared/real log directory)
-audit_retention_days: 0     # keep forever; this is a small, throwaway log directory anyway
+                            # ttl.audit_retention isn't set — this directory is wiped by runner.go
+                            # before every run, so the default (90d) never gets a chance to matter.
 image_cache_dir: ./logs/loadtest/image_cache  # own subdirectory, same reasoning as log_dir above —
                             # runner.go wipes this clean before every run too. Without this it would
                             # default to the same ~/.vmr/image_cache a real vmr instance uses, and
@@ -44,32 +45,33 @@ providers:
 # doubles as the scenario label in `vmr report`'s per-model breakdown.
 models:
   baseline:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   stream_normal:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:stream_normal"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:stream_normal"]}]}
   thinking_leak:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:thinking_leak"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:thinking_leak"]}]}
   think_tag:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:think_tag"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:think_tag"]}]}
   big_response:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:big_response"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:big_response"]}]}
   big_image:
     image_downscale: 512    # per-model override — global image_downscale stays off for every other scenario
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   multi_image:
     image_downscale: 512
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   gif:
     image_downscale: 512    # on, specifically to confirm GIF still skips the decode path even when downscaling is enabled
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   long_history:
-    endpoints: [{protocol: openai-completions, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   failover:
     endpoints:
-      - {protocol: openai-completions, providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
-      - {protocol: openai-completions, providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
-      - {protocol: openai-completions, providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
+      openai-completions:
+        - {providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
+        - {providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
+        - {providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
   anthropic_baseline:
-    endpoints: [{protocol: anthropic-messages, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {anthropic-messages: [{providers: [mock], models: ["scenario:baseline"]}]}
   responses_baseline:
-    endpoints: [{protocol: openai-responses, providers: [mock], models: ["scenario:baseline"]}]
+    endpoints: {openai-responses: [{providers: [mock], models: ["scenario:baseline"]}]}
