@@ -132,43 +132,17 @@ listen: 127.0.0.1:8800
 #                                 # BREAKING vs the old audit_retention_days: 0 used to mean "keep forever" —
 #                                 # that reading is gone; if you relied on it, write 90000d or larger.
 
-# pricing: global settings for metric: cost quota accounts and vmr report's $
-# estimates (see docs/VirtualModelRouter_Design_v4_Quota.md and
-# providers[].pricing below for the account-level half). A built-in standard
-# price table (sourced from a public LiteLLM-format snapshot) always applies
-# with no configuration at all, and vmr report's $ estimates use it with zero
-# setup — this whole block is skippable for most deployments.
-#
-# Recommended default: if you don't use any metric: cost quota limit at all
-# (metric: requests/tokens don't need any of this), skip this block entirely.
-# If you DO use metric: cost and you're fine accounting in USD, write only
-# `pricing: {currency: USD}` — exchange_rate stays empty/unused, and every
-# providers[].pricing.overrides row below can just write its numbers in USD
-# directly. Only reach for exchange_rate at all once an account's real quota
-# cap is denominated in a currency other than USD (a domestic vendor's CNY
-# plan, say) — forcing everything through USD in that case just moves the
-# manual conversion problem onto amount: below instead of removing it.
-# pricing:
-#   currency: CNY                # required once any provider has a metric: cost limit; the standard table itself is USD
-#   exchange_rate: {CNY: 7.1}    # a general "1 USD = X <code>" map — required whenever currency isn't USD (needs
-#                                 # a CNY entry here, since the built-in table is USD-denominated and feeds both
-#                                 # metric: cost charging and vmr report's $ column, so skipping it would label
-#                                 # USD numbers as CNY). Also the FALLBACK for a providers[].pricing.overrides
-#                                 # row's own currency: (see below — overrides live in this same file, so no
-#                                 # fallback question there) and for a pricing.supplement row's own currency:
-#                                 # (see pricing.example.yaml) that DOESN'T declare its own exchange_rate: block —
-#                                 # a supplement file's own block always wins on a matching key, so it can stay
-#                                 # portable across deployments; this map only fills in what it doesn't cover.
-#                                 # Also consulted by vmr report's -currency display currency when it differs
-#                                 # from this one. Write {CNY: 1.0} to state deliberately that no conversion applies.
-#   # Inline custom rates & aliases: define list price additions/corrections directly
-#   # here without needing an external pricing.yaml file. Merged over the built-in
-#   # standard table (inline rates win on a canonical-key clash):
-#   # rates:
-#   #   - {key: my-vendor/my-model, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
-#   # aliases:
-#   #   my-model-alias: my-vendor/my-model
-#   # supplement: ./pricing.yaml    # optional: legacy external file support (see pricing.example.yaml)
+# exchange_rate: a global "1 USD = X <code>" map. It has exactly two
+# consumers, and NEITHER is on the request path: ① normalizing a provider's
+# own providers[].pricing.rates (below) into USD once at load time, when
+# that provider's pricing.currency isn't USD; ② vmr report's -currency
+# display conversion. A built-in default table already covers common
+# currencies (see docs/VirtualModelRouter_Design_v4_Quota.md) — you only
+# need an entry here to override that default or to add a currency it
+# doesn't cover. Skippable entirely if every provider's pricing.currency is
+# USD (or unset) and you never pass -currency to vmr report.
+# exchange_rate:
+#   CNY: 7.1
 
 # Real model defaults: capabilities and context window ceiling for upstream
 # models, shared across all virtual models. Omit entirely if unneeded
@@ -243,10 +217,6 @@ providers:
     # margin for calibration error and in-flight requests. One entry is still
     # the common case and behaves exactly like before. rolling: true remains
     # a load-time "planned for a later batch" error, never a silent no-op.
-    # metric: cost and a pricing: block ARE supported (P2.2) — see the
-    # plan-e/plan-f examples further down and providers[].pricing's own
-    # comment block.
-    #
     # amount MUST be calibrated to what VMR ITSELF OBSERVES, not the plan's
     # marketing number: some vendors bill "one user turn" as a single unit
     # while an agentic client (tool calls, retries) turns that into a dozen-plus
@@ -255,7 +225,10 @@ providers:
     # flowing, not from the vendor's published quota.
     # quota:
     #   limits:
-    #     - metric: requests       # or: tokens, or: cost (needs a pricing: block, see below)
+    #     - metric: requests       # or: tokens (a Credits/money-style plan converts once: budget ÷ price,
+    #                              # written as a token amount — see token_weights/model_multipliers below
+    #                              # for expressing per-component/per-model differences; there is no
+    #                              # metric: cost anymore, see docs/future-strategy/pricing_architecture_simplification_plan.md)
     #       every: 1min            # N{min,h,d,w,mo} — also: 5h, 2w, 3d
     #       amount: 60             # a short RPM-style gate (a rate limit, not the billing period)
     #
@@ -277,11 +250,11 @@ providers:
     #       # weighted total token count) when omitted entirely, or on any
     #       # component you don't mention — only meaningful (and only accepted
     #       # by config validation) on a Limit whose own metric is tokens.
-    #       # Use this when the account's own Credits-style discount ratio
-    #       # (e.g. cache reads cost a fraction of fresh input) is uniform
-    #       # across all its models; if the ratio instead varies BY MODEL, use
-    #       # metric: cost with a pricing: block instead (see plan-e/plan-f
-    #       # below).
+    #       # Use this for a Credits-style account whose discount ratio (e.g.
+    #       # cache reads cost a fraction of fresh input) is uniform across
+    #       # all its models; if the ratio instead varies BY MODEL, price the
+    #       # difference in providers[].pricing (below) for vmr report's $
+    #       # estimates, and express the budget itself in tokens here.
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
     #       # To reuse one set across several windows, anchor the field on its
     #       # first use and alias it later (prefer this over a whole-entry
@@ -294,9 +267,6 @@ providers:
     #       # charge is recorded — not at read time. Also per-Limit since P3.
     #       # "*" is a wildcard fallback for any model not named explicitly;
     #       # a Limit with neither a named nor a "*" entry is unscaled (1.0).
-    #       # Only affects metric: requests/tokens — a cost Limit gets its
-    #       # price differentiation entirely from the pricing: block instead
-    #       # (configuring both on the same Limit is a load-time error).
     #       # model_multipliers: {"*": 1.0, heavy-model: 9}
     #
     #       # models (Scope): decides BOTH which upstream models this Limit
@@ -311,28 +281,28 @@ providers:
     #       # wildcard already covers it). /status shows one row per
     #       # model that has actually been charged, not one row per Limit.
 
-  # A Credits-style account whose per-model price differs (not just a
-  # uniform ratio, which token_weights above would cover) — metric: cost
-  # (P2.2) charges it in real money, priced through the standard table plus
-  # this account's own overrides. See docs/UserGuide.md's "Pricing and
-  # cost-metric quota" section for the full write-up.
+  # providers[].pricing: entirely optional, and consulted only to sharpen vmr
+  # report's/vmr analyze's $ estimates and vmr check's display — NEVER the
+  # request path, never routing, never quota (see
+  # docs/future-strategy/pricing_architecture_simplification_plan.md). A
+  # built-in standard price table always applies with no configuration at
+  # all; this block only states how THIS account's prices differ from it.
   # - name: anthropic              # naming the provider after its vendor helps the automatic model-name
   #                                 # resolution below find the standard table's matching entry
   #   base_url: {anthropic-messages: https://api.anthropic.com}
   #   api_key: ${ANTHROPIC_API_KEY}
-  #   quota:
-  #     limits:
-  #       - {metric: cost, every: 1mo, since: 2026-08-01, amount: 500}  # 500 CNY/month
   #   pricing:
-  #     map:                        # only needed when auto-resolution can't guess your model name —
+  #     currency: CNY               # load-time annotation: the rates rows below are written in CNY,
+  #                                 # converted to USD once at load time via the top-level exchange_rate
+  #                                 # (default USD if omitted) — never a runtime quantity
+  #     aliases:                   # only needed when auto-resolution can't guess your model name —
   #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr's own model name -> standard table's canonical key
-  #     overrides:                  # first-match-wins; each entry is EITHER discount OR all four
+  #     rates:                     # first-match-wins; each entry is EITHER discount OR all four
   #       # components (in_fresh/cache_read/cache_write/out), never a mix or a partial set.
   #       # List a specific model BEFORE a "*" wildcard fallback — the reverse order makes
   #       # the specific rule dead config (vmr rejects it at load time; no time-scoped
   #       # promo/off-peak windows here, only a static per-model rate).
-  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate, already in CNY (pricing.currency above)
-  #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # or: entered in the vendor's own USD invoice, converted via pricing.exchange_rate
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # this account's actual negotiated rate, in CNY (pricing.currency above)
   #       - {model: "*", discount: 0.6}  # fallback: 40% off list price for every other model on this account
 
   # A complete Scope example: account-wide shared pool STACKED with an

@@ -119,38 +119,15 @@ listen: 127.0.0.1:8800
 #                                 # 相比旧的 audit_retention_days 是 Breaking Change：以前 0 表示
 #                                 # "永久保留"——这个语义已删除；如果你依赖它，请写 90000d 或更大。
 
-# pricing：metric: cost 计量账号和 vmr report 的 $ 估算所用的全局设置
-# （完整设计见 docs/VirtualModelRouter_Design_v4_Quota.md，账号级的那一半
-# 见下面 providers[].pricing）。不做任何配置也会有一份内置的标准价目表生效
-# （数据源自公开的 LiteLLM 格式快照），vmr report 的 $ 估算零配置就能用——这
-# 整个块对大多数部署来说都可以跳过。
-#
-# 推荐的默认做法：如果你完全不用 metric: cost 配额（metric: requests/tokens
-# 都不需要这些东西），整个块直接不写。如果你用了 metric: cost、也不介意统一
-# 按美元记账，只写 `pricing: {currency: USD}` 一行就够——exchange_rate 留空
-# 不用，下面 providers[].pricing.overrides 每一行也直接填美元数字。只有当某
-# 个账号真正的配额上限是用非美元货币计的（比如某个国产厂商的人民币套餐），才
-# 需要用到 exchange_rate——强行统一成美元并不会消灭手工换算这件事，只是把它
-# 从这里挪到了下面的 amount: 上。
-# pricing:
-#   currency: CNY                # 只要有任意一个 provider 用了 metric: cost 就必填；标准表本身是 USD
-#   exchange_rate: {CNY: 7.1}    # 一张通用的"1 美元 = X <货币代码>"映射表——只要 currency 不是 USD 就
-#                                 # 必填（需要一条 CNY 的条目：内置表是以 USD 计价的，metric: cost 计费
-#                                 # 和 vmr report 的 $ 列都靠它，不写就会把 USD 的数字直接当成 CNY 标出
-#                                 # 来）。同时也是 providers[].pricing.overrides 某一行自带 currency:（见
-#                                 # 下面——override 就写在这份文件里，不存在"退回到哪"的问题）的换算来源，
-#                                 # 以及 pricing.supplement 某一行自带 currency:（见 pricing.example.yaml）
-#                                 # 在**那份文件自己没声明** exchange_rate: 块时的兜底——补充表自己声明的
-#                                 # 汇率在 key 撞车时永远优先，这样它才能脱离具体部署独立搬用；这张表只补
-#                                 # 它没覆盖到的部分。vmr report 的 -currency 展示币种和这里不一致时，
-#                                 # 也会查这张表。想明确表示"不需要换算"，就显式写 {CNY: 1.0}。
-#   # 内联费率与别名：直接在此文件中补充/修正刊例价与别名映射，无需外部 pricing.yaml 文件。
-#   # 叠加到内置标准表之上（canonical key 冲突时你的内联条目胜出）：
-#   # rates:
-#   #   - {key: my-vendor/my-model, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
-#   # aliases:
-#   #   my-model-alias: my-vendor/my-model
-#   # supplement: ./pricing.yaml    # 可选：兼容外部补充表文件（参见 pricing.example.yaml）
+# exchange_rate：一张通用的"1 美元 = X <货币代码>"映射表。它只有两个消费者，
+# 且都不在运行态：① 把某个 provider 用非美元书写的 providers[].pricing.rates
+# （见下方）归一为 USD（仅当该 provider 的 pricing.currency 不是 USD 时才需要）；
+# ② vmr report 的 -currency 展示折算。内置默认汇率表已覆盖常见货币（见
+# docs/VirtualModelRouter_Design_v4_Quota.md）——只有需要覆盖默认值，或用到
+# 默认表没有的货币时才需要写这里。如果每个 provider 的 pricing.currency 都是
+# USD（或不写），且从不给 vmr report 传 -currency，这一整块可以完全省略。
+# exchange_rate:
+#   CNY: 7.1
 
 # 真实模型默认值：真实上游模型的能力与上下文窗口上限声明，所有虚拟模型共享。
 # 不需要时整块可省略（未声明的模型不受约束）。
@@ -211,9 +188,7 @@ providers:
     # 闸（used < amount）完全不参与评分；用满烧断的闸把分数归零，直到窗口重置
     # ——所以闸的 amount 要设得比厂商真实限流*紧一点*，留出校准误差和在途请求
     # 的余量。只配一条依然是最常见的写法，行为和以前完全一样。rolling: true
-    # 仍是加载期的"计划在后续批次支持"报错，不是静默无操作。metric: cost 和
-    # pricing: 块已经支持（P2.2）——参见下面的
-    # plan-e/plan-f 示例以及 providers[].pricing 自己的注释块。
+    # 仍是加载期的"计划在后续批次支持"报错，不是静默无操作。
     #
     # amount 必须按 VMR 自己实际观测到的口径来校准，不能照抄套餐的宣传数字：
     # 有些厂商把"一次用户交互"计成一个单位，但一个 agent 类客户端（带工具调用、
@@ -222,7 +197,10 @@ providers:
     # /status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
     # quota:
     #   limits:
-    #     - metric: requests       # 或者：tokens，或者：cost（需要一个 pricing: 块，见下文）
+    #     - metric: requests       # 或者：tokens（Credits/金额制套餐换算一次：预算 ÷ 价格，写成
+    #                              # token 数即可——见下面 token_weights/model_multipliers 表达
+    #                              # 按分量/按模型的差异；已经没有 metric: cost 了，见
+    #                              # docs/future-strategy/pricing_architecture_simplification_plan.md）
     #       every: 1min            # N{min,h,d,w,mo}——也可以是 5h、2w、3d
     #       amount: 60             # 一条按分钟限速的闸（限速，不是账单周期）
     #
@@ -241,8 +219,9 @@ providers:
     #       # 就是最朴素的等权 token 总数）——只在这条 Limit 自己的 metric 就是
     #       # tokens 时才有意义（也只有这种情况下配置校验才会接受它）。当账号自己
     #       # Credits 制的折算比例（比如缓存命中读只算新鲜输入的一部分价格）在所
-    #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，改用带
-    #       # pricing: 块的 metric: cost（见下面 plan-e/plan-f）。
+    #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，把差异写
+    #       # 进下面的 providers[].pricing（供 vmr report 估算 $），预算本身依然
+    #       # 用 tokens 表达。
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
     #       # 想在多条窗口间复用同一套，就在第一次出现处锚定、后面别名引用（优先
     #       # 用它，别用整条目 `<<: *entry` 合并键——那会把 amount/every 也带过去）：
@@ -252,9 +231,7 @@ providers:
     #       # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
     #       # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。P3
     #       # 起同样按 Limit 配置。"*" 是通配兜底，用于任何没有具名列出的模型；
-    #       # 一条既没有具名项也没有 "*" 的 Limit 不缩放（1.0）。只影响
-    #       # metric: requests/tokens——cost 档的价格分化完全来自 pricing: 块
-    #       # （同一条 Limit 上两者同时配置是加载期错误）。
+    #       # 一条既没有具名项也没有 "*" 的 Limit 不缩放（1.0）。
     #       # model_multipliers: {"*": 1.0, heavy-model: 9}
     #
     #       # models（Scope）：同时决定"这条 Limit 对哪些模型生效"和"这些模型是
@@ -267,27 +244,26 @@ providers:
     #       # 和一个具名条目写在一起是加载期错误（通配符已经覆盖了它）。
     #       # /status 只展示真的产生过计费的模型各一行，不是每条 Limit 一行。
 
-  # 一个 Credits 制账号，如果它按模型分化的价格不是简单的统一比例（那种情况上面
-  # 的 token_weights 就够了）——metric: cost（P2.2）按真实金额给它计费，价格
-  # 通过标准表叠加这个账号自己的 overrides 来解析。完整写法见
-  # docs/UserGuide.zh.md 的"定价与 cost 计量档位"一节。
+  # providers[].pricing：完全可选，只用来帮 vmr report/vmr analyze 的 $ 估算
+  # 与 vmr check 的展示更精确——绝不影响请求路径、路由或配额（见
+  # docs/future-strategy/pricing_architecture_simplification_plan.md）。不
+  # 配置也会有一份内置标准价目表生效；这个块只声明"这个账号跟标准表不一样
+  # 的地方"。
   # - name: anthropic              # 把 provider 命名成它的厂商本名，有助于下面的自动
   #                                 # 模型名解析找到标准表里匹配的条目
   #   base_url: {anthropic-messages: https://api.anthropic.com}
   #   api_key: ${ANTHROPIC_API_KEY}
-  #   quota:
-  #     limits:
-  #       - {metric: cost, every: 1mo, since: 2026-08-01, amount: 500}  # 每月 500 元
   #   pricing:
-  #     map:                        # 只在自动解析猜不出你的模型名时才需要——
+  #     currency: CNY                # 解析期标注：下面 rates 行按人民币书写，加载期经顶层
+  #                                   # exchange_rate 一次性折算成 USD（不写默认 USD）——不是运行态量
+  #     aliases:                     # 只在自动解析猜不出你的模型名时才需要——
   #       my-claude-alias: anthropic/claude-3-7-sonnet-20250219  # vmr 自己的模型名 -> 标准表的 canonical key
-  #     overrides:                  # first-match-wins；每条要么是 discount，要么是全部四个
+  #     rates:                       # first-match-wins；每条要么是 discount，要么是全部四个
   #       # 分量（in_fresh/cache_read/cache_write/out）一起给，从不混着写或只给一部分。
   #       # 具体模型的规则要写在 "*" 通配兜底规则前面——反过来写会让具体规则变成永远
   #       # 不会命中的死配置（vmr 加载期直接拒绝）；这里没有限时促销/错峰时间窗，
   #       # 只有按模型的静态价格。
-  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
-  #       - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}  # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
+  #       - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}  # 这个账号对某个模型的实际谈判价，CNY（上面的 pricing.currency）
   #       - {model: "*", discount: 0.6}  # 兜底：这个账号上其余所有模型统一按列表价 6 折
 
   # 一个完整的 Scope 组合示例：账号总限（共享池）叠加某个具体模型的独立子额度——

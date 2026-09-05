@@ -40,13 +40,11 @@ ttl:                     # 活多久:生命周期/淘汰(扩展语法 d/w/mo/y)
   image_cache: 14d
   audit_retention: 90d   # 0/未写 = 用默认 90d;不支持“永久”语义,长期保留写大数(如 90000d)
 
-# 全局定价块。一旦任意 provider 配 metric: cost 或显式 pricing.overrides,
-# 此处 currency 就成了计费/报告的统一单位。
-pricing:
-  currency: CNY
-  exchange_rate: {CNY: 7.1, USD: 1.0}
-  supplement: ./pricing.mock.yaml     # 相对路径以本 config 所在目录为锚
-  # standard: ./pricing.yaml          # 〔罕见〕 整张替换内建 standard 表,再用 supplement 叠覆
+# 全局汇率表:仅有两个消费者,且都不在运行态——① 归一化某个 provider
+# 用非 USD 书写的 providers[].pricing.rates(见下方 anthropic 块);② vmr report
+# 的 -currency 展示折算。未声明的货币会先查内置默认汇率表兜底,查不到才报错。
+exchange_rate:
+  CNY: 7.1
 
 # 全局 fallback:按协议分桶(map),仅附加到已在对应 protocol 上有入口的虚拟模型;
 # priority 必填且 > 0 —— priority 数值越小越优先,> 0 即排在真实 endpoint(默认 0)之后。
@@ -90,7 +88,7 @@ providers:
   #     main:    ${MINIMAX_KEY_MAIN}
   #     backup:  ${MINIMAX_KEY_BACKUP}
 
-  # ─── 全三协议 + quota(tokens + metric:cost + pricing 全形态) ───
+  # ─── 全三协议 + quota(tokens 多窗口) + pricing 全形态 ───
   - name: anthropic
     base_url:
       openai-completions: https://api.anthropic.com/v1
@@ -102,20 +100,22 @@ providers:
         # tokens Limit + token_weights:cache 读 1/10、写 1.25 折算
         - {metric: tokens, every: 1d, amount: 1000000,
           token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}}
-        # metric: cost 周期:必须搭配 providers[].pricing.overrides 全四要素
-        - {metric: cost, every: 1mo, since: 2026-09-01, amount: 500}
+        # 月度 tokens bucket:预算类需求(原 metric: cost 的用法)现在换算成
+        # tokens 表达——按当前价目表把预算除一次价格,写成 token 数即可。
+        - {metric: tokens, every: 1mo, since: 2026-09-01, amount: 300000000}
         # 〔冲突示例〕 rolling: true  ← 一旦启用即被 reject("rolling 计划稍后批次")
         # - {metric: requests, every: 1h, amount: 100, rolling: true}
+    # pricing 只影响 vmr report/vmr analyze 的 $ 估算与 vmr check 的展示,
+    # 从不进入运行态(不进路由、不进配额、不进审计日志)。
     pricing:
-      map:                                 # 本地别名 → 标准表 canonical key
+      currency: CNY                        # 本 provider 的 rates 行按人民币书写,
+                                            # 加载期按顶层 exchange_rate 归一为 USD
+      aliases:                             # 本地别名 → 标准表 canonical key
         my-claude-alias: anthropic/claude-3-7-sonnet-20250219
-      overrides:
+      rates:
         # 具体条目先于 wildcard;四项显式费率必同时给出,缺一即报错
         - {model: my-model-x,
-           in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
-        # 另一条目用 USD 报价,通过 exchange_rate 转 CNY
-        - {model: my-model-y, currency: USD,
-           in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+           in_fresh: 11.22, cache_read: 2.27, cache_write: 11.22, out: 67.73}
         # 通配兜底:6 折,所有未显式命名的模型走折扣
         - {model: "*", discount: 0.6}
 
