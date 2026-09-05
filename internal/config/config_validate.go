@@ -173,9 +173,8 @@ func (c *Config) validateModelDefaults() error {
 	return nil
 }
 
-// validateModels validates all virtual model definitions and registers
-// configured (provider, model) pairs into providerModels for pricing resolution.
-func (c *Config) validateModels(providerModels map[string]map[string]bool) error {
+// validateModels validates all virtual model definitions.
+func (c *Config) validateModels() error {
 	for _, name := range fmtutil.SortedKeys(c.Models) {
 		m := c.Models[name]
 		if len(m.Endpoints) == 0 {
@@ -205,7 +204,7 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 			}
 			for i, eg := range groups {
 				ctx := fmt.Sprintf("model %q endpoints.%s[#%d]", name, protocol, i+1)
-				if err := c.validateEndpointGroup(ctx, protocol, eg, providerModels); err != nil {
+				if err := c.validateEndpointGroup(ctx, protocol, eg); err != nil {
 					return err
 				}
 			}
@@ -216,7 +215,7 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 
 // validateFallbackEndpoints validates fallback endpoint definitions and ensures
 // priority is explicitly set and positive.
-func (c *Config) validateFallbackEndpoints(providerModels map[string]map[string]bool) error {
+func (c *Config) validateFallbackEndpoints() error {
 	for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
 		groups := c.FallbackEndpoints[protocol]
 		if _, ok := adapter.Get(protocol); !ok {
@@ -227,7 +226,7 @@ func (c *Config) validateFallbackEndpoints(providerModels map[string]map[string]
 				return fmt.Errorf("fallback_endpoints.%s[#%d]: priority must be set and > 0 (an unset priority defaults to 0, which could silently outrank a model's own endpoints)", protocol, i+1)
 			}
 			ctx := fmt.Sprintf("fallback_endpoints.%s[#%d]", protocol, i+1)
-			if err := c.validateEndpointGroup(ctx, protocol, fb, providerModels); err != nil {
+			if err := c.validateEndpointGroup(ctx, protocol, fb); err != nil {
 				return err
 			}
 		}
@@ -236,10 +235,10 @@ func (c *Config) validateFallbackEndpoints(providerModels map[string]map[string]
 }
 
 // validateEndpointGroup validates one EndpointGroup under protocol (ctx
-// names its context for error messages) and records its (provider, model)
-// pairs into providerModels. Shared by both models.<name>.endpoints and
-// FallbackEndpoints buckets so the two can't drift on what "valid" means.
-func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup, providerModels map[string]map[string]bool) error {
+// names its context for error messages). Shared by both
+// models.<name>.endpoints and FallbackEndpoints buckets so the two can't
+// drift on what "valid" means.
+func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup) error {
 	if len(eg.Providers) == 0 {
 		return fmt.Errorf("%s: providers: at least one required", ctx)
 	}
@@ -258,12 +257,6 @@ func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup, p
 	for j, mn := range eg.Models {
 		if mn == "" {
 			return fmt.Errorf("%s: models[%d]: empty", ctx, j)
-		}
-		for _, pn := range eg.Providers {
-			if providerModels[pn] == nil {
-				providerModels[pn] = map[string]bool{}
-			}
-			providerModels[pn][mn] = true
 		}
 	}
 	return nil

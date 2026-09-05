@@ -33,8 +33,8 @@ func inEstFor(rv *recordView) int64 {
 // chargeReplay meters one successful replay's consumption against ep's
 // provider quota (a no-op when ep.Quota is nil, i.e. -provider has no
 // quota: configured) and hands it to router.ChargeResponse — the same
-// metric-dispatch/model-multiplier/cost-pricing pipeline chargeQuota uses
-// for live traffic (see that function's doc comment). It differs from
+// metric-dispatch/model-multiplier pipeline chargeQuota uses for live
+// traffic (see that function's doc comment). It differs from
 // chargeQuota only in how usage is obtained: live traffic sniffs it
 // incrementally off a streaming respnorm.NormalizerStream, but replay already
 // has the complete request/response bytes in hand (reqBody/respBody), so
@@ -60,5 +60,5 @@ func chargeReplay(reg *quota.Registry, ep *core.Endpoint, protocol string, reqBo
 	u, inOK, outOK := chatmsg.ExtractUsageSides(respBody, protocol)
 	raw, estimated := router.TokenCountersSides(u, inOK, outOK,
 		inEst, tokenutil.Estimate(respBody))
-	router.ChargeResponse(reg, ep, raw, estimated, inOK, outOK, now)
+	router.ChargeResponse(reg, ep, raw, estimated, now)
 }

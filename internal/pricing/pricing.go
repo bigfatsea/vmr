@@ -1,21 +1,23 @@
 // Ver 2026-08-07, by Opus 5
 
 // Package pricing is Quota-Aware Routing's per-1M-token pricing resolution
-// engine (see docs/VirtualModelRouter_Design_v4_Quota.md's
-// "定价分三层" section for the three-layer design and its "现状与后续计划"
-// section for what's actually shipped). A leaf package: only
-// depends on core + stdlib + gopkg.in/yaml.v3, same layer as internal/quota
-// (see that package's own doc comment for the precedent this follows).
+// engine (see docs/VirtualModelRouter_Design_v4_Quota.md's pricing sections
+// for the two-layer design: providers[].pricing (account-local contract) over
+// the embedded standard table (official baseline) — see
+// docs/future-strategy/pricing_architecture_simplification_plan.md for the
+// full rationale). A leaf package: only depends on core + stdlib +
+// gopkg.in/yaml.v3, same layer as internal/quota (see that package's own
+// doc comment for the precedent this follows).
 //
-// Two consumers share this package's resolution logic (see the design doc's
-// §4.2⑤): internal/config, which resolves pricing into core.PricingSpec at
-// config-validate time so it can ride along in router.Snapshot for the
-// metric: cost charging path (internal/router/quota.go); and
-// cmd/vmr/cmd_report.go, which resolves the same tables for vmr report's
-// offline $ estimates. Neither internal/report nor internal/router imports
-// this package directly for report's case — cmd is the composition root
-// that reads config.yaml, resolves pricing, and hands report a plain value
-// (see internal/report/pricing.go's own doc comment for why that boundary
+// Two consumers share this package's resolution logic: internal/config,
+// which validates every provider's pricing: block at config-validate time
+// (structural checks only — no runtime charging depends on this anymore,
+// see core.PricingSpec's doc comment); and cmd/vmr/cmd_report.go, which
+// resolves the same tables for vmr report's offline $ estimates. Neither
+// internal/report nor internal/router imports this package directly for
+// report's case — cmd is the composition root that reads config.yaml,
+// resolves pricing, and hands report a plain value (see
+// internal/report/pricing.go's own doc comment for why that boundary
 // exists).
 package pricing
 
@@ -31,15 +33,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Rate is a per-1,000,000-token four-component price snapshot, in whatever
-// currency its Table (or the resolving account's pricing.currency) uses. A
-// nil field means "unknown" (absent from the source data), NOT "free" — an
-// explicit *float64 pointing at 0.0 is how "free" is spelled. This
-// distinction is the whole reason the design doc's §4.2① calls out
-// "missing is more dangerous than 0": a metric: cost account whose
-// cache_read price is silently treated as 0 looks cheaper than it really
-// is, gets more traffic, and overspends — see Complete/MissingComponents,
-// which config.validate() uses to fail loudly instead.
+// Rate is a per-1,000,000-token four-component USD price snapshot — every
+// Rate this package produces is USD-denominated (see Table's doc comment).
+// A nil field means "unknown" (absent from the source data), NOT "free" —
+// an explicit *float64 pointing at 0.0 is how "free" is spelled. This
+// distinction matters for Complete/MissingComponents, which vmr report's
+// incomplete-rate labeling (internal/report/cost.go) uses to avoid silently
+// treating an unknown component as free.
 type Rate struct {
 	InFresh    *float64
 	CacheRead  *float64
@@ -48,10 +48,9 @@ type Rate struct {
 }
 
 // Complete reports whether every one of Rate's four components is set
-// (explicitly, even if to 0.0) and is a finite non-negative number — the
-// gate config.validate() applies to any provider+model a metric: cost Limit
-// will actually charge. A nil, NaN, Inf, or negative component makes a rate
-// unusable, matching the parse-time numeric gate in parseTable (R42).
+// (explicitly, even if to 0.0) and is a finite non-negative number —
+// internal/report/cost.go uses this to label a $ estimate as incomplete
+// rather than silently under-price a nil component as 0.
 func (r Rate) Complete() bool {
 	if r.InFresh == nil || r.CacheRead == nil || r.CacheWrite == nil || r.Out == nil {
 		return false
@@ -73,8 +72,7 @@ func (r Rate) IsEmpty() bool {
 }
 
 // MissingComponents names r's unset fields, in a fixed order, for error
-// messages — config.validate() uses this to say exactly which component is
-// missing rather than just "incomplete".
+// messages.
 func (r Rate) MissingComponents() []string {
 	var missing []string
 	for _, f := range []struct {
@@ -122,13 +120,14 @@ type entry struct {
 	rate Rate
 }
 
-// Table is a canonical-key -> Rate index: the shape both the embedded
-// standard table and a user's supplement file share (see embed.go's
-// LoadStandard and config.PricingConfig.Supplement). Keys are matched
-// case-insensitively — canonical ids are conventionally lowercase, but a
-// hand-written supplement file shouldn't have to get case exactly right.
+// Table is a canonical-key -> Rate index — the embedded standard/curated
+// tables' in-memory shape (see embed.go's LoadStandard). Always USD: every
+// row is normalized to USD at parse time (see parseTable), so no downstream
+// consumer (Merge, Resolve, the discount-chain recursion in resolve.go)
+// ever has to think about currency. Keys are matched case-insensitively —
+// canonical ids are conventionally lowercase, but a hand-written curated row
+// shouldn't have to get case exactly right.
 type Table struct {
-	Currency    string // always "USD" for the embedded standard/supplement tables — see fileTable's doc comment for why this package doesn't do general multi-currency tables the way the old report.Pricing sidecar did
 	GeneratedAt string
 	entries     map[string]entry // lowercased key -> entry
 	order       []string         // insertion order, for Step ④'s deterministic "first ambiguous match wins... no, doesn't win" scan
@@ -148,8 +147,8 @@ type Table struct {
 }
 
 // NewTable creates an empty Table — used by tests and as Merge's base case.
-func NewTable(currency string) *Table {
-	return &Table{Currency: currency, entries: map[string]entry{}, aliases: map[string]string{}}
+func NewTable() *Table {
+	return &Table{entries: map[string]entry{}, aliases: map[string]string{}}
 }
 
 // putAlias inserts or overwrites one bare-name -> canonical-key alias.
@@ -188,9 +187,9 @@ func (t *Table) Aliases() map[string]string {
 // target has no priced row, or whose target is itself an alias key (a chain
 // — banned outright rather than followed, since a chain is the only way to
 // build a cycle and a one-hop rule has no case it can't express). Called at
-// load time (embed.go's LoadStandard, config's buildPricingContext) so a
-// typo is a startup error, not a rate that silently falls through to the
-// suffix scan and lands on some other vendor's number.
+// load time (embed.go's LoadStandard) so a typo is a startup error, not a
+// rate that silently falls through to the suffix scan and lands on some
+// other vendor's number.
 func (t *Table) ValidateAliases() error {
 	if t == nil {
 		return nil
@@ -216,9 +215,9 @@ func sortedAliasKeys(m map[string]string) []string {
 	return out
 }
 
-// put inserts or overwrites key's Rate — internal, used by ParseTable/Merge.
+// put inserts or overwrites key's Rate — internal, used by parseTable/Merge.
 // Key is TrimSpace'd before storage so it matches Lookup's contract: a
-// hand-written supplement row "  gpt-4o  " and a hand-written lookup "gpt-4o"
+// hand-written curated row "  gpt-4o  " and a hand-written lookup "gpt-4o"
 // both reach the same entry rather than silently falling through to the
 // suffix scan with a key the scan can't disambiguate.
 func (t *Table) put(key string, r Rate) {
@@ -241,9 +240,10 @@ func (t *Table) Lookup(key string) (Rate, bool) {
 }
 
 // LookupRateOrAlias resolves key's Rate directly, or via t's aliases if key is
-// a bare alias name. Case-insensitive. Used by pricing.map resolution and
-// config validation so a mapping target can be either an exact canonical key
-// ("anthropic/claude-3-5-sonnet") or a standard bare alias ("claude-3-5-sonnet").
+// a bare alias name. Case-insensitive. Used by providers[].pricing.aliases
+// resolution and config validation so a mapping target can be either an
+// exact canonical key ("anthropic/claude-3-5-sonnet") or a standard bare
+// alias ("claude-3-5-sonnet").
 func (t *Table) LookupRateOrAlias(key string) (Rate, bool) {
 	if t == nil {
 		return Rate{}, false
@@ -263,10 +263,7 @@ func (t *Table) LookupRateOrAlias(key string) (Rate, bool) {
 // a first-party-vs-reseller collision, never two first parties disagreeing
 // about their own model — so "the first-party row is the list price, a
 // reseller's is that reseller's markup" resolves the overwhelming majority
-// of them with no per-model configuration at all (51 of 78 collisions in
-// the 2026-08-31 snapshot, plus 6 more pinned outright by curated aliases;
-// the remaining 21 are reseller-only models, which genuinely have no
-// canonical list price and stay unresolved).
+// of them with no per-model configuration at all.
 //
 // Deliberately the SHORT list (resellers), not the long one (first
 // parties): a vendor this package has never heard of is far more likely to
@@ -276,10 +273,6 @@ func (t *Table) LookupRateOrAlias(key string) (Rate, bool) {
 // volcengine for Doubao vs DeepSeek) can't be captured by a per-VENDOR
 // rank at all — that split is per (vendor, model), which is exactly what
 // the curated alias table exists to express (see Table.aliases).
-// No exported wrapper exists for this set: IsAggregatorVendor once was one,
-// but its only claimed caller (tools/gen_standard_pricing) actually consumes
-// Table.Ambiguities below, which reads the map directly — the wrapper was
-// dead code kept alive by its own doc comment.
 var aggregatorVendors = map[string]bool{
 	"openrouter": true, "fireworks_ai": true, "together_ai": true,
 	"groq": true, "perplexity": true,
@@ -303,14 +296,10 @@ func vendorOf(key string) string {
 // resold by three aggregators), and it used to mean "no rate at all". The
 // tie is broken by vendor precedence, never by an arbitrary pick: a single
 // non-aggregator (first-party) match wins outright — its price IS the model's
-// list price, which is what an offline $ estimate means (see the design
-// doc's "套餐账号的 $ 含义"). ok=false when the highest occupied rank still
-// holds more than one candidate: two aggregators disagreeing about someone
-// else's model have no canonical answer between them, and the design doc is
-// explicit that an ambiguous match must never be guessed at ("有歧义不猜——
-// 猜错一个费率比没有费率危险得多"). A single match of any rank still wins,
-// exactly as before — this only ever widens what resolves, never changes
-// what a previously-unambiguous name resolved to.
+// list price, which is what an offline $ estimate means. ok=false when the
+// highest occupied rank still holds more than one candidate: two
+// aggregators disagreeing about someone else's model have no canonical
+// answer between them, and an ambiguous match must never be guessed at.
 func (t *Table) LookupPreferredSuffix(model string) (Rate, bool) {
 	if t == nil {
 		return Rate{}, false
@@ -335,26 +324,19 @@ func (t *Table) LookupPreferredSuffix(model string) (Rate, bool) {
 }
 
 // Merge returns a new Table containing every row of base, overlaid by every
-// row of overlay — a whole-row replacement per canonical key ("按 key 合并，
-// 补充表在冲突时胜出", design doc §4.2①), not a per-component merge: a
-// supplement row that only sets in_fresh does NOT inherit base's
-// cache_read, it simply replaces the whole row (the same "explicit beats
-// partial" reasoning as everywhere else in this package — a supplement
-// author who wanted to keep base's other three components would copy them
-// forward explicitly, same as any override).
+// row of overlay — a whole-row replacement per canonical key (curated wins
+// over generated on a conflict), not a per-component merge: an overlay row
+// that only sets in_fresh does NOT inherit base's cache_read, it simply
+// replaces the whole row (the same "explicit beats partial" reasoning as
+// everywhere else in this package).
 func Merge(base, overlay *Table) *Table {
-	currency := "USD"
+	out := NewTable()
 	if base != nil {
-		currency = base.Currency
-	}
-	out := NewTable(currency)
-	if base != nil {
-		// GeneratedAt travels with base, not overlay: base is the
-		// standard/refreshed table (the "is this stale" signal callers like
-		// vmr report's §2 appendix render — see internal/report/pricing.go's
-		// Pricing.Disclaimer); overlay is typically a hand-maintained
-		// supplement/curated table with no meaningful generation date of
-		// its own.
+		// GeneratedAt travels with base (the generated table, whose
+		// freshness is the signal callers like vmr report's §2 appendix
+		// render — see internal/report/pricing.go's Pricing.Disclaimer);
+		// overlay is the hand-maintained curated table, with no meaningful
+		// generation date of its own.
 		out.GeneratedAt = base.GeneratedAt
 		for _, k := range base.order {
 			out.put(k, base.entries[k].rate)
@@ -367,9 +349,9 @@ func Merge(base, overlay *Table) *Table {
 		for _, k := range overlay.order {
 			out.put(k, overlay.entries[k].rate)
 		}
-		// Aliases overlay per-name the same way rates overlay per-key: a
-		// user supplement can retarget (or, by pointing it at its own row,
-		// effectively replace) an alias the curated table shipped.
+		// Aliases overlay per-name the same way rates overlay per-key: the
+		// curated table can retarget (or, by pointing it at its own row,
+		// effectively replace) an alias the generated table shipped.
 		for _, k := range sortedAliasKeys(overlay.aliases) {
 			out.putAlias(k, overlay.aliases[k])
 		}
@@ -377,53 +359,39 @@ func Merge(base, overlay *Table) *Table {
 	return out
 }
 
-// fileTable is a standard/curated/supplement pricing table's on-disk YAML
-// shape. Every in-memory Table this package produces is USD (LiteLLM's
+// fileTable is the embedded standard/curated pricing table's on-disk YAML
+// shape (standard_price_generated.yaml, standard_price_curated.yaml — see
+// embed.go). Every in-memory Table this package produces is USD (LiteLLM's
 // native currency, and the canonical-key space this package interoperates
-// with is LiteLLM's) — a source file (or one row of it) may declare a
-// different currency, converted to USD once at parse time via
-// FactorBetween/ParseTableWithRates, rather than carrying a currency tag
-// through Resolve/EffectiveRate the way the old, retired report.Pricing sidecar's
-// moneyValue did. This is still deliberately simpler than that sidecar's
-// general multi-currency graph (arbitrary CCY->CCY chains): every currency
-// here goes through one USD pivot hop, since every real-world rate has a
-// USD cross-rate and nothing in this package's own data (LiteLLM's
-// standard table) is denominated any other way.
+// with is LiteLLM's).
+//
+// ExchangeRate lets a hand-maintained curated row be entered straight from
+// a vendor's native-currency official price list (via that row's own
+// RateRow.Currency), self-contained within this file — no external
+// exchange-rate source exists anymore (see
+// docs/future-strategy/pricing_architecture_simplification_plan.md decision
+// 1/2: no external supplement/standard file, no per-deployment fallback
+// rates). A currency a row names without a matching entry here is a
+// load-time error, not a silent skip.
 type fileTable struct {
-	Currency    string     `yaml:"currency"`
-	GeneratedAt string     `yaml:"generated_at"`
-	Rates       []fileRate `yaml:"rates"`
-	// Aliases is this file's bare-model-name -> canonical-key map (see
-	// Table.aliases). A reference, not a price: it never carries numbers,
-	// so a regenerated standard table moves every alias's rate with it and
-	// nothing here goes stale on its own.
-	Aliases map[string]string `yaml:"aliases"`
-	// ExchangeRate is this file's OWN "1 USD = X <code>" map (same shape as
-	// config.yaml's pricing.exchange_rate), consulted BEFORE the rates
-	// argument parseTable was called with — a supplement/standard-override
-	// file that declares its own rate here stays fully self-contained and
-	// portable: its rows' USD-equivalent prices never drift just because
-	// the consuming config.yaml's accounting-currency rate later changes
-	// for an unrelated reason, and the file can be copied to a different
-	// deployment (different pricing.currency, maybe no matching
-	// pricing.exchange_rate entry at all) and still resolve correctly. A
-	// currency this file doesn't declare a rate for still falls back to
-	// the caller-supplied rates (typically config.yaml's
-	// pricing.exchange_rate) — this field is a per-file override, not a
-	// replacement for that shared table.
+	Currency     string             `yaml:"currency"`
+	GeneratedAt  string             `yaml:"generated_at"`
+	Rates        []RateRow          `yaml:"rates"`
+	Aliases      map[string]string  `yaml:"aliases"`
 	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 }
 
-// RateRow is one row in a pricing table (either an external supplement file or
-// an inline pricing.rates declaration in config.yaml). Pointer fields: an absent
-// YAML key decodes to nil (unknown), present-with-0.0 decodes to a non-nil pointer
-// at 0.0 (explicitly free) — preserving Rate's "missing vs zero" distinction.
+// RateRow is one row of the embedded standard/curated pricing table.
+// Pointer fields: an absent YAML key decodes to nil (unknown),
+// present-with-0.0 decodes to a non-nil pointer at 0.0 (explicitly free) —
+// this is the exact mechanism Rate's "missing vs zero" distinction is built
+// on.
 //
-// Currency optionally overrides the table's own default currency for this
+// Currency optionally overrides the file's own default currency for this
 // one row — e.g. a domestic vendor's row entered straight from its official
-// CNY price list. Empty means "inherit the table's default currency" (itself
-// USD if also empty). Converted to USD via the effective exchange_rate map at
-// parse time.
+// CNY price list inside an otherwise-USD table. Empty means "inherit the
+// table's currency:" (itself USD if that's also empty), converted via the
+// file's own exchange_rate: block (fileTable.ExchangeRate).
 type RateRow struct {
 	Key        string   `yaml:"key"`
 	Currency   string   `yaml:"currency"`
@@ -433,19 +401,17 @@ type RateRow struct {
 	Out        *float64 `yaml:"out"`
 }
 
-type fileRate = RateRow
-
 // FactorBetween returns the multiplier that converts an amount denominated
 // in fromCCY into toCCY, via a USD pivot: rates maps a currency code to "1
 // USD = X <that code>" (USD itself is always implicit 1.0 and never needs
 // an entry). ok=false when a needed non-USD currency has no entry, or its
 // entry isn't a finite positive number — deliberately no indirect
 // CCY->CCY chaining beyond the one USD hop: every currency this package
-// deals with (the standard table's own USD, a supplement row's native
-// currency, an account override's currency, vmr report's display currency)
-// has a well-known USD cross-rate, so a general multi-hop graph (the old,
-// retired report.Pricing sidecar's approach — see this package's doc
-// comment) would be unneeded complexity, not a missing capability.
+// deals with (a curated row's native currency, a provider's
+// pricing.currency, vmr report's display currency) has a well-known USD
+// cross-rate, so a general multi-hop graph would be unneeded complexity.
+// Exported: internal/config uses this directly to convert a provider's
+// pricing.rates components into USD at validate time.
 func FactorBetween(fromCCY, toCCY string, rates map[string]float64) (float64, bool) {
 	from, ok := rateVsUSD(fromCCY, rates)
 	if !ok {
@@ -473,39 +439,17 @@ func rateVsUSD(ccy string, rates map[string]float64) (float64, bool) {
 	return v, true
 }
 
-// ParseTable parses one standard/curated/supplement-shaped YAML document.
-// Every table this package reads via this entry point is asserted (not
-// merely assumed) to be USD — see fileTable's doc comment; a table
-// declaring anything else is a load-time error rather than a silent
-// misinterpretation. Used for the embedded standard/curated tables
-// (LoadStandard), which are authored by us and never need conversion — see
-// ParseTableWithRates for the user-supplied-file entry point that does.
+// ParseTable parses one standard/curated-shaped YAML document (the embedded
+// tables' own shape — see fileTable's doc comment). The sole entry point
+// into this parser: no external supplement/standard file exists anymore
+// (see fileTable's doc comment), so there is no second variant that accepts
+// a caller-supplied fallback exchange-rate map — a row's own currency:
+// converts only through this same file's own exchange_rate: block.
 func ParseTable(data []byte) (*Table, error) {
-	return parseTable(data, nil)
-}
-
-// ParseTableWithRates is ParseTable plus support for a table (top-level
-// currency:) or individual rows (fileRate.Currency) denominated in a
-// non-USD currency, auto-converted to USD at parse time via FactorBetween
-// — internal/config's buildPricingContext uses this for
-// pricing.supplement/pricing.standard, so a user can author a rate straight
-// from a vendor's native-currency official price without hand-converting to
-// USD first. rates is the FALLBACK conversion source (typically config.yaml's
-// pricing.exchange_rate) — the file's own fileTable.ExchangeRate block, if
-// it declares one, wins on a matching currency code (see that field's doc
-// comment for why: a self-contained file shouldn't have its resolved prices
-// silently drift when some unrelated deployment's rate later changes). nil
-// rates with no file-level exchange_rate: either behaves exactly like
-// ParseTable (any non-USD currency is a load-time error).
-func ParseTableWithRates(data []byte, rates map[string]float64) (*Table, error) {
-	return parseTable(data, rates)
-}
-
-func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 	if len(bytes.TrimSpace(data)) == 0 {
 		// An empty file (standard_price_curated.yaml starts this way — see
 		// embed.go's doc comment) is a valid, empty table, not an error.
-		return NewTable("USD"), nil
+		return NewTable(), nil
 	}
 	var ft fileTable
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -515,31 +459,15 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 			// A document that's entirely comments (standard_price_curated.yaml
 			// starts this way — see embed.go) decodes to no document at
 			// all, not a zero-value one; that's still a valid empty table.
-			return NewTable("USD"), nil
+			return NewTable(), nil
 		}
 		return nil, fmt.Errorf("parse pricing table: %w", err)
-	}
-	// The file's own exchange_rate: block (if any) wins over the
-	// caller-supplied rates on a matching key — see fileTable.ExchangeRate's
-	// doc comment for why a self-declared rate must take priority (a
-	// self-contained, portable file) rather than the shared table always
-	// winning (which would defeat the point of declaring one locally at
-	// all).
-	effectiveRates := rates
-	if len(ft.ExchangeRate) > 0 {
-		effectiveRates = make(map[string]float64, len(rates)+len(ft.ExchangeRate))
-		for k, v := range rates {
-			effectiveRates[k] = v
-		}
-		for k, v := range ft.ExchangeRate {
-			effectiveRates[k] = v
-		}
 	}
 	defaultCCY := strings.ToUpper(strings.TrimSpace(ft.Currency))
 	if defaultCCY == "" {
 		defaultCCY = "USD"
 	}
-	t, err := NewTableFromRows(ft.Rates, ft.Aliases, defaultCCY, effectiveRates)
+	t, err := newTableFromRows(ft.Rates, ft.Aliases, defaultCCY, ft.ExchangeRate)
 	if err != nil {
 		return nil, fmt.Errorf("parse pricing table: %w", err)
 	}
@@ -547,22 +475,21 @@ func parseTable(data []byte, rates map[string]float64) (*Table, error) {
 	return t, nil
 }
 
-// NewTableFromRows constructs a Table from in-memory RateRow entries and
-// optional aliases, normalized to USD via the provided exchange-rate map.
-// defaultCCY sets the fallback currency for rows that omit Currency ("" or
-// "USD" means USD). Used for inline pricing.rates/pricing.aliases in config.yaml
-// as well as the fileTable parser.
-func NewTableFromRows(rows []RateRow, aliases map[string]string, defaultCCY string, rates map[string]float64) (*Table, error) {
+// newTableFromRows constructs a Table from in-memory RateRow entries and
+// optional aliases, normalized to USD via rates (typically the file's own
+// exchange_rate: block — see fileTable.ExchangeRate). defaultCCY sets the
+// fallback currency for rows that omit Currency ("" or "USD" means USD).
+func newTableFromRows(rows []RateRow, aliases map[string]string, defaultCCY string, rates map[string]float64) (*Table, error) {
 	defaultCCY = strings.ToUpper(strings.TrimSpace(defaultCCY))
 	if defaultCCY == "" {
 		defaultCCY = "USD"
 	}
 	if defaultCCY != "USD" {
 		if _, ok := FactorBetween(defaultCCY, "USD", rates); !ok {
-			return nil, fmt.Errorf("currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\")", defaultCCY, defaultCCY, defaultCCY)
+			return nil, fmt.Errorf("currency %q has no matching exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\")", defaultCCY, defaultCCY, defaultCCY)
 		}
 	}
-	t := NewTable("USD")
+	t := NewTable()
 	for from, to := range aliases {
 		if strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
 			return nil, fmt.Errorf("aliases: both sides must be non-empty (got %q -> %q)", from, to)
@@ -591,7 +518,7 @@ func NewTableFromRows(rows []RateRow, aliases map[string]string, defaultCCY stri
 // (both name one model, see put's doc comment) rather than two rows only one
 // lookup form can ever reach; the duplicate check against the already-seen
 // set stays with the caller, which owns that set.
-func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64) (string, Rate, error) {
+func parseRateRow(r RateRow, i int, defaultCCY string, rates map[string]float64) (string, Rate, error) {
 	if strings.TrimSpace(r.Key) == "" {
 		return "", Rate{}, fmt.Errorf("rates[%d]: key is required", i)
 	}
@@ -601,8 +528,8 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	// but is invisible to bare-name and suffix resolution, which strip
 	// org prefixes via ModelBasename (see resolveCanonicalKey's fallback):
 	// it would silently split one physical model into two namespaces that
-	// can never see each other. Reject at load time so a hand-written
-	// supplement names the two-segment key instead.
+	// can never see each other. Reject at load time so a hand-written row
+	// names the two-segment key instead.
 	if strings.Count(r.Key, "/") > 1 {
 		return "", Rate{}, fmt.Errorf("rates[%d]: key %q must be \"vendor/basename\" or a bare name (at most one \"/\") — org/path prefixes are not model identity and are stripped from every table key (see pricing.ModelBasename)", i, r.Key)
 	}
@@ -615,7 +542,7 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	if rowCCY != "USD" {
 		factor, ok := FactorBetween(rowCCY, "USD", rates)
 		if !ok {
-			return "", Rate{}, fmt.Errorf("rates[%d]: currency %q has no matching pricing.exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\", either in this file itself or in config.yaml's pricing.exchange_rate)", i, rowCCY, rowCCY, rowCCY)
+			return "", Rate{}, fmt.Errorf("rates[%d]: currency %q has no matching exchange_rate entry to convert into USD (write exchange_rate: {%s: <rate>}, \"1 USD = <rate> %s\" in this file's own exchange_rate: block)", i, rowCCY, rowCCY, rowCCY)
 		}
 		rate = rate.Scale(factor)
 	}
@@ -625,11 +552,9 @@ func parseRateRow(r fileRate, i int, defaultCCY string, rates map[string]float64
 	if rate.IsEmpty() {
 		return "", Rate{}, fmt.Errorf("rates[%d]: key %q: at least one of in_fresh/cache_read/cache_write/out must be set", i, r.Key)
 	}
-	// Reject NaN, Inf, and negative rates — a hand-written supplement
-	// file can have a typo (e.g. "-5.0" or ".nan") that silently poisons
-	// every downstream consumer (Counters.Cost, ScoreForLimits, Flush).
-	// Each component is checked individually so the error message names
-	// the exact field the user needs to fix.
+	// Reject NaN, Inf, and negative rates — a hand-written row can have a
+	// typo (e.g. "-5.0" or ".nan") that silently poisons every downstream
+	// consumer.
 	for _, comp := range []struct {
 		name string
 		val  *float64

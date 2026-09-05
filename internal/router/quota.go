@@ -57,18 +57,17 @@ func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream
 	}
 	var raw quota.Counters
 	var estimated float64
-	inSniffed, outSniffed := true, true
 	if needsTokenCharge(ep.Quota.Limits, ep.Model) {
-		raw, estimated, inSniffed, outSniffed = tokenCharge(rbody, creq)
+		raw, estimated, _, _ = tokenCharge(rbody, creq)
 	}
-	ChargeResponse(rt.Quota, ep, raw, estimated, inSniffed, outSniffed, now)
+	ChargeResponse(rt.Quota, ep, raw, estimated, now)
 }
 
 // needsTokenCharge reports whether any of limits that actually apply to
 // model (see applicableLimits) needs the token/usage extraction tokenCharge
-// performs — i.e. is metric: tokens or metric: cost. A provider whose only
-// applicable Limit is metric: requests never needs it (zero extra cost —
-// see tokenCharge's own doc comment on why that matters for the hot path).
+// performs — i.e. is metric: tokens. A provider whose only applicable
+// Limit is metric: requests never needs it (zero extra cost — see
+// tokenCharge's own doc comment on why that matters for the hot path).
 func needsTokenCharge(limits []core.Limit, model string) bool {
 	for _, l := range limits {
 		if l.Metric != core.MetricRequests && quota.AppliesToModel(l, model) {
@@ -82,30 +81,14 @@ func needsTokenCharge(limits []core.Limit, model string) bool {
 // ep.Model (see applicableLimits) for one successful response, given its
 // raw four-component token counters (ignored for metric: requests) and how
 // much of them came from a degraded estimate (0 = exact). This is
-// chargeQuota's metric dispatch + model-multiplier scaling + cost pricing
-// tail, factored out so a caller that never streams through
-// respnorm.NormalizerStream can drive the exact same pipeline instead of
-// reimplementing it — currently `vmr replay` (internal/replay), which
-// extracts usage from an already fully-buffered response via
-// chatmsg.MergeUsageWithProtocol; see docs/VirtualModelRouter_Design_v4_Quota.md's
-// known-gap entry ② on `vmr replay` not charging quota. nil-safe: reg==nil
-// or ep.Quota==nil/no Limits is a silent no-op, the same contract
+// chargeQuota's metric dispatch + model-multiplier scaling tail, factored
+// out so a caller that never streams through respnorm.NormalizerStream can
+// drive the exact same pipeline instead of reimplementing it — currently
+// `vmr replay` (internal/replay), which extracts usage from an already
+// fully-buffered response via chatmsg.MergeUsageWithProtocol. nil-safe:
+// reg==nil or ep.Quota==nil/no Limits is a silent no-op, the same contract
 // chargeQuota has always had.
-//
-// metric: cost prices raw through ep.PricingRate — the rate config
-// resolution folded once at BuildSnapshot time (pricing.FoldSpec), read as
-// a plain value here (core.Rate.Cost; the override chain never re-resolves
-// on the hot path) — and writes the resulting $ amount into Counters.Cost —
-// computed once per applicable Limit (never recomputed later from raw
-// tokens: the price table itself can still change across a config reload,
-// which produces a new ep.PricingRate — recomputing from raw tokens later
-// would silently re-price a past charge at today's rate).
-// model_multipliers is only ever configured on a requests/tokens Limit
-// (config.validate() rejects it on a cost Limit — see LimitConfig.validate),
-// so applyModelMultiplier never runs on the cost path — deliberately: it
-// rebuilds a fresh quota.Counters that would silently zero out the Cost
-// field this branch just set.
-func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated float64, inSniffed, outSniffed bool, now time.Time) {
+func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, estimated float64, now time.Time) {
 	if reg == nil || ep.Quota == nil {
 		return
 	}
@@ -116,59 +99,14 @@ func ChargeResponse(reg *quota.Registry, ep *core.Endpoint, raw quota.Counters, 
 		case core.MetricRequests:
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, quota.Counters{Requests: 1}, 0)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
-		case core.MetricCost:
-			d := raw
-			d.Cost = componentCost(d, ep.PricingRate)
-			// estimated is token-denominated; on a cost Limit the estimate
-			// signal is money and is passed to ChargeCost below. Passing the
-			// token figure into Charge's `estimated` param would pollute
-			// bucket.Estimated (a requests/tokens-only accumulator) with a
-			// meaningless number (B6).
-			var estCostAmount float64
-			if !inSniffed || !outSniffed {
-				// Only the un-sniffed side of the ledger is an estimate — the
-				// sniffed side priced from real reported usage is exact. Price
-				// a Counters holding just the degraded components to get the
-				// estimated portion of d.Cost, so a request with real input
-				// usage and only a degraded output side reports ~1% estimated,
-				// not 100%. estimated_pct is the operator's calibration signal;
-				// inflating it to 100% for a mostly-exact account defeats it.
-				var estC quota.Counters
-				if !inSniffed {
-					estC.Fresh, estC.CacheRead, estC.CacheWrite = d.Fresh, d.CacheRead, d.CacheWrite
-				}
-				if !outSniffed {
-					estC.Out = d.Out
-				}
-				estCostAmount = componentCost(estC, ep.PricingRate)
-			}
-			// One locked charge: the cost and its estimate must land in the
-			// same period even if another goroutine rolls the bucket in
-			// between (F4).
-			reg.ChargeCost(ep.Provider, limitKey, periodStart, d, estCostAmount)
 		case core.MetricTokens:
 			d, est := quota.ApplyModelMultiplier(l, ep.Model, raw, estimated)
 			reg.Charge(ep.Provider, limitKey, periodStart, d, est)
 		}
-		// config validation only ever admits requests|tokens|cost; an
+		// config validation only ever admits requests|tokens; an
 		// unreachable metric value here (e.g. a hand-built core.Limit in a
 		// test) is a no-op, not a panic.
 	}
-}
-
-// componentCost prices d's four raw components through the endpoint's
-// pre-folded rate (a nil rate — no pricing resolved — prices everything 0,
-// same as the old EffectiveRate(nil-spec) zero-Rate shape did) — see
-// core.Rate.Cost for the shared formula (also reached by
-// internal/report/cost.go's costFor) and the nil-component/Complete
-// reasoning. d's components are converted back to int64 here: a
-// metric: cost Limit can never have model_multipliers configured
-// (config.validate rejects that combination — see LimitConfig.validate's
-// own comment), so d is always the unscaled token counts tokenCharge
-// produced, which are exact integers even though quota.Counters stores
-// them as float64 to accommodate the requests/tokens Limits that DO scale.
-func componentCost(d quota.Counters, rate *core.Rate) float64 {
-	return rate.Cost(int64(d.Fresh), int64(d.CacheRead), int64(d.CacheWrite), int64(d.Out))
 }
 
 // tokenCharge computes one response's token consumption: the upstream's own
@@ -181,9 +119,8 @@ func componentCost(d quota.Counters, rate *core.Rate) float64 {
 // 0 when it's exact — accumulated by quota.Registry into each account's running
 // estimated_pct, the one signal /status gives an operator for how
 // much to trust a token-metered account's numbers. inSniffed/outSniffed are
-// returned alongside so a metric: cost charge can price only the un-sniffed
-// side as an estimate (a request with real input usage but a degraded output
-// side is 99% exact, not 100% estimated).
+// returned alongside for callers that want the per-side detail (e.g. a
+// replay diagnostic); ChargeResponse itself only needs raw/estimated.
 func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (raw quota.Counters, estimated float64, inSniffed, outSniffed bool) {
 	// Usage() ok alone is not the exact-vs-degraded signal: a stream
 	// truncated after Anthropic's message_start has real INPUT usage but
@@ -255,13 +192,12 @@ type QuotaProviderStatus struct {
 	PeriodStart  time.Time `json:"period_start"`
 	PeriodEndsAt time.Time `json:"period_ends_at"`
 	// EstimatedPct is 0 for metric=requests (always exact) and for a
-	// tokens/cost account whose usage has been fully sniffed from upstream
+	// tokens account whose usage has been fully sniffed from upstream
 	// responses — otherwise the percentage of this period's consumption
 	// that came from the degraded byte-count fallback instead (see
 	// tokenCharge). The one signal an operator has for how much to trust
-	// Used/Pct for this Limit. Computed against the matching unit for each
-	// metric (raw tokens for tokens, money for cost — see QuotaStatus), NOT
-	// against Used, which has base(metric) applied.
+	// Used/Pct for this Limit. Computed against raw tokens, NOT against
+	// Used, which has base(metric) applied.
 	EstimatedPct float64 `json:"estimated_pct"`
 	// Fresh/CacheRead/CacheWrite/Out/Requests mirror quota.Counters' fields
 	// exactly, including its float64 type — a Limit with model_multipliers
@@ -396,17 +332,17 @@ func quotaStatusRowsForProvider(reg *quota.Registry, provider string, limits []c
 // answer here, not "which models could this Limit ever cover".
 func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, role string, now time.Time) QuotaProviderStatus {
 	limitKey := quota.LimitKey(l, model)
-	// One PeriodBounds: start and end are same-k consistent, and the Snapshot
-	// below reads counters+estimates under one lock — a /status row must not
+	// One PeriodBounds: start and end are same-k consistent, and Used
+	// below reads counters+estimate under one lock — a /status row must not
 	// straddle a period roll mid-render (F4/F9).
 	periodStart, periodEnd := quota.PeriodBounds(l, now)
-	c, estimated, estimatedCost := reg.Snapshot(provider, limitKey, periodStart)
+	c, estimated := reg.Used(provider, limitKey, periodStart)
 	used := quota.BaseAmount(l, c)
 	var pct float64
 	if l.Amount > 0 {
 		pct = used / l.Amount * 100
 	}
-	estPct := quota.EstimatedPct(l.Metric, c, estimated, estimatedCost)
+	estPct := quota.EstimatedPct(l.Metric, c, estimated)
 	models := l.Models
 	if model != "" {
 		models = []string{model}

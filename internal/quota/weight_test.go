@@ -33,14 +33,6 @@ func TestBaseAmount_Tokens(t *testing.T) {
 	}
 }
 
-func TestBaseAmount_Cost(t *testing.T) {
-	l := core.Limit{Metric: core.MetricCost}
-	got := BaseAmount(l, Counters{Cost: 12.34, Fresh: 999})
-	if got != 12.34 {
-		t.Fatalf("BaseAmount(cost) = %v, want 12.34", got)
-	}
-}
-
 func TestModelMultiplier_ExactWildcardDefault(t *testing.T) {
 	l := core.Limit{ModelMultipliers: map[string]float64{
 		"glm-5.2": 4.5,
@@ -59,12 +51,11 @@ func TestModelMultiplier_ExactWildcardDefault(t *testing.T) {
 
 func TestApplyModelMultiplier_ExactMultiplyNoRounding(t *testing.T) {
 	l := core.Limit{ModelMultipliers: map[string]float64{"m": 1.5}}
-	d, est := ApplyModelMultiplier(l, "m", Counters{Fresh: 3, Out: 1, Requests: 1, Cost: 2.5}, 5)
+	d, est := ApplyModelMultiplier(l, "m", Counters{Fresh: 3, Out: 1, Requests: 1}, 5)
 	// Exact multiplication, no rounding in either direction — see
 	// quota.Counters' doc comment for why: 3*1.5=4.5, 1*1.5=1.5, 5*1.5=7.5.
-	// Cost is preserved without scaling.
-	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || d.Cost != 2.5 || est != 7.5 {
-		t.Fatalf("ApplyModelMultiplier scaling = %+v est=%v, want Fresh=4.5 Out=1.5 Requests=1.5 Cost=2.5 est=7.5", d, est)
+	if d.Fresh != 4.5 || d.Out != 1.5 || d.Requests != 1.5 || est != 7.5 {
+		t.Fatalf("ApplyModelMultiplier scaling = %+v est=%v, want Fresh=4.5 Out=1.5 Requests=1.5 est=7.5", d, est)
 	}
 }
 
@@ -78,7 +69,7 @@ func TestApplyModelMultiplier_NoScalingIsIdentity(t *testing.T) {
 }
 
 func TestEstimatedPct_RequestsAlwaysZero(t *testing.T) {
-	got := EstimatedPct(core.MetricRequests, Counters{Requests: 100}, 100, 0)
+	got := EstimatedPct(core.MetricRequests, Counters{Requests: 100}, 100)
 	if got != 0 {
 		t.Fatalf("EstimatedPct(requests) = %v, want 0 (always exact)", got)
 	}
@@ -86,26 +77,15 @@ func TestEstimatedPct_RequestsAlwaysZero(t *testing.T) {
 
 func TestEstimatedPct_Tokens_UsesRawUnweightedTotal(t *testing.T) {
 	c := Counters{Fresh: 100, CacheRead: 100, CacheWrite: 100, Out: 100} // raw total 400
-	got := EstimatedPct(core.MetricTokens, c, 40, 0)
+	got := EstimatedPct(core.MetricTokens, c, 40)
 	if got != 10 {
 		t.Fatalf("EstimatedPct(tokens) = %v, want 10 (40/400*100)", got)
 	}
 }
 
-func TestEstimatedPct_Cost_UsesCostRatio(t *testing.T) {
-	c := Counters{Cost: 20.0}
-	got := EstimatedPct(core.MetricCost, c, 0, 5.0)
-	if got != 25 {
-		t.Fatalf("EstimatedPct(cost) = %v, want 25 (5/20*100)", got)
-	}
-}
-
 func TestEstimatedPct_ZeroDenominatorIsZeroNotNaN(t *testing.T) {
-	if got := EstimatedPct(core.MetricTokens, Counters{}, 0, 0); got != 0 {
+	if got := EstimatedPct(core.MetricTokens, Counters{}, 0); got != 0 {
 		t.Fatalf("EstimatedPct(tokens) with zero raw total = %v, want 0", got)
-	}
-	if got := EstimatedPct(core.MetricCost, Counters{}, 0, 0); got != 0 {
-		t.Fatalf("EstimatedPct(cost) with zero cost = %v, want 0", got)
 	}
 }
 

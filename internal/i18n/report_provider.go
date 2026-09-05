@@ -88,12 +88,7 @@ type ProviderQuotaText struct {
 	// logs against today's period) — only rendered when at least one row
 	// actually has the marker.
 	NoOverlapFootnote string
-	// UnpricedFootnote explains the ◇ marker: part of the account's traffic
-	// could not be priced at all and is absent from the figure (see
-	// ProviderQuotaRow.WindowUnpricedPct). Distinct from "X% est.", which
-	// marks traffic that IS in the figure. Rendered only when a row has it.
-	UnpricedFootnote string
-	// IncludeUsageFootnote explains why a token/cost account can show a near-
+	// IncludeUsageFootnote explains why a tokens account can show a near-
 	// total estimated share: on streaming openai-completions the response
 	// carries no usage block unless the client sent
 	// stream_options.include_usage:true, and vmr never injects request
@@ -124,12 +119,11 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"不做减法、不算覆盖率，各自标注来源。\n\n",
 			Headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
 			WindowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
-				"各口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
+				"两种口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
 				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：" +
 				"上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——" +
 				"两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，" +
-				"当响应正规化改写过内容（模型名改写、`<think>` 剥离等）时两者会差出这段字节；" +
-				"**cost 口径**已知一处出入——本报表的定价解析结果可能与记账当时生效的价格不同。三种口径共同的出入源：" +
+				"当响应正规化改写过内容（模型名改写、`<think>` 剥离等）时两者会差出这段字节。两种口径共同的出入源：" +
 				"config 里的权重/倍率在本窗口期内被改过。\n",
 			StalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
 				"与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 `-`。括号内的\"X% 估算\"标注" +
@@ -145,12 +139,7 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 				"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
 			NoOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
 				"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
-			UnpricedFootnote: "> ◇ 该账户本窗口有一部分请求**完全没有计入**左侧金额——本次报表没能为它们的端点解析出费率，" +
-				"所以显示的金额是偏低的。与括号里的\"估算\"不同：\"估算\"的流量在金额里，只是价格来自降级的字节估算；" +
-				"◇ 的流量根本不在金额里。常见成因是审计日志比 config.yaml 更旧（模型改名或已从 models: 移除），" +
-				"因为 `metric: cost` 账户当前配置里的模型在加载期就被强制要求可完整定价。" +
-				"缺失比例见 `vmr-report.json` 的 `window_unpriced_pct`。\n",
-			IncludeUsageFootnote: "> 某个 tokens/cost 账户的\"估算\"占比接近 100%：多半是流式 `openai-completions` 调用方没发 " +
+			IncludeUsageFootnote: "> 某个 tokens 账户的\"估算\"占比接近 100%：多半是流式 `openai-completions` 调用方没发 " +
 				"`stream_options.include_usage:true`——此时上游响应里没有 usage 块，而 vmr 不会替客户端注入请求字段（字节透传）。" +
 				"让客户端带上该选项，或改用 `anthropic-messages`/`openai-responses`（两者总是回传 usage）。\n",
 			FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
@@ -174,8 +163,7 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 			"with the same byte-count estimate the router charged (no longer counted as 0); the estimated share is shown as " +
 			"\"X% est.\" in parentheses. Both sides run the same formula; the one residual drift is that the router counts " +
 			"UPSTREAM bytes while this column can only count the bytes forwarded to the client, so the two differ by whatever " +
-			"response normalization rewrote (model-name rewrite, `<think>` stripping, ...). **cost: one known drift source** — " +
-			"this report's own pricing resolution may differ from the price in effect at charge time. Common to all three: " +
+			"response normalization rewrote (model-name rewrite, `<think>` stripping, ...). Common to both metrics: " +
 			"config weights/multipliers changed mid-window.\n",
 		StalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
 			"account, in a different window than the column to its left. Never subtract or ratio the two. Shows `-` when the stored " +
@@ -195,13 +183,7 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 		NoOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
 			"archived logs against today's billing period. More extreme than the routine \"windows don't align\" case: the two " +
 			"numbers belong to two entirely unrelated stretches of time, not two views of the same one.\n",
-		UnpricedFootnote: "> ◇ Some of this account's requests in this window are **not in the figure at all** — this report " +
-			"resolved no rate for their endpoint, so the amount shown is systematically low. Different from the parenthesized " +
-			"\"est.\": that traffic IS in the amount, just priced from a degraded byte-count estimate; ◇ traffic is missing " +
-			"outright. The usual cause is an audit log older than config.yaml (a model since renamed or dropped from `models:`), " +
-			"since a `metric: cost` account's currently-configured models are all required to price completely at load time. " +
-			"The missing share is `window_unpriced_pct` in `vmr-report.json`.\n",
-		IncludeUsageFootnote: "> A tokens/cost account showing a near-100% estimated share is usually a streaming `openai-completions` " +
+		IncludeUsageFootnote: "> A tokens account showing a near-100% estimated share is usually a streaming `openai-completions` " +
 			"caller that didn't send `stream_options.include_usage:true` — without it the upstream response carries no usage block, " +
 			"and vmr never injects request fields (byte-faithful). Have the client send that option, or use `anthropic-messages` / " +
 			"`openai-responses` (both always report usage).\n",

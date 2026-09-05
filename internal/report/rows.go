@@ -696,7 +696,7 @@ type ProviderRow struct {
 // and carries its own "unweighted / window doesn't align with billing
 // cycle" qualification in its footnotes.
 type ProviderQuotaRef struct {
-	Metric string  `json:"metric"` // requests | tokens | cost
+	Metric string  `json:"metric"` // requests | tokens
 	Every  string  `json:"every"`  // 1mo / 1w / 5h ...
 	Amount float64 `json:"amount"`
 	// Models is what this ref/row is scoped to for DISPLAY: the specific
@@ -734,7 +734,7 @@ type LiveQuota struct {
 	// EstimatedPct is quota.EstimatedPct's result for this account's
 	// bucket: the percentage of Used that came from a degraded (non-usage-
 	// sniffed) estimate rather than real upstream usage — always 0 for
-	// metric: requests and for a tokens/cost account whose usage was fully
+	// metric: requests and for a tokens account whose usage was fully
 	// sniffed. Without this, an account whose entire period is a downgraded
 	// estimate renders identically to one with authoritative usage — the
 	// same estimated_pct/⭐ honesty discipline the rest of this package
@@ -753,10 +753,8 @@ type LiveQuota struct {
 // router charges with (quota.BaseAmount/ApplyModelMultiplier) — but NOT
 // a replay of the router's actual charge history. Known small sources
 // of drift from the router's real number: failed attempts never
-// charged, config weights/multipliers having changed mid-window, and
-// (metric: cost only) this report's own pricing resolution possibly
-// differing from the price in effect at charge time. requests-metric
-// rounding is NOT a drift source — quota.ApplyModelMultiplier applies
+// charged, and config weights/multipliers having changed mid-window.
+// requests-metric rounding is NOT a drift source — quota.ApplyModelMultiplier applies
 // an exact multiplier with no rounding, so per-charge and
 // aggregate-then-multiply agree exactly (see quota.Counters' doc
 // comment).
@@ -775,16 +773,11 @@ type ProviderQuotaRow struct {
 	// more than one Limit (P3).
 	Models []string `json:"models,omitempty"`
 
-	// WindowConsumed is a pointer so a metric: cost account with NO
-	// resolvable pricing for any of its endpoints (CostEstimate nil
-	// everywhere in this window) can render nil → "-", the same "missing
-	// data, not a real zero" convention section_provider.go's own $ Estimate
-	// column already uses — a plain 0 here would be indistinguishable
-	// from "genuinely spent nothing this window" and read as false
-	// reassurance for exactly the AFP-pricing-gap scenario this report
-	// exists to surface. requests/tokens accounts are never nil: 0 there is
-	// a real zero (no traffic), not a missing-data case.
-	WindowConsumed *float64 `json:"window_consumed"`
+	// WindowConsumed is this window's recomputed base(metric) total — always
+	// a real number: 0 means genuinely no traffic this window, never
+	// "missing data" (that distinction mattered only for metric: cost,
+	// which no longer exists — see quota.EstimatedPct's doc comment).
+	WindowConsumed float64 `json:"window_consumed"`
 
 	// WindowEstimatedPct is the share of WindowConsumed that came from the
 	// degraded byte-count estimate rather than usage the routing half actually
@@ -792,12 +785,8 @@ type ProviderQuotaRow struct {
 	// recomputation, the exact counterpart of LiveQuota.EstimatedPct on the
 	// column to its right, so the two are read in the same unit.
 	//
-	// Always 0 for metric: requests (always exact). For metric: tokens it's
-	// the degraded share of the raw token total; for metric: cost it's the
-	// degraded share of the $ total (EndpointRow.CostEstimateEst summed
-	// across this window, priced from the same degraded token estimate
-	// rather than sniffed usage) — both read from a real per-record source,
-	// not derived from one another.
+	// Always 0 for metric: requests (always exact); for metric: tokens it's
+	// the degraded share of the raw token total.
 	//
 	// This field is what replaced an all-or-nothing bail-out: before it,
 	// a window where NO record had parseable usage rendered "-" while a
@@ -806,24 +795,6 @@ type ProviderQuotaRow struct {
 	// — it is indistinguishable from genuinely lower consumption — and it was
 	// the common one.
 	WindowEstimatedPct float64 `json:"window_estimated_pct,omitempty"`
-
-	// WindowUnpricedPct is the share of this account's requests that
-	// WindowConsumed leaves out entirely because no rate resolved for their
-	// endpoint (metric: cost only). WindowEstimatedPct's sibling one step
-	// further out: that one is "priced, but from a degraded estimate", this
-	// one is "not priced at all, so not in the number". Both exist because
-	// WindowConsumed's own guard is all-or-nothing — one unpriced endpoint
-	// among several priced ones rendered a precise, systematically-low figure
-	// that reads like genuinely lower spend.
-	//
-	// In REQUESTS, not currency, deliberately: no rate existing is precisely
-	// why these rows are missing, so a dollar figure would be invented.
-	//
-	// Normally 0 — config.validate already requires a metric: cost account's
-	// configured models to price completely. It goes non-zero when the audit
-	// log outruns the config (a model since renamed or dropped from models:)
-	// or on a legacy "/"-joined label splitEndpointProviderModel won't parse.
-	WindowUnpricedPct float64 `json:"window_unpriced_pct,omitempty"`
 
 	// WindowNoOverlap is true when this report run's audit-log
 	// coverage ([Meta.From, Meta.To]) and this account's current billing

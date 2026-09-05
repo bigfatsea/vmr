@@ -1,4 +1,4 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-09-06, by Sonnet 5
 package report
 
 import (
@@ -38,11 +38,6 @@ func tokensLimit(amount float64) core.Limit {
 		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: amount, TokenWeights: core.NewTokenWeights()}
 }
 
-func costLimit(amount float64) core.Limit {
-	return core.Limit{Metric: core.MetricCost, EveryUnit: "mo", EveryN: 1, EveryText: "1mo",
-		Since: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), Amount: amount}
-}
-
 // oneRef wraps a single core.Limit into the map[string][]ProviderQuotaRef
 // shape buildProviderQuotaRows/accumulateQuotaWindow now take (P3: one
 // entry per Limit) — nearly every test in this file only ever exercises one
@@ -64,7 +59,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
 	// heavy: 3 requests * 5x multiplier = 15; light: 2 requests * 1x = 2; total 17.
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 17 {
+	if rows[0].WindowConsumed != 17 {
 		t.Fatalf("WindowConsumed = %v, want 17", rows[0].WindowConsumed)
 	}
 }
@@ -83,8 +78,8 @@ func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatche
 		{Endpoint: "openai-completions:volcengine:deepseek-v4-pro", Requests: 19, Forwarded: 19},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("volcengine", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 104.5 {
-		t.Fatalf("WindowConsumed = %v, want 104.5 (19*5.5, matching the router's per-request charge exactly)", derefOrNil(rows[0].WindowConsumed))
+	if rows[0].WindowConsumed != 104.5 {
+		t.Fatalf("WindowConsumed = %v, want 104.5 (19*5.5, matching the router's per-request charge exactly)", rows[0].WindowConsumed)
 	}
 }
 
@@ -103,18 +98,9 @@ func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testi
 		{Endpoint: "openai-completions:acct1:m", Requests: 20, Forwarded: 12},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 66 {
-		t.Fatalf("WindowConsumed = %v, want 66 (12 forwarded * 5.5); 110 means it regressed to counting Requests", derefOrNil(rows[0].WindowConsumed))
+	if rows[0].WindowConsumed != 66 {
+		t.Fatalf("WindowConsumed = %v, want 66 (12 forwarded * 5.5); 110 means it regressed to counting Requests", rows[0].WindowConsumed)
 	}
-}
-
-// derefOrNil dereferences a *float64 for a Fatalf argument without risking a
-// nil-pointer panic inside the failure message itself.
-func derefOrNil(p *float64) any {
-	if p == nil {
-		return nil
-	}
-	return *p
 }
 
 // TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate
@@ -135,9 +121,9 @@ func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *
 			TokensInFreshEst: 400, TokensOutEst: 100, TokensEstimated: 7},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 500 {
-		t.Fatalf("WindowConsumed = %v, want 500 (the degraded estimate the router also charged); nil means it regressed to the old all-or-nothing bail-out",
-			derefOrNil(rows[0].WindowConsumed))
+	if rows[0].WindowConsumed != 500 {
+		t.Fatalf("WindowConsumed = %v, want 500 (the degraded estimate the router also charged); a regression here means it went back to the old all-or-nothing bail-out",
+			rows[0].WindowConsumed)
 	}
 	if rows[0].WindowEstimatedPct != 100 {
 		t.Errorf("WindowEstimatedPct = %v, want 100 (every token in this window is an estimate)", rows[0].WindowEstimatedPct)
@@ -156,9 +142,9 @@ func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
 			TokensInFreshEst: 200, TokensOutEst: 50, TokensEstimated: 4},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 1000 {
+	if rows[0].WindowConsumed != 1000 {
 		t.Fatalf("WindowConsumed = %v, want 1000 (750 sniffed + 250 estimated); 750 means the estimated half was dropped",
-			derefOrNil(rows[0].WindowConsumed))
+			rows[0].WindowConsumed)
 	}
 	if rows[0].WindowEstimatedPct != 25 {
 		t.Errorf("WindowEstimatedPct = %v, want 25 (250 of 1000 raw tokens are estimated)", rows[0].WindowEstimatedPct)
@@ -182,19 +168,19 @@ func TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged(t *testing
 
 // TestBuildProviderQuotaRows_TokensMetric_NoTrafficRendersRealZero is the
 // other side of the fix: an account with no traffic at all this window
-// really did consume zero, and must NOT be suppressed to "-".
+// really did consume zero, and must render that zero.
 func TestBuildProviderQuotaRows_TokensMetric_NoTrafficRendersRealZero(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{} // no endpoints at all
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0 {
-		t.Fatalf("WindowConsumed = %v, want a real 0 (zero traffic is a known zero, not missing data)", rows[0].WindowConsumed)
+	if rows[0].WindowConsumed != 0 {
+		t.Fatalf("WindowConsumed = %v, want 0 (zero traffic)", rows[0].WindowConsumed)
 	}
 }
 
 // TestBuildProviderQuotaRows_TokensMetric_PartialUsageStillSums guards the
 // fix's boundary: as long as SOME request had parseable usage, the
-// column is a number (this is the routine partial case), not "-".
+// column sums what it has (this is the routine partial case).
 func TestBuildProviderQuotaRows_TokensMetric_PartialUsageStillSums(t *testing.T) {
 	lim := tokensLimit(1_000_000)
 	rep := &Report2{EndpointsAll: []EndpointRow{
@@ -202,7 +188,7 @@ func TestBuildProviderQuotaRows_TokensMetric_PartialUsageStillSums(t *testing.T)
 		{Endpoint: "openai-completions:acct1:m2", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 100, TokensOut: 20},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 120 {
+	if rows[0].WindowConsumed != 120 {
 		t.Fatalf("WindowConsumed = %v, want 120 (100 fresh + 20 out from the one endpoint with usage)", rows[0].WindowConsumed)
 	}
 }
@@ -217,166 +203,8 @@ func TestBuildProviderQuotaRows_TokensMetric_AppliesWeightsAndMultiplier(t *test
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	// multiplier x2: Fresh=200, CacheRead=200, Out=20.
 	// weighted: 200*1 + 200*0.1 + 20*4 = 200+20+80 = 300.
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 300 {
+	if rows[0].WindowConsumed != 300 {
 		t.Fatalf("WindowConsumed = %v, want 300", rows[0].WindowConsumed)
-	}
-}
-
-func TestBuildProviderQuotaRows_CostMetric_SkipsModelMultiplier(t *testing.T) {
-	lim := costLimit(100)
-	c1, c2 := 1.5, 2.5
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", CostEstimate: &c1},
-		{Endpoint: "openai-completions:acct1:m2", CostEstimate: &c2},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 4.0 {
-		t.Fatalf("WindowConsumed = %v, want 4.0 (1.5+2.5, unweighted)", rows[0].WindowConsumed)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_NoPricingAnywhereRendersNil is
-// traffic existed for this cost account, but not a single endpoint
-// had a resolvable price — WindowConsumed must be nil (renders "-"), never
-// a fabricated 0 indistinguishable from "genuinely spent nothing."
-// Requests > 0 on both rows is load-bearing, not decoration: "-" means
-// "this account SERVED traffic that nothing could price". A row with
-// Requests == 0 is a different situation entirely (see
-// _CostMetric_AllAttemptsFailedRendersRealZero below), and this fixture
-// used to leave the field at its zero value — so it was quietly asserting
-// the wrong shape's behavior.
-func TestBuildProviderQuotaRows_CostMetric_NoPricingAnywhereRendersNil(t *testing.T) {
-	lim := costLimit(100)
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", Requests: 3, CostEstimate: nil},
-		{Endpoint: "openai-completions:acct1:m2", Requests: 2, CostEstimate: nil},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed != nil {
-		t.Fatalf("WindowConsumed = %v, want nil (served traffic, no endpoint priced)", *rows[0].WindowConsumed)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero
-// covers the third shape, between "no traffic at all" and "served but
-// unpriced": every attempt against this account failed (upstream 5xx, a
-// connection error), so EndpointsAll carries attempt-grade rows with
-// Requests == 0 and no cost was ever attributed. The router charged exactly
-// $0.00 for such a window (chargeQuota only ever runs from forwardSuccess),
-// so "-" would be a false UNKNOWN — the mirror image of the false ZERO the
-// nil branch exists to prevent, and out of step with what the requests and
-// tokens metrics render for the identical window.
-func TestBuildProviderQuotaRows_CostMetric_AllAttemptsFailedRendersRealZero(t *testing.T) {
-	lim := costLimit(100)
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0 {
-		t.Fatalf("WindowConsumed = %v, want a real 0 (nothing was ever forwarded, so nothing was charged)", rows[0].WindowConsumed)
-	}
-}
-
-// A failed endpoint must not drag a sibling that DID serve unpriced traffic
-// out of the "-" verdict either: the two conditions are independent, and
-// the account-level answer is still "unknown".
-func TestBuildProviderQuotaRows_CostMetric_FailedSiblingDoesNotMaskUnpriced(t *testing.T) {
-	lim := costLimit(100)
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:dead", Attempts: 4, Failed: 4, Requests: 0, CostEstimate: nil},
-		{Endpoint: "openai-completions:acct1:unpriced", Attempts: 2, Requests: 2, CostEstimate: nil},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed != nil {
-		t.Fatalf("WindowConsumed = %v, want nil (one endpoint served unpriced traffic)", *rows[0].WindowConsumed)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_NoTrafficRendersRealZero is the
-// mirror case: no traffic at all this window is a genuine 0, not a missing-
-// pricing "-" — the same distinction requests/tokens accounts already make.
-func TestBuildProviderQuotaRows_CostMetric_NoTrafficRendersRealZero(t *testing.T) {
-	lim := costLimit(100)
-	rows := buildProviderQuotaRows(&Report2{}, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0 {
-		t.Fatalf("WindowConsumed = %v, want a real 0 (no traffic)", rows[0].WindowConsumed)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_PartiallyPricedSumsWhatItHas locks
-// in the deliberate scope boundary: partial pricing (some endpoints priced,
-// some not) still sums what's known rather than going nil. The nil case
-// targets "zero endpoints priced" only; a partial undercount is already
-// covered by the existing WindowFootnote's general drift-sources disclaimer.
-func TestBuildProviderQuotaRows_CostMetric_PartiallyPricedSumsWhatItHas(t *testing.T) {
-	lim := costLimit(100)
-	c1 := 1.5
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:priced", CostEstimate: &c1},
-		{Endpoint: "openai-completions:acct1:unpriced", CostEstimate: nil},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 1.5 {
-		t.Fatalf("WindowConsumed = %v, want 1.5 (partial sum, not nil)", rows[0].WindowConsumed)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_UnsniffedUsageCountsItsEstimate is
-// the cost-metric sibling of the tokens-metric fix above: before it, a
-// record whose usage was never sniffed contributed a hardcoded 0 to
-// CostEstimate (via costFor) — a window entirely made of such records
-// rendered a misleadingly precise $0.0000 rather than either a real number
-// or "-". Now it prices the same degraded byte-count estimate the router
-// charges, and CostEstimateEst carries that whole amount as "estimated".
-func TestBuildProviderQuotaRows_CostMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
-	lim := costLimit(100)
-	c1 := 0.024
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m", CostEstimate: &c1, CostEstimateEst: c1},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 0.024 {
-		t.Fatalf("WindowConsumed = %v, want 0.024 (the degraded estimate the router also charged); a false zero means it regressed",
-			derefOrNil(rows[0].WindowConsumed))
-	}
-	if rows[0].WindowEstimatedPct != 100 {
-		t.Errorf("WindowEstimatedPct = %v, want 100 (every dollar in this window is an estimate)", rows[0].WindowEstimatedPct)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_MixedUsageIsFlagged mirrors the
-// tokens-metric mixed-window test: sniffed and degraded-estimate cost in the
-// same window must both count toward WindowConsumed, and the row must say
-// how much of it is a guess.
-func TestBuildProviderQuotaRows_CostMetric_MixedUsageIsFlagged(t *testing.T) {
-	lim := costLimit(100)
-	exact, mixed := 3.0, 1.0
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", CostEstimate: &exact},                       // fully sniffed
-		{Endpoint: "openai-completions:acct1:m2", CostEstimate: &mixed, CostEstimateEst: 0.4}, // partly degraded
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 4.0 {
-		t.Fatalf("WindowConsumed = %v, want 4.0 (3.0 exact + 1.0 mixed)", derefOrNil(rows[0].WindowConsumed))
-	}
-	if rows[0].WindowEstimatedPct != 10 {
-		t.Errorf("WindowEstimatedPct = %v, want 10 (0.4 of 4.0 total dollars are estimated)", rows[0].WindowEstimatedPct)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_FullySniffedIsNotFlagged guards the
-// other direction: a window with no degraded records must report a 0
-// estimated share, so the "X% est." annotation never appears on an
-// authoritative cost figure.
-func TestBuildProviderQuotaRows_CostMetric_FullySniffedIsNotFlagged(t *testing.T) {
-	lim := costLimit(100)
-	c1 := 2.0
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m", CostEstimate: &c1}, // CostEstimateEst left at its zero value
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowEstimatedPct != 0 {
-		t.Errorf("WindowEstimatedPct = %v, want 0 (nothing in this window was estimated)", rows[0].WindowEstimatedPct)
 	}
 }
 
@@ -498,65 +326,11 @@ func TestBuildProviderQuotaRows_MultiLimit_OneRowPerLimit(t *testing.T) {
 			unscoped = &rows[i]
 		}
 	}
-	if scoped == nil || scoped.WindowConsumed == nil || *scoped.WindowConsumed != 3 {
+	if scoped == nil || scoped.WindowConsumed != 3 {
 		t.Fatalf("scoped row WindowConsumed = %v, want 3 (only premium-model's 3 requests)", scoped)
 	}
-	if unscoped == nil || unscoped.WindowConsumed == nil || *unscoped.WindowConsumed != 8 {
+	if unscoped == nil || unscoped.WindowConsumed != 8 {
 		t.Fatalf("unscoped row WindowConsumed = %v, want 8 (both endpoints' 3+5 requests)", unscoped)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_MixedPricedAndUnpricedIsFlagged is the
-// two tests above's failure on the unresolved-rate axis instead of the
-// degraded-usage one: WindowConsumed's "-" guard only fires when NOTHING
-// priced, so this rendered a precise $3.00 with 40 requests invisible.
-func TestBuildProviderQuotaRows_CostMetric_MixedPricedAndUnpricedIsFlagged(t *testing.T) {
-	lim := costLimit(100)
-	priced := 3.0
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", Requests: 60, CostEstimate: &priced},
-		{Endpoint: "openai-completions:acct1:m2", Requests: 40}, // no rate resolved — CostEstimate nil
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed == nil || *rows[0].WindowConsumed != 3.0 {
-		t.Fatalf("WindowConsumed = %v, want 3.0 (only the priced endpoint can be valued)", derefOrNil(rows[0].WindowConsumed))
-	}
-	if rows[0].WindowUnpricedPct != 40 {
-		t.Errorf("WindowUnpricedPct = %v, want 40 (40 of 100 requests are absent from that 3.0)", rows[0].WindowUnpricedPct)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged guards the
-// other direction: config.validate already forces every configured model to
-// price, so this is the normal report — a false positive would stamp a "data
-// is missing" warning on a healthy one.
-func TestBuildProviderQuotaRows_CostMetric_FullyPricedIsNotFlagged(t *testing.T) {
-	lim := costLimit(100)
-	a, b := 1.0, 2.0
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", Requests: 10, CostEstimate: &a},
-		{Endpoint: "openai-completions:acct1:m2", Requests: 10, CostEstimate: &b},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowUnpricedPct != 0 {
-		t.Errorf("WindowUnpricedPct = %v, want 0 (every endpoint priced)", rows[0].WindowUnpricedPct)
-	}
-}
-
-// TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct pins the
-// two guards' interaction: nothing priced already renders "-", and "100%
-// missing" beside it is noise. ◇ is for a number that exists but is short.
-func TestBuildProviderQuotaRows_CostMetric_AllUnpricedStaysDashNotZeroPct(t *testing.T) {
-	lim := costLimit(100)
-	rep := &Report2{EndpointsAll: []EndpointRow{
-		{Endpoint: "openai-completions:acct1:m1", Requests: 25},
-	}}
-	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
-	if rows[0].WindowConsumed != nil {
-		t.Fatalf("WindowConsumed = %v, want nil (traffic existed, none of it priced)", derefOrNil(rows[0].WindowConsumed))
-	}
-	if rows[0].WindowUnpricedPct != 0 {
-		t.Errorf("WindowUnpricedPct = %v, want 0 — the nil WindowConsumed already says everything", rows[0].WindowUnpricedPct)
 	}
 }
 

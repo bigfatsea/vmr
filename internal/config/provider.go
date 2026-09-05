@@ -70,10 +70,10 @@ type Provider struct {
 	// no-op.
 	Quota *QuotaConfig `yaml:"quota"`
 	// Pricing declares this account's price differences from the standard
-	// list price — required (and validated for completeness) when
-	// Quota has a metric: cost limit; optional otherwise, in which case it
-	// only sharpens vmr report's $ estimates. See ProviderPricingConfig's
-	// doc comment (pricing.go).
+	// list price — entirely optional, and consulted only to sharpen vmr
+	// report's $ estimates and vmr check's display (never the request
+	// path — see core.PricingSpec's doc comment). See
+	// ProviderPricingConfig's doc comment (pricing.go).
 	Pricing *ProviderPricingConfig `yaml:"pricing"`
 	// Disabled takes this provider and every endpoint expanded from it
 	// out of routing — equivalent to "doesn't exist" at every consumer

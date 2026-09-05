@@ -46,20 +46,22 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 		fmt.Fprintf(tw, "pricing: embedded standard table failed to load (%v) — no $ estimates\n", err)
 		return nil, nil
 	}
-	summary := &report.Pricing{Currency: standard.Currency, StandardGeneratedAt: standard.GeneratedAt}
+	// Resolution is always USD now (see internal/pricing.Table's doc
+	// comment) — Currency starts at USD unconditionally and only changes
+	// below, if -currency/report.yaml requests a different display currency
+	// and a conversion rate is available.
+	summary := &report.Pricing{Currency: "USD", StandardGeneratedAt: standard.GeneratedAt}
 
 	var resolver *pricing.Resolver
 	var configRates map[string]float64
 	if loadErr != nil {
 		// cmdReport already printed one unified warning for cfgErr — a
 		// second, near-identical one here would just repeat it.
-		resolver = pricing.NewResolver(standard, nil, 1, summary.Currency)
+		resolver = pricing.NewResolver(standard, nil)
 	} else {
 		table := standard
-		factor := 1.0
 		if t, err := cfg.PricingTable(); err == nil && t != nil {
 			table = t
-			factor, _ = cfg.PricingAccounting()
 		}
 		perProvider := map[string]pricing.ProviderPolicy{}
 		overrideCount := 0
@@ -67,25 +69,18 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 			perProvider[name] = policy
 			overrideCount += len(policy.Overrides)
 		}
-		if cfg.Pricing != nil {
-			summary.Currency = cfg.Pricing.Currency
-			summary.Supplement = cfg.Pricing.Supplement
-			configRates = cfg.Pricing.ExchangeRate
-		}
+		configRates = cfg.ExchangeRate
 		summary.ProviderOverrides = overrideCount
 		if overrideCount > 0 {
-			fmt.Fprintf(tw, "pricing: %d provider override rule(s) loaded from %s\n", overrideCount, configPath)
+			fmt.Fprintf(tw, "pricing: %d provider rate rule(s) loaded from %s\n", overrideCount, configPath)
 		}
-		resolver = pricing.NewResolver(table, perProvider, factor, summary.Currency)
-	}
-	if summary.Currency == "" {
-		summary.Currency = "USD"
+		resolver = pricing.NewResolver(table, perProvider)
 	}
 
 	if displayCCY != "" && !strings.EqualFold(displayCCY, summary.Currency) {
-		rates := map[string]float64{}
-		for k, v := range configRates {
-			rates[k] = v
+		rates, effErr := pricing.EffectiveExchangeRate(configRates)
+		if effErr != nil {
+			rates = map[string]float64{}
 		}
 		for k, v := range extraRates { // report.yaml's own rates win over config.yaml's on a matching key
 			rates[k] = v
@@ -95,7 +90,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 			summary.Currency = displayCCY
 		} else {
 			summary.RequestedCurrency = displayCCY
-			fmt.Fprintf(tw, "pricing: no exchange rate to convert %s -> %s for -currency, showing %s instead (add exchange_rate: {%s: <rate>} to config.yaml's pricing: block or report.yaml)\n", summary.Currency, displayCCY, summary.Currency, displayCCY)
+			fmt.Fprintf(tw, "pricing: no exchange rate to convert %s -> %s for -currency, showing %s instead (add exchange_rate: {%s: <rate>} to config.yaml's top level or report.yaml)\n", summary.Currency, displayCCY, summary.Currency, displayCCY)
 		}
 	}
 	return resolver, summary
@@ -106,8 +101,8 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 // come from dispatchAnalyze's single config.Load (P-7-7) — shared with
 // runReport so both halves price against one config view. Same
 // degrade-gracefully contract: an unreadable config falls back to the embedded
-// standard table. Warnings go to stderr rather than being discarded, so
-// unresolvable supplement paths or missing exchange rates are visible.
+// standard table. Warnings go to stderr rather than being discarded, so a
+// missing display-currency exchange rate is visible.
 func resolvePricingForAnalyze(cfg *config.Config, cfgErr error, configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
 	tw := timestampWriter{w: os.Stderr}
 	if cfgErr != nil {

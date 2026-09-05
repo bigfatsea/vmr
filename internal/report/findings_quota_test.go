@@ -37,7 +37,7 @@ func TestQuotaExhaustionFinding_BelowThresholdDoesNotFire(t *testing.T) {
 // otherwise fabricate an alert — an estimate must never be the basis of one.
 func TestQuotaExhaustionFinding_NoLiveDataDoesNotFire(t *testing.T) {
 	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
-		{Provider: "acct1", WindowConsumed: f64(999999), Live: nil},
+		{Provider: "acct1", WindowConsumed: 999999, Live: nil},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f != nil {
 		t.Fatalf("expected no finding when Live is nil, regardless of WindowConsumed, got %+v", f)

@@ -45,9 +45,9 @@ func nonNegativeFinite(v float64) bool {
 // counterpart of core.QuotaSpec (see config.EndpointGroup -> core.Endpoint
 // for the same "YAML shape / runtime shape are separate types" precedent).
 // P3: one or more Limits, each carrying its own metric/window/Scope/
-// token_weights/model_multipliers — see LimitConfig's doc comment.
-// metric: cost is — see pricing.go for the providers[].pricing block a
-// cost-metric account needs.
+// token_weights/model_multipliers — see LimitConfig's doc comment. Only
+// two metrics: requests and tokens — see LimitConfig.validate's "cost" case
+// for why a metric: cost Limit is a load-time error, not a supported value.
 //
 // TokenWeights/ModelMultipliers are declared here purely as a migration
 // trap: P2 shipped them as account-level fields; P3 moved both down into
@@ -64,17 +64,15 @@ type QuotaConfig struct {
 
 // TokenWeightsConfig is TokenWeights as written in YAML: each component is a
 // pointer so "omitted" (nil, resolves to core.DefaultTokenWeight) and
-// "explicitly set to 0.0" are distinguishable — the same distinction
-// PricingRate's components will need for the same reason (an
-// omitted weight isn't "this component doesn't count", it's "I didn't say,
-// use the default").
+// "explicitly set to 0.0" are distinguishable — an omitted weight isn't
+// "this component doesn't count", it's "I didn't say, use the default".
 //
-// Design note: unlike PricingRate's per-model rates, an *explicit* 0.0
-// weight is rejected by validate() below (must be > 0, per the design doc's
-// §9.1 validation checklist) — a zero token_weight would silently make a
-// whole component invisible to quota accounting, which is a materially
-// different (and far more dangerous) failure than a zero *price*, so the
-// two are not treated the same way even though both are "0.0 the number".
+// Design note: unlike a providers[].pricing.rates row (where an explicit
+// 0.0 legitimately means "free"), an *explicit* 0.0 weight is rejected by
+// validate() below (must be > 0, per the design doc's §9.1 validation
+// checklist) — a zero token_weight would silently make a whole component
+// invisible to quota accounting, which is a materially different (and far
+// more dangerous) failure than a zero *price*.
 type TokenWeightsConfig struct {
 	InFresh    *float64 `yaml:"in_fresh"`
 	CacheRead  *float64 `yaml:"cache_read"`
@@ -121,11 +119,11 @@ func (tw *TokenWeightsConfig) resolve(providerName, fieldPath string) (core.Toke
 // Rolling is declared here (rather than left undeclared and relying on
 // strict-YAML's KnownFields to reject it) specifically so a user who writes
 // it gets "this capability is planned for a later batch" instead of a
-// confusing "unknown field" error — see validate() below. A `pricing:`
-// block (providers[].pricing/global pricing:) is deliberately NOT declared
-// anywhere in this file — its YAML shape and validation
-// (PricingConfig/ProviderPricingConfig, resolvePricing) live in pricing.go
-// instead, since it's a distinct config surface from quota limits.
+// confusing "unknown field" error — see validate() below. A provider's
+// `pricing:` block is deliberately NOT declared anywhere in this file —
+// its YAML shape and validation (ProviderPricingConfig, resolvePricing)
+// live in pricing.go instead, a distinct config surface with no runtime
+// coupling to quota limits at all (see core.PricingSpec's doc comment).
 //
 // Models (Scope), TokenWeights, and ModelMultipliers are per-Limit — P3
 // moved the latter two down from the account-level QuotaConfig fields P2
@@ -232,20 +230,6 @@ func parseSince(s, unit string, now time.Time) (t time.Time, ok bool, err error)
 	return time.Time{}, false, fmt.Errorf("invalid since %q (want YYYY-MM-DD, RFC3339, or hh:mm[:ss] for min/h Limits)", s)
 }
 
-// hasCostLimit reports whether any of limits is metric: cost — used by
-// pricing.go's resolvePricing to decide which providers need a fully
-// resolved rate for every model they serve. A provider can now mix a
-// metric: cost Limit with a metric: requests/tokens one (P3), so this is
-// no longer "the provider's only Limit"; it's "any of them".
-func hasCostLimit(limits []LimitConfig) bool {
-	for _, lc := range limits {
-		if lc.Resolved.Metric == core.MetricCost {
-			return true
-		}
-	}
-	return false
-}
-
 // validateQuota checks providerName's quota: block (nil = no quota
 // configured, always valid) and resolves every surviving Limit's
 // core.Limit form in place. now is the moment to resolve an unset `since`
@@ -296,13 +280,13 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 }
 
 // validate checks one LimitConfig and, on success, fills in Resolved. Every
-// knob not yet supported (rolling windows — cost metric and Scope ARE
-// supported, see the "cost"/models cases below) is rejected here with a
-// message that names the capability and says it's planned, not "invalid"
-// or "unsupported forever" — see docs/VirtualModelRouter_Design_v4_Quota.md's
-// design specification, which treats a silently ignored quota field as the
-// one failure mode this project cannot tolerate (the same fail-fast
-// contract KnownFields already enforces everywhere else in this config).
+// knob not yet supported (rolling windows — Scope IS supported, see the
+// models case below) is rejected here with a message that names the
+// capability and says it's planned, not "invalid" or "unsupported
+// forever" — see docs/VirtualModelRouter_Design_v4_Quota.md's design
+// specification, which treats a silently ignored quota field as the one
+// failure mode this project cannot tolerate (the same fail-fast contract
+// KnownFields already enforces everywhere else in this config).
 func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) error {
 	fieldPrefix := fmt.Sprintf("quota.limits[%d]", idx)
 	switch lc.Metric {
@@ -311,16 +295,11 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 	case "tokens":
 		lc.Resolved.Metric = core.MetricTokens
 	case "cost":
-		// Structurally accepted here — the actual pricing completeness
-		// check (does this account resolve a full four-component rate for
-		// every model it's configured to serve) happens later, in
-		// Config.resolvePricing, once the models: block has been walked to
-		// know which upstream models this provider must be priced for.
-		lc.Resolved.Metric = core.MetricCost
+		return fmt.Errorf("provider %q: %s: metric: cost is no longer supported — express the same budget as a tokens limit (convert once: budget ÷ price), optionally with model_multipliers/token_weights to weight expensive models; $ cost estimates remain available in vmr report", providerName, fieldPrefix)
 	case "":
-		return fmt.Errorf("provider %q: %s: metric is required (requests|tokens|cost)", providerName, fieldPrefix)
+		return fmt.Errorf("provider %q: %s: metric is required (requests|tokens)", providerName, fieldPrefix)
 	default:
-		return fmt.Errorf("provider %q: %s: unknown metric %q (want requests|tokens|cost)", providerName, fieldPrefix, lc.Metric)
+		return fmt.Errorf("provider %q: %s: unknown metric %q (want requests|tokens)", providerName, fieldPrefix, lc.Metric)
 	}
 	if lc.Rolling {
 		return fmt.Errorf("provider %q: %s: rolling windows are not supported in this release — this capability is planned for a later batch; use a tumbling window (omit rolling, or set it to false)", providerName, fieldPrefix)
@@ -354,15 +333,6 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 		if !positiveFinite(lc.ModelMultipliers[model]) {
 			return fmt.Errorf("provider %q: %s.model_multipliers[%q]: must be a finite number > 0 (got %v)", providerName, fieldPrefix, model, lc.ModelMultipliers[model])
 		}
-	}
-	// model_multipliers is a pure accounting-unit concept (see the design
-	// doc's "折扣与促销归入价格层" section) — it only ever multiplies a
-	// requests/tokens Limit's base(metric). A cost Limit's price
-	// differentiation comes entirely from providers[].pricing instead
-	// (per-model rates), so a model_multipliers block there would be
-	// silently unused — the same fail-fast contract as token_weights above.
-	if len(lc.ModelMultipliers) > 0 && lc.Resolved.Metric == core.MetricCost {
-		return fmt.Errorf("provider %q: %s.model_multipliers is configured but this Limit's metric is cost — cost accounts express per-model price differences via providers[].pricing instead (model_multipliers would never take effect)", providerName, fieldPrefix)
 	}
 	lc.Resolved = core.Limit{
 		Metric:           lc.Resolved.Metric,

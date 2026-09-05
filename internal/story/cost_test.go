@@ -34,7 +34,7 @@ rates:
 	if err != nil {
 		t.Fatalf("ParseTable: %v", err)
 	}
-	return pricing.NewResolver(tbl, nil, 1, "")
+	return pricing.NewResolver(tbl, nil)
 }
 
 func costStep(seq int, endpoint string, usageOK bool, u chatmsg.Usage) *Step {
@@ -204,7 +204,7 @@ rates:
 	if err != nil {
 		t.Fatalf("ParseTable: %v", err)
 	}
-	res := pricing.NewResolver(tbl, nil, 1, "")
+	res := pricing.NewResolver(tbl, nil)
 	j := journeyOf(costStep(1, "openai-completions:acme:incomplete", true, chatmsg.Usage{In: 1000, CacheRead: 900, Out: 100}))
 	got := ComputeJourneyCost(j, res, "USD")
 	if !got.Resolved {

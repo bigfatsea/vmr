@@ -125,12 +125,12 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	// forwardSuccess ever reaches chargeQuota (see chargeQuota's doc
 	// comment). An error response (429/5xx) is not billed by most
 	// request-metered providers, so charging it here would overstate local
-	// usage the account never sees. Token/cost limits get zero counters:
-	// the probe's usage is not parsed here (its whole response is capped at
+	// usage the account never sees. Token limits get zero counters: the
+	// probe's usage is not parsed here (its whole response is capped at
 	// probeBodyCap), and undercounting a few dozen tokens is the honest
 	// bound. nil-safe when no quota Registry is wired up or the endpoint
 	// carries no quota, like chargeQuota.
-	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, true, true, time.Now())
+	ChargeResponse(rt.Quota, ep, quota.Counters{}, 0, time.Now())
 
 	// 2xx: the endpoint answered — that alone is enough to let it out of
 	// cooldown, but only as probe-evidence: ReportProbeSuccess decays fails

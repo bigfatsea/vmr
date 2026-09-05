@@ -225,6 +225,9 @@ func printGlobalSettings(w io.Writer, cfg *config.Config, issues []config.Issue)
 	if line, ok := pricingTableLine(cfg); ok {
 		fmt.Fprintln(w, checkLine(0, "pricing_table", line))
 	}
+	if line, ok := exchangeRateLine(cfg); ok {
+		fmt.Fprintln(w, checkLine(0, "exchange_rate", line))
+	}
 	fmt.Fprintln(w, "dirs:")
 	fmt.Fprintln(w, checkLine(2, "log", cfg.LogDir))
 	fmt.Fprintln(w, checkLine(2, "image_cache", cfg.ImageCacheDir))
@@ -277,7 +280,7 @@ func printProviders(w io.Writer, cfg *config.Config) {
 			fmt.Fprintln(w, checkLine(2, "sticky_ttl", p.StickyTTL.D().String()))
 		}
 		printProviderQuota(w, cfg, p)
-		printProviderPricing(w, cfg, p)
+		printProviderPricing(w, p)
 	}
 }
 
@@ -340,12 +343,6 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 		}
 		since := l.Since.In(fmtutil.DisplayZone).Format("2006-01-02 15:04")
 		amount := fmt.Sprintf("%g", l.Amount)
-		// A cost-metric amount is denominated in cfg.Pricing.Currency
-		// (resolvePricing requires it to be set for any metric: cost
-		// provider) — bare "amount=698" is otherwise ambiguous.
-		if l.Metric == core.MetricCost && cfg.Pricing != nil && cfg.Pricing.Currency != "" {
-			amount += " " + cfg.Pricing.Currency
-		}
 		detail := fmt.Sprintf("role=%s every=%s since=%s amount=%s", role, l.EveryText, since, amount)
 		if len(l.Models) > 0 {
 			detail += " models=" + strings.Join(l.Models, ",")

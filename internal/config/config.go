@@ -18,7 +18,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 	"vmr/internal/rundir"
@@ -367,54 +366,43 @@ type Config struct {
 	// to 0 and would silently compete with a model's own real endpoints for
 	// the same tier.
 	FallbackEndpoints map[string][]EndpointGroup `yaml:"fallback_endpoints"`
-	// Pricing is the global pricing block — currency, exchange rate,
-	// and an optional user supplement/standard-table override. See
-	// PricingConfig's doc comment (pricing.go).
-	Pricing *PricingConfig `yaml:"pricing"`
+	// ExchangeRate is a global "1 USD = X <code>" map (USD itself is always
+	// implicit 1.0, never needs an entry here) — see
+	// internal/pricing.FactorBetween/EffectiveExchangeRate. Its two
+	// consumers are both OFF the request path: converting a provider's own
+	// pricing.currency-denominated rates to USD once at validate time, and
+	// vmr report's -currency display conversion. A currency named anywhere
+	// (a provider's pricing.currency, -currency) with no entry here falls
+	// back to the embedded default table (internal/pricing.
+	// LoadDefaultExchangeRate); still unresolved after that is a load-time
+	// error, never a silent 1:1 guess. See
+	// docs/future-strategy/pricing_architecture_simplification_plan.md §2.3.
+	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 
-	// ResolvedPricing holds every metric:-cost provider+model's fully
-	// resolved pricing.Resolve result, keyed by provider+"\x00"+model —
-	// filled by resolvePricing() during validate(), read by
-	// router.BuildSnapshot to fold onto core.Endpoint.PricingRate
-	// (pricing.FoldSpec, the pre-folded *core.Rate; this map stays in spec
-	// form so vmr check can still display the override chain). Not a yaml
-	// field: nil when no provider has a metric: cost limit (the common
-	// case — no pricing resolution work was needed at all), non-nil
-	// (possibly still empty) otherwise.
-	ResolvedPricing map[string]*core.PricingSpec `yaml:"-"`
+	// LegacyPricing exists ONLY to catch the pre-simplification top-level
+	// pricing: block (currency/exchange_rate/supplement/standard/rates/
+	// aliases) and fail with an actionable migration message instead of
+	// KnownFields' generic "field X not found in type Y" pointing at the
+	// wrong root cause — `pricing` itself is still a structurally valid key
+	// today, so KnownFields alone can't distinguish "a typo" from "the old
+	// shape". A generic map (not a struct mirroring the old PricingConfig)
+	// captures any sub-keys without needing to track that shape forever.
+	// Never consulted for real values — see resolvePricing.
+	LegacyPricing map[string]any `yaml:"pricing"`
 
-	// ProviderPricingPolicies holds one pricing.ProviderPolicy per provider
-	// — its map/overrides if it declared a pricing: block, plus (for every
-	// provider, block or not) the global currency and exchange-rate factor
-	// — for `vmr report`'s broader best-effort resolution (see
-	// PricingTable's doc comment). A superset of ResolvedPricing's coverage,
-	// deliberately: report prices whatever providers an audit log names,
-	// and a provider resolving standard-table prices with no conversion
-	// factor would be reported in the wrong currency. Not a yaml field; nil
-	// when nothing anywhere needed pricing resolved at all (no global
-	// pricing: block, no provider pricing: block, no metric: cost Limit).
+	// ProviderPricingPolicies holds one pricing.ProviderPolicy (aliases +
+	// rates) per provider that declared a pricing: block — for `vmr
+	// report`'s best-effort resolution (see PricingTable's doc comment).
+	// Every entry is already USD-normalized (a provider's own
+	// pricing.currency is converted once here, at validate time — see
+	// resolvePricing). Not a yaml field; nil when no provider declared a
+	// pricing: block at all.
 	ProviderPricingPolicies map[string]pricing.ProviderPolicy `yaml:"-"`
 
-	// pricingTableCache is the merged standard(+supplement) table computed
-	// once by resolvePricing() during validate() — PricingTable() returns
-	// this instead of re-parsing the embedded YAML on every call. Unset
-	// (nil) when resolvePricing() had no reason to build one (no pricing:
-	// block anywhere, no metric: cost provider); PricingTable() computes a
-	// fresh one on demand in that case.
+	// pricingTableCache is the merged generated+curated standard table,
+	// loaded once by resolvePricing() during validate() — PricingTable()
+	// returns this instead of re-parsing the embedded YAML on every call.
 	pricingTableCache *pricing.Table `yaml:"-"`
-
-	// pricingFactorCache / pricingCurrencyCache are the global USD ->
-	// pricing.currency factor and that currency's code, cached alongside
-	// pricingTableCache because they come from the same buildPricingContext
-	// pass and are meaningless apart from the table they scale — see
-	// PricingAccounting.
-	pricingFactorCache   float64 `yaml:"-"`
-	pricingCurrencyCache string  `yaml:"-"`
-
-	// configDir is the directory the config file was Load()ed from — the
-	// anchor for relative sidecar paths (see resolveConfigRelative). Empty
-	// for a config built from bytes via Parse.
-	configDir string `yaml:"-"`
 
 	// EmptyEnvRefs is every ${NAME} the config text referenced that was unset
 	// or empty in the environment at load time, sorted. Not a yaml field —
@@ -553,14 +541,13 @@ func (c *Config) validate() error {
 	if err := c.validateModelDefaults(); err != nil {
 		return err
 	}
-	providerModels := map[string]map[string]bool{}
-	if err := c.validateModels(providerModels); err != nil {
+	if err := c.validateModels(); err != nil {
 		return err
 	}
-	if err := c.validateFallbackEndpoints(providerModels); err != nil {
+	if err := c.validateFallbackEndpoints(); err != nil {
 		return err
 	}
-	return c.resolvePricing(providerModels)
+	return c.resolvePricing()
 }
 
 // ProviderByName looks up a provider by its declared name. Providers is a

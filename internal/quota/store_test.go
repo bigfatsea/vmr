@@ -46,38 +46,6 @@ func TestStore_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestStore_RoundTrip_CostAndEstimatedCost is TestStore_RoundTrip's
-// counterpart: Counters.Cost and bucket.EstimatedCost (both added for
-// metric: cost accounting) had no persistence coverage of their own before
-// this — TestStore_RoundTrip only ever charges the P1-era int fields, so a
-// JSON-tag typo or a dropped field specific to these two would not have
-// been caught by any quota-package-level test — the in-memory ChargeCost
-// tests in quota_test.go never go through Flush/Load.
-func TestStore_RoundTrip_CostAndEstimatedCost(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "vmr-quota.json")
-	ps := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-
-	r := NewRegistry(path)
-	r.Charge("plan-e", "cost/1mo", ps, Counters{Fresh: 1000, Out: 200, Cost: 12.3456}, 0)
-	r.ChargeCost("plan-e", "cost/1mo", ps, Counters{}, 4.5)
-	if err := r.Flush(); err != nil {
-		t.Fatalf("Flush: %v", err)
-	}
-
-	r2 := NewRegistry(path)
-	if err := r2.Load(); err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	c, _ := r2.Used("plan-e", "cost/1mo", ps)
-	if c.Cost != 12.3456 {
-		t.Fatalf("round-tripped Counters.Cost = %v, want 12.3456", c.Cost)
-	}
-	if _, _, estCost := r2.Snapshot("plan-e", "cost/1mo", ps); estCost != 4.5 {
-		t.Fatalf("round-tripped EstimatedCost = %v, want 4.5", estCost)
-	}
-}
-
 func TestStore_MissingFile_NotAnError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "does-not-exist.json")
@@ -223,7 +191,7 @@ func TestStore_FlushFailure_KeepsDirtyAndReports(t *testing.T) {
 	path := filepath.Join(dir, "vmr-quota.json")
 	r := NewRegistry(path)
 	ps := time.Now()
-	r.Charge("plan-a", "requests/1mo", ps, Counters{Cost: math.NaN()}, 0) // NaN poisons marshal
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Fresh: math.NaN()}, 0) // NaN poisons marshal
 
 	if err := r.Flush(); err == nil {
 		t.Fatal("Flush with a NaN counter returned nil, want an error")
@@ -248,7 +216,7 @@ func TestStore_Flusher_ReportsFailures(t *testing.T) {
 	path := filepath.Join(dir, "vmr-quota.json")
 	r := NewRegistry(path)
 	ps := time.Now()
-	r.Charge("plan-a", "requests/1mo", ps, Counters{Cost: math.NaN()}, 0) // every tick's Flush fails
+	r.Charge("plan-a", "requests/1mo", ps, Counters{Fresh: math.NaN()}, 0) // every tick's Flush fails
 
 	// The flusher goroutine writes through the logger while this test reads,
 	// so the buffer needs its own lock (go test -race catches the raw kind).

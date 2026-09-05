@@ -178,30 +178,24 @@ func TestVirtualModel_FallbackField_DefaultsToNilMeansTrue(t *testing.T) {
 	}
 }
 
-// TestFallbackEndpoints_FeedProviderModelsForPricing pins the fix noted in
-// CHANGELOG.md: a (provider, model) pair reachable only through a
-// fallback_endpoints: entry must still be registered into resolvePricing's
-// completeness set — a metric: cost provider used only as a fallback must
-// not be able to reach the request path with an unresolved rate. Exercised
-// indirectly: a cost-metric provider with no matching pricing for a
-// fallback-only model must fail validate(), not silently pass.
-func TestFallbackEndpoints_FeedProviderModelsForPricing(t *testing.T) {
+// TestFallbackEndpoints_ProviderModelPairs_Validated pins that a
+// fallback_endpoints: entry gets the same per-(provider, model) validation
+// as a virtual model's own endpoints — an unknown provider or empty model
+// name is a load-time error, not silently accepted because it lives in
+// fallback_endpoints instead of models:. (Pricing no longer has a
+// completeness gate to feed — see core.PricingSpec's doc comment — so this
+// only exercises validateEndpointGroup's structural checks now.)
+func TestFallbackEndpoints_ProviderModelPairs_Validated(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:9904
-pricing: {currency: USD}
 providers:
   - name: p1
     base_url: {openai-completions: https://api.example.com/v1}
     api_key: k1
-  - name: costy
-    base_url: {openai-completions: https://api.example.com/v1}
-    api_key: k2
-    quota:
-      limits: [{metric: cost, every: 1mo, since: 2026-08-01, amount: 100}]
 fallback_endpoints:
   openai-completions:
-    - providers: [costy]
-      models: [totally-unpriceable-model-xyz]
+    - providers: [unknown-provider]
+      models: [some-model]
       priority: 90
 models:
   m1:
@@ -211,7 +205,7 @@ models:
           models: [real-model]
 `
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "totally-unpriceable-model-xyz") {
-		t.Fatalf("want a pricing-resolution error naming the fallback-only model, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("want an unknown-provider rejection, got %v", err)
 	}
 }

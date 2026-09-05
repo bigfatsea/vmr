@@ -96,10 +96,10 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 		w("\n")
 	}
 	tbl := newTable(w, t.Headers...)
-	anyNoOverlap, anyConfigChanged, anyOverQuota, anyUnpriced := false, false, false, false
+	anyNoOverlap, anyConfigChanged, anyOverQuota := false, false, false
 	anyHighEstimate := false
 	for _, r := range rep.ProviderQuotas {
-		if r.Metric == "tokens" || r.Metric == "cost" {
+		if r.Metric == "tokens" {
 			if (r.Live != nil && r.Live.EstimatedPct >= 95) || r.WindowEstimatedPct >= 95 {
 				anyHighEstimate = true
 			}
@@ -132,14 +132,7 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 		// Same annotation the live column gets, for the same reason: a
 		// recomputed figure that is partly a byte-count estimate must not
 		// render identically to one entirely backed by sniffed usage.
-		windowConsumed := t.FormatEstimatedShare(windowConsumedCell(r.WindowConsumed), r.WindowEstimatedPct)
-		if r.WindowUnpricedPct > 0 {
-			// Traffic no rate resolved for, so absent from the number — one
-			// step past the "X% est." above, which covers traffic that IS in
-			// it. ◇ because ⭐/†/‡ each already mean something else here.
-			windowConsumed += "◇"
-			anyUnpriced = true
-		}
+		windowConsumed := t.FormatEstimatedShare(numStr(r.WindowConsumed), r.WindowEstimatedPct)
 		if r.WindowNoOverlap {
 			// The report's own audit-log window and this account's
 			// billing period share no time at all — the more extreme,
@@ -177,9 +170,6 @@ func renderProviderQuotaTable(w func(string, ...any), rep *Report2, lang i18n.La
 	}
 	if anyNoOverlap {
 		w("%s", t.NoOverlapFootnote)
-	}
-	if anyUnpriced {
-		w("%s", t.UnpricedFootnote)
 	}
 	if anyHighEstimate {
 		w("%s", t.IncludeUsageFootnote)
@@ -223,18 +213,6 @@ func topErrorClassProviderCell(p ProviderRow) string {
 		return cls + " " + strconv.Itoa(n)
 	}
 	return cls + " " + strconv.Itoa(n) + "(" + pctStr2(n, p.Failed) + ")"
-}
-
-// windowConsumedCell renders ProviderQuotaRow.WindowConsumed — nil (a
-// cost-metric account with traffic this window but no resolvable price
-// for any of it) renders "-", the same "missing data, not a real zero"
-// convention the main table's $ Estimate column already uses, never a
-// fabricated 0 that would read as "genuinely spent nothing."
-func windowConsumedCell(v *float64) string {
-	if v == nil {
-		return "-"
-	}
-	return numStr(*v)
 }
 
 // periodRangeCell formats a Limit's current period as "MM-DD ~ MM-DD" in

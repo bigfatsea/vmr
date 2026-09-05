@@ -1,0 +1,52 @@
+# Ver 2026-09-06, by Sonnet 5
+#
+# Built-in default "1 USD = X <code>" exchange-rate table — a convenience
+# fallback for the top-level exchange_rate: block in config.yaml, not an
+# accounting-grade source: rates drift daily, this table doesn't. It exists
+# so a deployment that only cares about a rough $ estimate in vmr report (or
+# a provider whose pricing.currency isn't USD) doesn't have to look up and
+# type in a rate just to get started — see
+# docs/future-strategy/pricing_architecture_simplification_plan.md §2.3.
+#
+# A currency the user declares in their own top-level exchange_rate: block
+# always wins over the value here (see pricing.EffectiveExchangeRate). A
+# currency named anywhere (a provider's pricing.currency, vmr report's
+# -currency flag) that has no entry here AND no user override is a load-time
+# error — this table is a fallback, never a reason to guess.
+#
+# Refresh occasionally; there is no automated staleness check the way the
+# standard price tables have (see cmd/vmr/check_pricing.go) — a currency
+# conversion error of a few percent only affects $ estimate precision, never
+# routing or quota behavior (see the design doc's decision 6).
+generated_at: "2026-09-06"
+rates:
+  CNY: 7.10
+  EUR: 0.92
+  GBP: 0.79
+  JPY: 155.0
+  HKD: 7.80
+  TWD: 32.5
+  KRW: 1390.0
+  INR: 87.0
+  SGD: 1.34
+  AUD: 1.53
+  CAD: 1.39
+  CHF: 0.88
+  BRL: 5.60
+  RUB: 90.0
+  VND: 25400.0
+  IDR: 16200.0
+  MYR: 4.40
+  THB: 34.5
+  PHP: 58.5
+  MXN: 18.5
+  ZAR: 18.2
+  TRY: 41.0
+  PLN: 3.95
+  SEK: 10.4
+  NOK: 10.7
+  DKK: 6.85
+  NZD: 1.68
+  AED: 3.6725
+  SAR: 3.75
+  ILS: 3.60

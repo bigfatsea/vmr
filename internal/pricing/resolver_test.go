@@ -6,7 +6,7 @@ import (
 )
 
 func TestResolver_RateFor_TableOnly(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "")
+	r := NewResolver(testTable(), nil)
 	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok || *rate.InFresh != 3 {
 		t.Fatalf("RateFor = %+v ok=%v, want InFresh=3", rate, ok)
@@ -14,7 +14,7 @@ func TestResolver_RateFor_TableOnly(t *testing.T) {
 }
 
 func TestResolver_RateFor_UnknownProvider_NoPolicy_StillTriesTable(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "")
+	r := NewResolver(testTable(), nil)
 	// "anthropic" as the vmr provider name lets step ② of the 4-step
 	// resolution succeed even with zero policy configured for it.
 	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
@@ -26,7 +26,7 @@ func TestResolver_RateFor_UnknownProvider_NoPolicy_StillTriesTable(t *testing.T)
 func TestResolver_RateFor_PerProviderPolicy(t *testing.T) {
 	r := NewResolver(testTable(), map[string]ProviderPolicy{
 		"my-plan": {Overrides: []OverrideRule{{Model: "*", Discount: f(0.5)}}},
-	}, 1, "")
+	})
 	// "totally-unknown-model" has no table entry under any resolution step
 	// (unlike claude-3-5-sonnet, which testTable() would resolve via the
 	// unique-suffix step) — the only matching rule is a discount with
@@ -47,7 +47,7 @@ func TestResolver_RateFor_DanglingDiscountOverExplicitAnchor(t *testing.T) {
 			{Model: "*", Discount: f(0.8)},
 			{Model: "totally-unknown-model", Explicit: Rate{InFresh: f(2), CacheRead: f(0.2), CacheWrite: f(2), Out: f(8)}},
 		}},
-	}, 1, "")
+	})
 	rate, ok := r.RateFor("my-plan", "totally-unknown-model")
 	if !ok || rate.InFresh == nil || !almostEqual(*rate.InFresh, 2*0.8) {
 		t.Fatalf("RateFor = %+v ok=%v, want InFresh=1.6 (explicit x 0.8)", rate, ok)
@@ -55,14 +55,14 @@ func TestResolver_RateFor_DanglingDiscountOverExplicitAnchor(t *testing.T) {
 }
 
 func TestResolver_RateFor_NoMatch(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "")
+	r := NewResolver(testTable(), nil)
 	if _, ok := r.RateFor("nope", "nope"); ok {
 		t.Fatal("want ok=false for a totally unknown provider+model")
 	}
 }
 
 func TestResolver_MemoizesResolution(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "")
+	r := NewResolver(testTable(), nil)
 	// Call twice; the second call should hit the cache path (resolve()'s
 	// map lookup) rather than re-running resolveCanonicalKey — this test
 	// can't observe the internal call count directly, but it does prove
@@ -76,7 +76,7 @@ func TestResolver_MemoizesResolution(t *testing.T) {
 }
 
 func TestResolver_CachesMisses(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "")
+	r := NewResolver(testTable(), nil)
 	_, ok1 := r.RateFor("nope", "nope")
 	_, ok2 := r.RateFor("nope", "nope")
 	if ok1 || ok2 {
@@ -85,7 +85,7 @@ func TestResolver_CachesMisses(t *testing.T) {
 }
 
 func TestResolver_WithDisplayFactor_ScalesRateFor(t *testing.T) {
-	r := NewResolver(testTable(), nil, 1, "").WithDisplayFactor(7.1)
+	r := NewResolver(testTable(), nil).WithDisplayFactor(7.1)
 	rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok {
 		t.Fatal("RateFor: ok = false")
@@ -96,7 +96,7 @@ func TestResolver_WithDisplayFactor_ScalesRateFor(t *testing.T) {
 }
 
 func TestResolver_WithDisplayFactor_OneOrZeroIsNoOp(t *testing.T) {
-	base := NewResolver(testTable(), nil, 1, "")
+	base := NewResolver(testTable(), nil)
 	for _, factor := range []float64{0, 1} {
 		r := base.WithDisplayFactor(factor)
 		rate, ok := r.RateFor("anthropic", "claude-3-5-sonnet")
@@ -107,7 +107,7 @@ func TestResolver_WithDisplayFactor_OneOrZeroIsNoOp(t *testing.T) {
 }
 
 func TestResolver_WithDisplayFactor_OriginalResolverUnaffected(t *testing.T) {
-	base := NewResolver(testTable(), nil, 1, "")
+	base := NewResolver(testTable(), nil)
 	_ = base.WithDisplayFactor(7.1)
 	rate, ok := base.RateFor("anthropic", "claude-3-5-sonnet")
 	if !ok || *rate.InFresh != 3 {

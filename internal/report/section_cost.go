@@ -35,17 +35,14 @@ func renderCostEstimate(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 		w("%s\n\n", t.ScopeFootnote)
 	}
 
-	// Pricing is composed from several layers (embedded standard
-	// table + optional supplement + per-provider config.yaml overrides),
-	// so there's no longer a single file's bytes to freeze verbatim the
-	// way an earlier sidecar did — this summary line is the replacement
-	// traceability mechanism (see pricing.go's package doc comment).
+	// Pricing is composed from two layers (embedded standard table +
+	// per-provider config.yaml pricing.rates), so there's no longer a
+	// single file's bytes to freeze verbatim the way an earlier sidecar
+	// did — this summary line is the replacement traceability mechanism
+	// (see pricing.go's package doc comment).
 	summary := fmt.Sprintf("standard table generated %s", orDash2(rep.Pricing.StandardGeneratedAt == "", "(unknown)", rep.Pricing.StandardGeneratedAt))
-	if rep.Pricing.Supplement != "" {
-		summary += fmt.Sprintf("; supplement: %s", rep.Pricing.Supplement)
-	}
 	if rep.Pricing.ProviderOverrides > 0 {
-		summary += fmt.Sprintf("; %d provider override rule(s) applied", rep.Pricing.ProviderOverrides)
+		summary += fmt.Sprintf("; %d provider rate rule(s) applied", rep.Pricing.ProviderOverrides)
 	}
 	w("%s\n\n", reqdetail.Details(t.FrozenSnapshotSummary, summary))
 }
@@ -178,8 +175,8 @@ func renderCostByClient(w func(string, ...any), rep *Report2, t i18n.CostText, c
 // costTotal is one §2 table's totals-row inputs: the sum over rows that
 // actually resolved a rate, and how many rows did and didn't. A total that
 // silently omitted the unpriced rows without saying how many there were
-// would be the same "precise, systematically low, reads like a real number"
-// failure §2.5's WindowUnpricedPct exists to prevent.
+// would be a precise-looking, systematically low number indistinguishable
+// from genuinely lower spend — see UnpricedNote's own callers.
 type costTotal struct {
 	sum              float64
 	priced, unpriced int

@@ -324,7 +324,7 @@ rates:
 		t.Fatalf("disclaimer should not be empty")
 	}
 
-	resolver := pricing.NewResolver(table, nil, 1, "")
+	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	rep, _, err := Build([]string{path}, time.Now(), nil, pricingInfo, resolver, nil)
 	if err != nil {
@@ -358,7 +358,7 @@ rates:
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := pricing.NewResolver(table, nil, 1, "")
+	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	rep, _, err := Build([]string{path}, time.Now(), nil, &Pricing{Currency: "CNY"}, resolver, nil)
 	if err != nil {

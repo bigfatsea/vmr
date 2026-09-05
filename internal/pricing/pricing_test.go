@@ -149,7 +149,7 @@ func TestRate_Scale(t *testing.T) {
 }
 
 func TestTable_LookupCaseInsensitive(t *testing.T) {
-	tbl := NewTable("USD")
+	tbl := NewTable()
 	tbl.put("Anthropic/Claude-3-5-Sonnet", Rate{InFresh: f(3)})
 	if _, ok := tbl.Lookup("anthropic/claude-3-5-sonnet"); !ok {
 		t.Fatal("Lookup should be case-insensitive")
@@ -157,7 +157,7 @@ func TestTable_LookupCaseInsensitive(t *testing.T) {
 }
 
 func TestTable_LookupPreferredSuffix(t *testing.T) {
-	tbl := NewTable("USD")
+	tbl := NewTable()
 	tbl.put("anthropic/claude-3-5-sonnet", Rate{InFresh: f(3)})
 	if r, ok := tbl.LookupPreferredSuffix("claude-3-5-sonnet"); !ok || *r.InFresh != 3 {
 		t.Fatalf("unique suffix match failed: ok=%v r=%+v", ok, r)
@@ -168,7 +168,7 @@ func TestTable_LookupPreferredSuffix(t *testing.T) {
 }
 
 func TestTable_LookupPreferredSuffix_AmbiguousNeverGuesses(t *testing.T) {
-	tbl := NewTable("USD")
+	tbl := NewTable()
 	tbl.put("vendor-a/shared-model", Rate{InFresh: f(1)})
 	tbl.put("vendor-b/shared-model", Rate{InFresh: f(2)})
 	if _, ok := tbl.LookupPreferredSuffix("shared-model"); ok {
@@ -177,9 +177,9 @@ func TestTable_LookupPreferredSuffix_AmbiguousNeverGuesses(t *testing.T) {
 }
 
 func TestMerge_WholeRowOverlay_NotPerComponent(t *testing.T) {
-	base := NewTable("USD")
+	base := NewTable()
 	base.put("v/m", Rate{InFresh: f(1), CacheRead: f(0.1), CacheWrite: f(1.25), Out: f(4)})
-	overlay := NewTable("USD")
+	overlay := NewTable()
 	// overlay only sets in_fresh — under whole-row semantics this REPLACES
 	// base's row entirely, it does not inherit base's other 3 components.
 	overlay.put("v/m", Rate{InFresh: f(99)})
@@ -198,9 +198,9 @@ func TestMerge_WholeRowOverlay_NotPerComponent(t *testing.T) {
 }
 
 func TestMerge_DisjointKeysBothSurvive(t *testing.T) {
-	base := NewTable("USD")
+	base := NewTable()
 	base.put("a/m", Rate{InFresh: f(1)})
-	overlay := NewTable("USD")
+	overlay := NewTable()
 	overlay.put("b/m", Rate{InFresh: f(2)})
 	merged := Merge(base, overlay)
 	if _, ok := merged.Lookup("a/m"); !ok {
@@ -219,9 +219,9 @@ func TestMerge_DisjointKeysBothSurvive(t *testing.T) {
 // "is this table stale" signal design doc §4.2③ requires (vmr report's §2
 // appendix, vmr check's staleness display).
 func TestMerge_PreservesBaseGeneratedAt(t *testing.T) {
-	base := NewTable("USD")
+	base := NewTable()
 	base.GeneratedAt = "2026-08-07"
-	overlay := NewTable("USD")
+	overlay := NewTable()
 	merged := Merge(base, overlay)
 	if merged.GeneratedAt != "2026-08-07" {
 		t.Fatalf("GeneratedAt = %q, want %q (base's generation date must survive the merge)", merged.GeneratedAt, "2026-08-07")
@@ -229,7 +229,7 @@ func TestMerge_PreservesBaseGeneratedAt(t *testing.T) {
 }
 
 func TestMerge_NilBase_NoPanic(t *testing.T) {
-	overlay := NewTable("USD")
+	overlay := NewTable()
 	overlay.put("a/m", Rate{InFresh: f(1)})
 	merged := Merge(nil, overlay) // must not panic dereferencing a nil base
 	if _, ok := merged.Lookup("a/m"); !ok {
@@ -413,16 +413,17 @@ func TestFactorBetween_MissingOrInvalidRate_Rejected(t *testing.T) {
 	}
 }
 
-// --- ParseTableWithRates ---
+// --- row-level currency, self-contained via the file's own exchange_rate: block ---
 
-func TestParseTableWithRates_RowLevelCurrency_ConvertsToUSD(t *testing.T) {
+func TestParseTable_RowLevelCurrency_ConvertsToUSD(t *testing.T) {
 	data := []byte(`currency: USD
+exchange_rate: {CNY: 7.1}
 rates:
   - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
 `)
-	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 7.1})
+	tbl, err := ParseTable(data)
 	if err != nil {
-		t.Fatalf("ParseTableWithRates: %v", err)
+		t.Fatalf("ParseTable: %v", err)
 	}
 	r, ok := tbl.Lookup("domestic/model-a")
 	if !ok {
@@ -434,20 +435,18 @@ rates:
 	if got := *r.Out; got < 4-1e-9 || got > 4+1e-9 {
 		t.Fatalf("Out = %v, want 4.0 (28.4 CNY / 7.1)", got)
 	}
-	if tbl.Currency != "USD" {
-		t.Fatalf("Table.Currency = %q, want USD — the in-memory Table must always be USD regardless of source rows", tbl.Currency)
-	}
 }
 
-func TestParseTableWithRates_TableLevelDefaultCurrency(t *testing.T) {
+func TestParseTable_TableLevelDefaultCurrency(t *testing.T) {
 	data := []byte(`currency: CNY
+exchange_rate: {CNY: 7.1}
 rates:
   - {key: domestic/model-a, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
   - {key: foreign/model-b, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4}
 `)
-	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 7.1})
+	tbl, err := ParseTable(data)
 	if err != nil {
-		t.Fatalf("ParseTableWithRates: %v", err)
+		t.Fatalf("ParseTable: %v", err)
 	}
 	a, _ := tbl.Lookup("domestic/model-a")
 	if got := *a.InFresh; got < 1-1e-9 || got > 1+1e-9 {
@@ -459,87 +458,13 @@ rates:
 	}
 }
 
-func TestParseTableWithRates_MissingRate_Rejected(t *testing.T) {
+func TestParseTable_MissingRate_Rejected(t *testing.T) {
 	data := []byte(`currency: USD
 rates:
   - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
 `)
-	if _, err := ParseTableWithRates(data, nil); err == nil {
-		t.Fatal("want an error: row declares currency CNY but no rates map was given to convert it")
-	}
-}
-
-func TestParseTableWithRates_FileOwnExchangeRate_SelfContained(t *testing.T) {
-	// No external rates passed at all — the file's own exchange_rate:
-	// block must be enough on its own, proving a supplement/standard file
-	// can be fully portable across deployments.
-	data := []byte(`currency: USD
-exchange_rate: {CNY: 7.1}
-rates:
-  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
-`)
-	tbl, err := ParseTableWithRates(data, nil)
-	if err != nil {
-		t.Fatalf("ParseTableWithRates (no external rates): %v", err)
-	}
-	r, ok := tbl.Lookup("domestic/model-a")
-	if !ok {
-		t.Fatal("row not found")
-	}
-	if got := *r.InFresh; got < 1-1e-9 || got > 1+1e-9 {
-		t.Fatalf("InFresh = %v, want 1.0 (7.1 CNY / the file's own 7.1 rate)", got)
-	}
-}
-
-func TestParseTableWithRates_FileOwnExchangeRate_WinsOverExternal(t *testing.T) {
-	// The file's own exchange_rate: block must win over a conflicting
-	// external (config.yaml) rate on the same currency code — a
-	// self-declared rate is a deliberate pin, not a mere suggestion.
-	data := []byte(`currency: USD
-exchange_rate: {CNY: 7.1}
-rates:
-  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
-`)
-	tbl, err := ParseTableWithRates(data, map[string]float64{"CNY": 999}) // wildly different external rate
-	if err != nil {
-		t.Fatalf("ParseTableWithRates: %v", err)
-	}
-	r, _ := tbl.Lookup("domestic/model-a")
-	if got := *r.InFresh; got < 1-1e-9 || got > 1+1e-9 {
-		t.Fatalf("InFresh = %v, want 1.0 (the file's own 7.1 rate must win over the external 999)", got)
-	}
-}
-
-func TestParseTableWithRates_FileExchangeRate_FallsBackToExternalForOtherCurrencies(t *testing.T) {
-	// The file declares its own rate for CNY only; a JPY row must still
-	// fall back to the externally-supplied rates map.
-	data := []byte(`currency: USD
-exchange_rate: {CNY: 7.1}
-rates:
-  - {key: domestic/model-a, currency: CNY, in_fresh: 7.1, cache_read: 0.71, cache_write: 8.875, out: 28.4}
-  - {key: jp-vendor/model-b, currency: JPY, in_fresh: 155, cache_read: 15.5, cache_write: 193.75, out: 620}
-`)
-	tbl, err := ParseTableWithRates(data, map[string]float64{"JPY": 155})
-	if err != nil {
-		t.Fatalf("ParseTableWithRates: %v", err)
-	}
-	r, ok := tbl.Lookup("jp-vendor/model-b")
-	if !ok {
-		t.Fatal("row not found")
-	}
-	if got := *r.InFresh; got != 1 {
-		t.Fatalf("InFresh = %v, want 1.0 (155 JPY / the external 155 rate)", got)
-	}
-}
-
-func TestParseTableWithRates_NilRates_BehavesLikePlainParseTable(t *testing.T) {
-	data := []byte("currency: USD\nrates: []\n")
-	tbl, err := ParseTableWithRates(data, nil)
-	if err != nil {
-		t.Fatalf("ParseTableWithRates(nil rates, all-USD data): unexpected error: %v", err)
-	}
-	if tbl.Currency != "USD" {
-		t.Fatalf("Table.Currency = %q, want USD", tbl.Currency)
+	if _, err := ParseTable(data); err == nil {
+		t.Fatal("want an error: row declares currency CNY but the file declares no exchange_rate: block to convert it")
 	}
 }
 
@@ -568,7 +493,7 @@ func TestNewTableFromRows_HappyPath(t *testing.T) {
 	aliases := map[string]string{
 		"alias-a": "vendor/model-a",
 	}
-	tbl, err := NewTableFromRows(rows, aliases, "USD", map[string]float64{"CNY": 7.1})
+	tbl, err := newTableFromRows(rows, aliases, "USD", map[string]float64{"CNY": 7.1})
 	if err != nil {
 		t.Fatalf("NewTableFromRows: %v", err)
 	}
@@ -602,7 +527,7 @@ func TestNewTableFromRows_RejectsDuplicatesAndInvalid(t *testing.T) {
 		{Key: "vendor/model", InFresh: &fresh},
 		{Key: "vendor/model", InFresh: &fresh},
 	}
-	if _, err := NewTableFromRows(dupRows, nil, "USD", nil); err == nil {
+	if _, err := newTableFromRows(dupRows, nil, "USD", nil); err == nil {
 		t.Errorf("want duplicate key error, got nil")
 	}
 
@@ -610,7 +535,7 @@ func TestNewTableFromRows_RejectsDuplicatesAndInvalid(t *testing.T) {
 	emptyKeyRows := []RateRow{
 		{Key: "  ", InFresh: &fresh},
 	}
-	if _, err := NewTableFromRows(emptyKeyRows, nil, "USD", nil); err == nil {
+	if _, err := newTableFromRows(emptyKeyRows, nil, "USD", nil); err == nil {
 		t.Errorf("want empty key error, got nil")
 	}
 
@@ -618,7 +543,7 @@ func TestNewTableFromRows_RejectsDuplicatesAndInvalid(t *testing.T) {
 	deepKeyRows := []RateRow{
 		{Key: "a/b/c", InFresh: &fresh},
 	}
-	if _, err := NewTableFromRows(deepKeyRows, nil, "USD", nil); err == nil {
+	if _, err := newTableFromRows(deepKeyRows, nil, "USD", nil); err == nil {
 		t.Errorf("want deep key error, got nil")
 	}
 
@@ -626,7 +551,7 @@ func TestNewTableFromRows_RejectsDuplicatesAndInvalid(t *testing.T) {
 	cnyRows := []RateRow{
 		{Key: "vendor/model", Currency: "CNY", InFresh: &fresh},
 	}
-	if _, err := NewTableFromRows(cnyRows, nil, "USD", nil); err == nil {
+	if _, err := newTableFromRows(cnyRows, nil, "USD", nil); err == nil {
 		t.Errorf("want missing exchange rate error, got nil")
 	}
 }

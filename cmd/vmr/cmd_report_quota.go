@@ -111,7 +111,7 @@ func quotaRefFor(lim core.Limit, model string, providerLive map[string]quota.Buc
 		ref.Live = &report.LiveQuota{
 			Used: used, Pct: pct,
 			PeriodStart: periodStart, PeriodEndsAt: periodEnd,
-			EstimatedPct: quota.EstimatedPct(lim.Metric, b.C, b.Estimated, b.EstimatedCost),
+			EstimatedPct: quota.EstimatedPct(lim.Metric, b.C, b.Estimated),
 		}
 	} else if _, exists := providerLive[limitKey]; !exists && len(providerLive) > 0 {
 		// Distinguishes two different-looking "Live is nil" causes that the

@@ -196,20 +196,6 @@ type Endpoint struct {
 	// provider has no quota configured (unmetered account).
 	Quota *QuotaSpec
 
-	// PricingRate is this specific provider+model's effective pricing,
-	// folded ONCE at BuildSnapshot time from the resolved PricingSpec chain
-	// (pricing.FoldSpec) — unlike Quota, NOT shared across every Endpoint
-	// expanded from the same provider, because price is inherently
-	// model-scoped (see PricingSpec's doc comment). The hot path reads it as
-	// a plain value (Rate.Cost) and never re-runs the override-chain
-	// resolution per request — pricing-table logic stays out of the routing
-	// hot path (KNOWN_ISSUES §1.0's red line). nil = no pricing resolved for
-	// this provider+model (no providers[].pricing configured and no
-	// standard/supplement table match) — a metric: cost Limit on such a
-	// provider is rejected at config-validate time before this is ever read
-	// on the request path; Cost on a nil receiver returns 0 defensively.
-	PricingRate *Rate
-
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
 	// immutable once constructed, so BuildSnapshot computes them exactly
@@ -302,13 +288,6 @@ type QuotaMetric string
 const (
 	MetricRequests QuotaMetric = "requests"
 	MetricTokens   QuotaMetric = "tokens"
-	// MetricCost is the Credits/money-denominated metric — see
-	// docs/VirtualModelRouter_Design_v4_Quota.md's pricing/cost sections.
-	// Charging it needs a resolved Endpoint.PricingRate; config.validate()
-	// rejects a metric: cost Limit on any provider+model that doesn't
-	// resolve one with every component present (see PricingSpec/Rate's doc
-	// comments).
-	MetricCost QuotaMetric = "cost"
 )
 
 // Limit is one window-level quota constraint: "in this long a period,
@@ -441,17 +420,14 @@ type Rate struct {
 }
 
 // Cost prices fresh/cacheRead/cacheWrite/out (raw token counts) through r
-// and sums them — the base(cost) formula from
-// docs/VirtualModelRouter_Design_v4_Quota.md's §3, and the formula's single
-// home: the routing half charges through it directly (router.ChargeResponse's
-// cost branch reads Endpoint.PricingRate as a plain value), the analytics
-// half reaches it through internal/pricing.Rate.Cost, which delegates here —
-// the two sides cannot drift, and cmd/vmr's quota parity test pins their
-// numbers against each other on top of that. A nil component (see this
-// type's doc comment: unknown, not free) contributes 0 rather than
-// panicking — a defensive floor, not a documented degrade path. A nil
-// receiver (Endpoint.PricingRate == nil: no pricing resolved for this
-// provider+model) returns 0 the same way.
+// and sums them — the analytics half's $ estimate formula. Not on the
+// routing hot path: the routing half no longer prices anything (see
+// PricingSpec's doc comment) — this method's only caller is
+// internal/pricing.Rate.Cost, which delegates here so the two package-level
+// Rate types cannot drift. A nil component (see this type's doc comment:
+// unknown, not free) contributes 0 rather than panicking — a defensive
+// floor, not a documented degrade path. A nil receiver returns 0 the same
+// way.
 func (r *Rate) Cost(fresh, cacheRead, cacheWrite, out int64) float64 {
 	if r == nil {
 		return 0
@@ -467,13 +443,14 @@ func (r *Rate) Cost(fresh, cacheRead, cacheWrite, out int64) float64 {
 }
 
 // PricingOverride is one model-scoped rule from an account's
-// providers[].pricing.overrides, already filtered (at resolve time, in
+// providers[].pricing.rates, already filtered (at resolve time, in
 // internal/pricing) to the ones whose `model` pattern matches this specific
-// Endpoint's Model — see PricingSpec.EffectiveRate (internal/pricing.
-// EffectiveRate, the function that actually walks this slice; core stays
-// pure data, per this package's own "shared types, no internal deps"
-// charter). No time dimension (date/hour window) — P0-A dropped that
-// functionality; see internal/pricing.OverrideRule's doc comment for why.
+// Endpoint's Model — see internal/pricing.EffectiveRate, the function that
+// actually walks this slice; core stays pure data, per this package's own
+// "shared types, no internal deps" charter. No time dimension (date/hour
+// window): a static, per-model price differentiation covers the
+// overwhelming majority of real-world "this account's price differs by
+// model" needs.
 type PricingOverride struct {
 	// Discount, when non-nil, means "the rate that resolves BELOW this rule
 	// in the chain, scaled by this factor" — NOT always PricingSpec.Base
@@ -488,36 +465,32 @@ type PricingOverride struct {
 	Explicit Rate
 }
 
-// PricingSpec is one provider+model's fully resolved pricing :
-// Base — the rate reachable with no Override present (from the
-// standard/supplement table, or an account override that fully replaces
-// it) — plus zero or more Overrides layered on top, evaluated in written
-// order (first-match-wins; a Discount composes against whatever the chain
-// below it resolves to). Attached per-Endpoint (not per-account, unlike
-// QuotaSpec) because price is inherently model-scoped — see
-// docs/VirtualModelRouter_Design_v4_Quota.md's "9.2 运行态" section
-// ("定价解析结果的挂点不一样") for why this couldn't be shared the way
-// QuotaSpec is.
+// PricingSpec is one provider+model's fully resolved pricing, ALWAYS in
+// USD (see internal/pricing.Table's doc comment: every rate this package
+// resolves is USD by the time it reaches this type — a provider's own
+// pricing.currency annotation is converted once at config-validate time,
+// well before Resolve ever runs): Base — the rate reachable with no
+// Override present (from the standard table, or an account rate that fully
+// replaces it) — plus zero or more Overrides layered on top, evaluated in
+// written order (first-match-wins; a Discount composes against whatever the
+// chain below it resolves to).
+//
+// Not on the routing hot path — the routing half doesn't resolve or carry
+// pricing at all anymore (see KNOWN_ISSUES §1.0). This type exists purely
+// for the analytics half's offline $ estimates: cmd/vmr/cmd_report.go
+// resolves it via internal/pricing.Resolve/Resolver, and vmr check's
+// display uses it to show what a provider's pricing.rates would resolve
+// to.
 //
 // Base and Overrides stay deliberately un-folded as a chain: a wildcard
 // catch-all Override (e.g. a blanket account discount) can sit above a
 // model-specific Explicit override, and EffectiveRate composes a discount
 // against whatever resolves BELOW it in the chain — folding an override
 // into Base at Resolve time while also keeping it in Overrides would
-// double-apply it. That constraint is on this structure's shape, not on
-// when resolution happens: P0-A made a spec fully static, so
-// EffectiveRate(spec) is a pure function of it, and the routing half
-// consumes the spec already folded — BuildSnapshot caches pricing.FoldSpec's
-// result on Endpoint.PricingRate. This type therefore only lives on the
-// config side (Config.ResolvedPricing, vmr check's display) and inside
-// internal/pricing; nothing re-resolves the chain per request.
+// double-apply it.
 type PricingSpec struct {
 	Base      Rate
 	Overrides []PricingOverride
-	// Currency is the account's pricing.currency this Spec's amounts are
-	// denominated in — carried along so a charge doesn't need a second
-	// lookup back into config just to label the number it just computed.
-	Currency string
 }
 
 // QuotaSpec is a provider's full quota configuration: one or more Limits

@@ -1,9 +1,9 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-06, by Sonnet 5
 
 // Pricing display for `vmr check` — split out of cmd_check.go when the file
 // crossed its archtest line budget: the pricing block (standard-table
-// freshness, per-provider resolved rates, rate formatting) is one cohesive
-// concern that only printProviders and printGlobalSettings consume.
+// freshness, exchange-rate provenance, per-provider declared rates) is one
+// cohesive concern that only printProviders and printGlobalSettings consume.
 package main
 
 import (
@@ -32,13 +32,13 @@ const pricingStaleAfter = 60 * 24 * time.Hour
 
 // pricingTableLine describes the standard price table backing this config's
 // $ figures — its generation date, and whether that date is old enough to
-// deserve a refresh. ok=false when nothing in this config touches pricing at
-// all (no global pricing: block, no providers[].pricing, no metric: cost
-// Limit), so the common quota-free config gains no new line.
+// deserve a refresh. ok=false only when the embedded table itself somehow
+// failed to load (PricingTable's error path) — otherwise the table is
+// always present, since it no longer depends on anything the config
+// declares (see docs/future-strategy/pricing_architecture_simplification_plan.md
+// decisions 1/2: the two-layer model has no "config touches no pricing at
+// all" case anymore).
 func pricingTableLine(cfg *config.Config) (string, bool) {
-	if len(cfg.ProviderPricingPolicies) == 0 && cfg.Pricing == nil {
-		return "", false
-	}
 	table, err := cfg.PricingTable()
 	if err != nil || table == nil {
 		return "", false
@@ -53,29 +53,6 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 			}
 		}
 	}
-	// cfg.Pricing's currency/exchange_rate/supplement are otherwise
-	// invisible in this output, yet directly determine what unit a
-	// metric: cost quota's amount= (below) is denominated in.
-	if cfg.Pricing != nil {
-		currency := cfg.Pricing.Currency
-		switch {
-		case currency == "":
-			line += "; currency=USD"
-		case cfg.Pricing.ExchangeRate[currency] != 0:
-			line += fmt.Sprintf("; currency=%s (1 USD = %g %s)", currency, cfg.Pricing.ExchangeRate[currency], currency)
-		default:
-			line += "; currency=" + currency
-		}
-		if len(cfg.Pricing.Rates) > 0 {
-			line += fmt.Sprintf("; %d inline rate(s)", len(cfg.Pricing.Rates))
-		}
-		if cfg.Pricing.Supplement != "" {
-			line += "; supplement=" + cfg.Pricing.Supplement
-		}
-		if cfg.Pricing.Standard != "" {
-			line += "; standard=" + cfg.Pricing.Standard
-		}
-	}
 	// Aliases silently redirect a bare model name to another vendor's row
 	// (see internal/pricing.Table.aliases). That is exactly the kind of
 	// resolution an operator should be able to see is in effect before
@@ -87,58 +64,71 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 	return line, true
 }
 
-// printProviderPricing renders p's resolved metric: cost pricing , if
-// any — one line per upstream model this provider actually resolved a
-// price for (see config.Config.ResolvedPricing), so an operator can see
-// exactly what rate a cost account will be charged at without cross-
-// referencing the standard table by hand. Absent entirely for a provider
-// with no resolved pricing, same as every other optional section here.
-func printProviderPricing(w io.Writer, cfg *config.Config, p config.Provider) {
-	var models []string
-	prefix := p.Name + "\x00"
-	for key := range cfg.ResolvedPricing {
-		if strings.HasPrefix(key, prefix) {
-			models = append(models, strings.TrimPrefix(key, prefix))
+// exchangeRateLine summarizes every currency actually in use across this
+// config — the top-level exchange_rate: block's own keys, plus every
+// provider's pricing.currency — and for each, whether its rate came from
+// the user's own exchange_rate: block or the built-in default table (see
+// pricing.EffectiveExchangeRate and the plan doc's §2.3: an operator must
+// be able to tell the two apart, not just see a number). ok=false when
+// nothing in this config names a non-USD currency at all — the common
+// case, and the line would say nothing useful.
+func exchangeRateLine(cfg *config.Config) (string, bool) {
+	used := map[string]bool{}
+	for ccy := range cfg.ExchangeRate {
+		used[strings.ToUpper(strings.TrimSpace(ccy))] = true
+	}
+	for _, p := range cfg.Providers {
+		if p.Pricing != nil && p.Pricing.Currency != "" {
+			used[strings.ToUpper(strings.TrimSpace(p.Pricing.Currency))] = true
 		}
 	}
-	if len(models) > 0 {
-		sort.Strings(models)
-		fmt.Fprintln(w, "  pricing:")
-		for _, model := range models {
-			spec := cfg.ResolvedPricing[prefix+model]
-			// EffectiveRate, not spec.Base: an account with an override (e.g.
-			// discount:) is charged at the resolved rate, not the standard
-			// table's list price — printing Base here would show an operator a
-			// number that has nothing to do with what metric: cost will actually
-			// charge.
-			r := pricing.EffectiveRate(spec)
-			fmt.Fprintln(w, checkLine(4, model, fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s %s/1M (%d override rule(s))",
-				ratePart(r.InFresh), ratePart(r.CacheRead), ratePart(r.CacheWrite), ratePart(r.Out), spec.Currency, len(spec.Overrides))))
-		}
-		return
+	if len(used) == 0 {
+		return "", false
 	}
+	_, defaultGeneratedAt, _ := pricing.LoadDefaultExchangeRate()
+	names := make([]string, 0, len(used))
+	for ccy := range used {
+		names = append(names, ccy)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, ccy := range names {
+		if v, ok := cfg.ExchangeRate[ccy]; ok {
+			parts = append(parts, fmt.Sprintf("%s=%g (user)", ccy, v))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s (built-in default, generated %s)", ccy, defaultGeneratedAt))
+	}
+	return strings.Join(parts, ", "), true
+}
+
+// printProviderPricing renders p's declared providers[].pricing block, if
+// any — currency annotation, aliases, and rates exactly as written (already
+// validated at config-load time: aliases resolve, rates are well-formed —
+// see resolvePricing). Absent entirely for a provider with no pricing:
+// block, same as every other optional section here. Pricing never reaches
+// the request path (see core.PricingSpec's doc comment), so there is no
+// "resolved per-endpoint rate" to show the way an older build did — the
+// full resolution (standard table + this account's rates/aliases) only
+// happens offline, in `vmr report`/`vmr analyze`.
+func printProviderPricing(w io.Writer, p config.Provider) {
 	if p.Pricing == nil {
 		return
 	}
-	// A declared providers[].pricing block with no ResolvedPricing entry
-	// means no virtual model's endpoint currently routes any model to this
-	// provider (so resolvePricing had nothing to resolve against) — show
-	// the raw declaration instead of silently dropping it, since it's
-	// explicit config a human wrote and may expect to see confirmed.
-	fmt.Fprintln(w, "  pricing: (declared; not resolved — no routed endpoint references this provider)")
-	for _, local := range fmtutil.SortedKeys(p.Pricing.Map) {
-		fmt.Fprintln(w, checkLine(4, "map", local+" -> "+p.Pricing.Map[local]))
+	fmt.Fprintln(w, "  pricing:")
+	if p.Pricing.Currency != "" {
+		fmt.Fprintln(w, checkLine(4, "currency", p.Pricing.Currency))
 	}
-	for i, oc := range p.Pricing.Overrides {
+	for _, local := range fmtutil.SortedKeys(p.Pricing.Aliases) {
+		fmt.Fprintln(w, checkLine(4, "aliases", local+" -> "+p.Pricing.Aliases[local]))
+	}
+	for i, oc := range p.Pricing.Rates {
 		val := fmt.Sprintf("in_fresh=%s cache_read=%s cache_write=%s out=%s",
 			ratePart(oc.InFresh), ratePart(oc.CacheRead), ratePart(oc.CacheWrite), ratePart(oc.Out))
 		if oc.Discount != nil {
 			val = fmt.Sprintf("discount=%g", *oc.Discount)
 		}
-		if oc.Currency != "" {
-			val += " currency=" + oc.Currency
-		}
-		fmt.Fprintln(w, checkLine(4, fmt.Sprintf("overrides[%d] model=%s", i, oc.Model), val))
+		fmt.Fprintln(w, checkLine(4, fmt.Sprintf("rates[%d] model=%s", i, oc.Model), val))
 	}
 }
 
@@ -152,7 +142,7 @@ func ratePart(v *float64) string {
 	// %.6g rather than %g: a rate that went through an exchange-rate
 	// multiplication (e.g. 3.0 USD x 7.1) routinely lands on a float64 like
 	// 21.299999999999997 — cosmetic noise for a display line, not a value
-	// anything downstream computes from (router.ChargeResponse/componentCost
-	// read the pricing.Rate directly, never this formatted string).
+	// anything downstream computes from (vmr report's pricing.Resolver
+	// reads the pricing.Rate directly, never this formatted string).
 	return strconv.FormatFloat(*v, 'g', 6, 64)
 }

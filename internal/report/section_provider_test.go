@@ -123,7 +123,7 @@ func TestRenderProviderQuotaTable_RendersLiveAndWindowSeparately(t *testing.T) {
 		Providers: []ProviderRow{{Provider: "acct1", Requests: 1, RequestsOK: 1}},
 		ProviderQuotas: []ProviderQuotaRow{{
 			Provider: "acct1", Metric: "requests", Every: "1mo", Amount: 18000,
-			WindowConsumed:   f64(104),
+			WindowConsumed:   104,
 			Live:             &LiveQuota{Used: 12240, Pct: 68.0},
 			PeriodStart:      ps,
 			PeriodEndsAt:     pe,
@@ -149,7 +149,7 @@ func TestRenderProviderQuotaTable_LiveNilRendersDash(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{{
 			Provider: "acct1", Metric: "requests", Every: "1mo", Amount: 1000,
-			WindowConsumed: f64(5), Live: nil,
+			WindowConsumed: 5, Live: nil,
 		}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -166,7 +166,7 @@ func TestRenderProviderQuotaTable_EstimatedPctAnnotatesLiveUsed(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{{
 			Provider: "acct1", Metric: "tokens", Every: "1mo", Amount: 1000,
-			WindowConsumed: f64(5),
+			WindowConsumed: 5,
 			Live:           &LiveQuota{Used: 400, Pct: 40.0, EstimatedPct: 10.0},
 		}},
 	}
@@ -183,7 +183,7 @@ func TestRenderProviderQuotaTable_ZeroEstimatedPctNoAnnotation(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{{
 			Provider: "acct1", Metric: "tokens", Every: "1mo", Amount: 1000,
-			WindowConsumed: f64(5),
+			WindowConsumed: 5,
 			Live:           &LiveQuota{Used: 400, Pct: 40.0, EstimatedPct: 0},
 		}},
 	}
@@ -196,22 +196,6 @@ func TestRenderProviderQuotaTable_ZeroEstimatedPctNoAnnotation(t *testing.T) {
 	}
 }
 
-// TestRenderProviderQuotaTable_WindowConsumedNilRendersDash is the
-// render-layer lock-in: WindowConsumed == nil (unresolved cost pricing)
-// must render "-", never a fabricated "0".
-func TestRenderProviderQuotaTable_WindowConsumedNilRendersDash(t *testing.T) {
-	rep := &Report2{
-		ProviderQuotas: []ProviderQuotaRow{{
-			Provider: "acct1", Metric: "cost", Every: "1mo", Amount: 100,
-			WindowConsumed: nil, Live: nil,
-		}},
-	}
-	out := renderProvidersStr(rep, i18n.EN)
-	if !strings.Contains(out, "| acct1 | cost | - | - |") {
-		t.Errorf("nil WindowConsumed must render as a dash, not 0:\n%s", out)
-	}
-}
-
 // TestRenderProviderQuotaTable_OverQuotaMarksStar is the lock-in:
 // Pct is deliberately unclamped, so an over-quota account (>=100%) needs a
 // visible flag, not a plain number indistinguishable from a healthy one.
@@ -219,11 +203,11 @@ func TestRenderProviderQuotaTable_OverQuotaMarksStar(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{
 			{Provider: "over", Metric: "tokens", Every: "1mo", Amount: 1000,
-				WindowConsumed: f64(5), Live: &LiveQuota{Used: 1389, Pct: 138.9}},
+				WindowConsumed: 5, Live: &LiveQuota{Used: 1389, Pct: 138.9}},
 			{Provider: "healthy", Metric: "tokens", Every: "1mo", Amount: 1000,
-				WindowConsumed: f64(5), Live: &LiveQuota{Used: 680, Pct: 68.0}},
+				WindowConsumed: 5, Live: &LiveQuota{Used: 680, Pct: 68.0}},
 			{Provider: "exact", Metric: "tokens", Every: "1mo", Amount: 1000,
-				WindowConsumed: f64(5), Live: &LiveQuota{Used: 1000, Pct: 100.0}},
+				WindowConsumed: 5, Live: &LiveQuota{Used: 1000, Pct: 100.0}},
 		},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -249,7 +233,7 @@ func TestRenderProviderQuotaTable_OverQuotaFootnoteAbsentWhenNoneFlagged(t *test
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{
 			{Provider: "healthy", Metric: "tokens", Every: "1mo", Amount: 1000,
-				WindowConsumed: f64(5), Live: &LiveQuota{Used: 680, Pct: 68.0}},
+				WindowConsumed: 5, Live: &LiveQuota{Used: 680, Pct: 68.0}},
 		},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -265,7 +249,7 @@ func TestRenderProviderQuotaTable_OverQuotaFootnoteAbsentWhenNoneFlagged(t *test
 func TestRenderProviderQuotaTable_SourcePathAndCrossInstanceWarning(t *testing.T) {
 	rep := &Report2{
 		Meta:           Meta{QuotaJSONPath: "/home/x/.vmr/logs/vmr-quota.json", QuotaInputOutsideLogDir: true},
-		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: f64(5)}},
+		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: 5}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
 	if !strings.Contains(out, "/home/x/.vmr/logs/vmr-quota.json") {
@@ -282,7 +266,7 @@ func TestRenderProviderQuotaTable_SourcePathAndCrossInstanceWarning(t *testing.T
 func TestRenderProviderQuotaTable_NoCrossInstanceWarningWhenNotFlagged(t *testing.T) {
 	rep := &Report2{
 		Meta:           Meta{QuotaJSONPath: "/home/x/.vmr/logs/vmr-quota.json", QuotaInputOutsideLogDir: false},
-		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: f64(5)}},
+		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: 5}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
 	if strings.Contains(out, "may be from a different machine") {
@@ -295,7 +279,7 @@ func TestRenderProviderQuotaTable_NoCrossInstanceWarningWhenNotFlagged(t *testin
 // Markdown) — must degrade to no source-path line, not a blank/broken one.
 func TestRenderProviderQuotaTable_NoSourcePathLineWhenMetaEmpty(t *testing.T) {
 	rep := &Report2{
-		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: f64(5)}},
+		ProviderQuotas: []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: 5}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
 	if strings.Contains(out, "real-time counter is read from") {
@@ -309,8 +293,8 @@ func TestRenderProviderQuotaTable_NoSourcePathLineWhenMetaEmpty(t *testing.T) {
 func TestRenderProviderQuotaTable_NoOverlapMarksDagger(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{
-			{Provider: "disjoint", WindowConsumed: f64(5), WindowNoOverlap: true},
-			{Provider: "normal", WindowConsumed: f64(3), WindowNoOverlap: false},
+			{Provider: "disjoint", WindowConsumed: 5, WindowNoOverlap: true},
+			{Provider: "normal", WindowConsumed: 3, WindowNoOverlap: false},
 		},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -330,7 +314,7 @@ func TestRenderProviderQuotaTable_NoOverlapMarksDagger(t *testing.T) {
 // never fires.
 func TestRenderProviderQuotaTable_NoOverlapFootnoteAbsentWhenNoneFlagged(t *testing.T) {
 	rep := &Report2{
-		ProviderQuotas: []ProviderQuotaRow{{Provider: "normal", WindowConsumed: f64(3)}},
+		ProviderQuotas: []ProviderQuotaRow{{Provider: "normal", WindowConsumed: 3}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
 	if strings.Contains(out, "shares NO time at all") {
@@ -344,8 +328,8 @@ func TestRenderProviderQuotaTable_NoOverlapFootnoteAbsentWhenNoneFlagged(t *test
 func TestRenderProviderQuotaTable_ConfigChangedMarksDoubleDagger(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{
-			{Provider: "changed", WindowConsumed: f64(5), Live: nil, LiveConfigChanged: true},
-			{Provider: "stale", WindowConsumed: f64(3), Live: nil, LiveConfigChanged: false},
+			{Provider: "changed", WindowConsumed: 5, Live: nil, LiveConfigChanged: true},
+			{Provider: "stale", WindowConsumed: 3, Live: nil, LiveConfigChanged: false},
 		},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -361,7 +345,7 @@ func TestRenderProviderQuotaTable_ConfigChangedMarksDoubleDagger(t *testing.T) {
 // makes sure the footnote doesn't clutter the common stale-period case.
 func TestRenderProviderQuotaTable_ConfigChangedFootnoteAbsentWhenNoneFlagged(t *testing.T) {
 	rep := &Report2{
-		ProviderQuotas: []ProviderQuotaRow{{Provider: "stale", WindowConsumed: f64(3), Live: nil}},
+		ProviderQuotas: []ProviderQuotaRow{{Provider: "stale", WindowConsumed: 3, Live: nil}},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
 	if strings.Contains(out, "-‡") || strings.Contains(out, "keyed under the OLD config") {
@@ -390,8 +374,8 @@ func TestRenderProviderQuotaTable_ZH(t *testing.T) {
 func TestRenderProviderQuotaTable_ModelScopeInProviderCell(t *testing.T) {
 	rep := &Report2{
 		ProviderQuotas: []ProviderQuotaRow{
-			{Provider: "openai", Metric: "tokens", Every: "1mo", Amount: 1000, WindowConsumed: f64(5)},
-			{Provider: "openai", Models: []string{"gpt-4o"}, Metric: "tokens", Every: "1d", Amount: 100, WindowConsumed: f64(3)},
+			{Provider: "openai", Metric: "tokens", Every: "1mo", Amount: 1000, WindowConsumed: 5},
+			{Provider: "openai", Models: []string{"gpt-4o"}, Metric: "tokens", Every: "1d", Amount: 100, WindowConsumed: 3},
 		},
 	}
 	out := renderProvidersStr(rep, i18n.EN)
@@ -408,7 +392,7 @@ func TestRenderProviderQuotaTable_ModelScopeInProviderCell(t *testing.T) {
 // is, and absent when the table is absent (even with skip stats set).
 func TestRenderProviderQuotaTable_SkippedNoteInsideTable(t *testing.T) {
 	withTable := &Report2{
-		ProviderQuotas:                []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: f64(5)}},
+		ProviderQuotas:                []ProviderQuotaRow{{Provider: "acct1", WindowConsumed: 5}},
 		ProviderQuotaSkippedAttempts:  2,
 		ProviderQuotaSkippedProviders: []string{"ghost-a"},
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-08-09, by Sonnet 5
+// Ver 2026-09-06, by Sonnet 5
 package main
 
 import (
@@ -9,16 +9,16 @@ import (
 	"vmr/internal/config"
 )
 
-// TestBuildPricing_NoDisplayCurrency_Unaffected pins the pre-existing
-// behavior (config.yaml's pricing.currency, no -currency involved) so a
-// regression in buildPricing's new display-currency branch can't silently
-// change the common case.
-func TestBuildPricing_NoDisplayCurrency_Unaffected(t *testing.T) {
+// TestBuildPricing_NoDisplayCurrency_ComputeCurrencyIsUSD pins the new
+// architecture's baseline: resolution is always USD (see
+// internal/pricing.Table's doc comment — a provider's own pricing.currency
+// is converted once at config-validate time, well before this ever runs).
+// With no -currency requested, summary.Currency stays USD and RateFor
+// returns the raw, unconverted standard-table price.
+func TestBuildPricing_NoDisplayCurrency_ComputeCurrencyIsUSD(t *testing.T) {
 	configPath := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
-pricing:
-  currency: CNY
-  exchange_rate: {CNY: 7.1}
+exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
     base_url: {anthropic-messages: https://api.anthropic.com}
@@ -32,31 +32,31 @@ models:
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
+	if cfgErr != nil {
+		t.Fatalf("config.Load: %v", cfgErr)
+	}
 	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "", nil)
-	if summary.Currency != "CNY" {
-		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
+	if summary.Currency != "USD" {
+		t.Fatalf("summary.Currency = %q, want USD", summary.Currency)
 	}
 	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
-	// Standard table lists this model at 3.0 USD/1M in_fresh -> 3*7.1 CNY.
-	if got, want := *rate.InFresh, 3*7.1; got < want-1e-6 || got > want+1e-6 {
-		t.Errorf("InFresh = %v, want %v (unconverted CNY accounting figure)", got, want)
+	// Standard table lists this model at 3.0 USD/1M in_fresh — no
+	// conversion at all when no -currency is requested.
+	if got, want := *rate.InFresh, 3.0; got < want-1e-6 || got > want+1e-6 {
+		t.Errorf("InFresh = %v, want %v (unconverted USD standard price)", got, want)
 	}
 }
 
-// TestBuildPricing_DisplayCurrency_ConvertsFromComputeCurrency covers the
-// new feature: compute in the config's accounting currency (CNY), DISPLAY
-// in a different currency (JPY) via extraRates (report.yaml's own map) —
-// the resolver must hand back JPY-scaled numbers and summary.Currency must
-// relabel to JPY.
-func TestBuildPricing_DisplayCurrency_ConvertsFromComputeCurrency(t *testing.T) {
+// TestBuildPricing_DisplayCurrency_ConvertsFromUSD covers -currency: compute
+// stays USD, DISPLAY converts via extraRates (report.yaml's own rates map)
+// — the resolver must hand back the display-scaled numbers and
+// summary.Currency must relabel accordingly.
+func TestBuildPricing_DisplayCurrency_ConvertsFromUSD(t *testing.T) {
 	configPath := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
-pricing:
-  currency: CNY
-  exchange_rate: {CNY: 7.1}
 providers:
   - name: anthropic
     base_url: {anthropic-messages: https://api.anthropic.com}
@@ -71,6 +71,9 @@ models:
 	var tw bytes.Buffer
 	extraRates := map[string]float64{"JPY": 155}
 	cfg, cfgErr := config.Load(configPath)
+	if cfgErr != nil {
+		t.Fatalf("config.Load: %v", cfgErr)
+	}
 	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "JPY", extraRates)
 	if summary.Currency != "JPY" {
 		t.Fatalf("summary.Currency = %q, want JPY", summary.Currency)
@@ -79,26 +82,25 @@ models:
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
-	// 3.0 USD -> CNY (accounting, x7.1) -> JPY (display, /7.1 x155): the
-	// USD list price converted straight to JPY via the USD pivot.
 	want := 3.0 * 155
 	if got := *rate.InFresh; got < want-1e-6 || got > want+1e-6 {
-		t.Errorf("InFresh = %v, want %v (3.0 USD standard price -> JPY via USD pivot)", got, want)
+		t.Errorf("InFresh = %v, want %v (3.0 USD standard price -> JPY)", got, want)
 	}
 	if tw.String() != "" {
 		t.Errorf("expected no warning when the conversion succeeds, got %q", tw.String())
 	}
 }
 
-// TestBuildPricing_DisplayCurrency_ConfigRateWins covers cfg.Pricing.
-// ExchangeRate supplying the needed rate with no report.yaml/-currency
-// extraRates at all.
-func TestBuildPricing_DisplayCurrency_ConfigRateWins(t *testing.T) {
+// TestBuildPricing_DisplayCurrency_ConfigExchangeRateWins covers config.yaml's
+// top-level exchange_rate: supplying the needed rate with no report.yaml/
+// -currency extraRates at all — and that a user-declared rate wins over the
+// built-in default table (CNY: 7.1 there — see
+// internal/pricing/standard_exchange_rate.yaml) rather than merely
+// coinciding with it.
+func TestBuildPricing_DisplayCurrency_ConfigExchangeRateWins(t *testing.T) {
 	configPath := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
-pricing:
-  currency: USD
-  exchange_rate: {CNY: 7.1}
+exchange_rate: {CNY: 8.0}
 providers:
   - name: anthropic
     base_url: {anthropic-messages: https://api.anthropic.com}
@@ -112,6 +114,9 @@ models:
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
+	if cfgErr != nil {
+		t.Fatalf("config.Load: %v", cfgErr)
+	}
 	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "CNY", nil)
 	if summary.Currency != "CNY" {
 		t.Fatalf("summary.Currency = %q, want CNY", summary.Currency)
@@ -120,15 +125,16 @@ models:
 	if !ok || rate.InFresh == nil {
 		t.Fatal("RateFor: no rate resolved")
 	}
-	if got, want := *rate.InFresh, 3*7.1; got < want-1e-6 || got > want+1e-6 {
-		t.Errorf("InFresh = %v, want %v", got, want)
+	if got, want := *rate.InFresh, 3.0*8.0; got < want-1e-6 || got > want+1e-6 {
+		t.Errorf("InFresh = %v, want %v (config's own exchange_rate, not the built-in default 7.1)", got, want)
 	}
 }
 
 // TestBuildPricing_DisplayCurrency_MissingRate_DegradesWithWarning: no rate
-// anywhere to convert USD -> CNY — must warn and keep the original
-// (compute) currency, never error out (vmr report's "a pricing problem
-// costs $ accuracy, never the whole report" philosophy).
+// anywhere (not the config, not the built-in default table) to convert USD
+// -> a made-up currency — must warn and keep USD, never error out (vmr
+// report's "a pricing problem costs $ accuracy, never the whole report"
+// philosophy).
 func TestBuildPricing_DisplayCurrency_MissingRate_DegradesWithWarning(t *testing.T) {
 	configPath := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
@@ -145,11 +151,14 @@ models:
 `)
 	var tw bytes.Buffer
 	cfg, cfgErr := config.Load(configPath)
-	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "CNY", nil)
+	if cfgErr != nil {
+		t.Fatalf("config.Load: %v", cfgErr)
+	}
+	resolver, summary := buildPricing(cfg, cfgErr, configPath, &tw, "ZZZ", nil)
 	if summary.Currency != "USD" {
 		t.Fatalf("summary.Currency = %q, want USD (degrade keeps the compute currency)", summary.Currency)
 	}
-	if !strings.Contains(tw.String(), "CNY") {
+	if !strings.Contains(tw.String(), "ZZZ") {
 		t.Errorf("expected a warning mentioning the unresolved target currency, got %q", tw.String())
 	}
 	rate, ok := resolver.RateFor("anthropic", "claude-3-7-sonnet-20250219")

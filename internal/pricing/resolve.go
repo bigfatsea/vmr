@@ -8,20 +8,14 @@ import (
 	"vmr/internal/core"
 )
 
-// OverrideRule is one providers[].pricing.overrides entry, as resolved by
+// OverrideRule is one providers[].pricing.rates entry, as resolved by
 // internal/config from YAML — the input shape Resolve consumes. Model
 // supports a "*" wildcard (matches any upstream model); Discount and
 // Explicit are mutually exclusive (internal/config's validation enforces
 // this before Resolve ever sees a rule). No time dimension (date/hour
-// window) by design — see EffectiveRate's doc comment for why that
-// functionality was dropped rather than kept: this package used to carry
-// date_from/date_to/hour_from/hour_to promotional windows, but they priced
-// vmr's core routing decision (which is a dimensionless ratio, unaffected
-// by absolute $ precision — see the design doc's §14.2① math) at a
-// complexity cost (a full time-reachability analysis in what's now
-// Complete/resolveChain) the feature's actual value never justified. A
-// static, per-model price differentiation covers the overwhelming majority
-// of real-world "this account's price differs by model" needs.
+// window) by design: a static, per-model price differentiation covers the
+// overwhelming majority of real-world "this account's price differs by
+// model" needs.
 type OverrideRule struct {
 	Model    string // exact upstream model name, or "*"
 	Discount *float64
@@ -49,26 +43,28 @@ func fromCoreRate(r core.Rate) Rate {
 
 // ResolveOptions bundles one vmr provider's pricing configuration inputs —
 // everything Resolve needs beyond the provider/model name pair themselves.
+// Deliberately carries no currency/exchange-rate fields: every input here
+// is already USD by the time Resolve sees it — Table is always USD (see
+// Table's doc comment), and Aliases/Overrides come from
+// providers[].pricing, whose own Currency annotation internal/config
+// already converted to USD once at validate time (see
+// docs/future-strategy/pricing_architecture_simplification_plan.md decision
+// 3/4). Resolve therefore never converts currency; the only remaining
+// currency step in this package is Resolver.WithDisplayFactor, a pure
+// display-time rescale applied AFTER resolution, for vmr report's -currency
+// flag.
 type ResolveOptions struct {
-	// Table is the merged supplement-over-standard table (see embed.go's
+	// Table is the merged generated+curated standard table (see embed.go's
 	// LoadStandard / Merge) — canonical-key -> Rate.
 	Table *Table
-	// Map is providers[].pricing.map: a local upstream model name -> the
-	// canonical key it should resolve to, when the automatic 4-step
+	// Aliases is providers[].pricing.aliases: a local upstream model name ->
+	// the canonical key it should resolve to, when the automatic 4-step
 	// resolution (see resolveCanonicalKey) would get it wrong or fail.
-	Map map[string]string
-	// Overrides is providers[].pricing.overrides, UNFILTERED (every model
+	Aliases map[string]string
+	// Overrides is providers[].pricing.rates, UNFILTERED (every model
 	// pattern, not just ones matching a specific endpoint) — Resolve
 	// filters to the ones matching model itself.
 	Overrides []OverrideRule
-	// ExchangeRateToTarget converts one USD unit into the account's target
-	// pricing.currency (1.0 when the target currency IS USD, or when no
-	// exchange_rate applies because there's nothing from Table to convert —
-	// account overrides are already in the target currency, never
-	// converted). 0 is treated as "not configured" and only matters if
-	// Table actually contributes a rate.
-	ExchangeRateToTarget float64
-	Currency             string
 }
 
 func lookupMapping(mapping map[string]string, model string) (string, bool) {
@@ -89,7 +85,7 @@ func lookupMapping(mapping map[string]string, model string) (string, bool) {
 }
 
 // resolveCanonicalKey implements the design doc's four-step automatic
-// resolution: ① opts.Map's explicit entry for model (matched case-insensitively),
+// resolution: ① opts.Aliases' explicit entry for model (matched case-insensitively),
 // ② "<provider>/<model>" (provider here is vmr's OWN providers[].name — see the
 // design doc's literal wording; this only helps when a provider happens to be
 // named after its upstream vendor, e.g. "anthropic", "deepseek"), ③ the bare
@@ -112,29 +108,26 @@ func lookupMapping(mapping map[string]string, model string) (string, bool) {
 // org-prefixed request must land on that same row (the serving vendor's own
 // price), not diverge to a first-party list price via the suffix scan alone.
 // The retry only ever WIDENS what resolves — every name a raw step answered
-// keeps that answer, including map entries pinned on the raw name. No new
-// pricing decision is introduced; this is not the retired generateAliases
-// mechanic (it pins nothing — it lowers an input form into the space the
-// existing four steps and vendor precedence already decide).
+// keeps that answer, including alias entries pinned on the raw name.
 //
 // The alias hop sits inside step ③ rather than ahead of step ②
 // deliberately: a provider that IS the vendor (deepseek/deepseek-v4-flash)
-// or that carries an exact supplement row of its own
+// or that carries an exact rates row of its own
 // (sub2api/gemini-3.6-flash-high) already has the more specific answer, and
-// a global alias must never override a per-provider one.
-func resolveCanonicalKey(provider, model string, table *Table, mapping map[string]string) (Rate, bool) {
-	if ck, ok := lookupMapping(mapping, model); ok {
+// a table alias must never override a per-provider one.
+func resolveCanonicalKey(provider, model string, table *Table, aliases map[string]string) (Rate, bool) {
+	if ck, ok := lookupMapping(aliases, model); ok {
 		if r, ok := table.LookupRateOrAlias(ck); ok {
 			return r, true
 		}
-		// An explicit map entry naming a key the table doesn't have is a
+		// An explicit alias entry naming a key the table doesn't have is a
 		// config mistake, and config.validate() rejects it at load time
-		// (see resolvePricing's pricing.map check) precisely so this
-		// function never has to decide what a broken mapping means. Falling
-		// through to the next step here is therefore only reachable for a
-		// caller that skipped that validation — vmr report against a
-		// config.yaml it couldn't load — where best-effort resolution is
-		// the documented behavior, not a silent mis-price.
+		// precisely so this function never has to decide what a broken
+		// mapping means. Falling through to the next step here is
+		// therefore only reachable for a caller that skipped that
+		// validation — vmr report against a config.yaml it couldn't
+		// load — where best-effort resolution is the documented behavior,
+		// not a silent mis-price.
 	}
 	if r, ok := table.Lookup(provider + "/" + model); ok {
 		return r, true
@@ -147,10 +140,10 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 			return r, true
 		}
 		// An alias naming a key the merged table doesn't have is a load-time
-		// error (Table.ValidateAliases, called by LoadStandard and config's
-		// buildPricingContext), so reaching here means a caller built a
-		// Table by hand without validating; falling through to step ④ is
-		// best-effort, never a silent mis-price.
+		// error (Table.ValidateAliases, called by LoadStandard), so
+		// reaching here means a caller built a Table by hand without
+		// validating; falling through to step ④ is best-effort, never a
+		// silent mis-price.
 	}
 	if r, ok := table.LookupPreferredSuffix(model); ok {
 		return r, true
@@ -164,20 +157,20 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 	// call's own fallback is unreachable. Runs only after all four raw steps
 	// missed, so nothing that resolved before changes.
 	if b := ModelBasename(model); b != model {
-		return resolveCanonicalKey(provider, b, table, mapping)
+		return resolveCanonicalKey(provider, b, table, aliases)
 	}
 	return Rate{}, false
 }
 
 // Resolve computes provider+model's PricingSpec: Base is the RAW
-// canonical-key lookup (opts.Map / the 4-step auto-resolution), converted
-// to opts.Currency via opts.ExchangeRateToTarget — deliberately with NO
-// override folded in (see EffectiveRate for why: folding an override into
-// Base here and ALSO keeping it in Overrides for EffectiveRate to apply
-// would double-apply it — a discount composing against itself). Overrides
-// carries every opts.Overrides entry whose model pattern matches model, in
-// written order, unmodified; EffectiveRate is the only place that ever
-// combines Base with an Override.
+// canonical-key lookup (opts.Aliases / the 4-step auto-resolution) — always
+// USD, no conversion step (see ResolveOptions' doc comment) — deliberately
+// with NO override folded in (see EffectiveRate for why: folding an
+// override into Base here and ALSO keeping it in Overrides for
+// EffectiveRate to apply would double-apply it — a discount composing
+// against itself). Overrides carries every opts.Overrides entry whose model
+// pattern matches model, in written order, unmodified; EffectiveRate is the
+// only place that ever combines Base with an Override.
 //
 // ok=false means the chain has no anchor: neither the table nor any
 // Explicit override supplies so much as a partial rate for this
@@ -186,17 +179,9 @@ func resolveCanonicalKey(provider, model string, table *Table, mapping map[strin
 // all-nil Rate, which downstream consumers would read as a priced $0.00
 // rather than "unpriced" (see Resolver.RateFor's gate). A
 // partial/incomplete Base (some components nil) still resolves with
-// ok=true; whether that's fatal is the CALLER's decision — see Complete,
-// which config.validate() uses to decide.
+// ok=true; whether that's fatal is the CALLER's decision — see Complete.
 func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bool) {
-	base, tableHit := resolveCanonicalKey(provider, model, opts.Table, opts.Map)
-	if tableHit {
-		factor := opts.ExchangeRateToTarget
-		if factor == 0 {
-			factor = 1
-		}
-		base = base.Scale(factor)
-	}
+	base, tableHit := resolveCanonicalKey(provider, model, opts.Table, opts.Aliases)
 
 	var matching []OverrideRule
 	for _, o := range opts.Overrides {
@@ -222,7 +207,7 @@ func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bo
 		}
 	}
 
-	spec := &core.PricingSpec{Base: base.toCore(), Currency: opts.Currency}
+	spec := &core.PricingSpec{Base: base.toCore()}
 	for _, o := range matching {
 		spec.Overrides = append(spec.Overrides, o.toCoreOverride())
 	}
@@ -231,16 +216,14 @@ func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bo
 
 // EffectiveRate resolves spec's Rate: the first Override (in written/config
 // order) whose model pattern matched at Resolve time wins — Resolve already
-// filtered spec.Overrides to model, so every entry here is a live candidate
-// (no time-window eligibility check: P0-A dropped that dimension, see
-// OverrideRule's doc comment). An explicit form is used as-is; a discount
-// form scales "the rate that resolves below it in the chain" — the design
-// doc's §4.2① wording, implemented as literally as its name suggests:
-// everything BELOW this rule (later Overrides, then spec.Base), resolved
-// recursively — NOT always spec.Base directly. This matters whenever a
-// discount rule is layered above another, more specific rule (a wildcard
-// catch-all discount above a model-specific explicit override): the
-// catch-all must discount THAT rate, not fall straight through to Base
+// filtered spec.Overrides to model, so every entry here is a live candidate.
+// An explicit form is used as-is; a discount form scales "the rate that
+// resolves below it in the chain" — implemented as literally as its name
+// suggests: everything BELOW this rule (later Overrides, then spec.Base),
+// resolved recursively — NOT always spec.Base directly. This matters
+// whenever a discount rule is layered above another, more specific rule (a
+// wildcard catch-all discount above a model-specific explicit override):
+// the catch-all must discount THAT rate, not fall straight through to Base
 // (which, for a model with no standard-table entry at all and only account
 // overrides, may not even be complete). No override at all (the common
 // case) resolves to spec.Base itself. Deterministic — the same spec always
@@ -255,33 +238,15 @@ func EffectiveRate(spec *core.PricingSpec) Rate {
 	return r
 }
 
-// FoldSpec resolves spec's override chain once and returns the effective
-// rate as a *core.Rate — the shape core.Endpoint.PricingRate carries, so
-// the routing hot path reads a precomputed value instead of re-running
-// resolveChain per request (KNOWN_ISSUES §1.0's red line: pricing-table
-// logic stays out of the live path). The result is exactly
-// EffectiveRate(spec).toCore(); the spec itself remains the config-side
-// carrier (Config.ResolvedPricing, vmr check's display) and the offline
-// report path keeps its own Resolver. nil-safe: a nil spec folds to a nil
-// rate, matching EffectiveRate's zero-Rate behavior at the Endpoint mount
-// point; core.Rate.Cost handles a nil receiver the same way.
-func FoldSpec(spec *core.PricingSpec) *core.Rate {
-	if spec == nil {
-		return nil
-	}
-	r := EffectiveRate(spec).toCore()
-	return &r
-}
-
-// Complete reports whether EffectiveRate(spec) is a Complete() rate — the
-// gate config.validate() applies to any provider+model a metric: cost Limit
-// will actually charge. Since EffectiveRate has exactly one resolution path
-// (no time dimension to range over), this is a single walk, not a
-// reachability search: badIndex is -1 when spec.Base itself supplied the
-// (possibly incomplete) rate, else the index of the Override whose Explicit
-// rate did (a Discount form can never itself introduce an incompleteness —
-// Rate.Scale only narrows an already-resolved rate, never widens it).
-// nil-safe: a nil spec is never complete.
+// Complete reports whether EffectiveRate(spec) is a Complete() rate —
+// internal/report/cost.go uses this to label a $ estimate as incomplete.
+// Since EffectiveRate has exactly one resolution path (no time dimension to
+// range over), this is a single walk, not a reachability search: badIndex
+// is -1 when spec.Base itself supplied the (possibly incomplete) rate, else
+// the index of the Override whose Explicit rate did (a Discount form can
+// never itself introduce an incompleteness — Rate.Scale only narrows an
+// already-resolved rate, never widens it). nil-safe: a nil spec is never
+// complete.
 func Complete(spec *core.PricingSpec) (ok bool, bad Rate, badIndex int) {
 	if spec == nil {
 		return false, Rate{}, -1

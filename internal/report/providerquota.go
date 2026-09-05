@@ -65,30 +65,12 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 				continue // this Limit didn't resolve — no row to show
 			}
 			key := refKey(provider, ref)
-			var windowConsumed *float64
-			switch {
-			case ref.Limit.Metric == core.MetricCost && acc.costSawTraffic[key] && !acc.costAnyPriced[key]:
-				windowConsumed = nil // traffic existed, none of it priced — unknown, not zero
-			case ref.Limit.Metric == core.MetricCost:
-				v := acc.windowSums[key].Cost
-				windowConsumed = &v
-			default:
-				v := quota.BaseAmount(*ref.Limit, acc.windowSums[key])
-				windowConsumed = &v
-			}
+			windowConsumed := quota.BaseAmount(*ref.Limit, acc.windowSums[key])
 			// Same unit-matching discipline quota.EstimatedPct documents: the
 			// tokens estimate is a raw (unweighted) token count, so its
 			// denominator is the raw four-component total, never BaseAmount's
-			// weighted sum; the cost estimate's denominator is
-			// acc.windowSums[key].Cost itself (EstimatedPct's own MetricCost
-			// branch), already the same $ unit as windowCostEstimated.
-			windowEstPct := quota.EstimatedPct(ref.Limit.Metric, acc.windowSums[key], acc.windowEstimated[key], acc.windowCostEstimated[key])
-			// Only meaningful next to a number that exists: the all-unpriced case
-			// already renders "-", and "100% missing" beside a "-" is noise.
-			var windowUnpricedPct float64
-			if windowConsumed != nil && acc.costReqs[key] > 0 {
-				windowUnpricedPct = float64(acc.costUnpricedReqs[key]) / float64(acc.costReqs[key]) * 100
-			}
+			// weighted sum.
+			windowEstPct := quota.EstimatedPct(ref.Limit.Metric, acc.windowSums[key], acc.windowEstimated[key])
 			// One PeriodBounds (one findK, same-k boundaries) — F9, the form
 			// router.quotaStatusRow and cmd_report_quota already use.
 			periodStart, periodEnd := quota.PeriodBounds(*ref.Limit, now)
@@ -115,7 +97,6 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 				Models:             models,
 				WindowConsumed:     windowConsumed,
 				WindowEstimatedPct: windowEstPct,
-				WindowUnpricedPct:  windowUnpricedPct,
 				WindowNoOverlap:    windowNoOverlap,
 				Live:               ref.Live,
 				LiveConfigChanged:  ref.LiveConfigChanged,
@@ -133,8 +114,8 @@ func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, 
 	// Provider name, then window text, then the specific model (several
 	// rows can now share Provider+Every — every per-model Limit's live
 	// buckets do), then the metric (same scope, different unit — requests
-	// vs tokens vs cost) is the tie-break chain, for a deterministic order
-	// across runs.
+	// vs tokens) is the tie-break chain, for a deterministic order across
+	// runs.
 	sort.Slice(rows, func(i, j int) bool {
 		a, b := rows[i], rows[j]
 		ha, hb := a.Live != nil, b.Live != nil
@@ -189,13 +170,8 @@ func sortedSkippedProviders(m map[string]int) []string {
 // contributes several) — a struct rather than seven loose maps through a
 // parameter list, since they are only ever read together.
 type quotaWindow struct {
-	windowSums          map[string]quota.Counters
-	windowEstimated     map[string]float64
-	windowCostEstimated map[string]float64
-	costSawTraffic      map[string]bool
-	costAnyPriced       map[string]bool
-	costReqs            map[string]int
-	costUnpricedReqs    map[string]int
+	windowSums      map[string]quota.Counters
+	windowEstimated map[string]float64
 
 	// skippedAttempts counts EndpointsAll rows whose provider name is not
 	// found in the quotas map — traffic from accounts not tracked by any
@@ -239,30 +215,13 @@ func renderSkippedAttemptsNote(w func(string, ...any), rep *Report2, lang i18n.L
 // flow, only this result.
 func accumulateQuotaWindow(rep *Report2, quotas map[string][]ProviderQuotaRef) quotaWindow {
 	acc := quotaWindow{
-		windowSums:          map[string]quota.Counters{},
-		windowEstimated:     map[string]float64{},
-		windowCostEstimated: map[string]float64{},
-		costSawTraffic:      map[string]bool{},
-		costAnyPriced:       map[string]bool{},
-		costReqs:            map[string]int{},
-		costUnpricedReqs:    map[string]int{},
-		unknownProviders:    map[string]int{},
+		windowSums:       map[string]quota.Counters{},
+		windowEstimated:  map[string]float64{},
+		unknownProviders: map[string]int{},
 	}
-	// windowEstimated/windowCostEstimated: the share of windowSums that came
-	// from the degraded estimate rather than sniffed usage — same numerator
-	// quota.Registry tracks live, split in two because EstimatedPct's
-	// tokens/cost branches read different denominators (raw token count vs.
-	// acc.windowSums[key].Cost). See WindowEstimatedPct's doc comment.
-	// cost{SawTraffic,AnyPriced}: "missing data is not a zero" for the one
-	// gap degraded-estimate contribution doesn't cover — no rate resolved
-	// AT ALL for this Limit's traffic. Renders nil → "-" rather than a
-	// fabricated 0. Distinct from windowCostEstimated above: a rate that DID
-	// resolve but priced a degraded estimate still counts as priced here.
-	// cost{Reqs,UnpricedReqs}: the PARTIALLY-priced case costAnyPriced is too
-	// coarse to see — an account mixing priced endpoints with unpriced ones
-	// rendered a precise-looking, systematically-low figure. See
-	// WindowUnpricedPct's doc comment (rows.go) for why this counts requests
-	// rather than dollars.
+	// windowEstimated: the share of windowSums that came from the degraded
+	// estimate rather than sniffed usage — same numerator quota.Registry
+	// tracks live. See WindowEstimatedPct's doc comment.
 	for _, e := range rep.EndpointsAll {
 		provider, model := splitEndpointProviderModelAny(e.Endpoint)
 		refs, ok := quotas[provider]
@@ -318,31 +277,6 @@ func accumulateQuotaWindow(rep *Report2, quotas map[string][]ProviderQuotaRef) q
 				d, est := quota.ApplyModelMultiplier(*ref.Limit, model, c, float64(e.TokensInFreshEst+e.TokensOutEst))
 				acc.windowSums[key] = acc.windowSums[key].Add(d)
 				acc.windowEstimated[key] += est
-			case core.MetricCost:
-				// model_multipliers never applies to a cost Limit (config.validate
-				// rejects that combination — see LimitConfig.validate's own
-				// comment), so this branch deliberately skips ApplyModelMultiplier.
-				// Gated on e.Requests (SERVED — accumulateCost's own basis, NOT the
-				// Forwarded basis MetricRequests needs above): EndpointsAll also
-				// carries attempt-only rows for an endpoint whose every attempt
-				// failed, and counting those made an all-failed window render "-"
-				// when the router had charged exactly $0.00 — a false UNKNOWN
-				// mirroring the false ZERO this guard exists to prevent.
-				if e.Requests > 0 {
-					acc.costSawTraffic[key] = true
-					acc.costReqs[key] += e.Requests
-					if e.CostEstimate == nil {
-						// accumulateCost (cost.go) returns early with no rate, so
-						// this row contributed nothing to windowSums and without
-						// this counter left no trace that it existed.
-						acc.costUnpricedReqs[key] += e.Requests
-					}
-				}
-				if e.CostEstimate != nil {
-					acc.windowSums[key] = acc.windowSums[key].Add(quota.Counters{Cost: *e.CostEstimate})
-					acc.windowCostEstimated[key] += e.CostEstimateEst
-					acc.costAnyPriced[key] = true
-				}
 			}
 		}
 	}

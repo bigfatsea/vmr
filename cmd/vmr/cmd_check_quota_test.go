@@ -9,9 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"vmr/internal/config"
-	"vmr/internal/pricing"
 )
 
 const quotaConfigYAML = `
@@ -185,125 +182,34 @@ func TestCmdCheck_NoQuotaBlock_SectionAbsent(t *testing.T) {
 }
 
 // TestCmdCheck_PrintsPricingTableLine verifies pricing table summary output
-// (pricingTableLine in cmd_check.go): a config that touches pricing at all
-// — here, a global `pricing:` block — must grow a "pricing_table:" line
-// naming the embedded standard table's generation date, so an operator can
-// spot a stale reference price without opening internal/pricing's source.
-// This had zero test coverage before (verified by grep across the repo
-// during a 2026-08-09 review) — a regression that silently dropped this
-// line, or broke the "no pricing touched" absence case below, would not
-// have failed any existing test.
+// (pricingTableLine in cmd_check.go): the embedded standard table is
+// unconditional now (see docs/future-strategy/pricing_architecture_simplification_plan.md
+// decisions 1/2 — no more "does this config touch pricing at all" gate), so
+// even a config that never declares a providers[].pricing block gets a
+// "pricing_table:" line naming the embedded table's generation date.
 func TestCmdCheck_PrintsPricingTableLine(t *testing.T) {
-	yaml := `
-listen: 127.0.0.1:0
-pricing:
-  currency: USD
-providers:
-  - name: plan-a
-    base_url: {openai-completions: https://example.com/v1}
-    api_key: test-key
-models:
-  m1:
-    endpoints:
-      openai-completions:
-        - providers: [plan-a]
-          models: [real-model]
-`
-	path := writeTempFile(t, "config.yaml", yaml)
-	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, "pricing_table:") || !strings.Contains(out, "built-in standard table generated") {
-		t.Fatalf("output missing pricing_table: line for a config with a pricing: block:\n%s", out)
-	}
-}
-
-// TestCmdCheck_NoPricingTouched_PricingTableLineAbsent is
-// TestCmdCheck_PrintsPricingTableLine's negative case: a config that never
-// mentions pricing (no global pricing: block, no providers[].pricing, no
-// metric: cost limit) must not grow a pricing_table: line at all — see
-// pricingTableLine's own doc comment ("ok=false when nothing in this
-// config touches pricing at all").
-func TestCmdCheck_NoPricingTouched_PricingTableLineAbsent(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if strings.Contains(out, "pricing_table:") {
-		t.Fatalf("output has a pricing_table: line for a config that never touches pricing:\n%s", out)
+	if !strings.Contains(out, "pricing_table:") || !strings.Contains(out, "built-in standard table generated") {
+		t.Fatalf("output missing pricing_table: line:\n%s", out)
 	}
 }
 
-// TestCmdCheck_PricingLineShowsEffectiveRateNotBase pins the fix for a
-// finding from the 2026-08-12 review (VMR_项目全面Review报告 A2):
-// printProviderPricing used to print spec.Base, the standard table's list
-// price, even for an account with a discount override — an operator reading
-// `vmr check` for a metric: cost account had no way to see what it would
-// actually be charged. This config gives claude-3-7-sonnet-20250219 (present
-// in the embedded standard table) a 50% discount override; the printed line
-// must reflect the discounted (effective) rate, not the undiscounted base.
-func TestCmdCheck_PricingLineShowsEffectiveRateNotBase(t *testing.T) {
+// TestCmdCheck_DeclaredPricingRates_ExplicitComponentsWithoutDiscount pins a
+// crash: printProviderPricing used to unconditionally dereference
+// oc.Discount before checking it for nil — exactly one of Discount or the
+// four explicit rate components is set (see config.PricingOverrideConfig's
+// doc comment), so a rates entry using the explicit-components form
+// panicked `vmr check` outright.
+func TestCmdCheck_DeclaredPricingRates_ExplicitComponentsWithoutDiscount(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
-pricing:
-  currency: USD
-providers:
-  - name: anthropic
-    base_url: {anthropic-messages: https://example.com/v1}
-    api_key: test-key
-    quota:
-      limits:
-        - {metric: cost, every: 1mo, amount: 100}
-    pricing:
-      overrides:
-        - {model: "*", discount: 0.5}
-models:
-  m1:
-    endpoints:
-      anthropic-messages:
-        - providers: [anthropic]
-          models: [claude-3-7-sonnet-20250219]
-`
-	path := writeTempFile(t, "config.yaml", yaml)
-
-	cfg, err := config.Load(path)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	spec := cfg.ResolvedPricing["anthropic\x00claude-3-7-sonnet-20250219"]
-	if spec == nil {
-		t.Fatal("no resolved pricing spec for anthropic/claude-3-7-sonnet-20250219")
-	}
-	base := spec.Base
-	effective := pricing.EffectiveRate(spec)
-	if base.InFresh == nil || effective.InFresh == nil || *base.InFresh == *effective.InFresh {
-		t.Fatalf("test setup didn't produce a base/effective gap — base=%v effective=%v", ratePart(base.InFresh), ratePart(effective.InFresh))
-	}
-
-	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, fmt.Sprintf("in_fresh=%s", ratePart(effective.InFresh))) {
-		t.Fatalf("pricing line does not show the discounted effective rate (%s):\n%s", ratePart(effective.InFresh), out)
-	}
-	if strings.Contains(out, fmt.Sprintf("in_fresh=%s", ratePart(base.InFresh))) {
-		t.Fatalf("pricing line shows the undiscounted base rate (%s) instead of the effective one:\n%s", ratePart(base.InFresh), out)
-	}
-}
-
-// TestCmdCheck_DeclaredUnresolvedPricingOverrideWithoutDiscount pins a
-// crash: printProviderPricing's "declared but not resolved" fallback (a
-// providers[].pricing block whose provider has no endpoint currently routed
-// to it, so config.Config.ResolvedPricing has nothing for it) used to
-// unconditionally dereference oc.Discount before checking it for nil —
-// exactly one of Discount or the four explicit rate components is set (see
-// config.PricingOverrideConfig's doc comment), so an override using the
-// explicit-components form panicked `vmr check` outright.
-func TestCmdCheck_DeclaredUnresolvedPricingOverrideWithoutDiscount(t *testing.T) {
-	yaml := `
-listen: 127.0.0.1:0
-pricing:
-  currency: USD
 providers:
   - name: p1
     base_url: {openai-completions: https://example.com/v1}
     api_key: test-key
     pricing:
-      overrides:
+      rates:
         - {model: some-model, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 3}
 models:
   m1:
@@ -315,7 +221,7 @@ models:
 	path := writeTempFile(t, "config.yaml", yaml)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
 	if !strings.Contains(out, "in_fresh=1 cache_read=0.1 cache_write=1.25 out=3") {
-		t.Errorf("declared-but-unresolved override's explicit rate components not rendered:\n%s", out)
+		t.Errorf("declared pricing.rates explicit components not rendered:\n%s", out)
 	}
 }
 

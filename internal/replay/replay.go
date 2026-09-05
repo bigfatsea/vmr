@@ -25,7 +25,6 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/imgprep"
 	"vmr/internal/jsonscan"
-	"vmr/internal/pricing"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 )
@@ -139,9 +138,8 @@ func buildReplayEndpoint(cfg *config.Config, opts Options, rv *recordView) (ad a
 		// {"developer":"system"}) would be silently dropped and the
 		// replayed request rejected upstream for an unrewritten role.
 		RoleMap: providerCfg.RoleMap,
-		// chargeReplay needs these resolved directly, the same as above.
-		Quota:       router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
-		PricingRate: pricing.FoldSpec(cfg.ResolvedPricing[opts.Provider+"\x00"+model]),
+		// chargeReplay needs this resolved directly, the same as above.
+		Quota: router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
 	}
 	ep.FullURL = ad.ResolveURL(baseURL)
 	return ad, protocol, providerCfg, ep, nil

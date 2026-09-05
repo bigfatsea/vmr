@@ -15,7 +15,7 @@ func almostEqual(a, b float64) bool {
 }
 
 func testTable() *Table {
-	tbl := NewTable("USD")
+	tbl := NewTable()
 	tbl.put("anthropic/claude-3-5-sonnet", Rate{InFresh: f(3), CacheRead: f(0.3), CacheWrite: f(3.75), Out: f(15)})
 	tbl.put("deepseek/deepseek-chat", Rate{InFresh: f(0.28), CacheRead: f(0.028), Out: f(0.42)}) // CacheWrite deliberately missing, like the real deepseek data
 	return tbl
@@ -90,7 +90,7 @@ func TestResolveCanonicalKey_ProviderSlashModel(t *testing.T) {
 }
 
 func TestResolveCanonicalKey_BareModel(t *testing.T) {
-	tbl := NewTable("USD")
+	tbl := NewTable()
 	tbl.put("gpt-4o", Rate{InFresh: f(2.5)}) // some standard-table entries are bare, no vendor prefix
 	r, ok := resolveCanonicalKey("my-openai-account", "gpt-4o", tbl, nil)
 	if !ok || *r.InFresh != 2.5 {
@@ -117,7 +117,7 @@ func TestResolveCanonicalKey_NoMatch_NoGuess(t *testing.T) {
 // --- Resolve(): table + override composition ---
 
 func TestResolve_TableOnly_NoOverrides(t *testing.T) {
-	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable(), Currency: "USD"})
+	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable()})
 	if !ok {
 		t.Fatal("Resolve failed")
 	}
@@ -126,16 +126,6 @@ func TestResolve_TableOnly_NoOverrides(t *testing.T) {
 	}
 	if len(spec.Overrides) != 0 {
 		t.Fatalf("no overrides configured, want empty Overrides, got %v", spec.Overrides)
-	}
-}
-
-func TestResolve_ExchangeRateAppliedToTableOnly(t *testing.T) {
-	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable(), Currency: "CNY", ExchangeRateToTarget: 7.1})
-	if !ok {
-		t.Fatal("Resolve failed")
-	}
-	if !almostEqual(*spec.Base.InFresh, 3*7.1) {
-		t.Fatalf("Base.InFresh = %v, want %v (table rate x exchange rate)", *spec.Base.InFresh, 3*7.1)
 	}
 }
 
@@ -148,7 +138,7 @@ func TestResolve_ExchangeRateAppliedToTableOnly(t *testing.T) {
 // EffectiveRate is where the composed value lives.
 func TestResolve_OverrideNotFoldedIntoBase(t *testing.T) {
 	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "*", Discount: f(0.6)}},
 	})
 	if !ok {
@@ -164,7 +154,7 @@ func TestResolve_OverrideNotFoldedIntoBase(t *testing.T) {
 
 func TestResolve_DiscountOverride_ComposesViaEffectiveRate(t *testing.T) {
 	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "*", Discount: f(0.6)}},
 	})
 	if !ok {
@@ -179,7 +169,7 @@ func TestResolve_DiscountOverride_ComposesViaEffectiveRate(t *testing.T) {
 func TestResolve_ExplicitOverride_ReplacesTable(t *testing.T) {
 	explicit := Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}
 	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "my-model-x", Explicit: explicit}},
 	})
 	if !ok {
@@ -196,7 +186,7 @@ func TestResolve_OverrideOnlyModel_NoTableEntry_StillResolves(t *testing.T) {
 	// override is the ONLY source, and that's sufficient.
 	explicit := Rate{InFresh: f(1), CacheRead: f(0.1), CacheWrite: f(1), Out: f(4)}
 	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "my-model-x", Explicit: explicit}},
 	})
 	if !ok {
@@ -208,7 +198,7 @@ func TestResolve_OverrideOnlyModel_NoTableEntry_StillResolves(t *testing.T) {
 }
 
 func TestResolve_NothingMatches_OkFalse(t *testing.T) {
-	_, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{Table: testTable(), Currency: "USD"})
+	_, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{Table: testTable()})
 	if ok {
 		t.Fatal("want ok=false: no table entry, no override")
 	}
@@ -220,7 +210,7 @@ func TestResolve_NothingMatches_OkFalse(t *testing.T) {
 // consumers would read as a priced $0.00 rather than "unpriced".
 func TestResolve_DanglingDiscountOnly_OkFalse(t *testing.T) {
 	_, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "*", Discount: f(0.8)}},
 	})
 	if ok {
@@ -234,7 +224,7 @@ func TestResolve_DanglingDiscountOnly_OkFalse(t *testing.T) {
 func TestResolve_DanglingDiscountOverExplicitAnchor_OkTrue(t *testing.T) {
 	explicit := Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}
 	spec, ok := Resolve("plan-x", "totally-unknown", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table: testTable(),
 		Overrides: []OverrideRule{
 			{Model: "*", Discount: f(0.8)},
 			{Model: "totally-unknown", Explicit: explicit},
@@ -256,7 +246,7 @@ func TestResolve_DanglingDiscountOverExplicitAnchor_OkTrue(t *testing.T) {
 
 func TestResolve_OverrideModelPatternFiltering(t *testing.T) {
 	spec, ok := Resolve("plan-b", "other-model", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "some-other-model", Discount: f(0.5)}},
 	})
 	// The only table entry that could match "other-model" via any of the 4
@@ -270,7 +260,7 @@ func TestResolve_OverrideModelPatternFiltering(t *testing.T) {
 // --- EffectiveRate(): deterministic first-match-wins resolution ---
 
 func TestEffectiveRate_NoOverrides_ReturnsBase(t *testing.T) {
-	spec, _ := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable(), Currency: "USD"})
+	spec, _ := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable()})
 	r := EffectiveRate(spec)
 	if *r.InFresh != 3 {
 		t.Fatalf("EffectiveRate = %+v, want Base (InFresh=3)", r)
@@ -278,14 +268,14 @@ func TestEffectiveRate_NoOverrides_ReturnsBase(t *testing.T) {
 }
 
 // TestEffectiveRate_SpecificOverrideBeforeWildcardFallback exercises the
-// still-supported composition pattern P0-A kept: a model-specific override
-// listed BEFORE a wildcard catch-all resolves to the specific rate for that
+// still-supported composition pattern: a model-specific override listed
+// BEFORE a wildcard catch-all resolves to the specific rate for that
 // model, leaving the wildcard reachable only for every other model — see
 // firstDeadOverride (internal/config/pricing.go) for the config-time guard
 // against the reverse (unreachable) ordering.
 func TestEffectiveRate_SpecificOverrideBeforeWildcardFallback(t *testing.T) {
 	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: NewTable("USD"), Currency: "USD",
+		Table: NewTable(),
 		Overrides: []OverrideRule{
 			{Model: "my-model-x", Explicit: Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}},
 			{Model: "*", Discount: f(0.6)},
@@ -307,51 +297,11 @@ func TestEffectiveRate_NilSpec_ReturnsZeroRate(t *testing.T) {
 	}
 }
 
-// TestFoldSpec_MatchesEffectiveRate pins the fold contract the routing hot
-// path leans on: FoldSpec(spec) is exactly EffectiveRate(spec) in
-// core.Rate shape — the pre-folded rate Endpoint.PricingRate carries must
-// charge identically to what a per-request EffectiveRate would have
-// produced, or the two shapes silently diverge. The nil case is part of the
-// contract too: nil spec -> nil rate (the Endpoint's "no pricing" mount),
-// which core.Rate.Cost handles as a zero floor.
-func TestFoldSpec_MatchesEffectiveRate(t *testing.T) {
-	if FoldSpec(nil) != nil {
-		t.Fatal("FoldSpec(nil) = non-nil, want nil (the Endpoint's no-pricing mount)")
-	}
-	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: NewTable("USD"), Currency: "USD",
-		Overrides: []OverrideRule{
-			{Model: "*", Discount: f(0.6)},
-			{Model: "my-model-x", Explicit: Rate{InFresh: f(1.58), CacheRead: f(0.32), CacheWrite: f(1.58), Out: f(9.54)}},
-		},
-	})
-	if !ok {
-		t.Fatal("Resolve failed")
-	}
-	want := EffectiveRate(spec)
-	got := FoldSpec(spec)
-	for _, c := range []struct {
-		name      string
-		got, want *float64
-	}{{"in_fresh", got.InFresh, want.InFresh}, {"cache_read", got.CacheRead, want.CacheRead},
-		{"cache_write", got.CacheWrite, want.CacheWrite}, {"out", got.Out, want.Out}} {
-		if (c.got == nil) != (c.want == nil) || (c.got != nil && *c.got != *c.want) {
-			t.Fatalf("FoldSpec.%s = %v, want %v (must equal EffectiveRate exactly)", c.name, c.got, c.want)
-		}
-	}
-	// The shape check: a folded rate prices the same token counts as the
-	// spec-side EffectiveRate — the whole point of the fold.
-	const fresh, out = 1_000_000, 2_000_000
-	if got.Cost(fresh, 0, 0, out) != want.Cost(fresh, 0, 0, out) {
-		t.Fatalf("FoldSpec.Cost = %v, want %v (EffectiveRate's own pricing)", got.Cost(fresh, 0, 0, out), want.Cost(fresh, 0, 0, out))
-	}
-}
-
 // --- discount composes against the resolved lower layer, never re-applies to itself ---
 
 func TestResolve_DiscountAppliesOnceToBase(t *testing.T) {
 	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table:     testTable(),
 		Overrides: []OverrideRule{{Model: "*", Discount: f(0.6)}},
 	})
 	if !ok {
@@ -378,7 +328,7 @@ func TestResolve_DiscountAppliesOnceToBase(t *testing.T) {
 // descent, not always spec.Base directly).
 func TestResolve_StackedDiscounts_ComposeMultiplicatively(t *testing.T) {
 	spec, ok := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{
-		Table: testTable(), Currency: "USD",
+		Table: testTable(),
 		Overrides: []OverrideRule{
 			{Model: "*", Discount: f(0.6)},
 			{Model: "*", Discount: f(0.5)},
@@ -394,7 +344,7 @@ func TestResolve_StackedDiscounts_ComposeMultiplicatively(t *testing.T) {
 	}
 }
 
-// --- Complete: the completeness gate config.validate() actually uses ---
+// --- Complete: the incompleteness gate vmr report's $ estimate labeling uses ---
 
 func TestComplete_NilSpec(t *testing.T) {
 	if ok, _, _ := Complete(nil); ok {
@@ -403,7 +353,7 @@ func TestComplete_NilSpec(t *testing.T) {
 }
 
 func TestComplete_CompleteBaseNoOverrides(t *testing.T) {
-	spec, _ := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable(), Currency: "USD"})
+	spec, _ := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable()})
 	ok, _, _ := Complete(spec)
 	if !ok {
 		t.Fatal("a fully-priced table entry with no overrides should be complete")
@@ -411,7 +361,7 @@ func TestComplete_CompleteBaseNoOverrides(t *testing.T) {
 }
 
 func TestComplete_IncompleteBaseNoOverrides_Fails(t *testing.T) {
-	spec, _ := Resolve("deepseek", "deepseek-chat", ResolveOptions{Table: testTable(), Currency: "USD"})
+	spec, _ := Resolve("deepseek", "deepseek-chat", ResolveOptions{Table: testTable()})
 	ok, bad, idx := Complete(spec)
 	if ok {
 		t.Fatal("deepseek-chat's table entry is missing cache_write — must not be complete")
@@ -433,7 +383,7 @@ func TestComplete_IncompleteBaseNoOverrides_Fails(t *testing.T) {
 // even list).
 func TestComplete_OverrideFullyCoversModel_BaseIrrelevant(t *testing.T) {
 	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: testTable(), Currency: "USD", // no table entry for my-model-x at all -> Base is empty
+		Table:     testTable(), // no table entry for my-model-x at all -> Base is empty
 		Overrides: []OverrideRule{{Model: "my-model-x", Explicit: Rate{InFresh: f(1), CacheRead: f(0.1), CacheWrite: f(1), Out: f(4)}}},
 	})
 	if !ok {
@@ -446,13 +396,12 @@ func TestComplete_OverrideFullyCoversModel_BaseIrrelevant(t *testing.T) {
 }
 
 // TestComplete_DiscountOverIncompleteBase_Fails: a discount override
-// composes against an incomplete Base and must surface as incomplete —
-// the dangerous failure direction docs/VirtualModelRouter_Design_v4_Quota.md's
-// validation checklist exists to rule out (a charge on the live request path
-// silently under-priced with no load-time signal).
+// composes against an incomplete Base and must surface as incomplete — the
+// dangerous failure direction of silently under-pricing a $ estimate with
+// no signal that it's degraded.
 func TestComplete_DiscountOverIncompleteBase_Fails(t *testing.T) {
 	spec, ok := Resolve("deepseek", "deepseek-chat", ResolveOptions{
-		Table: testTable(), Currency: "USD", // deepseek-chat's Base is missing cache_write
+		Table:     testTable(), // deepseek-chat's Base is missing cache_write
 		Overrides: []OverrideRule{{Model: "*", Discount: f(0.5)}},
 	})
 	if !ok {
@@ -479,7 +428,7 @@ func TestComplete_DiscountOverIncompleteBase_Fails(t *testing.T) {
 // exercises the lower-level pricing-package mechanism in isolation.)
 func TestComplete_RuleAfterFirstMatch_Unreachable_NotChecked(t *testing.T) {
 	spec, ok := Resolve("plan-e", "my-model-x", ResolveOptions{
-		Table: testTable(), Currency: "USD", // no table entry -> Base is empty/incomplete
+		Table: testTable(), // no table entry -> Base is empty/incomplete
 		Overrides: []OverrideRule{
 			{Model: "*", Explicit: Rate{InFresh: f(1), CacheRead: f(0.1), CacheWrite: f(1), Out: f(4)}}, // matches first
 			{Model: "*", Discount: f(0.5)}, // shadowed by the rule above: unreachable

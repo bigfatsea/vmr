@@ -18,10 +18,7 @@ type Pricing struct {
 	// (internal/pricing.Table.GeneratedAt) — the "is this stale" signal
 	// the design doc's §4.2③ guardrail requires be visible somewhere.
 	StandardGeneratedAt string `json:"standard_generated_at,omitempty"`
-	// Supplement is the user supplement table's path, if config.yaml's
-	// pricing.supplement configured one; empty otherwise.
-	Supplement string `json:"supplement,omitempty"`
-	// ProviderOverrides is the total providers[].pricing.overrides rule
+	// ProviderOverrides is the total providers[].pricing.rates rule
 	// count across every provider config.yaml declared pricing for — a
 	// quick "was any account-specific override in effect" signal.
 	ProviderOverrides int `json:"provider_overrides,omitempty"`

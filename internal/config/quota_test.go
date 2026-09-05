@@ -253,16 +253,16 @@ func TestQuota_NoQuotaBlock_UnaffectedByDefault(t *testing.T) {
 
 // --- §2.2 reject cases: every one must be a load-time error, never silent. ---
 
-// TestQuota_MetricCost_WithoutPricingCurrency_Rejected verifies that metric: cost requires a pricing currency:
-// completeness gate at the point closest to "cost" alone: metric: cost now
-// parses structurally, but an account with no pricing.currency configured
-// at all can't be charged in anything — see resolvePricing.
-func TestQuota_MetricCost_WithoutPricingCurrency_Rejected(t *testing.T) {
+// TestQuota_MetricCost_Rejected pins decision 6 (see
+// docs/future-strategy/pricing_architecture_simplification_plan.md):
+// metric: cost is no longer a supported Limit metric at all — a load-time
+// error with migration guidance, not a structural-then-completeness gate.
+func TestQuota_MetricCost_Rejected(t *testing.T) {
 	yaml := withQuotaBlock(`limits:
   - {metric: cost, every: 1mo, amount: 100}`)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "pricing.currency") {
-		t.Errorf("want a pricing.currency-not-set rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "metric: cost is no longer supported") {
+		t.Errorf("want a metric: cost rejection with migration guidance, got %v", err)
 	}
 }
 
@@ -305,12 +305,15 @@ func TestQuota_ModelMultipliers_ZeroOrNegative_Rejected(t *testing.T) {
 	}
 }
 
-func TestQuota_ModelMultipliers_OnCostLimit_Rejected(t *testing.T) {
+func TestQuota_MetricCost_WithModelMultipliers_StillRejectedForMetric(t *testing.T) {
+	// model_multipliers on a metric: cost Limit used to have its own,
+	// more specific rejection; now metric: cost itself is rejected first,
+	// before model_multipliers is even considered.
 	yaml := withQuotaBlock(`limits:
   - {metric: cost, every: 1mo, amount: 100, model_multipliers: {"*": 2}}`)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "model_multipliers is configured but this Limit's metric is cost") {
-		t.Errorf("want model_multipliers-on-cost rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "metric: cost is no longer supported") {
+		t.Errorf("want metric: cost rejection, got %v", err)
 	}
 }
 
@@ -372,18 +375,6 @@ func TestQuota_TokenWeights_OnNonTokensLimit_Rejected(t *testing.T) {
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "token_weights is configured but this Limit's metric is") {
 		t.Errorf("want token_weights-on-non-tokens-limit rejection, got %v", err)
-	}
-}
-
-// TestQuota_PricingBlock_AcceptedWhenUnused verifies pricing block acceptance:
-// a top-level pricing: block is now a real, known field — accepted (and
-// simply unused) on a config with no metric: cost provider at all. See
-// internal/config/pricing_test.go for the full pricing test matrix.
-func TestQuota_PricingBlock_AcceptedWhenUnused(t *testing.T) {
-	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
-		"listen: 127.0.0.1:9900\npricing:\n  currency: USD", 1)
-	if _, err := Parse([]byte(yaml)); err != nil {
-		t.Errorf("pricing: block should now be a known, accepted field, got %v", err)
 	}
 }
 

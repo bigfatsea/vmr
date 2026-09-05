@@ -132,21 +132,12 @@ func ExtractModel(l core.Limit, limitKey string) (model string, ok bool) {
 }
 
 // Counters is one Limit's accumulated consumption, stored by raw component —
-// never pre-weighted or pre-priced. Charge/Used deal in these units directly;
-// base(metric) is applied by the caller via weight.go's BaseAmount. Per the
-// design doc's Storage Granularity decision: folding a weighting policy into
-// the stored value would force a data migration every time that policy
-// changes, while raw components let token_weights/model_multipliers/cost
-// pricing all read the same history under a different formula.
-//
-// Cost is the one deliberate exception. A metric: cost charge is computed
-// against a price table that changes over time, so the $ amount must be frozen
-// at charge time — re-deriving it later from raw token counts at whatever
-// price happens to be configured then would silently rewrite history on every
-// pricing edit (see the design doc's "9.2 运行态"). Fresh/CacheRead/
-// CacheWrite/Out are still recorded alongside Cost on a cost-metric account:
-// unused for its routing decisions, but /status's four-component
-// breakdown is useful regardless of metric.
+// never pre-weighted. Charge/Used deal in these units directly; base(metric)
+// is applied by the caller via weight.go's BaseAmount. Per the design doc's
+// Storage Granularity decision: folding a weighting policy into the stored
+// value would force a data migration every time that policy changes, while
+// raw components let token_weights/model_multipliers read the same history
+// under a different formula.
 //
 // These are float64, not int64, because an account with model_multipliers
 // folds a possibly-fractional multiplier into them at charge time (see
@@ -160,7 +151,6 @@ type Counters struct {
 	CacheWrite float64 `json:"cache_write"`
 	Out        float64 `json:"out"`
 	Requests   float64 `json:"requests"`
-	Cost       float64 `json:"cost,omitempty"`
 }
 
 // Add returns the element-wise sum of c and d.
@@ -171,7 +161,6 @@ func (c Counters) Add(d Counters) Counters {
 		CacheWrite: c.CacheWrite + d.CacheWrite,
 		Out:        c.Out + d.Out,
 		Requests:   c.Requests + d.Requests,
-		Cost:       c.Cost + d.Cost,
 	}
 }
 
@@ -193,12 +182,6 @@ type bucket struct {
 	// see quota.Counters' doc comment for why that scaling must not be
 	// rounded to an integer.
 	Estimated float64 `json:"estimated"`
-	// EstimatedCost  is the $ equivalent for a metric: cost account:
-	// this period's total Cost that came from a degraded token estimate
-	// (via the resolved rate) rather than sniffed usage — same "how much to
-	// trust this number" signal Estimated gives requests/tokens accounts,
-	// just in money instead of tokens. Always 0 for a non-cost account.
-	EstimatedCost float64 `json:"estimated_cost,omitempty"`
 }
 
 // Registry holds every provider's live quota consumption. Shaped like
@@ -327,23 +310,6 @@ func (r *Registry) Charge(provider, limitKey string, periodStart time.Time, d Co
 	r.dirty = true
 }
 
-// ChargeCost applies a cost-metric charge and its degraded-estimate $ amount
-// in ONE locked section — the atomic form ChargeResponse's cost branch needs
-// so a concurrent period roll can't land the two halves in different periods
-// (was: Charge + a separate AddEstimatedCost, whose inter-lock gap let a
-// late estimate carrying the old periodStart misfire the clock-rollback WARN
-// and pollute the new period's EstimatedCost). estimatedCost is 0 for an
-// exact (both-sides-sniffed) charge.
-func (r *Registry) ChargeCost(provider, limitKey string, periodStart time.Time, d Counters, estimatedCost float64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	b := r.getLocked(provider, limitKey)
-	r.resetIfStaleLocked(b, periodStart)
-	b.C = b.C.Add(d)
-	b.EstimatedCost += estimatedCost
-	r.dirty = true
-}
-
 // Used returns provider's limitKey bucket as of periodStart, lazily
 // resetting first if the stored period has gone stale — so a read-only
 // caller (the router's per-request scoring path) sees a correctly-zeroed
@@ -359,18 +325,4 @@ func (r *Registry) Used(provider, limitKey string, periodStart time.Time) (Count
 		r.dirty = true
 	}
 	return b.C, b.Estimated
-}
-
-// Snapshot returns provider+limitKey's counters, token-estimate total and
-// cost-estimate total as of periodStart in ONE locked read (lazily resetting
-// a stale period once, same as Used) — /status renders all three per row and
-// must not see a mid-roll split between them.
-func (r *Registry) Snapshot(provider, limitKey string, periodStart time.Time) (Counters, float64, float64) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	b := r.getLocked(provider, limitKey)
-	if r.resetIfStaleLocked(b, periodStart) {
-		r.dirty = true
-	}
-	return b.C, b.Estimated, b.EstimatedCost
 }

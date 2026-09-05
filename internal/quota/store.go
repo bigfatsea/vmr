@@ -206,10 +206,9 @@ func (r *Registry) Flush() (err error) {
 // fileFormat's doc comment): a second, parallel type here would be exactly
 // the duplication that rule exists to avoid.
 type Bucket struct {
-	PeriodStart   int64    `json:"period_start"`
-	C             Counters `json:"counters"`
-	Estimated     float64  `json:"estimated"`
-	EstimatedCost float64  `json:"estimated_cost,omitempty"`
+	PeriodStart int64    `json:"period_start"`
+	C           Counters `json:"counters"`
+	Estimated   float64  `json:"estimated"`
 }
 
 // PeriodStartTime is PeriodStart converted back to a time.Time (in

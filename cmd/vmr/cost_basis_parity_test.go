@@ -43,7 +43,7 @@ rates:
 	if err != nil {
 		t.Fatalf("ParseTable: %v", err)
 	}
-	return pricing.NewResolver(tbl, nil, 1, "")
+	return pricing.NewResolver(tbl, nil)
 }
 
 // costParitySSE is storySSE plus an optional usage block — the one axis
