@@ -17,6 +17,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Role remapping (role_map)](#role-remapping-role_map)
   - [Endpoint try-order (priority and strategy)](#endpoint-try-order-priority-and-strategy)
   - [Multi-provider endpoint groups and global fallbacks](#multi-provider-endpoint-groups-and-global-fallbacks)
+  - [Temporarily disabling a provider](#temporarily-disabling-a-provider)
   - [Environment variables](#environment-variables)
 - [Request handling and routing](#request-handling-and-routing)
   - [Passthrough and normalization](#passthrough-and-normalization)
@@ -185,6 +186,21 @@ models:
 
 A fallback entry only attaches to a virtual model that already has its own entry point on the fallback's `protocol` — it augments an existing ingress, it never opens a new one a model didn't already declare (an anthropic-messages-only model is untouched by an openai-completions fallback). A virtual model can opt out entirely with `fallback: false`. Unlike an ordinary endpoint-group, `priority` on a fallback entry is **required and must be > 0** — omitted/0 would silently compete at the same tier as a model's own real endpoints instead of trailing behind them, and that's exactly the kind of surprise `vmr check`'s load-time validation exists to catch instead of a request routing there by accident. `vmr check` prints a fallback-origin endpoint with a trailing `fallback` annotation, and flags (⚠️) a fallback that would silently duplicate an endpoint a model already declares for itself.
 
+### Temporarily disabling a provider
+
+To take an account out of routing without touching the model configuration — a vendor throttling you, a paid API returning 5xx, a protocol upgrade, maintenance — set `disabled: true` on its `providers[]` entry and save (a hot reload picks it up within the usual debounce window):
+
+```yaml
+providers:
+  - name: volcengine
+    base_url: {openai-completions: https://ark.example.com/v3}
+    api_key: ${ARK_KEY_1}
+    disabled: true
+```
+
+`disabled: true` means the provider is treated as **nonexistent** at every consumer — not marked-but-alive. Its entry (including every endpoint expanded from it via `api_keys:`) produces no routes, appears in no try-order, injects nothing even when a `fallback_endpoints:` entry names it, gets no row in `/status`, and builds no quota counter. Endpoints that reference it keep validating and `vmr check` keeps succeeding — but `vmr check` prints a ⚠️ warning naming each reference that currently carries no traffic, so the takedown is never silent. Everything else about the provider is still validated as usual (a disabled entry must still be structurally complete).
+
+To restore, flip back to `false` (or delete the line) and reload — routes, health tracking and quota accounting all come back on the next snapshot. There is deliberately no separate runtime "disable" command or observation channel: the config file is the single source of truth, and a session pinned to the disabled provider by Sticky Model simply fails over to the remaining candidates on its next request.
 ### Environment variables
 
 The complete list — vmr reads nothing else from the environment:

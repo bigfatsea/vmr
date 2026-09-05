@@ -56,7 +56,7 @@ func (s *Severity) UnmarshalText(text []byte) error {
 
 // Issue is one problem Check finds. Provider/Model scope it for callers
 // that want to annotate a specific rendered line (vmr check) — Field names
-// which one ("api_key" | "probe_timeout" | "endpoint" | "listen"); all empty
+// which one ("api_key" | "probe_timeout" | "endpoint" | "listen" | "disabled"); all empty
 // means the issue is global. Endpoint carries the full
 // "protocol/provider/model" key for "endpoint".
 type Issue struct {
@@ -164,9 +164,18 @@ func isLoopbackOrPrivateHost(host string) bool {
 // that must stay a hard error. (Provider.Proxy has no global default to
 // inherit — a provider's proxy: true with no matching proxy URL is already a
 // hard validate() error, not a Check-time gap.)
+//
+// A Disabled provider skips the api_key check entirely — an account taken
+// out of routing is expected to lose its credential (or never need one),
+// and reporting that as missing is noise on top of a deliberate takedown.
+// Structure (base_url shape, quota, pricing) still goes through validate()
+// untouched: disabled means "no traffic", not "exempt from being valid".
 func (c *Config) checkProviders() []Issue {
 	var issues []Issue
 	for _, p := range c.Providers {
+		if p.Disabled {
+			continue
+		}
 		if p.APIKey != "" {
 			continue
 		}
@@ -188,6 +197,51 @@ func (c *Config) checkProviders() []Issue {
 			issue.Message = fmt.Sprintf("provider %q: no api_key — self-hosted upstream with no auth, fine if it truly needs none", p.Name)
 		}
 		issues = append(issues, issue)
+	}
+	return append(issues, c.checkDisabledReferences()...)
+}
+
+// checkDisabledReferences warns when a provider explicitly marked
+// disabled: true is still referenced by a models/endpoints or
+// fallback_endpoints providers list. Referencing a disabled provider is
+// legal (unlike referencing an unknown one, which validate() rejects) —
+// the point of the switch is to take an account out *without* editing the
+// endpoint structure, and flipping back to false + reload restores it. But
+// the config author must be able to SEE that the reference currently
+// carries no traffic, otherwise "why isn't this endpoint routing" stays
+// invisible. SeverityWarning, not error — never blocks a load or a
+// diagnose network phase. A disabled provider referenced NOWHERE gets no
+// issue at all: that's just an offline account parked in config, same as
+// before this field existed.
+func (c *Config) checkDisabledReferences() []Issue {
+	disabled := map[string]bool{}
+	for _, p := range c.Providers {
+		if p.Disabled {
+			disabled[p.Name] = true
+		}
+	}
+	if len(disabled) == 0 {
+		return nil
+	}
+	var issues []Issue
+	sayRef := func(pn, where string) {
+		if !disabled[pn] {
+			return
+		}
+		issues = append(issues, Issue{Provider: pn, Field: "disabled", Severity: SeverityWarning,
+			Message: fmt.Sprintf("provider %q is disabled but still referenced by %s; it carries no traffic until re-enabled", pn, where)})
+	}
+	for _, name := range fmtutil.SortedKeys(c.Models) {
+		for _, eg := range c.Models[name].Endpoints {
+			for _, pn := range eg.Providers {
+				sayRef(pn, fmt.Sprintf("model %q endpoint %s", name, eg.Protocol))
+			}
+		}
+	}
+	for i, fb := range c.FallbackEndpoints {
+		for _, pn := range fb.Providers {
+			sayRef(pn, fmt.Sprintf("fallback_endpoints[%d]", i))
+		}
 	}
 	return issues
 }
