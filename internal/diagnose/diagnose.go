@@ -289,7 +289,8 @@ type epKey struct{ protocol, provider, model string }
 func collectEndpointTriples(cfg *config.Config) map[epKey]map[string]string {
 	seen := map[epKey]map[string]string{}
 	for _, name := range fmtutil.SortedKeys(cfg.Models) {
-		for protocol, groups := range cfg.Models[name].Endpoints {
+		for _, protocol := range fmtutil.SortedKeys(cfg.Models[name].Endpoints) {
+			groups := cfg.Models[name].Endpoints[protocol]
 			for _, eg := range groups {
 				for _, pn := range eg.Providers {
 					for _, mn := range eg.Models {

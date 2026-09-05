@@ -142,8 +142,8 @@ models:
   m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
-	if len(issues) != 1 || issues[0].Field != "probe_timeout" {
-		t.Errorf("Check() = %+v, want exactly one probe_timeout issue", issues)
+	if len(issues) != 1 || issues[0].Field != "timeouts.probe" {
+		t.Errorf("Check() = %+v, want exactly one timeouts.probe issue", issues)
 	}
 }
 

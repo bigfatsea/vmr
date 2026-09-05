@@ -56,7 +56,7 @@ func (s *Severity) UnmarshalText(text []byte) error {
 
 // Issue is one problem Check finds. Provider/Model scope it for callers
 // that want to annotate a specific rendered line (vmr check) — Field names
-// which one ("api_key" | "probe_timeout" | "endpoint" | "listen" | "disabled"); all empty
+// which one ("api_key" | "timeouts.probe" | "endpoint" | "listen" | "disabled"); all empty
 // means the issue is global. Endpoint carries the full
 // "protocol/provider/model" key for "endpoint".
 type Issue struct {
@@ -131,8 +131,8 @@ func (c *Config) checkListenExposure() []Issue {
 // real request would.
 func (c *Config) checkTimeouts() []Issue {
 	if c.Timeouts.Probe.D() >= c.Timeouts.ResponseHeader.D() {
-		return []Issue{{Field: "probe_timeout", Message: fmt.Sprintf(
-			"probe_timeout (%s) should stay under response_header timeout (%s), or a background probe recovery check can hang as long as real traffic waits for a response",
+		return []Issue{{Field: "timeouts.probe", Message: fmt.Sprintf(
+			"timeouts.probe (%s) should stay under timeouts.response_header (%s), or a background probe recovery check can hang as long as real traffic waits for a response",
 			c.Timeouts.Probe.D(), c.Timeouts.ResponseHeader.D())}}
 	}
 	return nil
@@ -265,7 +265,8 @@ func (c *Config) checkModels() []Issue {
 		m := c.Models[name]
 		seen := map[string]bool{}
 		protocols := map[string]bool{}
-		for protocol, groups := range m.Endpoints {
+		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+			groups := m.Endpoints[protocol]
 			protocols[protocol] = true
 			for _, eg := range groups {
 				for _, pn := range eg.Providers {
@@ -282,7 +283,8 @@ func (c *Config) checkModels() []Issue {
 			}
 		}
 		if m.Fallback == nil || *m.Fallback {
-			for protocol, groups := range c.FallbackEndpoints {
+			for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
+				groups := c.FallbackEndpoints[protocol]
 				if !protocols[protocol] {
 					continue
 				}
@@ -312,11 +314,16 @@ func (c *Config) checkModels() []Issue {
 // endpoint and it comes alive), hence a warning, not an error — but it must
 // be spoken, because "I configured a fallback and it never fires" is near-
 // impossible to self-diagnose otherwise. One issue per unreachable
-// protocol, not per entry. Only key presence is checked — a model that
-// deliberately opted out via fallback: false is intent, not breakage.
+// protocol, not per entry. A model that deliberately opted out via
+// fallback: false doesn't make the protocol reachable on its own — if every
+// model declaring that protocol has opted out, the bucket is exactly as
+// dead as if no model declared it at all, and must warn the same way.
 func (c *Config) checkFallbackReachability() []Issue {
 	reachable := map[string]bool{}
 	for _, m := range c.Models {
+		if m.Fallback != nil && !*m.Fallback {
+			continue
+		}
 		for protocol := range m.Endpoints {
 			reachable[protocol] = true
 		}

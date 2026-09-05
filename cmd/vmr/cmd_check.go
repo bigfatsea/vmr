@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,9 +40,9 @@ func padLabel(label string, width int) string {
 }
 
 // endpointKeyWidth is the fixed column an endpoint's "- p=N. provider/model:"
-// label (indent included) pads out to, so extra_capabilities=/
-// max_context_tokens=/key=EMPTY values line up the same way checkLine's
-// key column does elsewhere.
+// label (indent included) pads out to, so capabilities=/max_context_tokens=/
+// key=EMPTY values line up the same way checkLine's key column does
+// elsewhere.
 const endpointKeyWidth = 40
 
 // warn appends the ⚠️ marker used throughout `vmr check` to flag a value
@@ -205,15 +206,7 @@ func printGlobalSettings(w io.Writer, cfg *config.Config, issues []config.Issue)
 		imgScale = fmt.Sprintf("%dpx", cfg.ImageDownscaleMaxPx)
 	}
 	fmt.Fprintln(w, checkLine(0, "image_downscale", imgScale))
-	fmt.Fprintln(w, checkLine(0, "image_cache_ttl", cfg.TTL.ImageCache.String()))
-	fmt.Fprintln(w, checkLine(0, "audit_retention", cfg.TTL.AuditRetention.String()))
 	fmt.Fprintln(w, checkLine(0, "extra_redact_headers", orNoneList(cfg.ExtraRedactHeaders)))
-	fmt.Fprintln(w, checkLine(0, "sticky_ttl", cfg.TTL.Sticky.D().String()))
-	probeTimeout := cfg.Timeouts.Probe.D().String()
-	if hasIssue(issues, "", "", "", "probe_timeout") {
-		probeTimeout = warn(probeTimeout)
-	}
-	fmt.Fprintln(w, checkLine(0, "probe_timeout", probeTimeout))
 	// redactProxyURL: cfg.HTTPProxy/HTTPSProxy can carry embedded userinfo
 	// credentials (http://user:pass@host:port), same as a provider's own
 	// proxy: URL below — printing either raw to a terminal or a log file
@@ -240,11 +233,18 @@ func printGlobalSettings(w io.Writer, cfg *config.Config, issues []config.Issue)
 	fmt.Fprintln(w, "timeouts:")
 	fmt.Fprintln(w, checkLine(2, "connect", cfg.Timeouts.Connect.D().String()))
 	responseHeader := cfg.Timeouts.ResponseHeader.D().String()
-	if hasIssue(issues, "", "", "", "probe_timeout") {
-		responseHeader = warn(responseHeader) // the probe_timeout/response_header contradiction is about both values together
+	probe := cfg.Timeouts.Probe.D().String()
+	if hasIssue(issues, "", "", "", "timeouts.probe") {
+		// the timeouts.probe/response_header contradiction is about both values together
+		responseHeader, probe = warn(responseHeader), warn(probe)
 	}
 	fmt.Fprintln(w, checkLine(2, "response_header", responseHeader))
 	fmt.Fprintln(w, checkLine(2, "stream_idle", cfg.Timeouts.StreamIdle.D().String()))
+	fmt.Fprintln(w, checkLine(2, "probe", probe))
+	fmt.Fprintln(w, "ttl:")
+	fmt.Fprintln(w, checkLine(2, "sticky", cfg.TTL.Sticky.D().String()))
+	fmt.Fprintln(w, checkLine(2, "image_cache", cfg.TTL.ImageCache.String()))
+	fmt.Fprintln(w, checkLine(2, "audit_retention", cfg.TTL.AuditRetention.String()))
 }
 
 func printProviders(w io.Writer, cfg *config.Config) {
@@ -552,6 +552,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			fallbackOK := m.Fallback == nil || *m.Fallback
 			fmt.Fprintln(w, checkLine(2, "fallback", fmt.Sprintf("%v", fallbackOK)))
 		}
+		wildcard := cfg.ModelDefaults["*"]
 		for _, protocol := range fmtutil.SortedKeys(snap.Models) {
 			route, ok := snap.Models[protocol][name]
 			if !ok {
@@ -561,6 +562,21 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			for _, ep := range route.EffectiveOrder() {
 				key := ep.Provider + "/" + ep.Model
 				var parts []string
+				// The model header above only shows the virtual model's own
+				// declared capabilities/max_context_tokens. When the model
+				// itself is unconstrained, the endpoint's actually-effective
+				// value comes from model_defaults instead (see
+				// router.resolveModelCapabilities/resolveModelMaxContextTokens)
+				// and would otherwise be invisible from this output — but
+				// skip it when it's just the "*" wildcard baseline shared by
+				// most endpoints (an exact model_defaults match, which is
+				// what actually differentiates this endpoint, still shows).
+				if len(m.Capabilities) == 0 && len(ep.Capabilities) > 0 && !slices.Equal(ep.Capabilities, wildcard.Capabilities) {
+					parts = append(parts, "capabilities="+strings.Join(ep.Capabilities, ","))
+				}
+				if m.MaxContextTokens == 0 && ep.MaxContextTokens > 0 && ep.MaxContextTokens != wildcard.MaxContextTokens {
+					parts = append(parts, fmt.Sprintf("max_context_tokens=%d", ep.MaxContextTokens))
+				}
 				if len(ep.RoleMap) > 0 {
 					rm := make([]string, 0, len(ep.RoleMap))
 					for _, from := range fmtutil.SortedKeys(ep.RoleMap) {

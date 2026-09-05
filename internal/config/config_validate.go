@@ -11,6 +11,7 @@ import (
 
 	"vmr/internal/adapter"
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/strategy"
 )
 
@@ -148,7 +149,8 @@ func (c *Config) validateModelDefaults() error {
 // validateModels validates all virtual model definitions and registers
 // configured (provider, model) pairs into providerModels for pricing resolution.
 func (c *Config) validateModels(providerModels map[string]map[string]bool) error {
-	for name, m := range c.Models {
+	for _, name := range fmtutil.SortedKeys(c.Models) {
+		m := c.Models[name]
 		if len(m.Endpoints) == 0 {
 			return fmt.Errorf("model %q: no endpoints", name)
 		}
@@ -167,7 +169,8 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
 			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)
 		}
-		for protocol, groups := range m.Endpoints {
+		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+			groups := m.Endpoints[protocol]
 			// Protocol lives at the map key, so one check per bucket covers
 			// every group under it — the key can't drift from the entries.
 			if _, ok := adapter.Get(protocol); !ok {
@@ -187,7 +190,8 @@ func (c *Config) validateModels(providerModels map[string]map[string]bool) error
 // validateFallbackEndpoints validates fallback endpoint definitions and ensures
 // priority is explicitly set and positive.
 func (c *Config) validateFallbackEndpoints(providerModels map[string]map[string]bool) error {
-	for protocol, groups := range c.FallbackEndpoints {
+	for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
+		groups := c.FallbackEndpoints[protocol]
 		if _, ok := adapter.Get(protocol); !ok {
 			return fmt.Errorf("fallback_endpoints: unknown protocol %q (available: %v)%s", protocol, adapter.Names(), unknownProtocolHint(protocol))
 		}

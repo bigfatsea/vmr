@@ -231,6 +231,72 @@ models:
 	}
 }
 
+// TestCmdCheck_EndpointShowsModelDefaultsResolution covers the observability
+// this output lost when EndpointGroup.Capabilities/MaxContextTokens were
+// removed in favor of model_defaults (config shape 2026-09, E.1/E.2): when
+// the virtual model itself declares nothing (unconstrained), an endpoint
+// whose capabilities/max_context_tokens actually resolve from model_defaults
+// must render that resolved value on its own line — otherwise there is no
+// way to see from `vmr check` alone what a given endpoint is really capable
+// of.
+func TestCmdCheck_EndpointShowsModelDefaultsResolution(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: test-key
+model_defaults:
+  real-model:
+    capabilities: [text, image]
+    max_context_tokens: 512000
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "capabilities=text,image") {
+		t.Errorf("endpoint should show its model_defaults-resolved capabilities:\n%s", out)
+	}
+	if !strings.Contains(out, "max_context_tokens=512000") {
+		t.Errorf("endpoint should show its model_defaults-resolved max_context_tokens:\n%s", out)
+	}
+}
+
+// TestCmdCheck_EndpointHidesResolutionWhenModelDeclaresItsOwn is the
+// negative counterpart: when the virtual model already declares
+// capabilities/max_context_tokens explicitly (shown once in the model
+// header), every endpoint resolves to that same value — repeating it on
+// every endpoint line would be pure noise, not a gap.
+func TestCmdCheck_EndpointHidesResolutionWhenModelDeclaresItsOwn(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: test-key
+model_defaults:
+  real-model:
+    capabilities: [text, image]
+    max_context_tokens: 512000
+models:
+  m1:
+    capabilities: [text, tools]
+    max_context_tokens: 128000
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if strings.Contains(out, "capabilities=text,image") || strings.Contains(out, "max_context_tokens=512000") {
+		t.Errorf("endpoint should not repeat the model's own declared values:\n%s", out)
+	}
+}
+
 // TestCmdCheck_ModelImageDownscaleOverride locks in that a model declaring
 // its own image_downscale renders it in the "=== Models ===" section (a
 // per-model override of the global image_downscale setting, config.
@@ -521,7 +587,7 @@ models:
 		checkLine(0, "max_attempts", "3"),
 		checkLine(0, "max_concurrency", "8"),
 		checkLine(0, "image_downscale", "512px"),
-		checkLine(0, "audit_retention", "30d"),
+		checkLine(2, "audit_retention", "30d"),
 	} {
 		if !strings.Contains(out, line) {
 			t.Errorf("logConfigSummary output missing %q in:\n%s", line, out)

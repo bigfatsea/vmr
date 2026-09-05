@@ -75,8 +75,40 @@ models:
 
 // TestCheckIgnoresFallbackDuplicate_ModelOptedOut mirrors BuildSnapshot's
 // fallback: false opt-out — a model that never receives the injection
-// cannot have it flagged as a duplicate either.
+// cannot have it flagged as a duplicate either. "other" keeps the protocol
+// reachable (via a model that didn't opt out) so this stays a pure test of
+// the duplicate check, not entangled with checkFallbackReachability.
 func TestCheckIgnoresFallbackDuplicate_ModelOptedOut(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
+fallback_endpoints:
+  openai-completions:
+    - {providers: [p1], models: [x], priority: 90}
+models:
+  other:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [y]}
+  m:
+    fallback: false
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [x]}
+`)
+	if issues := cfg.Check(); len(issues) != 0 {
+		t.Errorf("Check() = %+v, want no issues — model m opted out of fallbacks, and model other keeps openai-completions reachable", issues)
+	}
+}
+
+// TestCheckFlagsUnreachableFallback_AllReferencingModelsOptedOut is the gap
+// TestCheckIgnoresFallbackDuplicate_ModelOptedOut deliberately doesn't cover:
+// when EVERY model declaring a protocol has opted out via fallback: false,
+// that fallback bucket is exactly as dead as one no model declares at all —
+// checkFallbackReachability must warn, not stay silent just because the key
+// technically appears in some model's Endpoints.
+func TestCheckFlagsUnreachableFallback_AllReferencingModelsOptedOut(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
 providers:
@@ -91,8 +123,9 @@ models:
       openai-completions:
         - {providers: [p1], models: [x]}
 `)
-	if issues := cfg.Check(); len(issues) != 0 {
-		t.Errorf("Check() = %+v, want no issues — model m opted out of fallbacks", issues)
+	issues := cfg.Check()
+	if len(issues) != 1 || issues[0].Field != "fallback" || issues[0].Severity != SeverityWarning {
+		t.Errorf("Check() = %+v, want exactly the unreachable-fallback warning — the sole model declaring openai-completions opted out, so the bucket can never fire", issues)
 	}
 }
 
