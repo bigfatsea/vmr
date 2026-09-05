@@ -46,24 +46,33 @@ listen: 127.0.0.1:8800
 #   - ${VMR_KEY_ALICE}          # entry is tagged in `vmr report` output by its own tail (see
 #   - ${VMR_KEY_OPENCLAW}       # "Multiple callers, one instance" below). The old singular api_key
 #                               # was removed — configs still using it are rejected as an unknown field
-# max_attempts: 0              # cap on upstream tries per request (default 0 = walk every candidate)
-# probe_timeout: 15s            # upper bound on one background recovery probe, see Failover and health below
+# max_attempts: 0              # cap on upstream tries per request (0 = unlimited, the default: walk every candidate)
 # max_request_body_mb: 8       # inbound request body size cap (stability only; the audit trail always records requests in full, whatever size vmr accepted)
-# max_concurrency: 8           # global gate; excess requests wait in memory (default: unlimited) — see "Per-request memory budget" below before leaving this unlimited on a shared instance
+# max_concurrency: 8           # global gate; excess requests wait in memory (0 = unlimited, also the default) — see "Per-request memory budget" below before leaving this unlimited on a shared instance
 # https_proxy: http://127.0.0.1:7890   # proxy server URL for https base_urls — the ONLY way vmr uses a proxy
 #                                      # (env vars are ignored; write ${HTTPS_PROXY} to reference one explicitly).
 #                                      # Declaring this URL does NOT turn proxying on by itself — see `proxy` below
 # http_proxy: http://127.0.0.1:7890    # same for http base_urls (e.g. a LAN llama.cpp server)
 # image_downscale: 512         # long-side px cap for inline request images (default: off; a model's own setting overrides this, see below)
-# image_cache_ttl_days: 7      # eviction age for cached downscale results (default: 7 days)
-# audit_retention_days: 30     # delete audit files older than this (default: keep forever)
 # extra_redact_headers:        # additional client request header names to mask in the audit trail,
 #   - X-Custom-Token            # same treatment as the built-in Authorization/X-Api-Key/Cookie/etc
 #                                # list (case-insensitive). Absent/empty (the default) changes nothing.
-# timeouts:
+# timeouts:                    # "how long one wait may take" — request-path upper bounds, Go duration syntax
 #   connect: 10s               # upstream dial
 #   response_header: 120s      # upstream time-to-first-byte
 #   stream_idle: 120s          # abort any upstream body (stream, JSON, error) silent for this long
+#   probe: 15s                 # upper bound on one background recovery probe, see Failover and health below
+#
+# ttl:                         # "how long state lives" — lifecycle/eviction, extended syntax: Nd / Nw / Nmo / Ny
+#                              # (case-insensitive; d=24h, w=7d, mo=30d, y=365d; a bare number means days).
+#                              # Every ttl field shares one zero-value rule: 0 (incl. 0d), absent, and negative
+#                              # all mean "use the default". There is no "forever" — write a concrete large
+#                              # value (90000d ≈ 246 years) if you need retention beyond any horizon.
+#   sticky: 10m               # global default for Sticky Model's affinity window (Go duration syntax, 0 = default 10m)
+#   image_cache: 7d           # eviction age for cached downscale results (0 = default 7d)
+#   audit_retention: 90d      # delete audit files older than this (0 = default 90d).
+#                              # BREAKING vs the old audit_retention_days: 0 used to mean "keep forever" — that
+#                              # reading is gone; if you relied on it, write 90000d or larger.
 
 providers:
   - name: openrouter
@@ -108,7 +117,7 @@ The peak is short-lived — released as soon as downscaling finishes, before the
 
 ### Upstream proxy
 
-Explicit config only, default off. `http_proxy`/`https_proxy` above only declare *where* the proxy lives — they don't turn it on for anyone by themselves. Whether a provider actually uses it is decided entirely by that provider's own `proxy: true`/`false` (default `false`, direct — there's no global default to inherit; opt providers in one at a time). When it's `true`, the base_url's scheme picks `https_proxy` or `http_proxy`. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching proxy URL configured is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
+Explicit config only, default off. `http_proxy`/`https_proxy` above only declare *where* the proxy lives — they don't turn it on for anyone by themselves. Whether a provider actually uses it is decided entirely by that provider's own `proxy: true`/`false` (default `false`, direct — there's no global default to inherit; opt providers in one at a time). When it's `true`, the base_url's scheme picks `https_proxy` or `http_proxy`. `proxy` governs where *all* of that provider's connections go — it's a per-connection-time choice, orthogonal to `api_key`/`api_keys`, whose only job is expanding one declaration into several independent accounts. Proxy **environment variables are deliberately ignored** — an implicit knob that silently redirects traffic is exactly the surprise a router shouldn't have; to use one, reference it explicitly (`https_proxy: ${HTTPS_PROXY}`). `proxy: true` with no matching proxy URL configured is a config validation error, not a runtime surprise. `vmr check` and the startup summary print each provider's effective proxy (credentials masked). YAML 1.2: write `true`/`false`, not `on`/`off`.
 
 ### base_url and API versions
 
@@ -220,10 +229,11 @@ On upstream failure vmr walks the endpoint list in order until one succeeds or a
 
 **`soft_block_failover`** (opt-in, per virtual model or per endpoint; off by default). Some vendors — MiniMax is the known case — answer a content-flagged request with a *200* that embeds `input_sensitive`/`output_sensitive` and an empty or canned body, so an unattended agent silently continues from nothing. With this on, a **non-streaming** 2xx that carries the marker *and* has no real answer (≤64 characters of assistant text, no tool call) is treated exactly like a content-policy 4xx: fail over, no cooldown. Streaming responses can't be caught (they're already being forwarded before a verdict is possible). Set it on `models.<name>` to cover every endpoint under it; an endpoint's own `soft_block_failover: false` opts back out. Left off, the behavior is unchanged — the block is only recorded (`soft_block_detected` in the audit `norm` trail).
 
-**Recovering a cooled-down endpoint**: once an endpoint's cooldown expires, vmr fires one small dedicated probe request in the background (bounded by `probe_timeout`, default 15s) instead of letting the next real request find out the hard way. Real traffic never touches — and never waits behind — an endpoint that hasn't been confirmed recovered yet; it's simply routed to the next candidate until the probe reports back, however long that takes. The probe asks the model to echo back a one-time token, so a relay/gateway answering with a cached or canned "success" doesn't count as recovered.
+**Recovering a cooled-down endpoint**: once an endpoint's cooldown expires, vmr fires one small dedicated probe request in the background (bounded by `timeouts.probe`, default 15s) instead of letting the next real request find out the hard way. Real traffic never touches — and never waits behind — an endpoint that hasn't been confirmed recovered yet; it's simply routed to the next candidate until the probe reports back, however long that takes. The probe asks the model to echo back a one-time token, so a relay/gateway answering with a cached or canned "success" doesn't count as recovered.
 
 ```yaml
-probe_timeout: 15s      # upper bound on one background recovery probe
+timeouts:
+  probe: 15s             # upper bound on one background recovery probe (0/absent = default 15s)
 ```
 
 All-candidates-failed returns the last upstream error verbatim. Streams only fail over before the first byte is written.
@@ -262,7 +272,8 @@ Full design and the token-estimate calibration: `docs/VirtualModelRouter_Design_
 Upstream prompt caches are keyed on an exact byte prefix. If a multi-turn agent conversation gets routed to a different endpoint mid-conversation, the provider's cache goes cold and a "better" routing choice can end up costing more, not less — condition-based routing above is one thing that can trigger this (e.g. a context estimate that shrinks below another endpoint's declared ceiling after the agent compacts its history). Sticky Model keeps a conversation on whichever endpoint most recently, successfully served it:
 
 ```yaml
-sticky_ttl: 10m              # global default: how long a sticky preference stays valid
+ttl:
+  sticky: 10m                # global default: how long a sticky preference stays valid
 
 models:
   agent:
@@ -272,7 +283,7 @@ models:
       - protocol: openai-completions
         providers: [minimax]
         models: [MiniMax-M3]
-        # inherits the global 10-minute sticky_ttl
+        # inherits the global 10-minute ttl.sticky
       - protocol: openai-completions
         providers: [deepseek]
         models: [deepseek-chat]
@@ -280,8 +291,8 @@ models:
 ```
 
 - **Identity**: a conversation is fingerprinted from its system prompt *and* first non-system message — both hashed, never logged or otherwise exposed. Two different agents that happen to open with the same line don't collide, because their system prompts (and therefore their actual upstream cache prefixes) differ; hashing only the first user message, without the system prompt, would have missed exactly that case.
-- **`sticky_ttl` is per-endpoint, not per-model** — cache lifetime is a property of the upstream provider (Anthropic/OpenAI/MiniMax: roughly 5–10 minutes; DeepSeek: hours to days), so endpoints behind the same virtual model can each declare their own window instead of forcing one value on all of them. The global `sticky_ttl` (default 10 minutes) is the fallback for endpoints that don't override it.
-- **`sticky_ttl` (global or per-endpoint) can't exceed 24 hours** — the sticky registry itself drops an idle entry from memory after 24 hours regardless of what any endpoint's TTL says, so a longer setting would load but silently stop taking effect. `vmr check`/`vmr start`/hot reload all reject a config that tries it, with an error naming the offending model/endpoint.
+- **`sticky_ttl` is per-endpoint, not per-model** — cache lifetime is a property of the upstream provider (Anthropic/OpenAI/MiniMax: roughly 5–10 minutes; DeepSeek: hours to days), so endpoints behind the same virtual model can each declare their own window instead of forcing one value on all of them. The global `ttl.sticky` (default 10 minutes; `0`/absent = default) is the fallback for endpoints that don't override it.
+- **`ttl.sticky` and per-endpoint `sticky_ttl` can't exceed 24 hours** — the sticky registry itself drops an idle entry from memory after 24 hours regardless of what any endpoint's TTL says, so a longer setting would load but silently stop taking effect. `vmr check`/`vmr start`/hot reload all reject a config that tries it, with an error naming the offending model/endpoint.
 - Affinity only ever reorders within the endpoints that already passed health and condition filtering — an endpoint that's since become unhealthy or lost a required capability is never resurrected just because it was the sticky pick last time.
 - The pointer moves on every successful completion, including a failover success, so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
 
@@ -560,7 +571,7 @@ Don't want real auth at all (a trusted private network)? Leave `api_keys` unset 
 
 #### Retention and compression
 
-Agent workloads resend the full conversation on every turn, so a day's log can run into gigabytes — mostly repeated across lines, not within one. Each day's file rotates and compresses automatically once it's no longer "today": zstd on the whole file (not per-line) catches that cross-line repetition, typically 20–75× smaller in practice — far beyond what compressing each record on its own could reach, since a single record never sees the previous turn's near-duplicate body. `vmr report` reads `.jsonl` and `.jsonl.zst` interchangeably, so point it at a glob covering both. Set `audit_retention_days` to also delete files past a given age (default: keep forever — nothing is deleted unless you opt in); either way, deletion and compression are both keyed off the date in the filename, so housekeeping never needs to scan or `stat` the whole log directory. Details and the numbers behind this: Part 1 §9.5 of the design doc.
+Agent workloads resend the full conversation on every turn, so a day's log can run into gigabytes — mostly repeated across lines, not within one. Each day's file rotates and compresses automatically once it's no longer "today": zstd on the whole file (not per-line) catches that cross-line repetition, typically 20–75× smaller in practice — far beyond what compressing each record on its own could reach, since a single record never sees the previous turn's near-duplicate body. `vmr report` reads `.jsonl` and `.jsonl.zst` interchangeably, so point it at a glob covering both. `ttl.audit_retention` also deletes files past a given age — **breaking change**: the field used to be `audit_retention_days`, where `0` meant "keep forever"; that reading is gone, `0`/absent now means the default 90d, and a deployment relying on the old semantics must write a concrete large value (`90000d` ≈ 246 years). Either way, deletion and compression are both keyed off the date in the filename, so housekeeping never needs to scan or `stat` the whole log directory. Details and the numbers behind this: Part 1 §9.5 of the design doc.
 
 **Don't point two vmr instances at the same `log_dir`.** Each instance's housekeeping sweep decides a file is done for the day (safe to compress and, once past retention, delete) purely from the date in its filename — it has no way to know another process is still appending to that same file. Two instances sharing a `log_dir` and both still running past midnight is the one scenario where this bites: instance A rotates to today's file, sees yesterday's file as "done", and compresses-then-deletes it while instance B (still on yesterday's date, or just slower to rotate) is still writing to that exact inode — B's writes land in a file that no longer exists on disk. Give every instance (including a second local checkout for testing) its own `log_dir`.
 
@@ -621,7 +632,8 @@ Detection is always on, independent of this setting: every inline image in a req
 
 ```yaml
 image_downscale: 512      # global long-side px cap; 0 or absent = off
-image_cache_ttl_days: 7   # eviction age for the on-disk downscale cache (default 7 days, see below)
+ttl:
+  image_cache: 7d   # eviction age for the on-disk downscale cache (0 = default 7 days, see below)
 
 models:
   coding:
@@ -638,7 +650,7 @@ Any virtual model can set its own `image_downscale`, which always wins over the 
 
 ### Downscale result cache
 
-The first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by **content hash plus target size** — the filename is `<sha256-of-original-bytes>-<maxPx>.jpg`, so the same image downscaled to 512px and 256px (different per-model overrides) are two independent entries that can never collide — under the configured `image_cache_dir` (see below). A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`image_cache_ttl_days`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session) alongside a default 50MB total capacity cap (evicting oldest entries first if exceeded), swept lazily off normal cache access rather than a dedicated timer.
+The first time a given source image is downscaled to a given target size, the result (JPEG bytes) is cached on disk keyed by **content hash plus target size** — the filename is `<sha256-of-original-bytes>-<maxPx>.jpg`, so the same image downscaled to 512px and 256px (different per-model overrides) are two independent entries that can never collide — under the configured `image_cache_dir` (see below). A later request for the same image reuses the cached bytes verbatim instead of decoding/scaling/re-encoding. Two reasons this matters: it saves CPU (agent workflows resend the full conversation, images included, on every turn), and it protects the upstream's own prompt cache — which is keyed on exact byte/token match, so re-encoding the same image on every request can produce subtly different output bytes and silently defeat that cache, while identical cached bytes always hit it. Entries are evicted by last-hit time (`ttl.image_cache`, default 7 days; a hit refreshes the clock, so an image reused throughout a long conversation is never evicted mid-session) alongside a default 50MB total capacity cap (evicting oldest entries first if exceeded), swept lazily off normal cache access rather than a dedicated timer.
 
 ### Where the audit and cache directories land
 

@@ -122,17 +122,17 @@ func (c *Config) checkListenExposure() []Issue {
 		c.Listen)}}
 }
 
-// checkTimeouts flags a probe_timeout that isn't safely under
+// checkTimeouts flags a probe timeout that isn't safely under
 // response_header: the whole point of a background probe is a fast, cheap
 // liveness check real traffic never waits on (see DefaultProbeTimeout's doc
-// comment) — a probe_timeout at or above the response_header budget defeats
+// comment) — a probe timeout at or above the response_header budget defeats
 // that, letting a stuck probe hold an endpoint half-open for as long as a
 // real request would.
 func (c *Config) checkTimeouts() []Issue {
-	if c.ProbeTimeout.D() >= c.Timeouts.ResponseHeader.D() {
+	if c.Timeouts.Probe.D() >= c.Timeouts.ResponseHeader.D() {
 		return []Issue{{Field: "probe_timeout", Message: fmt.Sprintf(
 			"probe_timeout (%s) should stay under response_header timeout (%s), or a background probe recovery check can hang as long as real traffic waits for a response",
-			c.ProbeTimeout.D(), c.Timeouts.ResponseHeader.D())}}
+			c.Timeouts.Probe.D(), c.Timeouts.ResponseHeader.D())}}
 	}
 	return nil
 }

@@ -7,10 +7,12 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +31,7 @@ const (
 	DefaultIdleTimeout       = 120 * time.Second
 	DefaultImageCacheTTLDays = 7 // downscaled-image cache entries unused this many days get evicted
 	// DefaultStickyTTL is the global default for how long a Sticky Model
-	// affinity preference stays valid, absent an explicit sticky_ttl.
+	// affinity preference stays valid, absent an explicit ttl.sticky.
 	// Calibrated to the shortest common upstream prompt-cache lifetime
 	// (Anthropic's 5-minute default, OpenAI's 5-10 minute window) with a
 	// little headroom — see docs/VirtualModelRouter_Design_v4_Core.md's
@@ -37,13 +39,19 @@ const (
 	// cache, hours to days) should override it per-endpoint.
 	DefaultStickyTTL = 10 * time.Minute
 	// DefaultProbeTimeout bounds one background recovery-probe HTTP call
-	// (see probe_timeout on Config). Deliberately far under
+	// (see timeouts.probe). Deliberately far under
 	// DefaultHeaderTimeout: the whole point of a probe is a fast, cheap
 	// liveness check that never makes real traffic wait on it — if a
 	// provider can't answer a one-line prompt within this window, it isn't
 	// going to look "recovered" by waiting longer, so there's no reason to
 	// borrow the same budget a real request gets.
 	DefaultProbeTimeout = 15 * time.Second
+	// DefaultAuditRetentionDays is how long audit JSONL files are kept before
+	// deletion, absent an explicit ttl.audit_retention. Deliberately finite:
+	// the pre-TTL config let 0 mean "never delete", which silently reverted
+	// disk-full risk onto every config that left the field unset — a default
+	// has to actually default (see TTL.AuditRetention for the migration note).
+	DefaultAuditRetentionDays = 90
 	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
 	// solely so audit.KeyTag's trailing 8-character window can never be
 	// the whole key — a short key would otherwise have its full secret
@@ -99,7 +107,7 @@ type EndpointGroup struct {
 	// this lives per entry rather than once per provider.
 	RoleMap map[string]string `yaml:"role_map"`
 
-	// StickyTTL overrides the global sticky_ttl (below) for this endpoint
+	// StickyTTL overrides the global ttl.sticky (below) for this endpoint
 	// alone — cache lifetime is a property of the upstream provider, not of
 	// the virtual model, so different endpoints behind the same virtual
 	// model (e.g. a fast in-memory cache vs. DeepSeek's disk cache) can
@@ -185,10 +193,125 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 
 func (d Duration) D() time.Duration { return time.Duration(d) }
 
+// CalendarDuration is a lifecycle-scale duration for the ttl.* fields, in
+// calendar units Go's time.ParseDuration has no concept of: Nd (day), Nw
+// (week = 7d), Nmo (month = 30d), Ny (year = 365d), case-insensitive. A bare
+// integer means days (the old *_days int fields' spelling, so their numbers
+// migrate unchanged).
+//
+// Zero-value polarity, deliberately uniform across every ttl.* field: 0
+// (incl. 0d), absent, and negative all mean "use the default" — applyDefaults
+// fills any value <= 0. There is no third "unlimited" reading and no pointer
+// tri-state. Permanent-retention semantics were removed outright: forever,
+// permanent, and never are load errors — a config that genuinely wants
+// retention beyond any horizon writes a concrete large number (90000d), so
+// every value in the file stays a duration someone can reason about.
+//
+// Month/year are fixed-length approximations (30d/365d), not calendar math —
+// the same convention quota's every: 1mo uses.
+type CalendarDuration time.Duration
+
+var calendarPattern = regexp.MustCompile(`^([+-]?[0-9]+)(d|w|mo|y)?$`)
+
+func (d *CalendarDuration) UnmarshalYAML(node *yaml.Node) error {
+	var s string
+	if err := node.Decode(&s); err != nil {
+		return err
+	}
+	v, err := parseCalendarDuration(s)
+	if err != nil {
+		return err
+	}
+	*d = CalendarDuration(v)
+	return nil
+}
+
+func parseCalendarDuration(s string) (time.Duration, error) {
+	switch strings.ToLower(s) {
+	case "forever", "permanent", "never":
+		return 0, fmt.Errorf("invalid duration %q: permanent retention is not supported — 0/absent already means \"use the default\"; for very long retention write a concrete large value (e.g. 90000d ≈ 246 years)", s)
+	}
+	m := calendarPattern.FindStringSubmatch(strings.ToLower(s))
+	if m == nil {
+		return 0, fmt.Errorf("invalid duration %q (want a number followed by d/w/mo/y, e.g. \"14d\", \"3mo\", \"2w\"; case-insensitive, bare number = days)", s)
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q: %w", s, err)
+	}
+	var unit time.Duration
+	switch strings.ToLower(m[2]) {
+	case "w":
+		unit = 7 * 24 * time.Hour
+	case "mo":
+		unit = 30 * 24 * time.Hour
+	case "y":
+		unit = 365 * 24 * time.Hour
+	default: // "" (bare number) and "d" are both days
+		unit = 24 * time.Hour
+	}
+	return time.Duration(n) * unit, nil
+}
+
+func (d CalendarDuration) D() time.Duration { return time.Duration(d) }
+
+// String renders the value the way it's configured: whole days as "Nd",
+// anything else as Go's duration spelling, so a sub-day value never reads as
+// the misleading "0d".
+func (d CalendarDuration) String() string {
+	day := CalendarDuration(24 * time.Hour)
+	if d%day == 0 {
+		return fmt.Sprintf("%dd", int64(d/day))
+	}
+	return time.Duration(d).String()
+}
+
+// Days reports d in whole days, rounding up so a sub-day value is at least
+// one day — the day-granular downstream consumers (audit.SetRetentionDays,
+// imgprep's CacheTTLDays) both keep a legacy "0 = never delete / disabled"
+// reading, and a sub-day config that truncated to 0 would silently land in
+// exactly that. Only meaningful after applyDefaults (a value <= 0 becomes the
+// default there, so callers never see it).
+func (d CalendarDuration) Days() int {
+	return int(math.Ceil(time.Duration(d).Hours() / 24))
+}
+
 type Timeouts struct {
 	Connect        Duration `yaml:"connect"`
 	ResponseHeader Duration `yaml:"response_header"`
 	StreamIdle     Duration `yaml:"stream_idle"`
+	// Probe bounds one background recovery probe of a half-open endpoint
+	// (past its cooldown, but not yet confirmed recovered): a small
+	// dedicated request fires in the background and real traffic never
+	// touches the endpoint until that probe succeeds. Per-probe upper
+	// bound; default DefaultProbeTimeout.
+	Probe Duration `yaml:"probe"`
+}
+
+// TTL gathers the lifecycle fields — how long state lives before eviction —
+// as opposed to Timeouts' "how long one wait may take". All three share the
+// same zero-value polarity: 0/absent/negative = use the default (see
+// CalendarDuration; Sticky is a plain Go-grammar Duration because it's
+// minutes/hours scale, same polarity). No field here has a "permanent"
+// reading — that semantics was removed.
+type TTL struct {
+	// Sticky is the global default for how long a Sticky Model affinity
+	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md's
+	// Sticky Model section); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
+	// EndpointGroup.StickyTTL overrides this for endpoints whose upstream
+	// cache lifetime differs (e.g. DeepSeek's disk cache).
+	Sticky Duration `yaml:"sticky"`
+	// ImageCache is the downscale-cache eviction age (downscaled-image cache
+	// entries unused this long are evicted); <=0/absent defaults to
+	// DefaultImageCacheTTLDays days.
+	ImageCache CalendarDuration `yaml:"image_cache"`
+	// AuditRetention is how long audit JSONL files are kept before deletion
+	// (compression to .zst on rotation happens regardless). <=0/absent
+	// defaults to DefaultAuditRetentionDays. Breaking vs the old
+	// audit_retention_days field: 0 there meant "never delete" — that
+	// reading is gone; configs relying on it must name a concrete value
+	// (90000d).
+	AuditRetention CalendarDuration `yaml:"audit_retention"`
 }
 
 // Providers is a flat list (protocol is per-provider data, not a grouping
@@ -208,12 +331,6 @@ type Config struct {
 	// against a key short enough that its whole value becomes the tag.
 	APIKeys     []string `yaml:"api_keys"`
 	MaxAttempts int      `yaml:"max_attempts"` // 0 = unlimited: try every available endpoint once
-	// ProbeTimeout bounds one background recovery probe of a half-open
-	// endpoint (past its cooldown, but not yet confirmed recovered): a
-	// small dedicated request fires in the background and real traffic
-	// never touches the endpoint until that probe succeeds. Per-probe upper
-	// bound; default DefaultProbeTimeout.
-	ProbeTimeout Duration `yaml:"probe_timeout"`
 	// MaxRequestBodyMB bounds the inbound client request body vmr will read
 	// into memory (http.MaxBytesReader) — a stability cap, unrelated to
 	// audit logging (the audit trail records every request in full,
@@ -245,9 +362,7 @@ type Config struct {
 	// its directory once at startup); image_cache_dir follows hot reloads.
 	LogDir              string `yaml:"log_dir"`
 	ImageCacheDir       string `yaml:"image_cache_dir"`
-	ImageDownscaleMaxPx int    `yaml:"image_downscale"`      // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
-	ImageCacheTTLDays   int    `yaml:"image_cache_ttl_days"` // downscaled-image cache entries unused this many days are evicted; <=0/absent defaults to DefaultImageCacheTTLDays
-	AuditRetentionDays  int    `yaml:"audit_retention_days"` // 0/absent = never delete audit files (compression to .zst on rotation happens regardless)
+	ImageDownscaleMaxPx int    `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
 	// ExtraRedactHeaders names additional client request headers to mask in
 	// the audit trail the same way the built-in credential list (see
 	// audit.credentialHeaders) already masks Authorization/X-Api-Key/etc —
@@ -256,13 +371,11 @@ type Config struct {
 	// case-insensitively, same as the built-in list. Absent/empty (the
 	// default) changes nothing.
 	ExtraRedactHeaders []string `yaml:"extra_redact_headers"`
-	// StickyTTL is the global default for how long a Sticky Model affinity
-	// preference stays valid (see docs/VirtualModelRouter_Design_v4_Core.md's
-	// Sticky Model section); <=0/absent defaults to DefaultStickyTTL. Per-endpoint
-	// EndpointGroup.StickyTTL overrides this for endpoints whose upstream
-	// cache lifetime differs (e.g. DeepSeek's disk cache).
-	StickyTTL Duration                `yaml:"sticky_ttl"`
-	Timeouts  Timeouts                `yaml:"timeouts"`
+	Timeouts           Timeouts `yaml:"timeouts"`
+	// TTL holds the lifecycle fields (sticky affinity window, image-cache
+	// eviction, audit retention) — see its doc comment for the shared
+	// zero-value polarity (0/absent/negative = use the default).
+	TTL       TTL                     `yaml:"ttl"`
 	Providers []Provider              `yaml:"providers"`
 	Models    map[string]VirtualModel `yaml:"models"`
 	// FallbackEndpoints is appended to the tail of every virtual model's
@@ -318,6 +431,16 @@ type Config struct {
 	// PricingAccounting.
 	pricingFactorCache   float64 `yaml:"-"`
 	pricingCurrencyCache string  `yaml:"-"`
+
+	// Transitional mirrors of Timeouts.Probe / TTL.Sticky / TTL.ImageCache
+	// for the pre-TTL field-name readers this package doesn't own
+	// (internal/router's probe.go and snapshot.go, internal/replay);
+	// applyDefaults — the one place defaults resolve — keeps them in step,
+	// so nothing else may write either side. Delete these once those readers
+	// use the new fields directly.
+	ProbeTimeout      Duration `yaml:"-"`
+	StickyTTL         Duration `yaml:"-"`
+	ImageCacheTTLDays int      `yaml:"-"`
 
 	// configDir is the directory the config file was Load()ed from — the
 	// anchor for relative sidecar paths (see resolveConfigRelative). Empty
@@ -406,14 +529,17 @@ func (c *Config) applyDefaults() {
 	if c.Listen == "" {
 		c.Listen = "127.0.0.1:8800"
 	}
-	if c.ProbeTimeout <= 0 {
-		c.ProbeTimeout = Duration(DefaultProbeTimeout)
+	if c.Timeouts.Probe <= 0 {
+		c.Timeouts.Probe = Duration(DefaultProbeTimeout)
 	}
-	if c.ImageCacheTTLDays <= 0 {
-		c.ImageCacheTTLDays = DefaultImageCacheTTLDays
+	if c.TTL.Sticky.D() <= 0 {
+		c.TTL.Sticky = Duration(DefaultStickyTTL)
 	}
-	if c.StickyTTL.D() <= 0 {
-		c.StickyTTL = Duration(DefaultStickyTTL)
+	if c.TTL.ImageCache.D() <= 0 {
+		c.TTL.ImageCache = CalendarDuration(DefaultImageCacheTTLDays) * CalendarDuration(24*time.Hour)
+	}
+	if c.TTL.AuditRetention.D() <= 0 {
+		c.TTL.AuditRetention = CalendarDuration(DefaultAuditRetentionDays) * CalendarDuration(24*time.Hour)
 	}
 	if c.MaxRequestBodyMB <= 0 {
 		c.MaxRequestBodyMB = DefaultMaxRequestBodyMB
@@ -445,6 +571,10 @@ func (c *Config) applyDefaults() {
 			c.Models[name] = m
 		}
 	}
+	// Transitional mirrors — see the field comments on Config.
+	c.ProbeTimeout = c.Timeouts.Probe
+	c.StickyTTL = c.TTL.Sticky
+	c.ImageCacheTTLDays = c.TTL.ImageCache.Days()
 }
 
 func (c *Config) validate() error {

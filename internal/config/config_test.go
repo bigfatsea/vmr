@@ -49,8 +49,8 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	if got := cfg.Models["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
 		t.Errorf("default strategy: %v", got)
 	}
-	if cfg.ProbeTimeout.D() != DefaultProbeTimeout {
-		t.Errorf("default probe_timeout: got %v, want %v", cfg.ProbeTimeout.D(), DefaultProbeTimeout)
+	if cfg.Timeouts.Probe.D() != DefaultProbeTimeout {
+		t.Errorf("default timeouts.probe: got %v, want %v", cfg.Timeouts.Probe.D(), DefaultProbeTimeout)
 	}
 }
 
@@ -151,13 +151,13 @@ func TestParseAllowsOrdinaryEnvValues(t *testing.T) {
 
 func TestProbeTimeoutConfig(t *testing.T) {
 	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900",
-		"listen: 127.0.0.1:9900\nprobe_timeout: 5s", 1)
+		"listen: 127.0.0.1:9900\ntimeouts:\n  probe: 5s", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ProbeTimeout.D() != 5*time.Second {
-		t.Errorf("probe_timeout: got %v, want 5s", cfg.ProbeTimeout.D())
+	if cfg.Timeouts.Probe.D() != 5*time.Second {
+		t.Errorf("timeouts.probe: got %v, want 5s", cfg.Timeouts.Probe.D())
 	}
 }
 
@@ -306,36 +306,35 @@ func TestImageCacheTTLDaysDefaultsToSevenDays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ImageCacheTTLDays != DefaultImageCacheTTLDays {
-		t.Errorf("default image_cache_ttl_days: got %d, want %d", cfg.ImageCacheTTLDays, DefaultImageCacheTTLDays)
+	if cfg.TTL.ImageCache.D() != time.Duration(DefaultImageCacheTTLDays)*24*time.Hour {
+		t.Errorf("default ttl.image_cache: got %v, want %d days", cfg.TTL.ImageCache.D(), DefaultImageCacheTTLDays)
 	}
 }
 
 func TestImageCacheTTLDaysConfig(t *testing.T) {
-	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_cache_ttl_days: 14", 1)
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nttl:\n  image_cache: 14d", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ImageCacheTTLDays != 14 {
-		t.Errorf("image_cache_ttl_days: got %d, want 14", cfg.ImageCacheTTLDays)
+	if cfg.TTL.ImageCache.D() != 14*24*time.Hour {
+		t.Errorf("ttl.image_cache: got %v, want 14d", cfg.TTL.ImageCache.D())
 	}
 }
 
-// TestImageCacheTTLDaysNonPositiveClampsToDefault differs from
-// audit_retention_days's "0 = keep forever" convention on purpose: the image
-// cache is a pure performance optimization with no audit/compliance value,
-// so silently growing it forever is not a safer default than actively
-// pruning it (the design doc's decision table).
+// TestImageCacheTTLDaysNonPositiveClampsToDefault: the image cache is a pure
+// performance optimization with no audit/compliance value, so its zero-value
+// polarity is the same "use the default" as every other ttl.* field (the old
+// int field's separate <=0 clamp survives as the same rule).
 func TestImageCacheTTLDaysNonPositiveClampsToDefault(t *testing.T) {
-	for _, v := range []string{"0", "-5"} {
-		yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nimage_cache_ttl_days: "+v, 1)
+	for _, v := range []string{"0d", "-5d"} {
+		yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nttl:\n  image_cache: "+v, 1)
 		cfg, err := Parse([]byte(yaml))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.ImageCacheTTLDays != DefaultImageCacheTTLDays {
-			t.Errorf("image_cache_ttl_days: %s must clamp to default %d, got %d", v, DefaultImageCacheTTLDays, cfg.ImageCacheTTLDays)
+		if cfg.TTL.ImageCache.D() != time.Duration(DefaultImageCacheTTLDays)*24*time.Hour {
+			t.Errorf("ttl.image_cache: %s must clamp to default %d days, got %v", v, DefaultImageCacheTTLDays, cfg.TTL.ImageCache.D())
 		}
 	}
 }
@@ -356,32 +355,28 @@ func TestMaxConcurrencyNegativeRejected(t *testing.T) {
 	}
 }
 
-func TestAuditRetentionDaysDefaultsToDisabled(t *testing.T) {
+// TestAuditRetentionDefaultsTo90Days: the old "absent = keep forever" default
+// is gone — retention now defaults to a finite 90d, because a default that
+// silently reverts to never-deleting is a disk-full trap (see
+// DefaultAuditRetentionDays).
+func TestAuditRetentionDefaultsTo90Days(t *testing.T) {
 	cfg, err := Parse([]byte(validYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AuditRetentionDays != 0 {
-		t.Errorf("audit_retention_days: default must be 0 (never delete), got %d", cfg.AuditRetentionDays)
+	if cfg.TTL.AuditRetention.D() != time.Duration(DefaultAuditRetentionDays)*24*time.Hour {
+		t.Errorf("default ttl.audit_retention: got %v, want %d days", cfg.TTL.AuditRetention.D(), DefaultAuditRetentionDays)
 	}
 }
 
-func TestAuditRetentionDaysConfig(t *testing.T) {
-	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\naudit_retention_days: 30", 1)
+func TestAuditRetentionConfig(t *testing.T) {
+	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\nttl:\n  audit_retention: 30d", 1)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AuditRetentionDays != 30 {
-		t.Errorf("audit_retention_days: got %d, want 30", cfg.AuditRetentionDays)
-	}
-}
-
-func TestAuditRetentionDaysNegativeRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "listen: 127.0.0.1:9900", "listen: 127.0.0.1:9900\naudit_retention_days: -5", 1)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "audit_retention_days must be >= 0") {
-		t.Errorf("want audit_retention_days rejection error, got %v", err)
+	if cfg.TTL.AuditRetention.D() != 30*24*time.Hour {
+		t.Errorf("ttl.audit_retention: got %v, want 30d", cfg.TTL.AuditRetention.D())
 	}
 }
 
@@ -742,19 +737,19 @@ func TestStickyTTLGlobalDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.StickyTTL.D() != DefaultStickyTTL {
-		t.Errorf("StickyTTL default = %v, want %v", cfg.StickyTTL.D(), DefaultStickyTTL)
+	if cfg.TTL.Sticky.D() != DefaultStickyTTL {
+		t.Errorf("TTL.Sticky default = %v, want %v", cfg.TTL.Sticky.D(), DefaultStickyTTL)
 	}
 }
 
 func TestStickyTTLGlobalOverride(t *testing.T) {
-	yaml := "sticky_ttl: 30m\n" + validYAML
+	yaml := "ttl:\n  sticky: 30m\n" + validYAML
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.StickyTTL.D() != 30*time.Minute {
-		t.Errorf("StickyTTL = %v, want 30m", cfg.StickyTTL.D())
+	if cfg.TTL.Sticky.D() != 30*time.Minute {
+		t.Errorf("TTL.Sticky = %v, want 30m", cfg.TTL.Sticky.D())
 	}
 }
 
@@ -796,14 +791,14 @@ func TestStickyTTLNonPositiveRejected(t *testing.T) {
 // TestStickyTTLPerEndpointAboveBackstopRejected lock the fix for the gap
 // flagged in the previous review: internal/sticky.Registry evicts an idle
 // entry from its map after sticky.BackstopTTL (24h) independent of any
-// endpoint's own StickyTTL, so a configured sticky_ttl above that value
+// endpoint's own StickyTTL, so a configured ttl.sticky above that value
 // would load successfully but silently stop taking effect once a
 // conversation goes quiet for longer than the backstop — a "no error but
 // the feature stops working" trap. validate() must catch it at load time.
 func TestStickyTTLGlobalAboveBackstopRejected(t *testing.T) {
-	yaml := "sticky_ttl: 25h\n" + validYAML
+	yaml := "ttl:\n  sticky: 25h\n" + validYAML
 	if _, err := Parse([]byte(yaml)); err == nil {
-		t.Error("global sticky_ttl above sticky.BackstopTTL (24h) must be rejected at load")
+		t.Error("global ttl.sticky above sticky.BackstopTTL (24h) must be rejected at load")
 	}
 }
 
@@ -818,9 +813,9 @@ func TestStickyTTLAtBackstopBoundaryAccepted(t *testing.T) {
 	// Exactly the backstop value is still safe (the backstop only evicts
 	// entries idle STRICTLY LONGER than itself — see internal/sticky.Set),
 	// so this must not be rejected as an off-by-one.
-	yaml := "sticky_ttl: 24h\n" + validYAML
+	yaml := "ttl:\n  sticky: 24h\n" + validYAML
 	if _, err := Parse([]byte(yaml)); err != nil {
-		t.Errorf("sticky_ttl exactly at the backstop (24h) should be accepted, got %v", err)
+		t.Errorf("ttl.sticky exactly at the backstop (24h) should be accepted, got %v", err)
 	}
 }
 

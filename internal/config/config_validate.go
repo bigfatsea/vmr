@@ -27,15 +27,12 @@ func (c *Config) validateBasic() error {
 	if c.MaxConcurrency < 0 {
 		return fmt.Errorf("max_concurrency must be >= 0 (got %d)", c.MaxConcurrency)
 	}
-	if c.AuditRetentionDays < 0 {
-		return fmt.Errorf("audit_retention_days must be >= 0 (got %d)", c.AuditRetentionDays)
-	}
 	if c.ImageDownscaleMaxPx < 0 {
 		return fmt.Errorf("image_downscale must be >= 0 (got %d; 0 = disabled)", c.ImageDownscaleMaxPx)
 	}
-	if c.StickyTTL.D() > core.StickyBackstopTTL {
-		return fmt.Errorf("sticky_ttl %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep sticky_ttl at or under %s",
-			c.StickyTTL.D(), core.StickyBackstopTTL, c.StickyTTL.D(), core.StickyBackstopTTL)
+	if c.TTL.Sticky.D() > core.StickyBackstopTTL {
+		return fmt.Errorf("ttl.sticky %s exceeds the internal memory-eviction backstop (%s): a sticky entry idle longer than the backstop is dropped regardless of this setting, so stickiness would silently stop working before %s elapses — keep ttl.sticky at or under %s",
+			c.TTL.Sticky.D(), core.StickyBackstopTTL, c.TTL.Sticky.D(), core.StickyBackstopTTL)
 	}
 	for i, k := range c.APIKeys {
 		if len(k) < minAPIKeyLen {

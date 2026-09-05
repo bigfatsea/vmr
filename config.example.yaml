@@ -87,10 +87,7 @@ listen: 127.0.0.1:8800
 #
 # (Singular `api_key` was removed — a config still using it fails to load as an
 # unknown field, same as any other typo. api_keys is the only auth surface.)
-# max_attempts: 0                # cap on upstream tries; default 0 = walk every available endpoint
-# probe_timeout: 15s             # upper bound on one background recovery-probe call: a half-open endpoint gets
-#                                 # a small dedicated probe request before real traffic is allowed back onto it —
-#                                 # real requests never wait on or get diverted by another endpoint's recovery check
+# max_attempts: 0                # cap on upstream tries; default 0 = unlimited (walk every available endpoint)
 # max_request_body_mb: 8         # inbound request body size cap (stability, unrelated to audit logging)
 # max_concurrency: 8             # global gate; excess requests wait in memory (0/absent = unlimited) — worst case
 #                                 # per in-flight request is ~32MB (8MB request + 8MB response-normalization
@@ -107,22 +104,33 @@ listen: 127.0.0.1:8800
 #                                 # a short-lived peak max_request_body_mb cannot see. Images decode one at a time,
 #                                 # and anything over ~64MP is passed through undecoded (decompression-bomb guard).
 #                                 # Serving vision traffic from a shared instance? Set max_concurrency conservatively.
-# image_cache_ttl_days: 7        # evict downscale-cache entries unused for this many days (0/absent = default 7)
-# sticky_ttl: 10m                # global default for Sticky Model's affinity window (0/absent = default 10m);
-#                                 # each endpoint below can override it — see the "cheap" model for an example;
-#                                 # hard ceiling 24h either way (the sticky registry's own memory-eviction
-#                                 # backstop) — vmr check/start reject anything above that
-# audit_retention_days: 30       # delete audit files older than this; 0/absent = keep forever (rotation always compresses old days to .zst regardless)
 # extra_redact_headers:           # additional client request header names to mask in the audit trail, same
 #   - X-Custom-Token              # treatment as the built-in Authorization/X-Api-Key/Cookie/etc list — for a
 #                                  # client's own custom auth header vmr doesn't already know to mask (case-
 #                                  # insensitive match). Absent/empty (the default) changes nothing.
 # log_dir: ~/.vmr/logs           # audit JSONL directory; used exactly as given (~/ expands); absent = ~/.vmr/logs. Changing it needs a restart
 # image_cache_dir: ~/.vmr/image_cache  # downscale-result cache directory; same rule; absent = ~/.vmr/image_cache; follows hot reload
-# timeouts:
+# timeouts:                       # "how long one wait may take" — request-path upper bounds, Go duration syntax
 #   connect: 10s
 #   response_header: 120s        # time to first byte from upstream
 #   stream_idle: 120s            # abort any upstream body (stream, JSON, error) silent for this long
+#   probe: 15s                   # upper bound on one background recovery-probe call: a half-open endpoint gets
+#                                 # a small dedicated probe request before real traffic is allowed back onto it —
+#                                 # real requests never wait on or get diverted by another endpoint's recovery check
+#
+# ttl:                            # "how long state lives" — lifecycle/eviction, extended syntax: Nd / Nw / Nmo / Ny
+#                                 # (case-insensitive; d=24h, w=7d, mo=30d, y=365d; a bare number means days).
+#                                 # Zero-value rule for every ttl field: 0 (incl. 0d), absent, and negative all
+#                                 # mean "use the default". There is no "forever": write a concrete large value
+#                                 # (90000d ≈ 246 years) if you need retention beyond any horizon.
+#   sticky: 10m                  # global default for Sticky Model's affinity window (Go duration syntax, 0/absent =
+#                                 # default 10m); each endpoint below can override it — see the "cheap" model for
+#                                 # an example; hard ceiling 24h either way (the sticky registry's own memory-
+#                                 # eviction backstop) — vmr check/start reject anything above that
+#   image_cache: 14d             # evict downscale-cache entries unused this long (0/absent = default 7d)
+#   audit_retention: 90d         # delete audit files older than this (0/absent = default 90d).
+#                                 # BREAKING vs the old audit_retention_days: 0 used to mean "keep forever" —
+#                                 # that reading is gone; if you relied on it, write 90000d or larger.
 
 # pricing: global settings for metric: cost quota accounts and vmr report's $
 # estimates (see docs/VirtualModelRouter_Design_v4_Quota.md and

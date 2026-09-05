@@ -145,8 +145,10 @@ func cmdStart(args []string) error {
 	// audit.New's startup housekeeping sweep (internal/audit/housekeep.go)
 	// reads the retention window at the moment it runs — SetRetentionDays
 	// must land before New, not after, or that first sweep compresses old
-	// files but never purges them.
-	audit.SetRetentionDays(cfg.AuditRetentionDays)
+	// files but never purges them. The calendar-TTL converts to whole days,
+	// rounding up (Days()), so a sub-day value can't collapse to 0 and trip
+	// the audit package's own "0 = never delete" reading.
+	audit.SetRetentionDays(cfg.TTL.AuditRetention.Days())
 	audit.SetExtraRedactHeaders(cfg.ExtraRedactHeaders)
 
 	var auditLog *audit.Logger
@@ -211,7 +213,7 @@ func cmdStart(args []string) error {
 			rt.RecordReload(trigger, err)
 			return
 		}
-		audit.SetRetentionDays(newCfg.AuditRetentionDays)
+		audit.SetRetentionDays(newCfg.TTL.AuditRetention.Days())
 		audit.SetExtraRedactHeaders(newCfg.ExtraRedactHeaders)
 		rt.Install(newSnap)
 		rt.RecordReload(trigger, nil)

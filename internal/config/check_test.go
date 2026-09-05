@@ -135,8 +135,7 @@ models:
 func TestCheckFlagsProbeTimeoutNotUnderResponseHeader(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
-probe_timeout: 130s
-timeouts: {response_header: 120s}
+timeouts: {probe: 130s, response_header: 120s}
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k1}
 models:

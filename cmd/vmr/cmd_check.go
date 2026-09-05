@@ -205,15 +205,11 @@ func printGlobalSettings(w io.Writer, cfg *config.Config, issues []config.Issue)
 		imgScale = fmt.Sprintf("%dpx", cfg.ImageDownscaleMaxPx)
 	}
 	fmt.Fprintln(w, checkLine(0, "image_downscale", imgScale))
-	fmt.Fprintln(w, checkLine(0, "image_cache_ttl", fmt.Sprintf("%dd", cfg.ImageCacheTTLDays)))
-	retention := "forever"
-	if cfg.AuditRetentionDays > 0 {
-		retention = fmt.Sprintf("%dd", cfg.AuditRetentionDays)
-	}
-	fmt.Fprintln(w, checkLine(0, "audit_retention", retention))
+	fmt.Fprintln(w, checkLine(0, "image_cache_ttl", cfg.TTL.ImageCache.String()))
+	fmt.Fprintln(w, checkLine(0, "audit_retention", cfg.TTL.AuditRetention.String()))
 	fmt.Fprintln(w, checkLine(0, "extra_redact_headers", orNoneList(cfg.ExtraRedactHeaders)))
-	fmt.Fprintln(w, checkLine(0, "sticky_ttl", cfg.StickyTTL.D().String()))
-	probeTimeout := cfg.ProbeTimeout.D().String()
+	fmt.Fprintln(w, checkLine(0, "sticky_ttl", cfg.TTL.Sticky.D().String()))
+	probeTimeout := cfg.Timeouts.Probe.D().String()
 	if hasIssue(issues, "", "", "", "probe_timeout") {
 		probeTimeout = warn(probeTimeout)
 	}
@@ -545,7 +541,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 		sticky := m.Sticky == nil || *m.Sticky
 		fmt.Fprintln(w, checkLine(2, "sticky", fmt.Sprintf("%v", sticky)))
 		if sticky {
-			fmt.Fprintln(w, checkLine(2, "sticky_ttl", cfg.StickyTTL.D().String()))
+			fmt.Fprintln(w, checkLine(2, "sticky_ttl", cfg.TTL.Sticky.D().String()))
 		}
 		if m.ImageDownscaleMaxPx != nil {
 			fmt.Fprintln(w, checkLine(2, "image_downscale", fmt.Sprintf("%dpx", *m.ImageDownscaleMaxPx)))
@@ -576,7 +572,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 					}
 					parts = append(parts, "role_map="+strings.Join(rm, ","))
 				}
-				if sticky && ep.StickyTTL != cfg.StickyTTL.D() {
+				if sticky && ep.StickyTTL != cfg.TTL.Sticky.D() {
 					parts = append(parts, "sticky_ttl="+ep.StickyTTL.String())
 				}
 				if ep.APIKey == "" {

@@ -492,7 +492,8 @@ api_keys: ["sk-vmr-local-test-key-001"]
 max_attempts: 3
 max_concurrency: 8
 image_downscale: 512
-audit_retention_days: 30
+ttl:
+  audit_retention: 30d
 providers:
   - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: key-aaaa}
   - {name: p2, base_url: {openai-completions: https://b.example/v1}, api_key: key-bbbb, proxy: false}

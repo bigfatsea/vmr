@@ -353,10 +353,12 @@ func downscaleImages(body []byte, protocol string, snap *router.Snapshot, route 
 		return body, nil
 	}
 	n := route.EffectiveImageDownscaleMaxPx(snap.Cfg.ImageDownscaleMaxPx)
+	// Days() rounds up so a sub-day ttl.image_cache can't collapse to 0 and
+	// trip imgprep's day-granular sweep's "0 = no eviction" reading.
 	return imgprep.Downscale(body, protocol, imgprep.Options{
 		MaxPx:        n,
 		CacheDir:     snap.Cfg.ImageCacheDir,
-		CacheTTLDays: snap.Cfg.ImageCacheTTLDays,
+		CacheTTLDays: snap.Cfg.TTL.ImageCache.Days(),
 	})
 }
 
