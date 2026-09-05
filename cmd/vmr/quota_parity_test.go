@@ -64,9 +64,9 @@ type parityAttempt struct {
 
 // forwarded mirrors internal/router's own decision to call chargeQuota:
 // forwardSuccess runs for any response with status < 400, and charges
-// "regardless of copyErr" — so a truncated 2xx is charged, but a
-// softblock 2xx (ErrorClass="content") is NOT (checkSoftBlock exits
-// the attempt before forwardSuccess runs).
+// "regardless of copyErr" — so a truncated 2xx is charged, but an
+// unforwarded softblock 2xx (ErrorClass="content") is NOT (it never
+// reaches forwardSuccess).
 func (a parityAttempt) forwarded() bool {
 	return a.status > 0 && a.status < 400 && !a.softblock
 }
@@ -115,10 +115,9 @@ func (r parityRequest) auditLine(ts time.Time, provider string) string {
 		case a.status >= 400:
 			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"upstream %d","error_class":"rate_limit"`, a.status, a.status)
 		case a.softblock:
-			// Softblock: checkSoftBlock writes SetErrorResponse with
-			// ErrorClass="content" before returning blocked=true — the
-			// attempt NEVER reaches forwardSuccess, so Forwarded is never
-			// set and quota is never charged.
+			// Softblock: an attempt with ErrorClass="content" never reaches
+			// forwardSuccess, so Forwarded is never set and quota is never
+			// charged.
 			fields += fmt.Sprintf(`,"response":{"status":%d},"error":"content","error_class":"content"`, a.status)
 		case a.truncated:
 			// New-format real shape: forwardSuccess sets Forwarded BEFORE
@@ -394,7 +393,7 @@ func responsesUsageJSON(in, out int) string {
 }
 
 // softblockResp is a short content-policy refusal body — the router never
-// charges for it (checkSoftBlock exits before forwardSuccess).
+// charges for it (it exits before forwardSuccess).
 const softblockResp = `{"error":{"type":"content_policy"}}`
 
 // tokensParityFixture is the shared corpus for the tokens and cost parity
@@ -752,8 +751,8 @@ func (r parityRequest) replayChargeFor() (raw quota.Counters, estimated float64,
 // side must be estimated on BOTH sides — the exact thing the old merged
 // disjunction got wrong.
 //
-// The softblock rows are the other load-bearing case: checkSoftBlock exits
-// before forwardSuccess, so the router never charges them. Neither half's
+// The softblock rows are the other load-bearing case: an attempt that
+// exits before forwardSuccess is never charged by the router. Neither half's
 // ChargeResponse loop ever runs for a softblock attempt (it is not
 // forwarded), so the account stays at zero on both sides.
 func TestQuotaParity_ReplayAndLiveChargeAgree(t *testing.T) {

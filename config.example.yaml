@@ -442,18 +442,10 @@ models:
                                   # block above entirely — for a model that must stay
                                   # strictly scoped to its own declared endpoints (omit to
                                   # inherit the default true, i.e. participate)
-    # soft_block_failover: true   # let a 2xx that carries a vendor content-policy flag
-                                  # (MiniMax input_sensitive/output_sensitive) but returns
-                                  # an empty/near-empty answer fail over like an ErrContent
-                                  # 4xx would, instead of reaching the client as a clean
-                                  # empty 200. Non-streaming responses only; off by default.
-                                  # Model-level here is the default for every endpoint below;
-                                  # an endpoint can still override with its own value.
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          # soft_block_failover: false   # this one endpoint opts out even if the model turned it on
         - providers: [openrouter]
           # A models: list with more than one name expands into that many
           # independent, individually health-tracked endpoints sharing this

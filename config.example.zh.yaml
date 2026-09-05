@@ -371,16 +371,10 @@ models:
     # fallback: false             # 让这个虚拟模型完全不参与上面的 fallback_endpoints: 块——
                                   # 用于必须严格局限在自己声明的端点内的模型（不写
                                   # 就继承默认值 true，即参与）
-    # soft_block_failover: true   # 让一个带厂商内容合规标记（MiniMax input_sensitive/
-                                  # output_sensitive）但回复为空/极短的 2xx 像 ErrContent 4xx
-                                  # 那样切换到下一候选，而不是作为干净的空 200 到达客户端。
-                                  # 仅非流式响应；默认关。写在模型级是下面每个端点的默认值，
-                                  # 端点可以用自己的值覆盖。
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
-          # soft_block_failover: false   # 即使模型级打开了，这一条端点也单独退出
         - providers: [openrouter]
           # 一份含多个名字的 models: 列表会展开成同样多个独立的、各自单独做健康跟踪
           # 的端点，共享这一条记录的 provider/protocol/priority——按

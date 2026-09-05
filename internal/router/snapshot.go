@@ -186,9 +186,6 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 	if eg.StickyTTL != nil {
 		stickyTTL = eg.StickyTTL.D()
 	}
-	// endpoint's own explicit value wins; else the model's base; else off.
-	effSoftBlockFailover := eg.SoftBlockFailover != nil && *eg.SoftBlockFailover ||
-		eg.SoftBlockFailover == nil && m.SoftBlockFailover != nil && *m.SoftBlockFailover
 	var eps []*core.Endpoint
 	for _, upstreamModel := range eg.Models {
 		for _, providerName := range eg.Providers {
@@ -206,20 +203,19 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			effCapabilities := resolveModelCapabilities(m, cfg.ModelDefaults, providerName, upstreamModel)
 			effMaxContextTokens := resolveModelMaxContextTokens(m, cfg.ModelDefaults, providerName, upstreamModel)
 			ep := &core.Endpoint{
-				Provider:          providerName,
-				AdapterType:       protocol,
-				BaseURL:           baseURL,
-				FullURL:           ad.ResolveURL(baseURL),
-				APIKey:            p.APIKey,
-				Model:             upstreamModel,
-				Priority:          eg.Priority,
-				RoleMap:           eg.RoleMap,
-				Capabilities:      effCapabilities,
-				MaxContextTokens:  effMaxContextTokens,
-				FromFallback:      fromFallback,
-				SoftBlockFailover: effSoftBlockFailover,
-				StickyTTL:         stickyTTL,
-				Quota:             quotaSpecs[providerName],
+				Provider:         providerName,
+				AdapterType:      protocol,
+				BaseURL:          baseURL,
+				FullURL:          ad.ResolveURL(baseURL),
+				APIKey:           p.APIKey,
+				Model:            upstreamModel,
+				Priority:         eg.Priority,
+				RoleMap:          eg.RoleMap,
+				Capabilities:     effCapabilities,
+				MaxContextTokens: effMaxContextTokens,
+				FromFallback:     fromFallback,
+				StickyTTL:        stickyTTL,
+				Quota:            quotaSpecs[providerName],
 				// Folded once here, read as a plain value on the hot path —
 				// the override chain never re-resolves per request (see
 				// core.Endpoint.PricingRate's doc comment).

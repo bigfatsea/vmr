@@ -200,7 +200,7 @@ type Attempt struct {
 	// Forwarded is true when this attempt's response was actually forwarded
 	// to the client — the upstream returned a 2xx, the response was committed
 	// to the client, and the router charged quota for it. The ONLY setter is
-	// router.forwardSuccess: softblock paths (checkSoftBlock), >=400 error
+	// router.forwardSuccess: >=400 error
 	// paths (handleErrorResponse), and build/network failures never set it.
 	// A truncated stream (SetTruncated after SetSuccessResponse) still has
 	// Forwarded=true — the response headers were already committed and quota

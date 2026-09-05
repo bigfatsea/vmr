@@ -27,13 +27,12 @@ import (
 // legacyEndpointGroup mirrors the pre-map EndpointGroup: a flat list entry
 // carrying its own protocol.
 type legacyEndpointGroup struct {
-	Protocol          string            `yaml:"protocol"`
-	Providers         []string          `yaml:"providers"`
-	Models            []string          `yaml:"models"`
-	Priority          int               `yaml:"priority"`
-	RoleMap           map[string]string `yaml:"role_map"`
-	StickyTTL         *config.Duration  `yaml:"sticky_ttl"`
-	SoftBlockFailover *bool             `yaml:"soft_block_failover"`
+	Protocol  string            `yaml:"protocol"`
+	Providers []string          `yaml:"providers"`
+	Models    []string          `yaml:"models"`
+	Priority  int               `yaml:"priority"`
+	RoleMap   map[string]string `yaml:"role_map"`
+	StickyTTL *config.Duration  `yaml:"sticky_ttl"`
 }
 
 type legacyVirtualModel struct {
@@ -43,7 +42,6 @@ type legacyVirtualModel struct {
 	MaxContextTokens    int64                 `yaml:"max_context_tokens"`
 	Sticky              *bool                 `yaml:"sticky"`
 	Fallback            *bool                 `yaml:"fallback"`
-	SoftBlockFailover   *bool                 `yaml:"soft_block_failover"`
 	ImageDownscaleMaxPx *int                  `yaml:"image_downscale"`
 }
 
@@ -72,7 +70,6 @@ func (l *legacyConfig) toNew(t *testing.T) *config.Config {
 			MaxContextTokens:    lm.MaxContextTokens,
 			Sticky:              lm.Sticky,
 			Fallback:            lm.Fallback,
-			SoftBlockFailover:   lm.SoftBlockFailover,
 			ImageDownscaleMaxPx: lm.ImageDownscaleMaxPx,
 			Endpoints:           map[string][]config.EndpointGroup{},
 		}
@@ -92,12 +89,11 @@ func bucketByProtocol(t *testing.T, legacy []legacyEndpointGroup) map[string][]c
 			t.Fatal("legacy endpoint group without protocol")
 		}
 		ne := config.EndpointGroup{
-			Providers:         le.Providers,
-			Models:            le.Models,
-			Priority:          le.Priority,
-			RoleMap:           le.RoleMap,
-			StickyTTL:         le.StickyTTL,
-			SoftBlockFailover: le.SoftBlockFailover,
+			Providers: le.Providers,
+			Models:    le.Models,
+			Priority:  le.Priority,
+			RoleMap:   le.RoleMap,
+			StickyTTL: le.StickyTTL,
 		}
 		out[le.Protocol] = append(out[le.Protocol], ne)
 	}
@@ -132,7 +128,6 @@ models:
       - protocol: anthropic-messages
         providers: [p1]
         models: [m4]
-        soft_block_failover: true
       - protocol: openai-responses
         providers: [p3]
         models: [m5]
@@ -185,7 +180,6 @@ models:
       anthropic-messages:
         - providers: [p1]
           models: [m4]
-          soft_block_failover: true
       openai-responses:
         - providers: [p3]
           models: [m5]

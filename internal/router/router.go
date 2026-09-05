@@ -384,21 +384,6 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	if resp.StatusCode >= 400 {
 		return rt.handleErrorResponse(w, resp, ad, att, logPrefix, tokenEst, snap, attempt, start, key, &healthReported)
 	}
-	uerr, blocked, peekErr := rt.checkSoftBlock(resp, creq, ep, att, logPrefix, tokenEst, snap, attempt, key, &healthReported)
-	if peekErr != nil {
-		// The soft-block peek hit a broken/timed-out upstream before any byte
-		// reached the client — same shape as a transport error, so treat it
-		// as one and let the failover loop move on.
-		resp.Body.Close()
-		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-		healthReported = true
-		rt.logf("%s, %s, error=network:%v, cooldown=%s, attempt=%d", logPrefix, tokenEst, peekErr, cd, attempt)
-		att.SetNetworkError(peekErr)
-		return false, nil, false
-	}
-	if blocked {
-		return false, uerr, false
-	}
 	return rt.forwardSuccess(w, r, resp, creq, ep, att, logPrefix, snap, attempt, start, key, &healthReported)
 }
 
@@ -513,8 +498,8 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// and ObservedModel.
 	att.SetSuccessResponse(resp.StatusCode, resp.Header)
 	// SetForwarded is the single point that flips Attempt.Forwarded on. Every
-	// other path (checkSoftBlock, handleErrorResponse, SetBuildError,
-	// SetNetworkError, SetCanceled) leaves it false; a later SetTruncated
+	// other path (handleErrorResponse, SetBuildError, SetNetworkError,
+	// SetCanceled) leaves it false; a later SetTruncated
 	// (mid-stream cut AFTER the 200 was committed) does NOT undo it, so the
 	// field is the exact reproduction basis for the router's per-forwarded-
 	// attempt quota charging. See Attempt.Forwarded's own doc comment.

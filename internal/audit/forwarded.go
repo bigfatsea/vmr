@@ -26,10 +26,10 @@ func (a *Attempt) SetForwarded() {
 // — it means "not forwarded" on new records but "field absent" on old
 // ones. The rule: a true Forwarded is authoritative; a false one falls
 // back to the old-format signal (a < 400 response with no error class),
-// which new-format softblock records never satisfy (checkSoftBlock writes
-// ErrorClass "content" alongside its < 400 response). Do not re-derive
-// this decision at each call site — it is the single compatibility
-// chokepoint for the field.
+// which historical softblock records never satisfy (the historical
+// softblock failover path wrote ErrorClass "content" alongside its < 400
+// response). Do not re-derive this decision at each call site — it is the
+// single compatibility chokepoint for the field.
 func (a *Attempt) IsForwarded() bool {
 	if a == nil {
 		return false

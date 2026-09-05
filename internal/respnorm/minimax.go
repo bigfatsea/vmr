@@ -157,9 +157,6 @@ func containsSoftBlockMarker(b []byte) bool {
 	return false
 }
 
-// ContainsSoftBlockMarker is the exported entry point for router soft-block failover.
-func ContainsSoftBlockMarker(b []byte) bool { return containsSoftBlockMarker(b) }
-
 // stripThinkingProcess removes MiniMax M3's "Thinking Process:" section
 // from a fully buffered response. Returns b unchanged if not detected.
 func stripThinkingProcess(b []byte) []byte {
