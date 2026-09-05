@@ -130,7 +130,7 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 
 ### 角色改写 role_map
 
-有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 自己身上写 `role_map: {developer: system}`（即 `providers[].role_map`），vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。挂在 provider 一级声明一次即可：它修复的 role 拒收是该 provider 的 API 实现属性，不属于任何某个虚拟模型——该账号名下的所有端点自动继承。某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。空白 role 名、空白目标值、以及自映射（`system: system`）在加载时直接拒绝。
+有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 自己身上写 `role_map: {developer: system}`（即 `providers[].role_map`），vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。挂在 provider 一级声明一次即可：它修复的 role 拒收是该 provider 的 API 实现属性，不属于任何某个虚拟模型——该账号名下的所有端点自动继承。某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。空白 role 名、空白目标值、自映射（`system: system`）、以及首尾带空白的 role 名都在加载时直接拒绝——匹配是精确字符串比较，带空白的名字要么永远匹配不上、要么改写出网关拒收的 role，且两种失败在运行时都不会有任何提示。
 
 ### 端点尝试顺序 priority 与 strategy
 

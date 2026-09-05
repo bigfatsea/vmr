@@ -243,11 +243,18 @@ func TestRoleMapEmptyNormalized(t *testing.T) {
 }
 
 // TestRoleMapInvalid pins the per-entry validation: blank names, blank
-// targets and self-mappings are all load errors.
+// targets, whitespace-padded names and self-mappings are all load errors.
+// The padded cases are the dangerous half of the blank check: role matching
+// is an exact string compare, so a padded key silently never matches (the
+// 400 the user was fixing keeps happening) and a padded value rewrites to a
+// role the gateway rejects — neither surfaces any hint at runtime.
 func TestRoleMapInvalid(t *testing.T) {
 	for name, frag := range map[string]string{
 		"blank from":   "role_map:\n      \"\": system",
 		"blank to":     "role_map:\n      developer: \"\"",
+		"padded from":  "role_map:\n      \" developer\": system",
+		"padded to":    "role_map:\n      developer: \" system\"",
+		"padded NBSP":  "role_map:\n      \"developer\\u00a0\": system",
 		"self-mapping": "role_map:\n      system: system",
 	} {
 		yaml := strings.Replace(validYAML, "api_key: ${VMR_TEST_KEY}", "api_key: ${VMR_TEST_KEY}\n    "+frag, 1)

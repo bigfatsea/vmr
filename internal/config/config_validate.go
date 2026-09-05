@@ -132,6 +132,9 @@ func (c *Config) validateProviders(quotaNow time.Time) error {
 			if strings.TrimSpace(v) == "" {
 				return fmt.Errorf("provider %q: role_map: %q maps to an empty role name", p.Name, k)
 			}
+			if k != strings.TrimSpace(k) || v != strings.TrimSpace(v) {
+				return fmt.Errorf("provider %q: role_map: %q -> %q contains surrounding whitespace — role matching is an exact string compare, a padded name can never match (or rewrites to a role the gateway rejects); remove the padding", p.Name, k, v)
+			}
 			if k == v {
 				return fmt.Errorf("provider %q: role_map: %q maps to itself (a no-op rewrite)", p.Name, k)
 			}
