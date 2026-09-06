@@ -38,10 +38,9 @@ func LoadDefaultExchangeRate() (rates map[string]float64, generatedAt string, er
 }
 
 // EffectiveExchangeRate merges userRates over the embedded default table —
-// a user-declared code always wins on a matching key (see
-// docs/future-strategy/pricing_architecture_simplification_plan.md §2.3's
-// lookup order: user config -> built-in default -> load-time error). The
-// returned map is what every FactorBetween call in this package's callers
+// a user-declared code always wins on a matching key (lookup order: user
+// config -> built-in default -> load-time error). The returned map is what
+// every FactorBetween call in this package's callers
 // (internal/config's provider currency conversion, cmd/vmr/cmd_report.go's
 // display-currency factor) should pass as their rates argument — a
 // currency absent from BOTH layers stays absent, so FactorBetween still

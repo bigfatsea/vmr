@@ -68,8 +68,8 @@ type Finding struct {
 	// (cmd/vmr/cmd_story.go's writeJourneyFile); report's vmr-report.json
 	// matches, via cmd_report.go's report.LocalizeEfficiency call before
 	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
-	// do NOT follow lang — see docs/future-strategy/json_lang_policy_plan_sonnet-5.md
-	// for the reasoning.
+	// do NOT follow lang — see docs/future-strategy/analyze_architecture_redesign_opus-5.md
+	// §5.5 for the reasoning.
 	Finding  string `json:"finding"`
 	Evidence string `json:"evidence,omitempty"`
 	Action   string `json:"action,omitempty"`

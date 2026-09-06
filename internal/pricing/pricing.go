@@ -3,10 +3,8 @@
 // Package pricing is Quota-Aware Routing's per-1M-token pricing resolution
 // engine (see docs/VirtualModelRouter_Design_v4_Quota.md's pricing sections
 // for the two-layer design: providers[].pricing (account-local contract) over
-// the embedded standard table (official baseline) — see
-// docs/future-strategy/pricing_architecture_simplification_plan.md for the
-// full rationale). A leaf package: only depends on core + stdlib +
-// gopkg.in/yaml.v3, same layer as internal/quota (see that package's own
+// the embedded standard table (official baseline)). A leaf package: only
+// depends on core + stdlib + gopkg.in/yaml.v3, same layer as internal/quota (see that package's own
 // doc comment for the precedent this follows).
 //
 // Two consumers share this package's resolution logic: internal/config,
@@ -368,11 +366,9 @@ func Merge(base, overlay *Table) *Table {
 // ExchangeRate lets a hand-maintained curated row be entered straight from
 // a vendor's native-currency official price list (via that row's own
 // RateRow.Currency), self-contained within this file — no external
-// exchange-rate source exists anymore (see
-// docs/future-strategy/pricing_architecture_simplification_plan.md decision
-// 1/2: no external supplement/standard file, no per-deployment fallback
-// rates). A currency a row names without a matching entry here is a
-// load-time error, not a silent skip.
+// exchange-rate source exists anymore (no external supplement/standard file,
+// no per-deployment fallback rates). A currency a row names without a matching
+// entry here is a load-time error, not a silent skip.
 type fileTable struct {
 	Currency     string             `yaml:"currency"`
 	GeneratedAt  string             `yaml:"generated_at"`

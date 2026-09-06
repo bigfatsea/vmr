@@ -375,8 +375,7 @@ type Config struct {
 	// (a provider's pricing.currency, -currency) with no entry here falls
 	// back to the embedded default table (internal/pricing.
 	// LoadDefaultExchangeRate); still unresolved after that is a load-time
-	// error, never a silent 1:1 guess. See
-	// docs/future-strategy/pricing_architecture_simplification_plan.md §2.3.
+	// error, never a silent 1:1 guess.
 	ExchangeRate map[string]float64 `yaml:"exchange_rate"`
 
 	// LegacyPricing exists ONLY to catch the pre-simplification top-level

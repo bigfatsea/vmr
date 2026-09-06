@@ -35,8 +35,7 @@ const pricingStaleAfter = 60 * 24 * time.Hour
 // deserve a refresh. ok=false only when the embedded table itself somehow
 // failed to load (PricingTable's error path) — otherwise the table is
 // always present, since it no longer depends on anything the config
-// declares (see docs/future-strategy/pricing_architecture_simplification_plan.md
-// decisions 1/2: the two-layer model has no "config touches no pricing at
+// declares (the two-layer model has no "config touches no pricing at
 // all" case anymore).
 func pricingTableLine(cfg *config.Config) (string, bool) {
 	table, err := cfg.PricingTable()

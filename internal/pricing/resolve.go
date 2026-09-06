@@ -47,12 +47,10 @@ func fromCoreRate(r core.Rate) Rate {
 // is already USD by the time Resolve sees it — Table is always USD (see
 // Table's doc comment), and Aliases/Overrides come from
 // providers[].pricing, whose own Currency annotation internal/config
-// already converted to USD once at validate time (see
-// docs/future-strategy/pricing_architecture_simplification_plan.md decision
-// 3/4). Resolve therefore never converts currency; the only remaining
-// currency step in this package is Resolver.WithDisplayFactor, a pure
-// display-time rescale applied AFTER resolution, for vmr report's -currency
-// flag.
+// already converted to USD once at validate time. Resolve therefore never
+// converts currency; the only remaining currency step in this package is
+// Resolver.WithDisplayFactor, a pure display-time rescale applied AFTER
+// resolution, for vmr report's -currency flag.
 type ResolveOptions struct {
 	// Table is the merged generated+curated standard table (see embed.go's
 	// LoadStandard / Merge) — canonical-key -> Rate.

@@ -203,6 +203,7 @@ type bucket struct {
 // that.
 type Registry struct {
 	mu       sync.Mutex
+	flushMu  sync.Mutex
 	accounts map[string]map[string]*bucket // provider name -> limitKey -> bucket
 	path     string
 	dirty    bool

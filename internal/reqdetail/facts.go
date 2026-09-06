@@ -2,7 +2,7 @@
 
 // Package reqdetail renders one audit record's detail page — the shared
 // microscopic-tier leaf both internal/report and internal/story sit on top
-// of (see docs/future-strategy/story_report_architecture_opus-5.md §7.6a).
+// of (see docs/future-strategy/analyze_architecture_redesign_opus-5.md §1.1).
 // Honesty note on purity, in two tiers:
 //
 //   - This file's per-record fact extraction functions ARE pure functions

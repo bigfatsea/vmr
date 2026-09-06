@@ -227,7 +227,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 // when onRecord is nil (-details off): a caller that needs the raw
 // audit.Record for detail rendering needs the file open regardless, so
 // there is nothing to save by skipping decode in that case (see
-// docs/future-strategy/story_report_architecture_opus-5.md §7.6c on why
+// docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.4 on why
 // -details' own cost stays separate).
 func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo), cache *ctxgraph.FileCache) error {
 	for fileIdx, path := range paths {

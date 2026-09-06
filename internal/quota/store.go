@@ -123,6 +123,8 @@ func (r *Registry) Flush() (err error) {
 	if r.path == "" {
 		return nil
 	}
+	r.flushMu.Lock()
+	defer r.flushMu.Unlock()
 	r.mu.Lock()
 	if !r.dirty {
 		r.mu.Unlock()

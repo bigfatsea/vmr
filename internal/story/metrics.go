@@ -409,7 +409,7 @@ type JourneySummary struct {
 // texts follow lang, keeping .json and .md outputs fully aligned —
 // compare-*.json's MetricDiff.Label and vmr-report.json's efficiency[]
 // follow the same lang-follows-everywhere policy (P8,
-// docs/future-strategy/json_lang_policy_plan_sonnet-5.md).
+// docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.5).
 //
 // The -compare path (cmd_story.go's compareJourneys) calls this on both
 // sides purely to get Metrics for Compare(sA, sB, lang) — Compare/journeyRef

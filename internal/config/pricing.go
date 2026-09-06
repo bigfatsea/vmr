@@ -2,10 +2,7 @@
 
 // Pricing — YAML-shape config types and their validation/resolution.
 // providers[].pricing is the ONLY place pricing is configured: no top-level
-// pricing.rates/aliases, no external pricing.yaml supplement file. See
-// docs/future-strategy/pricing_architecture_simplification_plan.md for the
-// full rationale (four overlapping config-time entry points collapsed to
-// one, and why the top-level pricing: block existed at all before this).
+// pricing.rates/aliases, no external pricing.yaml supplement file.
 // Split from config.go per that file's own line-count budget.
 package config
 
