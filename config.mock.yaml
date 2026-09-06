@@ -230,7 +230,7 @@ models:
         - providers: [openrouter]
           models: [anthropic/claude-3-7-sonnet]
 
-  # ─── 额外模型用于演示 metric:cost 计费场景覆盖到 premium-model ───
+  # ─── 额外虚拟模型,把 my-model-x(pricing.rates 演示)与 heavy-model(model_multipliers 演示)接上真实端点 ───
   premium:
     endpoints:
       anthropic-messages:

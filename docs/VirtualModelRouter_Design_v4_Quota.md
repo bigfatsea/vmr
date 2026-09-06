@@ -167,32 +167,30 @@ charge(L) = base(L.Metric, L.TokenWeights) × L.ModelMultipliers[model]
 |---|---|---|
 | **多条并存 Limit** | 22% 套餐两种 metric 并存；三层窗口是常态 | 极低——桶/闸角色归并只需一次线性扫描（见 §5.2） |
 | **metric: requests** | Coding Plan 74% 按次数计 | **最低**——计数器 +1，完全不需要解析响应 |
-| **metric: tokens** | 类型 C / D（Token 总量桶） | 中——需要 usage 嗅探 + 降级估算 |
-| **metric: cost（分量折算）** | **Token Plan 94% 按 Token/Credits 计，且 Credits 按分量折算，比例差 5～120 倍** | 中——复用既有的按模型分项费率表 |
+| **metric: tokens** | 类型 C / D（Token 总量桶），且 Token Plan 占比 62% 中 94% 按 Token/Credits 计——含原本设想靠 `metric: cost` 表达的 Credits 制套餐（换算一次预算/价格即可，见 §7.1） | 中——需要 usage 嗅探 + 降级估算 |
 | **模型倍率（Limit 级，P3 订正）** | 类型 B / D 普遍存在，实测倍率跨度 2～9 倍 | 极低——一个 `map[string]float64` |
-| **token 分量权重（Limit 级，P3 订正）** | 类型 D 是 Token 桶，但四个分量的扣减比例不均一 | 极低——四个 float，缺省全 1.0 |
+| **token 分量权重（Limit 级，P3 订正）** | 类型 D 是 Token 桶，四个分量的扣减比例不均一；也承接了 Credits 制套餐的分量折算需求（比例差 5～120 倍）——理由见 §7.1「Credits/金额制套餐现在怎么表达」 | 极低——四个 float，缺省全 1.0 |
 | **Scope（按模型限定）** | 存在返回模型级明细的用量接口，提示可能有独立子额度 | 极低——charge 时一次模型名匹配 |
 | **rolling 窗口** | 类型 B 的短窗是滚动的 | 低——分桶近似，约 40 行（见 §8） |
 
 ### 4.2 砍掉（有依据的简化）
 
-**① 定价分三层：内置标准表 → 用户补充表 → 账号覆盖**
+**① 定价收敛为两层：内置标准表 → 账号覆盖，中间不设外部文件层**
 
-拆成三层，各自回答一个不同的问题：
+各自回答一个不同的问题：
 
 | 层 | 回答的问题 | 键空间 | 位置 |
 |---|---|---|---|
 | **标准表** | 这个模型的**列表价**是多少 | canonical model id | 随二进制 `go:embed`（`internal/pricing`） |
-| **补充表** | 标准表**没收录**的模型价格 | 同上（可回贡上游） | 用户文件，`pricing.supplement` |
 | **账号覆盖** | **我这个账号**的实际成交价/折扣 | vmr 的 `provider` + `model`（用户自取名） | `config.yaml` 的 `providers[].pricing` |
 
-三层而非两层，是因为补充表（列表价缺口，与账号无关、可回贡）与账号覆盖（谈到的折扣，永远不回贡）**键空间不同**。解析顺序：`providers[].pricing.overrides` 首条匹配（`discount` 形式 = 下层费率 × discount；显式费率形式直接采用）→ 补充表 ∪ 标准表（冲突时补充表胜出）→ 都没有则该 provider+model 无费率（`vmr report` 该行无 $ 估算；`metric: cost` **加载期错误**）。`rate` 是 `(provider, model)` 的纯函数，无时间戳参数（见 ④）。
+曾经有过第三层——独立于标准表之外的用户补充文件（`pricing.supplement`），用来补标准表没收录的模型价格且可回贡上游。它已被彻底删除（Pricing 架构极简化重构，见 `docs/future-strategy/pricing_architecture_simplification_plan.md`）：标准表本身持续刷新，缺失的模型直接提 PR 补进 `standard_price_curated.yaml`，不需要用户各自维护一份等价的私有补丁文件；账号覆盖与列表价缺口从此不再共享一个键空间的暧昧地带。解析顺序：`providers[].pricing.rates` 首条匹配（`discount` 形式 = 下层费率 × discount；显式费率形式直接采用）→ 标准表 → 都没有则该 provider+model 无费率（`vmr report` 该行无 $ 估算——不再有任何加载期门禁会因此拒绝启动，那道门禁属于已删除的 `metric: cost`，见 §7.1）。`rate` 是 `(provider, model)` 的纯函数，无时间戳参数（见 ④）。
 
-**表内查键的四步**（`internal/pricing.resolveCanonicalKey`）：① `providers[].pricing.map` 的显式映射；② `<provider>/<model>`（provider 是 vmr 自取的名字，只在它恰好等于厂商前缀时命中）；③ 裸模型名——先当 canonical key 直查，再查表的**别名**（下文 ⑥）；④ `*/model` 后缀匹配，按**厂商优先级**定胜负（下文 ⑦）。任一步不命中就落到下一步。四步全不命中、且请求名带 `/` 时，还有一步**裸名重试**：用 `ModelBasename` 掐掉 org/路径前缀后，把同一套解析在裸名上重跑（递归，四步全部）——因为表侧 key 已被生成器归一化成两段，而聚合商 API 强制带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）不降级就永远够不到表里的行。重试只拓宽：原本四步能命中的名字答案不变，带前缀的名字命中后与裸名请求的答案**逐字节一致**（决策主体与规则都没变，只是输入形态被降到了同一命名空间）。仍未命中即“无费率”，不猜。`ModelBasename` 是“裸名”的唯一权威定义，生成器建 key、解析器降级、歧义报告分组三处同源引用，不存在第二份实现。
+**表内查键的四步**（`internal/pricing.resolveCanonicalKey`）：① `providers[].pricing.aliases` 的显式映射；② `<provider>/<model>`（provider 是 vmr 自取的名字，只在它恰好等于厂商前缀时命中）；③ 裸模型名——先当 canonical key 直查，再查表的**别名**（下文 ⑥）；④ `*/model` 后缀匹配，按**厂商优先级**定胜负（下文 ⑦）。任一步不命中就落到下一步。四步全不命中、且请求名带 `/` 时，还有一步**裸名重试**：用 `ModelBasename` 掐掉 org/路径前缀后，把同一套解析在裸名上重跑（递归，四步全部）——因为表侧 key 已被生成器归一化成两段，而聚合商 API 强制带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）不降级就永远够不到表里的行。重试只拓宽：原本四步能命中的名字答案不变，带前缀的名字命中后与裸名请求的答案**逐字节一致**（决策主体与规则都没变，只是输入形态被降到了同一命名空间）。仍未命中即“无费率”，不猜。`ModelBasename` 是“裸名”的唯一权威定义，生成器建 key、解析器降级、歧义报告分组三处同源引用，不存在第二份实现。
 
 **⑥ 别名：裸模型名 → canonical key 的引用（不是价格拷贝）**
 
-别名写在 `standard_price_curated.yaml` 的 `aliases:` 段（用户补充表也可以写，同名时覆盖）。它存的是**目标 key**，不是数字——刷新 generated 表时，每条别名的费率跟着一起动，别名本身永不过期。**只解析一跳**：目标本身又是别名，是加载期错误（`Table.ValidateAliases`），因此结构上不可能成环。目标不存在同样是加载期错误——否则一个拼错的别名会静默落回第④步，命中另一家厂商的价。
+别名写在 `standard_price_curated.yaml` 的 `aliases:` 段（这是标准表自己的别名机制，解决"裸模型名撞车该判给谁"；与账号级的 `providers[].pricing.aliases`——"我这个部署里这个本地名字对应标准表哪一行"——是两回事，见 §9.1）。它存的是**目标 key**，不是数字——刷新 generated 表时，每条别名的费率跟着一起动，别名本身永不过期。**只解析一跳**：目标本身又是别名，是加载期错误（`Table.ValidateAliases`），因此结构上不可能成环。目标不存在同样是加载期错误——否则一个拼错的别名会静默落回第④步，命中另一家厂商的价。
 
 **别名负责"钉死一个模型该用谁的价"，优先级负责"运行时兜底"**——不是"优先级为主、别名补漏"。理由是两者的失效姿态不同：别名的目标消失是**加载期报错**（响亮），而优先级翻转是**静默**的，一个原本有价的名字会悄悄变成无价，报表里只是少一行。
 
@@ -216,13 +214,13 @@ charge(L) = base(L.Metric, L.TokenWeights) × L.ModelMultipliers[model]
 
 转售商名单（`aggregatorVendors`）刻意取**短的那一边**：没听说过的厂商更可能是新的第一方而不是新的聚合商，误判成第一方在不撞车时零代价。单一命中（不论档位）行为不变——这条规则只会让更多名字解析出来，永远不会改变一个原本无歧义的名字解析到哪一行。
 
-`metric: cost` 的严格性：**不仅"查不到条目"报错，"条目存在但缺少四分量中的任何一项"也报错**（缺失当 0 会低估消耗→账号显宽裕→拿更多流量→超支，见 §12.1"缺失费率的失败姿态"）。显式 `0.0`（上游对免费缓存就这么写）算"存在"，与"字段缺失"必须区分——生成脚本**不得把缺失补成 0**。
+费率行的形状校验：**不仅"查不到条目"不算错，"条目存在但缺少四分量中的任何一项"却是加载期错误**——缺失当 0 会把这一行的 $ 估算算出一个看起来正常、实则系统性偏低的数字，不写清楚地报错就是在放行"没写 = 免费"这种歧义。显式 `0.0`（上游对免费缓存就这么写）算"存在"，与"字段缺失"必须区分——生成脚本**不得把缺失补成 0**。
 
-> **覆盖度必须诚实说明**：上游标准数据对西方主流厂商四分量齐全，对**国产第一方厂商明显偏弱**（全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%，而缓存费率恰是 `cost` 档最要命的、分量差 5～120 倍）。所以标准表是**消除入门断崖的基线，不是 `metric: cost` 的充分数据源**——设计上假定它经常缺失，这正是"四项不齐即报错"存在的理由。
+> **覆盖度必须诚实说明**：上游标准数据对西方主流厂商四分量齐全，对**国产第一方厂商明显偏弱**（全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%，而缓存命中的分量差可达 5～120 倍，是 $ 估算里最容易失真的部分）。所以标准表是**消除入门断崖的基线，不是记账精度的数据源**——`vmr report`/`vmr analyze` 对缺分量的行会标注为不完整估算（`CostRateIncomplete`），而不是假装数字是准的。
 
 标准表内部拆两块（合并后对外一张表）：`standard_price_generated.yaml`（脚本从上游生成、可整体覆盖）+ `standard_price_curated.yaml`（项目手工补国产厂商、脚本不得触碰——否则每次刷新手工行被清掉）。
 
-**② 格式不向上游看齐，但键空间对齐**：**单位**保留 per-1M（比科学计数法少一个数量级出错机会）；**分量语义**与上游 `input_cost_per_token`/`cache_read_*`/`cache_creation_*` 等价、可机械转换；**币种**保留 vmr 的 `currency`/`exchange_rate`（否则表达不了非美元套餐）；曾有的 `date_*`/`hour_*` 促销时间窗功能面已移除（见 ④）。唯一改动的是**键**：标准表与补充表用上游的 canonical key 空间（生成脚本归一化成 `<litellm_provider>/<basename>`），账号覆盖仍用 vmr 自己的 `provider` + `model`——两套键空间因为它们回答两个不同的问题，这正是 `map` 字段存在的原因。
+**② 格式不向上游看齐，但键空间对齐**：**单位**保留 per-1M（比科学计数法少一个数量级出错机会）；**分量语义**与上游 `input_cost_per_token`/`cache_read_*`/`cache_creation_*` 等价、可机械转换；**币种**保留 vmr 的 `currency`/`exchange_rate`（否则表达不了非美元套餐——账号的书写币种经顶层 `exchange_rate` 一次性归一为 USD，见 ⑨）；曾有的 `date_*`/`hour_*` 促销时间窗功能面已移除（见 ④）。唯一改动的是**键**：标准表用上游的 canonical key 空间（生成脚本归一化成 `<litellm_provider>/<basename>`），账号覆盖仍用 vmr 自己的 `provider` + `model`——两套键空间因为它们回答两个不同的问题，这正是 `aliases` 字段存在的原因。
 
 **③ 标准表以开源参考表的形式维护**——是一份参考数据文件加一个刷新脚本，不是产品也不是服务。四条护栏：过期比缺失更危险（表内带生成时间戳，`vmr check` 与报表免责声明一并显示、超阈值提醒）｜溯源可见（免责声明说明每行费率来自哪一层）｜许可与署名（生成部分派生自 MIT 上游数据）｜不承诺准确性（价格以厂商官方为准）。
 
@@ -236,9 +234,9 @@ go run ./tools/gen_standard_pricing -generated-at $(date +%F)   # 拉取 + 覆�
 
 **手工行的取值纪律**：`standard_price_curated.yaml` 的每一个数字必须来自厂商自己的定价页并注明出处，**不做推断**。曾有 `zhipu/glm-5.*` 的 `cache_read` 按"输入价的 50%"推断（依据是缓存文档里的一个例子），后来对照定价页的"缓存命中"列发现推断值高了 2～2.3 倍。在缓存命中率 70–99% 的真实负载里 `cache_read` 是账单主项，推断出来的缓存价不是舍入误差。限时促销价（如"限时免费"的缓存写入）**留空而不是写 0**——本表没有时间维度，促销结束后那个 0 会永远低估。
 
-**④ 折扣与促销归入价格层，不再借道 `model_multipliers`**：折扣若只在 `model_multipliers`（一个额度概念），`vmr report` 仍按列表价计算、系统性高报支出；写进价格层则**额度计量与成本报表同时受益**。整个账号打折 → `overrides: [{model: "*", discount: 0.6}]`；单模型价格不同 → 写显式四分量费率。有起止日期的限时活动、分时段价差**不做**——价格层只服务 `vmr report` 的 $ 精度这个二阶价值，不为一个使用频率未知的场景背上一整套时间可达性分析。`model_multipliers` 因此收敛回**纯额度语义**（"这个模型烧几倍计数单位"），**只作用于 `requests`/`tokens`**；某 provider 的 Limit 全是 `cost` 却配了 `model_multipliers` → 报错。
+**④ 折扣与促销归入价格层，不再借道 `model_multipliers`**：折扣若只在 `model_multipliers`（一个额度概念），`vmr report` 仍按列表价计算、系统性高报支出；写进价格层则**额度计量与成本报表同时受益**。整个账号打折 → `rates: [{model: "*", discount: 0.6}]`；单模型价格不同 → 写显式四分量费率。有起止日期的限时活动、分时段价差**不做**——价格层只服务 `vmr report` 的 $ 精度这个二阶价值，不为一个使用频率未知的场景背上一整套时间可达性分析。`model_multipliers` 因此是**纯额度语义**（"这个模型烧几倍计数单位"），只作用于 `requests`/`tokens`——这两档是仅有的 metric，谈不上"某 metric 下非法"这条校验了。
 
-**⑤ 把 per-provider 定价并入 `config.yaml`**：`cost` 把定价放到了**请求路径**上，而独立的 `pricing.yaml` 不在热重载链路里，留在外面要另建文件监听 + 原子换表。并入后自动进 Snapshot / 热重载。落点：新叶子包 `internal/pricing`（与 `internal/quota` 同层，只依赖 `core`），`internal/config` 在 `validate()` 阶段解析 `providers[].pricing` + `pricing.supplement`、产出随 `core.Endpoint`/`core.Limit` 进 Snapshot——`metric: cost` 的"四项费率是否齐全"校验因此天然发生在加载期。`cmd/vmr/cmd_report.go` 的 `LoadPricing` 同样依赖 `internal/pricing`，与 config 层共用同一份解析逻辑（**两个消费者、一份实现**）；`internal/report` 依旧只接收已解析对象、绝不 import `config` 或 `pricing`（archtest 强制）。**破坏性变更**：独立 `pricing.yaml` 与 `vmr report -pricing` 取消，存量行迁入 `providers[].pricing.overrides`（多数行在有标准表后可直接删）。无 config.yaml 时跑 `vmr report` 降级为只用标准表列表价、不含账号折扣。
+**⑤ 把 per-provider 定价并入 `config.yaml`，且不再留任何外部文件出口**：独立的 `pricing.yaml`（无论是最早的 `vmr report -pricing`，还是后来的 `pricing.supplement`）不在热重载链路里，留在外面就要另建文件监听 + 原子换表；折算这份账号级定价原本还打算供 `metric: cost` 在请求路径上直接消费，就更没有理由让它活在 Snapshot 之外。并入后落点：叶子包 `internal/pricing`（与 `internal/quota` 同层，只依赖 `core`），`internal/config` 在 `validate()` 阶段解析 `providers[].pricing`（本账号覆盖）叠加内置标准表，产出供 `core.PricingSpec` 使用——`metric: cost` 已随决策 6 整体删除（见 §7.1），这条产物现在只服务离线的 `vmr report`/`vmr analyze`，从不挂到 Snapshot 的路由结构上。`cmd/vmr/cmd_report.go` 与 `internal/config` 共用 `internal/pricing` 的同一份解析逻辑（**两个消费者、一份实现**）；`internal/report` 依旧只接收已解析对象、绝不 import `config` 或 `pricing`（archtest 强制）。无 config.yaml 时跑 `vmr report` 降级为只用标准表列表价、不含账号折扣。
 
 > **套餐账号的 $ 含义**：包月套餐边际价格是 0（钱已花）。报表的 $ 应理解为"这些流量若按量计费要花多少"——这恰好是判断"套餐买得值不值"的那个数。
 
@@ -249,16 +247,28 @@ go run ./tools/gen_standard_pricing -generated-at $(date +%F)   # 拉取 + 覆�
 三条推论，都是有意的：
 
 - **它不是实付金额。** 包月/套餐账号的边际成本是 0；经转售商或代理（`bai`/`sensenova`/`cliproxy` 这类）的实际单价只有用户自己知道。
-- **转售商没有自己的公开定价记录时，按第一方列表价计价是正确的默认**，不是将就。渠道有自定价时（第②步命中 provider 自有行，如 `dashscope` 对 DeepSeek 模型的自定价），用渠道价；需要覆盖时，配 `providers[].pricing.overrides` 或 `pricing.supplement` 即可——那正是第三层存在的理由。
+- **转售商没有自己的公开定价记录时，按第一方列表价计价是正确的默认**，不是将就。渠道有自定价时（第②步命中 provider 自有行，如 `dashscope` 对 DeepSeek 模型的自定价），用渠道价；需要覆盖时，配 `providers[].pricing.rates` 即可——那正是账号覆盖层存在的理由。
 - **它回答的问题是"这个套餐/代理买得值不值"**，而不是"我这个月被扣了多少"。后者以厂商控制台为准，vmr 不试图复现。
 
-**⑨ 记账货币的折算因子是全局的，不挂在 provider 上**
+**⑨ 汇率折算只发生在两处，都不在运行态，且不存在"记账货币"这个中间概念**
 
-USD 标准表 →（`pricing.exchange_rate`）→ 记账货币 `pricing.currency` →（`-currency` 的显示汇率）→ 报表展示币种。第一跳的因子是 `pricing:` 块的全局属性，**不是** per-provider 属性：审计日志会点名**曾经跑过**的每一个 provider（改过名的、删掉的、被 `api_keys` 拆分过的），这些名字在今天的 `config.yaml` 里没有条目。把因子挂在 per-provider 的策略上，它们就会以 1.0 折算，于是同一条 canonical 价格行在同一张表的相邻两行里，一行是 USD、一行是 CNY，差着整整一个汇率，而两行看上去都很正常。因子因此挂在 `pricing.Resolver` 上（`config.Config.PricingAccounting()` 提供），对每个 provider 一视同仁。
+`internal/pricing.Table`/`Resolver` 解析出的一切永远是 USD——`providers[].pricing.currency` 只是一个
+**解析期标注**（这个 provider 的 `rates` 行用什么币种书写），加载期经顶层 `exchange_rate` 一次性
+折算成 USD 存入内存，从不作为运行态量传递。汇率因此只有两个消费者，都不在运行态：①
+加载期把非 USD 书写的 provider `rates` 归一为 USD；② `vmr report` 的 `-currency` 对已解析的 USD
+结果做一次纯展示折算（`Resolver.WithDisplayFactor`）。未声明的货币先查内置默认汇率表兜底
+（`standard_exchange_rate.yaml`），仍查不到才报错——不允许静默按 0/1.0 处理。
+
+这条设计吸取了一个真实教训：早先曾设想一个全局"记账货币"（USD 标准表 → 汇率 → 记账货币 →
+`-currency` 显示汇率 → 报表展示币种），因子若挂在 per-provider 策略上，审计日志里点名的、
+**曾经跑过但今天 config.yaml 已无条目**的 provider（改过名的、删掉的、被 `api_keys` 拆分过的）
+就会以 1.0 折算——同一条 canonical 价格行在同一张表的相邻两行里一行 USD、一行记账货币，
+看上去都很正常。现在这条风险被结构性消解：`providers[].pricing.currency` 只是解析期的书写标注，
+折算发生一次、结果恒为 USD，不存在"记账货币是哪一种"这个需要按 provider 反查的问题。
 
 汇率换算一律走 **USD 单跳中枢**，不做 M×N 的任意币种链。
 
-**⑥ 折算规则下沉至 Limit 级**：多窗口复合配额里，短窗速率闸通常按原始请求数/等权计量，长周期账单桶需要精确的 `token_weights` 或 `model_multipliers`。若留在账号级，用户被迫让所有窗口共享同一套不适用的系数——是表达力硬伤。因此 `token_weights` 与 `model_multipliers` 完全下沉至单条 Limit 内部，配置校验防呆（`token_weights` 仅在 `metric: tokens` 下合法、`model_multipliers` 在全 `cost` 下报错）。
+**⑥ 折算规则下沉至 Limit 级**：多窗口复合配额里，短窗速率闸通常按原始请求数/等权计量，长周期账单桶需要精确的 `token_weights` 或 `model_multipliers`。若留在账号级，用户被迫让所有窗口共享同一套不适用的系数——是表达力硬伤。因此 `token_weights` 与 `model_multipliers` 完全下沉至单条 Limit 内部，`token_weights` 仅对 `metric: tokens` 合法。
 
 **⑦ 不做 per-provider 的四个金额全局权重**：类型 E/F 的 Credits 折算率在厂商文档里就是**逐模型标注**的，一组 per-provider 全局权重对多模型账号必然系统性偏差，而费率表天然按模型。（与 ⑧ 的 `token_weights` 不冲突——那服务 token 桶型套餐，其账号内各模型共用一套分量比例。）
 
@@ -477,15 +487,23 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 
 ## 7. 计量
 
-### 7.1 三种 metric 的计量方式
+### 7.1 两种 metric 的计量方式
+
+Limit 只支持 `requests`/`tokens` 两种 metric——曾经设想过的第三档 `metric: cost`
+已随 Pricing 架构极简化重构（决策 6，见
+`docs/future-strategy/pricing_architecture_simplification_plan.md`）整体删除：不是降级或延后，
+是路由半区从此**不再解析、不再消费任何价格数据**。`cost` 档当初为什么会被设计进来、
+后来又为什么判定它把控制面和计费面焊在了一起，完整论证留在 §12/§13/§14/§15 的决策
+记录里，作为历史存档，不代表当前可配置项。
 
 统一公式（§3 已给出）：`charge = base(metric) × ModelMultipliers[model]`。
 
 | metric | `base` | 适用套餐 | 解析成本 |
 |---|---|---|---|
 | `requests` | `1` | Coding Plan（74% 按次数计） | **零**。不碰响应体 |
-| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重按单条 Limit（见「折算规则下沉至 Limit 级」）、缺省全 1.0 | 类型 C / D | 中，见 §7.2 |
-| `cost` | `Σ_c tokens_c × Rate[provider, model, c, ts]`，费率见 §4.2 ① 的三层解析 | 类型 E / F | 同 `tokens`，多一次查表 |
+| `tokens` | `Σ_c tokens_c × TokenWeights[c]`，权重按单条 Limit（见「折算规则下沉至 Limit 级」）、缺省全 1.0 | 类型 C / D，以及原先需要 `cost` 表达的 Credits 制套餐（换算一次预算/价格，写成 token 数即可，见下） | 中，见 §7.2 |
+
+**Credits/金额制套餐现在怎么表达**：控制面（Limit）要解决的是"别让某个账号/模型把流量吃光"——一个跨模型、跨 Provider 的**量**的均衡问题，直接作用的 substrate 是 token 和请求次数，不是 cost（cost 是 tokens × 价格的**投影**，价格随时间变化，让控制面的触发时机跟着价目表/汇率漂移，是把控制面和计费面焊死在一起）。cost Limit 表达的一切，`tokens` Limit 都能表达：把预算除以价格算一次、写成 token 数，语义从此稳定；"贵模型多占额度"由既有的 `model_multipliers`（按模型倍率）与 `token_weights`（四分量权重）承担，无表达力损失。$ 估计仍然可以从 `vmr report`/`vmr analyze` 得到——那是离线的、允许随价目表刷新而漂移的估算，从不是运行态的记账。
 
 `c` 遍历四个分量 `{in_fresh, cache_read, cache_write, out}`，其中
 `in_fresh = usage.In − usage.CacheRead − usage.CacheWrite`
@@ -507,19 +525,14 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 
 **精度：`Counters` 全线 `float64`，计费时不取整。** 早先把五个原始分量存成 `int64`、`model_multipliers` 计费时 `math.Ceil` 向上取整（"取整方向必须偏安全"）——但取整的偏差不受配置者直觉控制（系数 `2.5` → `3` 是 +20%，`2.9` → `3` 只有 +3.4%，离整数边界越近偏差越离谱），且必要性完全来自"容器是整数"这个自我设限。改 `float64` 直接精确相乘后取整问题连根拔除；未配 `model_multipliers` 的账号（`mult == 1.0` 短路）字段永远是精确整数值浮点数、与旧 `int64` 逐位一致。
 
-`tokens` 与 `cost` 是**同一个加权求和函数的两个权重来源**，实现上不是两条代码路径——
-差别只在权重是账号级内联比例、还是按模型查价目表。
-`TokenWeights` 全为 1.0 时 `base(tokens)` 恰好退化成 `In + Out`，简单场景零配置。
+`TokenWeights` 全为 1.0 时 `base(tokens)` 恰好退化成 `In + Out`，简单场景零配置；
+非等权时（`cache_read`/`cache_write` 折算比例不同）承担了原先要靠 `cost` 才能表达的
+"分量折算"需求（见 §7.1「Credits/金额制套餐现在怎么表达」）。
 
-三档最终都要有，因为各自覆盖的市场份额都不小（见 §2.1）。但**交付分批**：
-`requests` 与等权 `tokens` 属第一批（§14.3 P1），`cost` 与 `token_weights` 属第二批——
-理由见 §14.2 的依据 ①：`headroom` 是账号内部的比值，计量单位上的常数倍偏差会自动约掉，
-所以路由决策不必等到绝对单位做准。
-
-**`cost` 不是可选项**：Token Plan 占在售套餐 62%，其中 94% 按 Token/Credits 计量，
-而 Credits 的扣减是按分量折算的（cache read 比 fresh input 便宜 5～120 倍）。
-用 `tokens` 的等权总量去记 Credits 制套餐，会**高估 3～8 倍**——
-一个刚用掉 15% 的账号会显示成已耗尽，路由和看板同时失真。
+`requests` 与 `tokens`（含 `token_weights`）分两批交付：`requests` 与等权 `tokens`
+属第一批（§14.3 P1），`token_weights` 属第二批——理由见 §14.2 的依据 ①：`headroom`
+是账号内部的比值，计量单位上的常数倍偏差会自动约掉，所以路由决策不必等到绝对单位
+做准。
 
 ### 7.2 token 计量：嗅探 + 降级
 
@@ -546,14 +559,12 @@ func reorderByQuota(candidates []*core.Endpoint, dims []strategy.Dimension,
 所以降级路径按**无缓存**折算——请求体估算全部计入 `in_fresh`，响应体估算全部计入 `out`。
 这个方向是**保守的（高估消耗）**：对闸而言偏安全，对桶而言会略微少用套餐。
 每一笔降级计量都累加进 `account.estimated`，`/status` 因此能给出本周期的估算占比，
-让运维者知道这个账号的数字有多可信——**这正是 `cost` 档最需要盯的指标**，
-因为它的降级偏差比 `tokens` 档更大（缓存分量的费率差可达 5～120 倍）。
+让运维者知道这个账号的数字有多可信。
 
 > **算这个占比时分子分母必须同单位**，这是个真实的坑：`estimated` 是**未加权**的原始
 > token 数，而 `used` 已经套过 `base(metric)`。拿前者除以后者，只要有任何一个权重不是 1.0
 > 结果就是错的（`out` 权重 5 倍时，一个 100% 靠估算的周期会被报成 20% 估算）。
-> 正确的分母是**原始四分量之和**；`cost` 档则另算——它的分子是 `estimated_cost`、
-> 分母是 `Counters.Cost`，两者都已经是金额。公式在 `internal/quota` 里只有一份
+> 正确的分母是**原始四分量之和**。公式在 `internal/quota` 里只有一份
 > （`EstimatedPct`），路由半区的 `/status` 与离线读者共用（§12.1）。
 
 ### 7.3 外部用量校准：留位置，但先不抽接口
@@ -618,12 +629,11 @@ RFC3339（`…+08:00`）——写成 `Z`/UTC 结尾会把每个周期边界锚�
 ### 9.1 配置形态
 
 ```yaml
-# 全局定价。standard 内置随二进制（无需配置）；supplement 是用户补充表，
-# 按 canonical model id 与标准表合并，冲突时补充表胜出。
-pricing:
-  currency: CNY
-  exchange_rate: {CNY: 7.1}
-  supplement: ./pricing.yaml    # 可选；给了路径但文件不存在 = 加载期错误，不静默跳过
+# 全局汇率表：仅有两个消费者，且都不在运行态——① 把某个 provider 用非 USD 书写
+# 的 pricing.rates 归一为 USD（加载期一次）；② vmr report 的 -currency 展示折算。
+# 未声明的货币先查内置默认汇率表兜底，查不到才报错（见 §4.2⑨）。
+exchange_rate:
+  CNY: 7.1
 
 providers:
   # ── 类型 A：次数制 + 三层窗口 ────────────────────────────────
@@ -652,11 +662,14 @@ providers:
       limits:
         - {metric: tokens, every: 1w, since: 2026-08-14, amount: 65000000}
 
-  # ── 类型 D：Token 桶 + 分量权重 + 模型系数 ────────────────────
-  # 账号内各模型共用一套分量比例 → 用 tokens + token_weights，不必去维护费率表。
-  # token_weights/model_multipliers 是 Limit 自己的字段（见 §12.1「折算规则的层级」
-  # 一行的订正）——三条窗口若真的共用同一套比例，就得三处各写一遍；这里假设 5h 的
-  # 速率闸窗口够短，厂商对它不做缓存折扣区分，所以只在两条更长的窗口上写了权重。
+  # ── 类型 D：Token 桶 + 分量权重 + 模型系数（原 Credits/金额制的表达方式）───
+  # 账号内各模型共用一套分量比例 → 用 tokens + token_weights，不必去维护费率表；
+  # 原本需要 metric: cost 才能表达的"cache read 比 fresh input 便宜"这类分量折算，
+  # 现在也走这条路径（见 §7.1「Credits/金额制套餐现在怎么表达」）。token_weights/model_multipliers 是 Limit
+  # 自己的字段（见 §12.1「折算规则的层级」一行的订正）——三条窗口若真的共用同一套
+  # 比例，就得三处各写一遍；这里假设 5h 的速率闸窗口够短，厂商对它不做缓存折扣
+  # 区分，所以只在两条更长的窗口上写了权重。原"金额预算"账号迁移过来时，把预算
+  # 除一次当前价格换算成 token 数即可（一次性换算，语义从此稳定，不再随价目表漂移）。
   - name: plan-d
     quota:
       limits:
@@ -672,29 +685,19 @@ providers:
           token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
           model_multipliers: {"*": 1.0, heavy-model: 9}
 
-  # ── 类型 E：金额 / Credits 制，单层窗口 ───────────────────────
-  # 分量费率按模型分化 → 走 cost；价格三层解析（§4.2 ①）
+  # ── providers[].pricing：只影响 vmr report/vmr analyze 的 $ 估算与 vmr check
+  # 的展示，从不进入运行态（不进路由、不进配额、不进审计日志）──────────────
   - name: plan-e
     pricing:
-      map: {my-model-x: vendor/model-x}        # 仅在自动解析对不上 canonical key 时才需要
-      overrides:
+      currency: USD                            # 解析期标注：下面 rates 行的书写币种
+      aliases: {my-model-x: vendor/model-x}    # 仅在自动解析对不上 canonical key 时才需要
+      rates:
         # 该模型的实际分量费率与列表价不同 → 写显式费率（每 1M token）。下面的通配
         # 是 discount 形式（不终结匹配），所以本条写在它前后都可以；但若通配也是
         # 显式形式，本条就必须写在它之前，否则加载期错误。
         - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
         # 兜底：整账号其余模型按列表价 6 折
         - {model: "*", discount: 0.6}
-    quota:
-      limits:
-        - {metric: cost, every: 1mo, amount: 198}
-
-  # ── 类型 F：金额制 + 多层窗口 ────────────────────────────────
-  - name: plan-f
-    quota:
-      limits:
-        - {metric: cost, every: 5h,  amount: 12}
-        - {metric: cost, every: 1w,  amount: 30}
-        - {metric: cost, every: 1mo, amount: 60}
 
   # ── 模型级独立子额度（Scope，已交付 P3）────────────────────────
   # models: 同时决定"哪些模型适用"和"是否独立计数"——不写 = 共享一个池，
@@ -713,24 +716,22 @@ providers:
         - {metric: requests, every: 1mo,  amount: 90000}              # 账号总限，共享池
 ```
 
-**全局定价字段**（`pricing`）：
+**全局字段**：
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
-| `currency` | `amount`（`cost` 档）与费率的基准币种 | 必填（有 `cost` Limit 时） |
-| `exchange_rate` | 通用的"1 美元 = X `<货币代码>`"映射表，写成 `{CNY: 7.1}`——折算标准表币种（USD）到 `currency`，也是 `providers[].pricing.overrides` 里任何一行自带 `currency:` 字段的换算来源（override 就写在这份文件里，没有"退回到哪"的问题）；对 `pricing.supplement`/`pricing.standard` 文件而言只是**兜底**——那类文件可以在自己内部再声明一份同形状的 `exchange_rate:` 块，key 撞车时**文件自己的优先**，这样一份 supplement 可以脱离某个具体 `config.yaml` 独立搬用，不会因为部署改了记账汇率就让文件里"厂商官网核实过"的价格跟着漂移（见 `pricing.example.yaml`）；也是 `vmr report` 的 `-currency` 展示币种（当它和 `currency` 不同时）的换算来源。每个用到的货币都要有条目，USD 本身隐含为 1.0、不用写 | **必填（`currency` 非 USD 时）**——标准表同时喂给 `metric: cost` 计费和 `vmr report` 的 $ 列，缺汇率会产出"按 USD 算、按 `currency` 标"的数字；确实不需要换算时显式写 `{CNY: 1.0}` |
-| `supplement` | 用户补充表路径，按 canonical key 与内置标准表合并、冲突时它胜出 | 空 |
-| `standard` | 覆盖内置标准表（自备整表时用） | 内置 |
+| `exchange_rate` | 通用的"1 美元 = X `<货币代码>`"映射表，写成 `{CNY: 7.1}`——归一某个 provider 用非 USD 书写的 `pricing.rates`，也是 `vmr report` `-currency` 展示折算的来源。未声明的货币先查内置默认汇率表（`standard_exchange_rate.yaml`）兜底，仍查不到才**加载期报错**——不允许静默按 0/1.0 处理 | 空（未用到非 USD 货币时无需声明） |
 
-**账号级定价字段**（`providers[].pricing`，只写"和标准列表价不一样"的部分）：
+**账号级定价字段**（`providers[].pricing`，只写"和标准列表价不一样"的部分；整个 `pricing:` 块可选，缺省不影响路由/配额，只是 `vmr report` 的 $ 估算少一些覆盖）：
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
-| `map` | `本地 model 名 → 标准表 canonical key` 的映射，只在自动解析失败时才需要 | 空 |
-| `overrides` | 费率覆盖规则**列表**，静态按模型区分（没有时间窗——见"②格式要不要向上游看齐"一节）。每条含 `model`（支持 `"*"`）+ 二选一的 `discount`（乘"链中它下面解析出的费率"——即后续规则、再落到 Base，递归下钻，不终结匹配）或四项显式费率（直接采用、终结匹配）；显式费率还可选带 `currency:`（这一行自己的币种，比如直接抄厂商美元发票的数字），加载期通过全局 `exchange_rate` 换算到 `currency`——只对显式费率有意义，和 `discount` 一起写是错误。**只有显式规则终结匹配**：一条显式通配 `"*"` 之后的任何规则、以及两条 `model` 完全相同的显式规则，都是加载期错误（`firstDeadOverride`）——永远轮不到。折扣形式（含通配折扣）不终结、不屏蔽任何规则："通配折扣在前 + 专属显式在后"（语义 = 折扣 × 专属价）与"同一 model 两条折扣叠加"（乘法叠加）都是合法配置。若某 model 既无标准表命中、也无任何显式规则兜底（只匹配到悬空折扣），`Resolve` 返回"无费率"（不再产出全空费率冒充 `$0.00`）；补充表里四分量全空的费率行同样是加载期错误。 | 空 |
+| `currency` | 解析期标注：下面 `rates` 行的书写币种，加载期经顶层 `exchange_rate` 一次性折算成 USD 存入内存。**不是运行态量**——不进 `core.Endpoint`、不进审计日志、不进报表标签 | `USD` |
+| `aliases` | `本地 model 名 → 标准表 canonical key` 的映射，只在自动解析失败时才需要 | 空 |
+| `rates` | 费率覆盖规则**列表**，静态按模型区分（没有时间窗——见"②格式要不要向上游看齐"一节）。每条含 `model`（支持 `"*"`）+ 二选一的 `discount`（乘"链中它下面解析出的费率"——即后续规则、再落到 Base，递归下钻，不终结匹配）或四项显式费率（直接采用、终结匹配）——四项费率与 `currency` 共用同一个账号级标注，不支持逐行各写各的币种。**只有显式规则终结匹配**：一条显式通配 `"*"` 之后的任何规则、以及两条 `model` 完全相同的显式规则，都是加载期错误（`firstDeadOverride`）——永远轮不到。折扣形式（含通配折扣）不终结、不屏蔽任何规则："通配折扣在前 + 专属显式在后"（语义 = 折扣 × 专属价）与"同一 model 两条折扣叠加"（乘法叠加）都是合法配置。若某 model 既无标准表命中、也无任何显式规则兜底（只匹配到悬空折扣），`Resolve` 返回"无费率"（不产出全空费率冒充 `$0.00`）。 | 空 |
 
-`map` 缺省时的**自动解析顺序**（`vmr check` 会把解析结果打出来，可审计）：
-① `map` 显式项 → ② `<provider 名>/<model>` → ③ 裸 `<model>`（西方厂商多为此形）→
+`aliases` 缺省时的**自动解析顺序**（`vmr check` 会把解析结果打出来，可审计）：
+① `aliases` 显式项 → ② `<provider 名>/<model>` → ③ 裸 `<model>`（西方厂商多为此形）→
 ④ 全表中形如 `*/<model>` 的**唯一**匹配。四步都命中不了、或第 ④ 步匹配到多条（有歧义）
 时，若请求名带 org/路径前缀，再按 `ModelBasename` 掐成裸名把①–④重跑一遍（同上选）。**最终仍命中不了、
 或重跑后依然歧义时不做猜测**，按“无费率”处理——猜错一个费率比没有费率危险得多。
@@ -739,33 +740,32 @@ providers:
 
 | 字段 | 说明 | 缺省 |
 |---|---|---|
-| `metric` | `requests` \| `tokens` \| `cost` | 必填 |
+| `metric` | `requests` \| `tokens`（`cost` 已删除，见 §7.1） | 必填 |
 | `every` | `N{min,h,d,w,mo}`，覆盖"数分钟/数小时/数日/数周/数月" | 必填 |
 | `since` | 周期锚点时间，后续周期自动推算。三种写法：`YYYY-MM-DD`（当日 0 点）、RFC3339 完整时间戳（精确到秒+时区）、纯时间 `hh:mm[:ss]`（今天该时刻，**仅 `every: min/h` 合法**，`d/w/mo` 上用会在加载期报错——省得为了表达"每小时的第几分钟"硬凑一个无意义的日期） | 不写＝取配置加载/热重载那一刻，**对齐到固定日历边界**（min/h/d→当日午夜、w→周一 0 点、mo→月初）。这个对齐是必需的：`LimitKey` 不含 `since`，桶 key 稳定，但缺省锚点若取原始 `now`，每次热重载都会把锚点挪到重载时刻、`resetIfStaleLocked` 随之清零账号累计消耗（B2）。锚点定在午夜使周期栅格锁死到"日"——**同一自然日内的任意热重载对任意 `every` N 都解析出同一锚点、计数存活**。残余收窄为：`every: Nh` 且 N∤24（如 `5h`）或 `every: Nmin` 且 N∤1440（如 `7min`），且热重载/重启跨过自然日——此时至多一次相移重置。需要精确相位就显式写 `since` |
 | `rolling` | 滚动窗口（分桶近似）；否则固定对齐窗口。**rolling 永不当桶**（§5.2）。仍是加载期"计划在后续批次支持"报错——见 §14.3「实际交付 vs 原始终态」，未随 P3 交付 | `false` |
-| `amount` | 该窗口上限（vmr 可观测口径；`cost` 档为 `pricing.currency` 的币种） | 必填，>0 |
+| `amount` | 该窗口上限（vmr 可观测口径的 token 数或请求次数，无币种、无价格） | 必填，>0 |
 | `models` | 该 Limit 的 Scope，已随 P3 交付。**不写**＝所有模型共享一个池；写 **`["*"]`**＝规则适用全部模型，但每个模型各自独立开一个 bucket；写**具体列表**＝只有列出的模型适用，且同样各自独立。写不写这个字段，同时决定了"哪些模型适用"和"是否独立计数"——不需要额外的 `mode:` 字段。见 §12.1「Scope 的判定」一行 | 全部（共享） |
 | `token_weights` | 仅本条 Limit 生效的分量权重，只在 `metric: tokens` 时合法——**按 Limit 配置，不是账号级**，见 §12.1「折算规则的层级」一行的订正 | 全 `1.0` |
-| `model_multipliers` | 仅本条 Limit 生效的按模型倍率，`metric: cost` 时非法——**按 Limit 配置**，理由同上 | 未命中模型/无通配 = `1.0` |
+| `model_multipliers` | 仅本条 Limit 生效的按模型倍率——**按 Limit 配置**，理由同上 | 未命中模型/无通配 = `1.0` |
 
 **命名**：额度块叫 `quota`、价格块叫 `pricing`，都不叫 `budget`。`vmr report` 已有一套以金额为中心的
 成本估算，配置里再出现一个 `budget` 却可能指次数或 token，是可预见的混淆源。
 
 **校验**（`config.validate`，沿用现有 fail-fast 风格）：
 
-* `metric` 枚举；`every` 语法与 `N > 0`（支持 `min`, `h`, `d`, `w`, `mo`）；`amount > 0`；
+* `metric` 枚举（`requests`\|`tokens`；`cost` 是值不是键，`KnownFields` 抓不到，显式拒绝并给出迁移
+  指引：换算成 `tokens` 预算，`model_multipliers`/`token_weights` 承担按模型/按分量的差异表达）；
+  `every` 语法与 `N > 0`（支持 `min`, `h`, `d`, `w`, `mo`）；`amount > 0`；
 * `since` 格式校验：接受 `YYYY-MM-DD`、RFC3339 以及纯时间 `hh:mm[:ss]`；若使用纯时间格式，**仅允许**在 `every: min` 或 `every: h` 的 Limit 上配置，若用于 `d`/`w`/`mo` 则加载期报错；
 * `models`（Scope）校验：`"*"` 为通配保留字面量，严禁与具名模型混写（如 `models: ["*", "gpt-4"]` 为加载期错误）；不支持 glob 模式；
 * 同一 provider 下 Limit 冲突/重叠检测（`quota.ModelSetsOverlap`）：两条 Limit 若 `(metric, every)` 相同且其 `models` 作用域存在交集（同为共享池、或一方为 `*`、或具体模型列表重叠），判定为重复定义并**加载期报错**；
 * `model_multipliers` / `token_weights` 的值必须 `> 0` 且为有限数（非 NaN / 非 Inf）；
-* 某条 `metric: cost` 的 Limit 却配了 `model_multipliers` → 报错，提示改用 `pricing.overrides`
-  （同一件事只留一种写法；这条校验按 Limit 各自独立判断）；
-* `overrides` 每条规则的 `discount` 与显式费率**二选一**，同时出现是错误；`currency` 只对显式
-  费率有意义，和 `discount` 一起写同样是错误（`discount` 是无量纲乘数，不存在币种）；
+* `rates` 每条规则的 `discount` 与显式费率**二选一**，同时出现是错误；
 * `token_weights` 出现在**自己 `metric` 不是 `tokens`** 的 Limit 上 → 报错（配了不生效的字段，
   按 `KnownFields` 的同一精神必须显式失败，不能静默无效；同一 provider 下别的 Limit 是不是
   `tokens` 不影响这条判断，因为折算规则已经是 Limit 自己的字段——见 §12.1 的订正）；
-* `pricing.map` 的每一条显式映射，其 canonical key 必须在合并后的标准表∪补充表里存在 → 否则**加载期错误**：
+* `pricing.aliases` 的每一条显式映射，其 canonical key 必须在内置标准表里存在 → 否则**加载期错误**：
   用户手写的映射打错字时，若继续按四步解析往下走，可能静默匹配到**另一个模型**的费率——
   正是本节"有歧义不猜"要防的那类失败，只是这次的歧义来自 typo 而不是表本身；
 * 所有数值字段（`amount`/`token_weights`/`model_multipliers`/`discount`/显式费率/`exchange_rate`）
@@ -774,20 +774,13 @@ providers:
   以及 `vmr-quota.json` 的持久化——NaN 一旦写入某个账号的 `Counters`，之后每一次 `Add`
   都会把污染传染给同一个桶的全部后续记账（`NaN + x` 恒为 `NaN`），`Pct`/`Headroom` 排序
   也随之失去确定性（`NaN` 与任何值比较都是 false）；
-* `metric: cost` 涉及的每个上游模型，都必须解析出四项费率齐全的费率（显式写 `0.0` 算齐全，字段
-  缺失不算）→ 否则**加载期错误**。绝不把缺失当 0：那会低估消耗、让账号显示得比实际宽裕，进而
-  超支——是最坏的失效方向。没有时间维度后，一个 provider+model 只有唯一一条确定的解析路径
-  （沿 `overrides` 从上往下：折扣形式逐层下钻并缩放，停在第一条显式规则、否则落到 Base），
-  校验只需要沿这条路径走一遍，不再需要对"这条规则在哪些时刻生效"做可达性分析；
-  `firstDeadOverride`（上面 `overrides` 字段的说明）在此之前就已经把"被前面某条**显式**规则的
-  匹配域遮蔽、永远轮不到"的规则拒之门外。
+* 顶层遗留的 `pricing:` 块（旧形态：`currency`/`exchange_rate`/`supplement`/`standard`/`rates`/
+  `aliases` 都曾挂在这里）**整体拒绝**，给出迁移指引——`exchange_rate` 移到顶层，
+  `currency`/`aliases`/`rates` 移到各 `providers[].pricing`；不做静默字段搬迁。
 
 ### 9.2 运行态
 
-**折算发生在读取侧还是计费侧，按 metric 分**：`Counters` 只存原始事实、`token_weights` 在读取侧套用（账号内共用同一套四分量权重，读取时用当前配置重新加权、历史数据永远有效）。但另外两项在**计费那一刻**就乘进去：
-
-* **`model_multipliers`**——`Registry` 按 provider 聚合、不细分到 model；聚合完成后"这些量来自哪个模型、该乘几倍"已丢失。账号一旦配了它，`Counters.Requests`/`.Fresh` 的语义从"原始数"变成"模型加权后的等价单位"（一处需要在 `/status` 展示上讲清楚的语义变化）。
-* **`metric: cost` 的金额**必须计费时算好写进 `Counters.Cost`。费率会随时间变化（标准表刷新、账号覆盖改配置），若读取时才重算，配置变更前后消耗的 token 混进同一聚合桶、只能整体按"读取那一刻"的费率算钱，旧费率下产生的那一笔金额就错了。`Counters` 对 `cost` 因此从"事实存储"变成"计费时刻预计算结果的累加器"。
+**折算发生在读取侧还是计费侧，按 metric 分**：`Counters` 只存原始事实、`token_weights` 在读取侧套用（账号内共用同一套四分量权重，读取时用当前配置重新加权、历史数据永远有效）。但 `model_multipliers` 在**计费那一刻**就乘进去——`Registry` 按 provider 聚合、不细分到 model；聚合完成后"这些量来自哪个模型、该乘几倍"已丢失。账号一旦配了它，`Counters.Requests`/`.Fresh` 的语义从"原始数"变成"模型加权后的等价单位"（一处需要在 `/status` 展示上讲清楚的语义变化）。`model_multipliers` 是"计费时预计算"这条规则唯一的例外——已删除的 `metric: cost`（决策 6）曾经是第二个例外（`$` 金额连同 `Counters.Cost` 字段一起在计费那一刻算好写入），随它一并消失。
 
 ```go
 package quota   // internal/quota，仅依赖 core（周期数学是纯函数，无 I/O）
@@ -797,11 +790,8 @@ package quota   // internal/quota，仅依赖 core（周期数学是纯函数，
 // float64，不是 int64：model_multipliers 一旦配置，就要求这些字段能精确
 // 存下一个非整数倍率的计费结果（不取整——见上文"精度"一段），未配置时
 // 它们永远是精确的整数值浮点数，与整数语义等价。
-// Cost 是例外：metric: cost 的 Limit 在计费那一刻就把 $ 金额算好写入这里，
-// 之后费率表再变也不影响已记录的历史值（理由见上）；requests/tokens 档它恒为 0。
 type Counters struct {
     Fresh, CacheRead, CacheWrite, Out, Requests float64
-    Cost float64
 }
 
 // bucket 是一个 (provider, limitKey) 的实时状态：当前认为自己在哪个周期、
@@ -822,17 +812,15 @@ type Registry struct {                        // 形状对齐 health.Registry：
 
 **职责切分**：Registry 只存"消耗了多少"这个**事实**；`amount`/`token_weights` 这套**政策**
 始终从 Snapshot 现读，于是热重载改它们立刻生效、且不重置计数，无需任何迁移逻辑——
-这条对 `model_multipliers`/费率表不成立（见上），是上面那条修正的直接原因，不是这里的例外。
+这条对 `model_multipliers` 不成立（见上），是上面那条修正的直接原因，不是这里的例外。
 "不重置计数"对**缺省 `since`** 的 Limit 同样成立，但依赖 `DefaultSince` 把缺省锚点对齐到
 日历边界（见上方 `since` 行、及"已评估并否决的改进提案"表的 B2 条目）——早先直接取 `now` 会让每次热重载
 经 `resetIfStaleLocked` 清零，那是一个真 bug，不是相位选择。
 
-> 存原始分量 token 而不是存折算后的数值，这条选择对 `token_weights`（读取时套用）与
-> `metric: cost`（`Fresh`/`CacheRead`/`CacheWrite`/`Out` 与计费时算好的 `Cost` 一起存，
-> 前者供 `/status` 的分量明细展示用，不参与路由决策）依然成立：改配置、改价目表
-> 都不需要数据迁移。`model_multipliers` 是唯一的例外——它在写入时就把倍率乘进了
-> `Counters` 本身（见上），账号一旦配了它，`Fresh`/`Requests` 等字段存的就已经是
-> 加权后的等价单位，不再是原始分量，这正是"计费时套用"这个选择带来的直接代价。
+> 存原始分量 token 而不是存折算后的数值，这条选择依然成立：改配置不需要数据迁移。
+> `model_multipliers` 是唯一的例外——它在写入时就把倍率乘进了 `Counters` 本身（见上），
+> 账号一旦配了它，`Fresh`/`Requests` 等字段存的就已经是加权后的等价单位，不再是原始
+> 分量，这正是"计费时套用"这个选择带来的直接代价。
 
 **Key 用 provider name，刻意不含 API Key 哈希**——与 `Endpoint.HealthKey()` 相反，是有意为之：
 HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全；但对额度而言，轮换密钥（同一账号）
@@ -852,16 +840,9 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 `BuildSnapshot` 负责转换，并把同一个 `*core.QuotaSpec` 指针挂到该 Provider 展开出的所有
 `core.Endpoint` 上（`nil` = 无套餐），于是排序时取额度是一次字段读，而不是对 `Cfg.Providers` 做线性查找。
 
-**定价解析结果的挂点不一样，因为它的粒度不一样**：`QuotaSpec` 是账号级、同一 Provider 下所有
-`core.Endpoint` 共享一个指针是对的——额度本来就按账号记账。但价格是**按模型分化**的（§4.2⑦已论证，
-市场数据也证实 Credits 折算率逐模型标注），账号级挂一份单一费率装不下多模型账号，所以
-`PricingRate`（`internal/pricing.Resolve` 的产物经 `pricing.FoldSpec` **预折叠成单个 `core.Rate`**）挂在
-`core.Endpoint.PricingRate` 上——`BuildSnapshot` 对每个 `provider+model` 组合各自折叠一次，不像
-`QuotaSpec` 那样整个账号共享；热路径读它是纯字段直读，override 链解析永不进实时路由（§9.1 加载期
-已一次性做完）。`nil` 表示该端点没有解析出费率；一个配了 `metric: cost` 的账号若有端点解析不出费率，
-在校验阶段就已经报错（§9.1 校验清单），不会留到运行时才发现 `nil`。
+**定价不挂载到 `core.Endpoint` 上**：`core.Endpoint` 不携带任何定价字段，`core.PricingSpec` 只服务离线的 `vmr report`/`vmr analyze`（`internal/pricing.Resolver`），从不挂到 Snapshot 的路由结构上——这与 `QuotaSpec` 挂在 `core.Endpoint` 上（见上文）恰成对照：额度是路由决策要读的量，定价不是。已删除的 `metric: cost`（决策 6）曾经需要一个反向挂点——`internal/pricing.Resolve` 的产物预折叠成单个 `core.Rate` 挂在 `core.Endpoint` 的专属字段上，供计费时刻字段直读——随它一起删除后，KNOWN_ISSUES §1.0"让价目表进实时路由热路径"这条红线也从"靠纪律守住的边界"变成"结构上已不存在的东西"：热路径上连价格数据都没有了。
 
-**实现落点**：`every`/`since` 保持普通 `string` 字段，解析与报错都在 `validate()` 里一次性做完、产出写进 `LimitConfig.Resolved core.Limit`（`yaml:"-"`，对 `KnownFields` 隐身）——不用自定义 `UnmarshalYAML`，符合 KISS，`PricingConfig`/`PricingOverride` 同理。`quota.LimitKey` 对 per-model Limit 带 `#model=<name>` 后缀（一条 `models: ["*"]`/具体列表的 Limit 给每个实际命中的模型各开一个独立 bucket，不共享计数器）。rolling 窗口未交付（§15.2 #4），`Registry` 因此是简单的 `map[string]map[string]*bucket`（provider name → `LimitKey` → bucket）、每个 bucket 是惰性重置的单一计数器，从 P1 沿用至今；等真交付 rolling 再把 `bucket` 换成能装下 `Ring` 的类型，不现在为一个还没有真实需求的功能预留骨架。
+**实现落点**：`every`/`since` 保持普通 `string` 字段，解析与报错都在 `validate()` 里一次性做完、产出写进 `LimitConfig.Resolved core.Limit`（`yaml:"-"`，对 `KnownFields` 隐身）——不用自定义 `UnmarshalYAML`，符合 KISS，`ProviderPricingConfig`/`PricingOverrideConfig` 同理。`quota.LimitKey` 对 per-model Limit 带 `#model=<name>` 后缀（一条 `models: ["*"]`/具体列表的 Limit 给每个实际命中的模型各开一个独立 bucket，不共享计数器）。rolling 窗口未交付（§15.2 #4），`Registry` 因此是简单的 `map[string]map[string]*bucket`（provider name → `LimitKey` → bucket）、每个 bucket 是惰性重置的单一计数器，从 P1 沿用至今；等真交付 rolling 再把 `bucket` 换成能装下 `Ring` 的类型，不现在为一个还没有真实需求的功能预留骨架。
 
 ### 9.3 持久化
 
@@ -993,7 +974,7 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | usage 门禁不能作用于原始 TCP chunk，否则跨包截断会漏扫 | **本就如此，非问题** | 门禁作用于**重组后的完整事件**（`emitBlock`）与**完整响应体**（`finalizeBuffered`），从不作用于 `ingest` 拿到的原始 chunk。这一点已在 §7.2 写死，因为它正是最容易实现错的地方 |
 | `every: 1mo` 不能裸调 `time.AddDate` | **成立，已处理** | Go 的 `AddDate` 会把 2 月 31 日归一化溢出（1/31 + 1mo 得到 3/3）。实现必须自带月末截断，已写入 P1 开发计划的周期数学一步 |
 | P1 等权 token 会让高缓存命中的 Credits 套餐被误判耗尽 | **成立，但对策不同** | 确实存在：等权记账高估 3～8 倍，而用户在第一个周期结束前无从凭经验标定 `amount`。但后果是**被错误降权、浪费套餐**，不是"无法工作"（score 归零只排到梯队末位，不淘汰）。对策不采用"把 amount 放大 3～5 倍"这种猜数——P1 本就按分量存原始 token，**把分量明细放进 `/status` 即可让用户第一天就算出自己的换算系数**（§11、§14.2） |
-| `metric: cost` 与两层定价表永久从热路径砍掉，路由侧只留 `requests`/`tokens`，$ 全部交给离线 `vmr report` | **否决** | 复杂度诊断部分成立，但分批与 opt-in 早已是本设计的既有姿态——`cost` 与两层定价表本来就排在 P2、只在配了 `metric: cost` 的账号上才触发解析、缺失费率是加载期显式报错而非静默降级（§9.1 校验清单、§12.1"缺失费率的失败姿态"）；国产厂商覆盖率低这条已在 §4.2①、§13 如实写明，不是这轮复核的新发现。永久砍掉的真实代价被低估：`token_weights` 是账号级统一四分量比例，装不下类型 E/F（Credits/金额制）账号"折算率按模型分化"这一实测特征（§4.2⑦已论证 per-provider 全局金额权重会系统性偏差），砍掉 `cost` 等于让这部分账号（Token Plan 62% 里的多数）永久停留在等权 token 记账的 3～8 倍高估里——与本功能要防止的"套餐被误判耗尽而浪费"直接冲突。P2 范围与门禁不变 |
+| `metric: cost` 与两层定价表永久从热路径砍掉，路由侧只留 `requests`/`tokens`，$ 全部交给离线 `vmr report` | **否决（后于 2026-09-06 反转，见下）** | 当时的判定：复杂度诊断部分成立，但分批与 opt-in 早已是本设计的既有姿态——`cost` 与两层定价表本来就排在 P2、只在配了 `metric: cost` 的账号上才触发解析、缺失费率是加载期显式报错而非静默降级；国产厂商覆盖率低这条已在 §4.2①、§13 如实写明，不是这轮复核的新发现。永久砍掉的真实代价被低估：`token_weights` 是账号级统一四分量比例，装不下类型 E/F（Credits/金额制）账号"折算率按模型分化"这一实测特征（§4.2⑦已论证 per-provider 全局金额权重会系统性偏差），砍掉 `cost` 等于让这部分账号（Token Plan 62% 里的多数）永久停留在等权 token 记账的 3～8 倍高估里。**后续反转**：Pricing 架构极简化重构（决策 6，见 `docs/future-strategy/pricing_architecture_simplification_plan.md`）判定这条代价被这次否决高估了——`token_weights`/`model_multipliers` 已能表达"贵模型多占额度"，真正装不下的只是"按分量精确折算到具体价格"这个记账精度需求，而这本来就该是离线 `vmr report` 的工作，不该让控制面的触发时机跟着价目表漂移。`metric: cost` 已于 2026-09-06 整体删除，本行判定作废，完整论证见该方案文档与本文 §7.1 |
 | 给 `quota.Registry` 加内存级 per-provider `in_flight` 原子计数器，`score' = score - α × in_flight`，压制并发新会话瞬间挤爆同一梯队队首端点 | **搁置，留给 P3 用数据判断；即使做，落点未必在 quota** | 问题本身成立，但与 quota 无关——它是"同梯队打平时新请求集中冲向队首"的一个特例：quota 出现之前，`priority` 打平时的稳定排序早就有同样效果（§5.3 已引用同一事实否决过另一个抖动提案），quota 只是继承了这个既有行为，不是它的制造者。给 quota 专门加一个 `α` 是把一个通用路由问题焊死在这一个维度上——换个打平维度（未来若加新 Dimension）还得再修一次；且 `α` 是一个没有实测依据的新魔数，与本设计"每个魔数都要有依据"的自设标准冲突。实现成本也不是"几行"：需要在 `tryOne` 的失败循环里精确控制 acquire/release 时机（只在真正发起 attempt 时 +1、attempt 结束时 -1，而非排序阶段），量级接近 `limiter.go` 的 `AcquireSlot`。**处置**：P1/P2 不做；P3 若真实 429 数据显示同梯队并发确有代价，优先在候选选择层（`strategy` 或 `Serve` 的排序步骤）做一个与 quota 正交的通用打散机制，而不是塞进 headroom 分数——这样纯 `priority` 打平的场景也一并受益，quota 场景不需要单独处理 |
 | **硬门控（用淘汰代替重排）+ 全部超额时返回 429 快速熔断** | **否决** | ① 本地额度计数本质是估算值（降级估算 ±30%、多实例部署状态不互通、厂商口径偏差、新上线未校准），用估算值执行不可逆的拒绝服务动作是自制故障；② 上游真正的 429/402 信号已由 `internal/health` 状态机（长冷却 + 半开单飞 + failover）精准覆盖；③ 软重排在全部超额时挑超额程度最轻的端点做最后尝试，若成功则免除故障，若失败则自然 failover；④ 跨周期惰性清零（`resetIfStaleLocked`）在时钟跨界时 O(1) 瞬间自愈，无需维护"从候选集移除后如何恢复"的状态机 |
 | **新增 `mode: shared \| per_model` 枚举字段** | **否决** | 需求是三态（共享、全模型独立、限定模型独立），由 `models:` 字段（不写 / `["*"]` / `[name,...]`）单一字段直接表达更自然。引入独立的 `mode` 会产生 `mode: shared` 配合具体 `models` 列表等矛盾组合，增加不必要的配置面与校验复杂度 |
@@ -1023,10 +1004,9 @@ HealthKey 含密钥哈希是为了"换 key 就重新试探健康"，方向安全
 | 多实例共享计数 | 不做 | 单二进制、零 DB 是产品前提 | 多实例各自低估；单实例部署，或接官方用量 API |
 | 被替换的 `limitKey` 残留在状态文件里 | 暂不清理 | `Registry` 整份读写、从不删 key（§9.3）；路由半区只读当前 key，自身无害 | 改过 `every`/`metric` 的账号会永久留一个孤儿桶，且无时间戳可判断其新旧；离线读者会持续看到"有旧数据但当前 key 无数据"。清理落点在路由半区的 `Load`→首次 `Flush` 之间，随 P3 一并做（§15.3⑥） |
 | 从审计日志离线复算扣减量 | 接受偏差，`requests` 档除外 | 审计日志记的是"发生了什么"，不是"扣了多少"——后者是路由半区当时的记账 | `requests` 档可恒等复现（§7.1）；`tokens` 档过去有两处固有偏差，均已消解（B0 批次，2026-08-14）：`model_multipliers` 缩放改为精确乘法、不取整后，"逐请求取整 vs 汇总取整"不再成立；`usage` 嗅探失败时报表侧现在复现同一条退化估算公式（`internal/chatmsg/tokenest.go` 的 `EstimateDegradedTokens`），不再是"路由记了字节估算而离线计 0"。**仍然存在**的是一处不同性质的残差：路由半区数的是**上游**字节（含 opaque 模式），离线读者只有**审计记录里的客户端侧**响应体（经过 model 改写、响应归一化、`recorderBodyCap` 截断之后）——两者在没有归一化改动字节数时完全一致，改动时按差值偏离，这正是 `WindowEstimatedPct` 把复算列标成"估算"而不是"权威值"的原因；`cost` 档另有"复算时的费率可能不同于记账时"。差分测试保证的是公式与基数一致，不是消除这些偏差 |
-| 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且这类规则只在个别厂商出现、自身还在频繁调整 | 对这类账号系统性低估；改用 `cost` 档（价格覆盖的 `hour_*` 直接支持）或调低 `amount` |
-| 标准表对国产第一方覆盖不全 | 接受，靠补充表 / 账号覆盖补 | 实测上游数据：部分厂商无缓存字段、部分条目无价格字段、部分厂商零收录；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%（明细见市场参考文档） | 这些账号要用 `metric: cost` 必须补费率；因四项不齐即加载期报错，缺失不会被静默吞掉；补充表可回贡以逐步消解 |
+| 时段倍率（`requests`/`tokens` 档） | 不做 | 需新配置面，且这类规则只在个别厂商出现、自身还在频繁调整 | 对这类账号系统性低估；调低 `amount` 缓解，或接官方用量 API 校准 |
+| 标准表对国产第一方覆盖不全 | 接受，靠账号覆盖补 | 实测上游数据：部分厂商无缓存字段、部分条目无价格字段、部分厂商零收录；全表 `cache_read` 覆盖率仅 23%、`cache_write` 仅 8%（明细见市场参考文档） | 影响的只是 `vmr report`/`vmr analyze` 的 $ 估算精度（`CostRateIncomplete` 标注不完整），不影响路由或配额——账号可写 `providers[].pricing.rates` 补显式费率，标准表本身也持续靠 `standard_price_curated.yaml` 的手工行逐步补齐 |
 | 标准列表价会过期 | 接受 | 随二进制内置的是快照 | 表内带生成时间戳，报表免责声明与 `vmr check` 一并显示；`tools/` 下有刷新脚本，用户也可自备标准表 |
-| `cost` 档分量比例与价目表不同 | 接受 | 按模型的绝对费率已能覆盖绝大多数情形 | 改用 `tokens` + `token_weights`（换取精确比例，损失按模型粒度） |
 | 无 config.yaml 时跑 `vmr report` | 接受降级 | 账号覆盖存在 config.yaml 里 | 只拿到标准列表价，$ 数字不含该账号折扣；需在用户文档写明 |
 | 降级估算拆不出缓存分量 | 保守按无缓存折算 | `tokenutil.Estimate` 只给总量 | 高估消耗（对闸安全、对桶略少用）；计入 `estimated` 占比，`/status` 可见 |
 | 额度耗尽硬熔断 | 不做 | 按估算值执行破坏性动作 = 自制故障 | 硬信号是上游 402/429，既有 health 状态机已覆盖 |
@@ -1145,7 +1125,7 @@ archtest 有 700 行预算，当前 561 行。
 - **Headroom**：§1.1 的"三套餐重置日错开"场景做成断言（整个设计的立论依据）；`ε`/`HeadroomCap` 的 clamp。
 - **梯队 & 不变量**：`priority` 分层时不跨层重排、未挂 Limit 的成员位置不变；sticky 命中时 quota 重排被覆盖；耗尽端点仍在候选集里且不产生 health 冷却。
 - **惰性重置**：跨周期的计费与读取都触发清零；重启后从文件加载并补偿重置。
-- **P2 折算**：`token_weights` 全 1.0 时 `base(tokens)` 逐字节等于 `In + Out`；`cost` + `discount: 0.6` 恰为纯 `cost` 的 0.6 倍；真实费率夹具下 `cost` 与等权总 token 比值落在 3～8 倍区间；四项费率不齐的 `metric: cost` 在**加载期**报错（`vmr check`/`start`/热重载三处共用同一个 `validate()`）；生成脚本不得把缺失分量补 0、`standard_price_curated` 手工行重新生成后仍在。
+- **P2 折算**：`token_weights` 全 1.0 时 `base(tokens)` 逐字节等于 `In + Out`；非等权时按分量精确加权（不取整）；生成脚本不得把缺失分量补 0、`standard_price_curated` 手工行重新生成后仍在；`providers[].pricing.rates` 的费率行"四分量全给或全不给"在加载期校验（`vmr check`/`start`/热重载三处共用同一个 `validate()`）——已删除的 `metric: cost` 曾在此基础上再加一层"整个账号所有模型都要解析出费率"的门禁，随该 metric 一起删除，见 §7.1。
 - **P3 桶/闸**：最长 tumbling 为桶、全 rolling 的账号没有桶；活闸不抬分（`TestScoreForLimits_GateNeverBoosts`）、烧断闸归零沉底（`TestScoreForLimits_BlownGateZeroesScore` + `router` 的 `TestReorderByQuota_MultiLimit_BlownGateDeprioritizes`）、无渐进压制带（`TestScoreForLimits_NearBlownGateDoesNotThrottle`）；单 Limit 严格退化为 P1/P2 行为；`models:` 过滤只对匹配模型计费、`model_multipliers` 按**上游**模型名生效。
 - **`-race`**：`Registry` 的并发计费/读取/flush。
 - **archtest**：`internal/report` 仍不 import `config`；`router` → `quota`/`pricing` 不成环。
@@ -1161,7 +1141,9 @@ archtest 有 700 行预算，当前 561 行。
 
 ### 15.1 一句话结论
 
-**P1、P2、P3 已全部交付并投入使用（rolling 窗口除外）；P4 未启动**。按 §14.1 自评的十四项终态机制计，已落地十二项、永久砍掉一项（`Source` 抽象）、剩一项待 P4（环形分桶/rolling）。另有一件终态清单之外的事已交付：**`vmr-quota.json` 从进程私有状态升级成对外可读的格式**——`vmr report` 现在把它的实时计数器与从审计日志重算的窗口消耗并排展示（§11），带出两条契约（§9.3 的读取前提、§12.1 的"额度公式唯一实现 + 差分测试"纪律），P3 后都已按多 Limit 重新验证过。真正影响可用性的剩余缺口是**内置标准价目表的四分量完整率不高**（§15.3①）。
+**P1、P2、P3 已全部交付并投入使用（rolling 窗口除外）；P4 未启动**。按 §14.1 自评的十四项终态机制计，当前实际生效十一项、永久砍掉两项（`Source` 抽象；`metric: cost`——2026-09-06 随 Pricing 架构极简化重构删除，见 `docs/future-strategy/pricing_architecture_simplification_plan.md`）、剩一项待 P4（环形分桶/rolling）。另有一件终态清单之外的事已交付：**`vmr-quota.json` 从进程私有状态升级成对外可读的格式**——`vmr report` 现在把它的实时计数器与从审计日志重算的窗口消耗并排展示（§11），带出两条契约（§9.3 的读取前提、§12.1 的"额度公式唯一实现 + 差分测试"纪律），P3 后都已按多 Limit 重新验证过。
+
+`metric: cost` 的删除同时带走了定价体系的第三层：从"内置标准表 → 用户补充表 → 账号覆盖"三层收敛为"内置标准表 → 账号覆盖"两层，外部 `pricing.yaml` 补充表不再存在（§4.2①）；账号级定价字段改名为 `currency`/`aliases`/`rates`（原 `map`/`overrides`），且账号覆盖的书写币种在加载期即归一为 USD，路由半区从此零价格、零币种（§9.2）。这不是对 P2 的降级——是判定 P2 曾经的核心动因（"贵模型多占额度"）本就该由 `token_weights`/`model_multipliers` 承担，而"精确记账"从来就只是 `vmr report` 的离线工作，不该反向影响控制面。真正影响可用性的剩余缺口是**内置标准价目表的四分量完整率不高**（§15.3①，现已降级为影响报表精度而非路由/配额行为）。
 
 ### 15.2 终态十四项机制逐项现状
 
@@ -1169,7 +1151,7 @@ archtest 有 700 行预算，当前 561 行。
 
 | # | 机制 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | 三种 metric（requests / tokens / cost） | ✅ 全部落地 | `core.QuotaMetric`；`router/quota.go` 的 `ChargeResponse` |
+| 1 | 三种 metric（requests / tokens / cost） | ⛔ `cost` 已于 2026-09-06 整体删除 | P2 曾全部落地（`core.QuotaMetric` 含 `MetricCost`）；Pricing 架构极简化重构（决策 6）判定 cost 把控制面与计费面焊在一起，整体删除——`core.QuotaMetric` 现只剩 `requests`/`tokens`，`ChargeResponse` 无 cost 分支，见 §7.1 |
 | 2 | 多窗口归并 | ✅ P3 | `config.QuotaConfig.Limits` 不再限制为一条；`quota.ScoreForLimits` 按桶/闸规则归并 |
 | 3 | 桶 / 闸角色 | ✅ P3 | `quota.BucketIndex` + `ScoreForLimits`（最长周期为桶，闸二值归并：活着不参与、烧断归零——`GateReserve` 魔数与 `min(1,raw)` 硬封顶均已删），单 Limit 时严格退化为 P1/P2 行为 |
 | 4 | 环形分桶（rolling） | ⬜ P4（本批范围内明确排除，非顺延） | `rolling: true` 仍是加载期"计划中"错误；见 §14.3 P3 一节"未随 P3 交付"的说明 |
@@ -1177,35 +1159,36 @@ archtest 有 700 行预算，当前 561 行。
 | 6 | `model_multipliers` | ✅ P2，**P3 起改为按 Limit 配置** | 每条 Limit 各自的字段，**计费时**套用，精确相乘、不取整（§9.2）；见 §12.1「折算规则的层级」的订正 |
 | 7 | `token_weights` | ✅ P2，**P3 起改为按 Limit 配置** | 每条 Limit 各自的字段，**读取时**套用，缺省全 1.0；理由同上 |
 | 8 | Scope（`models:`） | ✅ P3 | 出现真实案例后按 §14.1 的门槛交付；三态语义（不写＝共享、`"*"`＝按模型独立不限成员、具体列表＝按模型独立限定成员），`quota.LimitKey` 按"实际计费的模型"生成 key，不是按 Limit 声明的列表 |
-| 9 | 标准定价表 + 生成脚本 | ✅ P2 | `internal/pricing` 的 `go:embed` 双表 + `tools/gen_standard_pricing` |
-| 10 | per-provider 价格覆盖 + ID 映射 | ✅ P2（时间窗子功能面已于 P0-A 移除） | `providers[].pricing` 的 `map`/`overrides`（`discount`/显式费率/`"*"` 通配，静态按模型区分，无时间维度） |
+| 9 | 标准定价表 + 生成脚本 | ✅ P2，2026-09-06 起为定价体系的唯一底座 | `internal/pricing` 的 `go:embed` 双表 + `tools/gen_standard_pricing`；外部 `pricing.yaml` 补充表（曾经的第三层）已整体删除，见 §4.2① |
+| 10 | per-provider 价格覆盖 + ID 映射 | ✅ P2（时间窗子功能面已于 P0-A 移除；2026-09-06 改名） | `providers[].pricing` 的 `aliases`/`rates`（原 `map`/`overrides`，`discount`/显式费率/`"*"` 通配，静态按模型区分，无时间维度）；`currency` 字段现为解析期书写标注，加载期归一 USD，不再是运行态量 |
 | 11 | `Source` 抽象（官方用量 API） | ⛔ 永久砍掉 | §14.1 已定案：写第一个适配器时再抽（P4） |
 | 12 | 持久化 + 惰性重置 | ✅ P1 | `vmr-quota.json`（0600），5s flusher + 退出前强制 flush。已成为**对外可读**的格式：`quota.LoadFile`/`Bucket` 供离线消费者只读加载（不构造 `Registry`、不加锁、不写盘），读取契约见 §9.3 |
 | 13 | 梯队占位重排 | ✅ P1，P3 扩展到 Scope | `reorderByQuota`，只重排"挂了至少一条适用 Limit"的成员——一条 Limit 的 `models:` 没覆盖到某端点的模型，对该端点等同于没配这条 Limit |
 | 14 | usage 嗅探 + 降级估算 | ✅ P1 | 事件级门禁 + 字节估算兜底 |
 
-十四项里：**已落地 12 项（#1、2、3、5、6、7、8、9、10、12、13、14）、P4 待做 1 项
-（#4，本批范围内明确排除的环形分桶）、永久砍掉 1 项（#11）。**
+十四项里：**当前实际生效 11 项（#2、3、5、6、7、8、9、10、12、13、14）、P4 待做 1 项
+（#4，本批范围内明确排除的环形分桶）、永久砍掉 2 项（#11 `Source` 抽象；#1 `metric: cost`，
+2026-09-06 随 Pricing 架构极简化重构删除，比 #11 晚得多，但同样是"永久"而非"待排期"）。**
 
 ### 15.3 已知缺口与后续建议
 
 按"是否影响可用性"排序，不按批次；每条都说明为什么现在不做，不是简单地标"待办"。
 
-**① 内置标准表的四分量完整率不高（影响可用性）。**
-`metric: cost` 的加载期门槛是"四项费率全部有值"（缺失当 0 会低估消耗，是最危险的失效方向），
-所以多数模型光靠内置表配不出 `metric: cost`，必须写 `providers[].pricing.overrides` 的显式
-四分量费率。上游数据本身就是这样（西方主流厂商覆盖完整，国产第一方厂商明显偏弱——部分缺缓存
-字段、部分整条缺价格），§4.2①、§13 已如实写明"标准表是消除入门断崖的基线，不是 `cost` 的
-充分数据源"，不是实施偏差。`standard_price_curated.yaml` 已陆续补入经过官方定价页核对的国产
-第一方厂商条目，但多数仍因 `cache_write`（部分还缺 `cache_read`）未公开而不满足四项齐全——
-**逐步补齐更多国产第一方厂商的四分量费率是这项缺口唯一的实质解法，属于持续的数据维护工作，
-不是一次性的代码任务，因此不排期，靠社区与项目持续贡献补充表/`standard_price_curated.yaml` 推进。**
+**① 内置标准表的四分量完整率不高（影响报表精度，不再影响可用性）。**
+上游数据本身就不均衡：西方主流厂商覆盖完整，国产第一方厂商明显偏弱——部分缺缓存字段、部分
+整条缺价格。`metric: cost` 存在时，这条缺口曾经是加载期门槛（四项费率不齐 = 拒绝启动）；
+随该 metric 于 2026-09-06 整体删除，缺口的后果已降级为 `vmr report`/`vmr analyze` 的 $
+估算不完整（`CostRateIncomplete` 标注），不再触及能否启动。`standard_price_curated.yaml` 已
+陆续补入经过官方定价页核对的国产第一方厂商条目，但多数仍因 `cache_write`（部分还缺
+`cache_read`）未公开而不满足四项齐全——**逐步补齐更多国产第一方厂商的四分量费率是这项缺口
+唯一的实质解法，属于持续的数据维护工作，不是一次性的代码任务，因此不排期，靠社区与项目
+持续贡献 `standard_price_curated.yaml` 或各自的 `providers[].pricing.rates` 推进。**
 
-**② 报表的"溯源可见"只做到聚合级，没做到逐行级。** `vmr report` §2 只给一个汇总（标准表生成日期 + 补充表路径 + override 条数），单行 $ 数字看不出它走的是标准表/补充表/账号覆盖哪一层。真要做需要在 `pricing.Resolve` 返回值里带上来源标记并一路穿到 `report` 的行结构——不是小改动。低频需求，等 P4 做额度看板（`section_quota.go`）时报表本就要改一轮，届时一并考虑。
+**② 报表的"溯源可见"只做到聚合级，没做到逐行级。** `vmr report` §2 只给一个汇总（标准表生成日期 + 账号覆盖条数），单行 $ 数字看不出它走的是标准表还是账号覆盖哪一层。真要做需要在 `pricing.Resolve` 返回值里带上来源标记并一路穿到 `report` 的行结构——不是小改动。低频需求，等 P4 做额度看板（`section_quota.go`）时报表本就要改一轮，届时一并考虑。
 
-**③ 生成脚本的 canonical key 做了归一化，不是上游 JSON 顶层 key 原文。**归一化保留（org 前缀不是模型身份——同一模型在不同卖主处前缀漂移，裸名归一是去重、刷新稳定、厂商优先级比较的前提）。曾经的后果是**桥只修了一半**：表侧归一、请求侧不归一，带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`、fireworks 的 `accounts/fireworks/models/...`）四步全落空、静默 Unpriced，`metric: cost` 直接加载期报错。已修复：新增 `pricing.ModelBasename` 作为“裸名”的唯一权威定义（生成器建 key、解析器降级、歧义报告分组三处同源），`resolveCanonicalKey` 四步落空后把请求名掐成裸名递归重跑——带前缀请求与裸名请求答案逐字节一致，原本命中的名字结果不变。配套：`ParseTable` 强制 key 至多一段 `/`（三段 key 会劈出隐形命名空间，手写补充表直接加载期报错）。已知残余：某网关自造 id 掐掉前缀后恰与另一模型裸名同名时，重试会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `map`/别名先钉（优先级更高）。
+**③ 生成脚本的 canonical key 做了归一化，不是上游 JSON 顶层 key 原文。**归一化保留（org 前缀不是模型身份——同一模型在不同卖主处前缀漂移，裸名归一是去重、刷新稳定、厂商优先级比较的前提）。曾经的后果是**桥只修了一半**：表侧归一、请求侧不归一，带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`、fireworks 的 `accounts/fireworks/models/...`）四步全落空、静默 Unpriced（`metric: cost` 存在时曾因此直接加载期报错，现在只是该行无 $ 估算）。已修复：新增 `pricing.ModelBasename` 作为“裸名”的唯一权威定义（生成器建 key、解析器降级、歧义报告分组三处同源），`resolveCanonicalKey` 四步落空后把请求名掐成裸名递归重跑——带前缀请求与裸名请求答案逐字节一致，原本命中的名字结果不变。配套：`ParseTable` 强制 key 至多一段 `/`（三段 key 会劈出隐形命名空间，标准表里出现即加载期报错）。已知残余：某网关自造 id 掐掉前缀后恰与另一模型裸名同名时，重试会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `providers[].pricing.aliases` 先钉（优先级更高）。
 
-**④ `ParseTable` 不校验标准表/补充表内费率的正负与有限性**（账号覆盖那层已有 `positiveFinite`/`nonNegativeFinite` 校验）——因为标准表是脚本产出 + `go:embed` 的受控数据、补充表是用户自备的完整表，要出现负数/NaN 都得先绕过生成脚本或手工构造整表。ROI 不足，登记备查。
+**④ `ParseTable` 不校验标准表内费率的正负与有限性**（账号覆盖那层已有 `positiveFinite`/`nonNegativeFinite` 校验）——因为标准表是脚本产出 + `go:embed` 的受控数据，要出现负数/NaN 都得先绕过生成脚本或手工改坏 `standard_price_curated.yaml`。ROI 不足，登记备查。
 
 **已交付的相关项**：`vmr replay` 的消耗现在计入同一份 `vmr-quota.json`（`internal/replay.Run` 复用导出的 `router.ChargeResponse` 计费管线，`-dry-run` 不触碰状态文件；仍不覆盖多实例并发写同一文件——那本是 §13"多实例共享计数"这条已接受限制）；被替换的孤儿 `limitKey` 由 `quota.Registry.Prune` 在 Snapshot 安装与热重载时按配置白名单自动修剪；P3 放开多窗口后 `internal/report` 的 `ProviderQuotaRef` 已从单 Limit 改为按 `(provider, LimitKey)` 聚合、§2.5 额度对照表一个 Limit 一行。
 

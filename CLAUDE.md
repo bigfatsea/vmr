@@ -65,14 +65,14 @@ Routing half:
 
 | Package | Owns |
 | --- | --- |
-| `config` | YAML load, `${ENV}` expansion, strict validation, hot-reload watch. Also resolves `metric: cost` pricing through `internal/pricing` at load time — a `metric: cost` provider whose rate can't be fully resolved is a config error, not a runtime surprise |
+| `config` | YAML load, `${ENV}` expansion, strict validation, hot-reload watch. Also resolves each provider's `pricing` (account overrides) and the top-level `exchange_rate` through `internal/pricing` at load time — purely for `vmr report`/`vmr analyze` $ estimates; a rate row missing a component is a config error (all four or none), but an unresolvable model is not — it just leaves that row unpriced |
 | `adapter`, `adapter/{openai,anthropic,openairesponses}` | `Adapter` interface (compile-time blank-import registry) + shared error classification (`DefaultClassify`) + protocol-domain field/role semantics (`SessionFingerprint`, `TopLevelProbe`) |
 | `strategy` | `Dimension` (ordering) + `Condition` (elimination) — two separate interfaces |
 | `health` | Passive state machine: cooldown, backoff, half-open single-flight |
 | `sticky` | Session-affinity registry for prompt-cache stickiness |
 | `probe` | Minimal echo-nonce request shared by background recovery probes and `vmr diagnose` |
 | `quota` | Quota accounting: `Counters`/`Registry` keyed by provider *name* (rotating a key must not reset the period), calendar-aware periods, headroom scoring, atomic `vmr-quota.json` persistence |
-| `pricing` | Three-layer rate resolution (account override → supplement/standard table → unpriced). A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
+| `pricing` | Two-layer rate resolution (account override → standard table → unpriced), no external file layer. A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
 | `respnorm` | Response stream normalization: `Wrap` + the buffered/passthrough state machine, model rewrite, SSE splitting, `[DONE]` policy, and the evidence-based vendor quirk repairs. Quota usage sniffing lives here too — a documented tradeoff, see the package doc |
 | `router` | Failover loop (`Serve`/`tryOne`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
 | `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, `/status` (auth-gated), unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/status`) |

@@ -45,9 +45,9 @@
 # not repeated here), or simply does not publish one — never guessed as
 # 0 without a citation saying so (see this file's own "missing beats wrong"
 # stance above). A row that stays incomplete after this still helps `vmr
-# report`'s best-effort $ estimate; it just can't satisfy a `metric: cost`
-# account's stricter Complete gate until the gap is filled with a
-# sourced number.
+# report`'s best-effort $ estimate; it's just marked as an incomplete-rate
+# estimate (CostRateIncomplete) until the gap is filled with a sourced
+# number.
 currency: USD
 generated_at: "2026-08-09"
 
@@ -481,7 +481,7 @@ rates:
   #
   # GLM-5.1's price is tiered by input length ([0,32K) vs >=32K); the
   # [0,32K) tier is used here as the common case — an account whose traffic
-  # runs mostly above 32K input should add a providers[].pricing.overrides
+  # runs mostly above 32K input should add a providers[].pricing.rates
   # entry with the >=32K figures instead. GLM-5.2/5.3 have a single flat 1M
   # tier. cache_write: the page says 限时免费 (free for a limited promotional
   # window) — a promo, not a price, and this schema has no time dimension
@@ -531,11 +531,12 @@ rates:
   # recommendation ("适用于绝大部分场景"), not a translation/vision/embedding
   # specialty model. No cache pricing of any kind is published anywhere in
   # Hunyuan's docs (not merely a missing field on this one page) — this row
-  # stays at 2 of 4 components on purpose; it will never satisfy a
-  # `metric: cost` account's completeness gate without an account-level
-  # override supplying cache figures from elsewhere (e.g. a negotiated
-  # contract), but it still turns `vmr report`'s $ estimate for this
-  # provider from "nothing at all" into a real (if partial) number.
+  # stays at 2 of 4 components on purpose; it will keep rendering as an
+  # incomplete-rate estimate (CostRateIncomplete) without an account-level
+  # providers[].pricing.rates entry supplying cache figures from elsewhere
+  # (e.g. a negotiated contract), but it still turns `vmr report`'s $
+  # estimate for this provider from "nothing at all" into a real (if
+  # partial) number.
   - key: hunyuan/hunyuan-a13b
     in_fresh: 0.07042    # ¥0.5 / 7.1
     out: 0.28169          # ¥2 / 7.1

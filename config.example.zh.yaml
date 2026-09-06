@@ -200,7 +200,7 @@ providers:
     #     - metric: requests       # 或者：tokens（Credits/金额制套餐换算一次：预算 ÷ 价格，写成
     #                              # token 数即可——见下面 token_weights/model_multipliers 表达
     #                              # 按分量/按模型的差异；已经没有 metric: cost 了，见
-    #                              # docs/future-strategy/pricing_architecture_simplification_plan.md）
+    #                              # docs/VirtualModelRouter_Design_v4_Quota.md 的"计量"一节）
     #       every: 1min            # N{min,h,d,w,mo}——也可以是 5h、2w、3d
     #       amount: 60             # 一条按分钟限速的闸（限速，不是账单周期）
     #
@@ -246,7 +246,7 @@ providers:
 
   # providers[].pricing：完全可选，只用来帮 vmr report/vmr analyze 的 $ 估算
   # 与 vmr check 的展示更精确——绝不影响请求路径、路由或配额（见
-  # docs/future-strategy/pricing_architecture_simplification_plan.md）。不
+  # docs/VirtualModelRouter_Design_v4_Quota.md 的"定价"一节）。不
   # 配置也会有一份内置标准价目表生效；这个块只声明"这个账号跟标准表不一样
   # 的地方"。
   # - name: anthropic              # 把 provider 命名成它的厂商本名，有助于下面的自动

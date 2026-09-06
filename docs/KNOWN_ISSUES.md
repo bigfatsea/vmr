@@ -20,8 +20,9 @@
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
 - **§2 分布**：高危 0；中危 3（`2.2`/`2.17`/`2.18`），其余均为低危。
-- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进 `ChargeCost` 单锁原子写、`/status` 走 `Snapshot` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。新增待定：§2.89 / §2.90 / §2.91。
-- **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——`Endpoint.PricingRate` 改持 `pricing.FoldSpec` 折叠出的 `*core.Rate`，cost 计费热路径字段直读（`core.Rate.Cost`），override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界；成本公式 SSOT 收敛到 `core.Rate.Cost`（`pricing.Rate.Cost` 委托之），`FoldSpec` 的 nil→nil 契约照旧。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
+- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进单锁原子写、`/status` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。
+- **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——cost 计费热路径改为折叠字段直读，override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界（该优化本身已于 2026-09-06 被 §2.89 记录的整体删除取代，见下）。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
+- **2026-09-06 已闭环**（Pricing 架构极简化重构，`docs/future-strategy/pricing_architecture_simplification_plan.md`）：`metric: cost`、两层定价热路径挂点（原挂在 `core.Endpoint` 上的折叠费率字段）、其折叠函数、`quota.Counters` 的 cost 分量与其原子写方法整体删除（§2.89 更新记录）；顶层 `pricing:` 块（`currency`/`exchange_rate`/`supplement`/`standard`）删除，改为顶层 `exchange_rate:` + `providers[].pricing.{currency,aliases,rates}`（原 `map`/`overrides` 改名）二层模型；`internal/pricing` 新增内置默认汇率表（`standard_exchange_rate.yaml`）。路由半区从此零价格、零币种；定价解析完全下沉到离线 `vmr report`/`vmr analyze`。Breaking change，详见 `CHANGELOG` `[Unreleased]` 的迁移指引。
 - **2026-09-05 已闭环**（T1/T2b/T3/T4 多 Agent 批次）：`imgprep` 递归下钻 Anthropic `tool_result` 嵌套图片；`reqdetail` 角色归属走 `chatmsg.ExtractReasoning`（三级回退）、`ctxgraph` 新增官方单条消息散列入口 `HashMsgJSON` 并让 story 前导系统哈希归位；`ctxgraph` 解析缓存改按内容哈希为 key、删除 mtime 消歧；`buildCandidates` 新增健康过滤 last-resort（候选全空时释放退避最浅的半开端点，见 §2.85）。详见 `CHANGELOG` `[Unreleased]` 及下文 §1.4/§2.85 对应条目更新。
 - **2026-09-05 已闭环**（独立复核发现，quota role 展示层）：`/status`/`vmr status`/`vmr check` 的 bucket/gate `role=` 判定收敛到单一函数 `internal/quota.Role(limits, li, model)`，按行的 Scope 选 judging set——共享行（`model==""`）收窄成"同样覆盖全体模型的 Limit"（排除限定列表 Limit：它只为自己点名的模型竞争，混合 Scope 且该列表周期更长时，旧的全量视角会把共享池错标成闸，而受害的正是没有专属行的模型）；`vmr check` 对限定单个具名模型的 Limit 现在也按该模型的 `applicableLimits` 精确计算（不再是全量近似）——只有通配 `["*"]` 或列出多个模型的 Limit 仍是全量近似 + note 指向 `/status`（结构性：一条静态行给不出对多个模型各自不同的正确答案）。同时把 `Role` 的桶身份判定从字段值相等改成按 `limits` 原始下标比较——共享池与一条 metric/period/amount/since 恰好全等的通配 Limit（合法配置，不撞校验）用值判等无法区分，会被一起误标成桶。均为纯展示修正，非混合 Scope 且非该值巧合相等的配置零变化，路由/计费/评分零影响。详见 `CHANGELOG` `[Unreleased]`、`internal/quota/score_test.go`（`TestRole_*`）、`internal/router/quota_multilimit_test.go`、`cmd/vmr/cmd_check_quota_test.go`。
 - **2026-09-04 已闭环**：`ScoreForLimits` 闸归并二值化（原 §2.88，N3 裁决采纳「闸 = 带安全余量的厂商限流本地代理」语义：活着的闸不参与评分，烧断的闸归零沉底到窗口重置；旧 `min(1, raw)` 硬封顶把带闸账号的桶抢跑加分压死在 ≤1.0 的病灶随之消除）。详见 `CHANGELOG` `[Unreleased]`。
@@ -50,7 +51,7 @@
 - **`ReleaseProbe` 与 `ReportNeutral` 行为相同但保留为两个方法**：前者是"名额先还、健康结论稍后再报"（`forwardSuccess` 在流真正跑完前用它），后者是"这次结果对健康没有信息量，到此为止"。合一会让 `forwardSuccess` 的调用点读起来像已经下了终局结论，而它恰恰还没有。
 - **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→2s 冷却→探针成功→满额流量→429 的循环成因。钉死的保证是"没有真实成功就永不归零、永不回到最浅档"。**订正（2026-09-05）**：本条曾写"探针成功与真实失败交替时深度在两档间振荡（如 2↔3）"——在 `Classify` 的单锁模型下这个场景不成立：`fails>0` 的端点对真实流量恒 `available=false`，真实流量根本到不了它，也就谈不上"真实失败"（§2.85 已指出这处过时，这里一并订正）。唯一的例外是 §2.85 的 last-resort：候选全空时释放的那一个半开端点会真的收真实流量，因此确实可能经历真实失败——但那时它已经是候选集里唯一的端点，不存在"与其他端点振荡"的场景。
 - **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
-- **后台探针按 requests 口径计 1，对 token/cost 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token/cost 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
+- **后台探针按 requests 口径计 1，对 token 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
 - **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果在 Windows 上依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
@@ -79,11 +80,11 @@
 - **CLI 与 Server 版本必须匹配，不一致直接报错不做兼容**：单二进制、可随时重启，`vmr status` 与 `vmr start` 理应同版本——不一致说明升级没走完，报错正是暴露它。`json.RawMessage` 式兼容层只覆盖一个滚动升级窗口却永久留在代码里，违反 KISS。曾为「旧 server 缺失新 key」保留的 `serving *bool` 兜底已作为死代码删除（`instance.config` 由 string 改 object 后即不可达）——版本必须匹配的原则不再留任何字段级例外。
 - **`/status` 的 `instance.base_urls` 回显请求自身地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status` 就广告什么地址，这正是客户端该填的值。纯展示、不参与鉴权或路由，Host 可伪造无安全影响；刻意不做 `X-Forwarded-Host` 解析。
 - **`base_url` 内嵌凭据在加载期报错，而不是在审计侧脱敏**：`base_url` 是自由字符串，`https://u:p@host` 或 `?api_key=...` 会原样进 `Attempt.URL` 落盘——审计脱敏只覆盖 header，这是脱敏模型的唯一旁路。在源头消灭比运行期脱敏正确：脱敏是永远追不全的黑名单。**适用于**：固定的凭据键名清单（`api_key`/`token`/`secret`/`password` 等）与 userinfo 段。**不适用于**：自定义网关用非常规键名承载凭据的情形——刻意不做"值看起来像 key"的启发式判断，那会误杀 `api-version` 这类合法参数。错误信息只回显键名，绝不回显值。
-- **价目表的数值防线建在 `pricing.parseTable`，不下沉到 `internal/config`**：`parseTable` 是 supplement/standard/curated 三类手写文件的唯一解析入口，config.yaml 的 overrides 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关，config 不重复校验 pricing 的解析结果。NaN/±Inf/负费率一律加载期硬错误：它们会让 `Counters.Cost` 中毒，进而让 `UsedFrac`/`Headroom`/`ScoreForLimits` 全部失效、评分永久停在最大余量，把该账号变成流量磁铁。
+- **价目表的数值防线建在 `pricing.ParseTable`，不下沉到 `internal/config`**：`ParseTable` 是标准/curated 表的唯一解析入口（外部 supplement 文件已删除，见 §1.0），config.yaml 的 `providers[].pricing.rates` 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关，config 不重复校验 pricing 的解析结果。NaN/±Inf/负费率一律加载期硬错误——定价与配额自 Pricing 架构极简化重构（决策 6）起彻底解耦，一条脏费率的影响面已收窄到只污染离线 `vmr report`/`vmr analyze` 的 $ 估算，不再可能触达 `quota.Counters`（该结构自身也已不含任何价格分量）。
 - **`report.yaml` 解析失败是硬错误退出，文件不存在才是静默 no-op**：严格解析（`KnownFields`）配上软降级是最坏组合——一个键名笔误会静默关掉**全部** report.yaml 设置，包括自流量排除（分析工具自己的开销于是混进被分析的工作负载）。文件不存在是合法的"未配置"（多数运行本就没有 report.yaml）；显式 `-report-config` 指向的文件不存在则报错，那是用户自己给的指针。报表头另有一行写明本次实际应用的配置文件路径（`Meta.ReportConfigPath`）——"没找到 report.yaml"和"本来就没有"在产物上必须可区分。
 - **环境变量未定义时静默展开为空串，不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值在 YAML 里显式写出。
-- **`internal/config` 的三层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但这是 Quota 设计文档决策表明文选定的方案——「只让 report 一侧解析、`metric: cost` 另开一条运行时校验路径」是同一行里已否决的备选（两份实现容易漂移）。后置还会摧毁「`metric: cost` 费率不齐 = **加载期**错误」这条硬要求。
-- **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的命名形态不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.map`/`overrides` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `map`/别名先钉（优先级更高）。
+- **`internal/config` 的二层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但这是 Quota 设计文档决策表明文选定的方案——只让 `cmd/vmr/cmd_report.go` 一侧另行解析、config 侧完全不校验会导致两份实现各自推断、容易漂移，是已否决的备选。后置到 `BuildSnapshot` 还会摧毁「费率行四分量全给或全不给、`aliases` 目标必须存在」这些加载期校验——它们的价值就在于**加载期**能立刻报错，而不是等 `vmr report`/`vmr check` 跑一次才发现打错的字。
+- **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的命名形态不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.aliases`/`rates` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `pricing.aliases` 先钉（优先级更高）。
 - **多协议适配器（`adapter/{openai,anthropic,openairesponses}`）保持独立子包**：三协议底层已有真实分叉（Anthropic 529 特判、Responses 顶层 `input` 数组与 `RewriteInputRoles`、`x-api-key` vs `Authorization`）；独立子包支持编译期 `init()` 注册与独立单测，新增协议零侵入。合并成参数化结构体只是把多态改写为字符串 `if` 分支。
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
 - **`TopLevelProbe` 的契约是「探测」不是「校验」，不检查尾随字节**：它回答「这团字节是不是某个协议的对话请求」（结构探测，供 `RequestFacts` 与 sticky 指纹用），不承诺「字节流在探针返回的结构之后没有尾随垃圾」。
@@ -233,14 +234,14 @@
 #### 2.58 [低] 定价表覆盖不到的模型，其成本永远不进任何合计
 
 - **现状**：`§2` 四张表都带合计行，合计只含解析出费率的行，并在表下注明「合计不含 N/M 天（个模型/端点/客户端）」。未定价行本身仍渲染、成本列写 `-`（不是 0，也不是整行消失）。剩下的是数据缺口本身，不是呈现缺口：一个三张表都查不到的模型，其流量的成本就是未知。
-- **当前缓解**：厂商优先级消歧 + curated 别名把标准表的可用覆盖面拉满（2026-08-31 快照：709 个裸名里 78 个撞车，6 个由 curated 别名钉死、51 个自动解开）；带 org/路径前缀的聚合商模型名经 `pricing.ModelBasename` 兜底与裸名同解析（2026-09 交付，见 §1.2 对应条目）；剩余缺口由用户在 `pricing.supplement` 自补，不补则如实显示未定价。`vmr check` 在表龄超 60 天时提示刷新。
+- **当前缓解**：厂商优先级消歧 + curated 别名把标准表的可用覆盖面拉满（2026-08-31 快照：709 个裸名里 78 个撞车，6 个由 curated 别名钉死、51 个自动解开）；带 org/路径前缀的聚合商模型名经 `pricing.ModelBasename` 兜底与裸名同解析（2026-09 交付，见 §1.2 对应条目）；剩余缺口由用户在对应 provider 的 `pricing.rates`/`pricing.aliases` 自补，或贡献进 `standard_price_curated.yaml` 惠及所有用户，不补则如实显示未定价。`vmr check` 在表龄超 60 天时提示刷新。
 - **可能方案**：无代码方案——这是数据边界。框架只保证查得到就用得上、查不到就说不知道。
 - **触发条件**：常用模型长期不在任何一层表内，且用户不愿自补。
 
 #### 2.58a [低] 费率缺分量时按 0 计价，只在 §2 汇总层披露，不逐行标注
 
 - **现状**：`pricing.Rate.Cost` 把 nil 分量按 0 计价（防御性下限）。`§2` 会汇总提示「有 N 个端点的单价缺分量」，但具体是哪几行、缺哪一项、少算了多少，行上看不出来。
-- **当前缓解**：`EndpointRow.CostRateIncomplete` + `§2` 的 `IncompleteRateNote`；`metric: cost` 那条路径不受影响——它有 `pricing.Complete` 的加载期硬门。
+- **当前缓解**：`EndpointRow.CostRateIncomplete` + `§2` 的 `IncompleteRateNote`。已删除的 `metric: cost`（见 §1.0）曾在此基础上再加一道账号级加载期硬门（`pricing.Complete`）；随它一起删除后，缺分量的后果统一收敛成"报表这一行是不完整估算"，不再有第二条更严格的路径。
 - **可能方案**：与 2.58b（逐行溯源）同一批做——两者都需要把解析结果的元信息从 `pricing.Resolve` 一路穿到 report 的行结构。
 - **触发条件**：主力模型的厂商长期不公布缓存价，而账号缓存命中率又高。
 
@@ -394,10 +395,10 @@
 - **触发条件**：真实用户报告「用某慢上游时流式响应假死后被客户端超时切断」。
 
 
-#### 2.89 [已落地 2026-09-05] `core.Endpoint.PricingRate` 持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
+#### 2.89 [已作废 2026-09-06] `core.Endpoint` 的定价挂点持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
 
-- **落地**（2026-09-05）：`BuildSnapshot` 现在把 `pricing.FoldSpec` 折叠出的 `*core.Rate` 挂 `Endpoint.PricingRate`，cost 计费分支字段直读（`core.Rate.Cost`），override 链解析不再进实时路由热路径——架构红线（§1.0「让价目表进实时路由热路径」）不再被越界。成本公式 SSOT 收敛到 `core.Rate.Cost`（`internal/pricing.Rate.Cost` 委托之），`replay` 走同一 `FoldSpec` 挂载，离线 `Resolver`/`vmr check` 显示形态不变。`FoldSpec(nil)→nil` 的契约与旧 `EffectiveRate(nil-spec)` 的零费率行为对齐。
-- **残留（触发驱动）**：`core.PricingSpec` 的 `Base + Overrides` 收进 `internal/pricing`——config 侧展示（`vmr check`）与报表离线路径不受影响，纯属包边界整洁；等 `core` / `config` 下次有其它改动时顺路做，不为它单独排期。
+- **作废原因**：这条条目描述的整套机制（`metric: cost`、`core.Endpoint` 上的折叠费率字段、其折叠函数、`Counters` 的 cost 分量与其原子写方法）已被 pricing 架构极简化重构（`docs/future-strategy/pricing_architecture_simplification_plan.md` 决策 6）整体删除，不是继续优化——路由半区从此**零价格、零币种**，连"折叠一次"这个优化对象本身都不存在了。原 2026-09-05 记录的"折叠进 `Endpoint` 专属字段"优化因此被完全绕过，不再是当前状态的一部分。
+- **现状**：`core.Endpoint` 不再有 `PricingRate` 字段，`core.PricingSpec` 不再有 `Currency` 字段，`internal/pricing` 不再有 `FoldSpec`/`ResolveOptions.ExchangeRateToTarget`。定价解析完全下沉到离线的 `vmr report`/`vmr analyze`（`internal/pricing.Resolver`），路由/配额/审计日志都不再消费任何价格数据；KNOWN_ISSUES §1.0 的红线（价目表不进实时路由热路径）因此从"靠纪律守住"变成"结构上已不存在的东西"。详见 `docs/VirtualModelRouter_Design_v4_Quota.md` §7/§9 与 `CHANGELOG` `[Unreleased]`。
 
 #### 2.91 [低，决定不做 2026-09-05] `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默
 

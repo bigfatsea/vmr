@@ -228,7 +228,7 @@ providers:
     #     - metric: requests       # or: tokens (a Credits/money-style plan converts once: budget ÷ price,
     #                              # written as a token amount — see token_weights/model_multipliers below
     #                              # for expressing per-component/per-model differences; there is no
-    #                              # metric: cost anymore, see docs/future-strategy/pricing_architecture_simplification_plan.md)
+    #                              # metric: cost — see docs/VirtualModelRouter_Design_v4_Quota.md's Metering section)
     #       every: 1min            # N{min,h,d,w,mo} — also: 5h, 2w, 3d
     #       amount: 60             # a short RPM-style gate (a rate limit, not the billing period)
     #
@@ -284,7 +284,7 @@ providers:
   # providers[].pricing: entirely optional, and consulted only to sharpen vmr
   # report's/vmr analyze's $ estimates and vmr check's display — NEVER the
   # request path, never routing, never quota (see
-  # docs/future-strategy/pricing_architecture_simplification_plan.md). A
+  # docs/VirtualModelRouter_Design_v4_Quota.md's Pricing section). A
   # built-in standard price table always applies with no configuration at
   # all; this block only states how THIS account's prices differ from it.
   # - name: anthropic              # naming the provider after its vendor helps the automatic model-name

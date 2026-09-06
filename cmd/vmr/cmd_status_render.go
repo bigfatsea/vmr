@@ -64,25 +64,20 @@ func printStatus(st *statusResponse) {
 		estNote := ""
 		if q.EstimatedPct > 0 {
 			estNote = fmt.Sprintf(", %.0f%% estimated", q.EstimatedPct)
-			if q.EstimatedPct >= 95 && (q.Metric == "tokens" || q.Metric == "cost") {
-				// A token/cost account metered almost entirely by byte
-				// estimate is the include_usage gap in the field: streaming
+			if q.EstimatedPct >= 95 && q.Metric == "tokens" {
+				// A token account metered almost entirely by byte estimate is
+				// the include_usage gap in the field: streaming
 				// openai-completions callers who didn't send
 				// stream_options.include_usage:true, which vmr can't inject.
 				estNote += " — likely missing stream_options.include_usage"
 			}
 		}
-		// metric: cost's used/amount are money, always rendered to 4dp so
-		// a $2.5000 balance never reads as a rounded "$2.5". requests/tokens
-		// are usually whole numbers but aren't guaranteed to be: a
-		// fractional model_multipliers value (e.g. 1.5) folds straight into
-		// Used with no rounding (see quota.Counters' doc comment), so
+		// requests/tokens are usually whole numbers but aren't guaranteed to
+		// be: a fractional model_multipliers value (e.g. 1.5) folds straight
+		// into Used with no rounding (see quota.Counters' doc comment), so
 		// numStr renders those with decimals too instead of %.0f silently
 		// truncating them back to an integer.
-		usedStr, amountStr := fmt.Sprintf("%.4f", q.Used), fmt.Sprintf("%.4f", q.Amount)
-		if q.Metric != "cost" {
-			usedStr, amountStr = numStr(q.Used), numStr(q.Amount)
-		}
+		usedStr, amountStr := numStr(q.Used), numStr(q.Amount)
 		scopeNote := ""
 		if len(q.Models) > 0 {
 			scopeNote = " models=" + strings.Join(q.Models, ",")

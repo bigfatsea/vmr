@@ -369,13 +369,13 @@ providers:
 
 没配 `quota:` 的端点行为和之前完全一样——这是逐个 provider 的可选功能，不是全局开关。
 
-**目前交付的范围**（完整现状见 `docs/VirtualModelRouter_Design_v4_Quota.md`「现状与后续计划」一节）：每个 provider 可以配任意条 `limits:`，每条各自的 `metric` 可以是 `requests`、`tokens`，也可以是 `cost`（见下文[定价与 cost 计量档位](#定价与-cost-计量档位)），只支持固定（非滚动）窗口。`rolling: true` 仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次提供。一条 Limit 还可以用 `models: [名字, ...]` 把它限定到具体的上游模型——省略等于"这个 provider 下所有模型都算"，例子见下文。
+**目前交付的范围**（完整现状见 `docs/VirtualModelRouter_Design_v4_Quota.md`「现状与后续计划」一节）：每个 provider 可以配任意条 `limits:`，每条各自的 `metric` 是 `requests` 或 `tokens`，只支持固定（非滚动）窗口。`rolling: true` 仍会在**加载期直接报错**，点名是哪个字段、并说明它计划在后续批次提供。一条 Limit 还可以用 `models: [名字, ...]` 把它限定到具体的上游模型——省略等于"这个 provider 下所有模型都算"，例子见下文。没有 `metric: cost` 这一档——Credits/金额制套餐把预算换算一次成 token 数（预算 ÷ 价格），按模型/按分量的差异用下文的 `model_multipliers`/`token_weights` 表达；`$` 成本估算仍可从 `vmr report`/`vmr analyze` 得到（见下文[定价与成本估算](#定价与成本估算)），是离线计算的估算值，从不反馈进路由。
 
 **`amount` 必须按 vmr 自己观测到的口径标定，不能照抄套餐的宣传数字。** 有些厂商把"一次用户提问"算作一个计量单位，但一个 Agent 客户端（工具调用、重试、多步骤流程）会把它展开成一到二十多次 vmr 真正看到并计数的 HTTP 请求。请用你自己的真实流量来标定 `amount`——跑几天看 `/status` 的 `quota` 段，或者跑一次 `vmr report`——而不是抄官网价目表上的数字。标错了也不会导致故障（一个额度配少了的账号只会更早被降权），但路由决策的准确度会打折扣。
 
 对 `metric: tokens`，vmr 优先使用上游返回的真实 usage（精确值），只有在拿不到时才降级为按字节数估算——拿不到的三种情况是：响应被压缩、上游不返回 usage 字段、或流在中途被截断。降级估算刻意偏保守（**宁可高估**），一个账号本周期内有多少比例的计数来自降级估算，会显示为 `/status` 里的 `estimated_pct`。
 
-**`include_usage` 缺口**：在 `openai-completions` 上，*流式*响应根本不带 usage 块，除非客户端在请求里发了 `stream_options: {include_usage: true}`——而 vmr 从不注入请求字段（字节透传）。因此一个挂在 `openai-completions` 端点上的 `metric: tokens` / `metric: cost` 账户，对每个没发这个选项的流式调用方几乎完全靠字节估算计费，`estimated_pct` 会贴近 100。`vmr status` 和 `vmr report` 在估算占比接近全部时会给出相应说明（底层降级字节估算在后台自动保障平滑记账）。解决办法：让客户端带上该选项；或把该账户改走 `anthropic-messages` / `openai-responses`（两者总是回传 usage）；或接受高估（偏差是保守的，账户只会被提前降权、不会被静默跑爆）。非流式调用不受影响。
+**`include_usage` 缺口**：在 `openai-completions` 上，*流式*响应根本不带 usage 块，除非客户端在请求里发了 `stream_options: {include_usage: true}`——而 vmr 从不注入请求字段（字节透传）。因此一个挂在 `openai-completions` 端点上的 `metric: tokens` 账户，对每个没发这个选项的流式调用方几乎完全靠字节估算计费，`estimated_pct` 会贴近 100。`vmr status` 和 `vmr report` 在估算占比接近全部时会给出相应说明（底层降级字节估算在后台自动保障平滑记账）。解决办法：让客户端带上该选项；或把该账户改走 `anthropic-messages` / `openai-responses`（两者总是回传 usage）；或接受高估（偏差是保守的，账户只会被提前降权、不会被静默跑爆）。非流式调用不受影响。
 
 **它不会做的事**：它从不会把某个端点从候选列表里剔除——一个额度耗尽的账号只是在自己的 priority 梯队里排到最后，其它端点都不可用时 failover 仍然会尝试它。它不会覆盖 Sticky Model——已建立的对话即使对应账号额度已经紧张，也会继续留在原端点；重排只对新会话生效。它也从不会主动触发降级——额度耗尽不会像真实的 429/402 那样让端点进入冷却，那仍然是 `internal/health` 的职责。
 
@@ -403,8 +403,8 @@ providers:
           model_multipliers: {"*": 1.0, heavy-model: 9}
 ```
 
-- **`token_weights`** 在计算 headroom 以及 `/status` 的 `used`/`pct` 时，对 `metric: tokens` Limit 的四个分量重新加权——**按 Limit 配置**（一个 provider 配了几条窗口，就各自写各自的一份；因为实测发现同一账号的不同窗口未必共用同一套折算比例），未写的分量缺省为 `1.0`，且只对自身 `metric` 就是 `tokens` 的 Limit 生效（配在 `requests`/`cost` 的 Limit 上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例是**按模型分化**的，改用带 `pricing:` 块的 `metric: cost`（见下文）——按模型分化的价格没法用一组共享比例表达。
-- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。P3 起同样**按 Limit 配置**，理由同上。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按（provider、Limit）聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只影响 `requests`/`tokens` 档；`cost` 档的价格分化完全由 `pricing:` 块承担，同一条 Limit 上两者同时配置是加载期错误。
+- **`token_weights`** 在计算 headroom 以及 `/status` 的 `used`/`pct` 时，对 `metric: tokens` Limit 的四个分量重新加权——**按 Limit 配置**（一个 provider 配了几条窗口，就各自写各自的一份；因为实测发现同一账号的不同窗口未必共用同一套折算比例），未写的分量缺省为 `1.0`，且只对自身 `metric` 就是 `tokens` 的 Limit 生效（配在 `requests` 的 Limit 上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例**也按模型分化**，配合下文的 `model_multipliers` 一起表达按模型的整体缩放——这是一种近似（无法表达"按模型 × 按分量"同时分化的比例），但按模型、按分量的精确费率本来就该是 `vmr report`/`vmr analyze` 的事，不是路由控制面的事，见下文[定价与成本估算](#定价与成本估算)。
+- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。P3 起同样**按 Limit 配置**，理由同上。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按（provider、Limit）聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只作用于 `requests`/`tokens` 档（也是仅有的两档）。
 
 两个字段都不配置时行为不变——`token_weights` 缺省等同于 P1 一直在用的纯等权求和，`model_multipliers` 缺省让每笔计费保持 1 倍。
 
@@ -457,61 +457,55 @@ Scope、通配、或者具名命中都算）——一条 Limit 如果没把某�
 按模型独立计数的 Limit，只展示**真的产生过计费**的那些模型各一行——`"*"` 这条 Limit 的行数会随着
 新模型开始产生流量而增长，不是配置阶段就能定死的。
 
-#### 定价与 cost 计量档位
+#### 定价与成本估算
 
-`metric: cost` 直接按真实金额而不是次数/token 数给账号计费——适合按模型分化定价的 Credits 制套餐，这正是 `token_weights` 那套单一共享比例表达不了的场景。定价来自两层：**内置在二进制里的标准价目表**（不需要任何配置——数据源自一份公开的 LiteLLM 格式快照，MIT 许可，定期刷新）叠加你在 `config.yaml` 里写明的、与你账号不同的部分。
+定价存在的唯一目的是让 `vmr report`/`vmr analyze` 的 `$` 估算与 `vmr check` 的展示更精确——它从不进入请求路径，不影响路由，也不影响任何配额 Limit（没有 `metric: cost` 这一档，见上文[额度感知路由](#额度感知路由-quota-aware-routing)）。定价只有两层，且仅有两层：**内置在二进制里的标准价目表**（不需要任何配置——数据源自一份公开的 LiteLLM 格式快照，MIT 许可，定期刷新）叠加你在 `config.yaml` 里写明的、与你账号不同的部分。没有第三层外部文件——所有配置都直接写在 `config.yaml` 里。
 
-**推荐的默认做法：大多数部署完全用不到下面这些。** 如果你哪个账号都不用 `metric: cost`，整个 `pricing:` 块可以直接跳过——纯 `requests`/`tokens` 档位在加载期根本不读它。即便如此它仍是可选但有用的：`vmr report`/`vmr story` 的 `$` 列就是按这个块折算的，所以一个 `requests`/`tokens` 套餐的账号也可以只为让报表估算贴合真实账单而填 `pricing.overrides`。区别在强制力——配了 `metric: cost` limit，这个块就是加载期硬门槛（它扣费的每个模型都必须解析出完整费率）；没配就只是让离线估算更准，且会优雅降级。如果用了、也不介意统一按美元记账，只需要 `pricing: {currency: USD}` 一行——`exchange_rate` 留空不用，下面每条 `providers[].pricing.overrides` 费率直接填美元数字就行。只有当某个账号真正的配额上限是用非美元货币计的（比如某个国产厂商的人民币套餐），才需要用到 `exchange_rate`。
+**大多数部署完全用不到下面这些。** 单是标准表就已经覆盖了绝大多数主流公开模型，无需任何配置。只有当某个账号的实际费率与列表价不同（谈判折扣、标准表不认识的私有/自定义模型）时才需要 `providers[].pricing` 块。
 
 ```yaml
-pricing:
-  currency: CNY # 只要有账号用 metric: cost 就必填；标准表本身是 USD
-  exchange_rate: {CNY: 7.1} # 一张通用的"1 美元 = X <货币代码>"映射表——只要 currency 不是 USD 就必填
-  # 可选：直接内联自定义费率与别名（无需外部 pricing.yaml 文件）：
-  rates:
-    - {key: custom/my-model, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54}
-  aliases:
-    my-model-alias: custom/my-model
-  # supplement: ./pricing.yaml # 可选：外部补充表文件，指定时会叠加在内联费率之上
+# 可选，全局：只有某个账号下面的 pricing.currency 不是 USD 时才需要
+exchange_rate:
+  CNY: 7.1   # 一张通用的"1 美元 = X <货币代码>"映射表——未声明的货币会先查内置默认表兜底，
+             # 所以这个字段其实很少需要显式声明
 
 providers:
   - name: anthropic # 把 provider 命名成厂商本名有助于自动解析——见下文
-    quota:
-      limits:
-        - {metric: cost, every: 1mo, amount: 500} # 每月 500 元
     pricing:
-      map: {my-claude-alias: anthropic/claude-3-7-sonnet-20250219} # 只在自动解析猜不出你的模型名时才需要
-      overrides:
-        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54} # 这个账号对某个模型的实际谈判价，已经是 CNY（上面的 pricing.currency）
-        - {model: my-model-y, currency: USD, in_fresh: 1, cache_read: 0.1, cache_write: 1.25, out: 4} # 或者：直接抄厂商美元发票上的数字，靠 pricing.exchange_rate 自动换算
-        - {model: "*", discount: 0.6} # 兜底：其余模型统一按列表价 6 折
+      currency: CNY               # 解析期标注：下面 rates 用什么币种书写，加载期经上面的
+                                   # exchange_rate 一次性折算成 USD（省略则默认 USD，直接按美元填即可）
+      aliases:
+        my-claude-alias: anthropic/claude-3-7-sonnet-20250219 # 只在自动解析猜不出你的模型名时才需要
+      rates:
+        - {model: my-model-x, in_fresh: 1.58, cache_read: 0.32, cache_write: 1.58, out: 9.54} # 这个账号对某个模型的实际谈判价，CNY（上面的 pricing.currency）
+        - {model: "*", discount: 0.6} # 兜底：这个账号其余模型统一按列表价 6 折
 ```
 
-**一个模型的价格怎么找到**，按顺序：先看 `providers[].pricing.map`（你自己写的“本地模型名 → 标准表条目”映射），然后是 `<provider 名>/<模型名>`，然后是裸模型名——先当标准表的 key 直接查，再查表的**别名**，最后在整张表里对 `*/<模型名>` 后缀做匹配。如果配置里写的模型名带 org/路径前缀且四步全部落空，整套查找会在**裸名**（最后一个 `/` 之后的那段）上重跑一遍：聚合商 API 强制上游名带前缀（OpenRouter 的 `meta-llama/llama-3.3-70b-instruct`、Together 的 `google/gemma-...`、Fireworks 的 `accounts/fireworks/models/...`），而标准表的 key 是剥掉前缀的两段式——重跑让带前缀的名字解析到与裸名完全相同的费率，而不是静默无价。钉在完整带前缀名上的 `pricing.map` 项仍然优先，一如既往。
+**一个模型的价格怎么找到**，按顺序：先看 `providers[].pricing.aliases`（你自己写的"本地模型名 → 标准表条目"映射），然后是 `<provider 名>/<模型名>`，然后是裸模型名——先当标准表的 key 直接查，再查表自己内部的别名，最后在整张表里对 `*/<模型名>` 后缀做匹配。如果配置里写的模型名带 org/路径前缀且四步全部落空，整套查找会在**裸名**（最后一个 `/` 之后的那段）上重跑一遍：聚合商 API 强制上游名带前缀（OpenRouter 的 `meta-llama/llama-3.3-70b-instruct`、Together 的 `google/gemma-...`、Fireworks 的 `accounts/fireworks/models/...`），而标准表的 key 是剥掉前缀的两段式——重跑让带前缀的名字解析到与裸名完全相同的费率，而不是静默无价。钉在完整带前缀名上的 `pricing.aliases` 项仍然优先，一如既往。
 
 最后这一步值得说清楚，因为一个裸模型名通常被好几家厂商同时收录：作者一家，加上转售它的每一家聚合商。vmr 用**厂商优先级**破这个平局——唯一一条非转售商（第一方）的行直接胜出，因为它的价**就是**这个模型的列表价，而列表价正是离线估算要表达的东西。只有几家转售商之间打平时才判为"无费率"：两家聚合商对别人家的模型各报各的，其中没有哪个是权威答案，vmr 宁可没有价格也不猜错。正是这条规则，让你随便取名叫 `my-plan` 的 provider 下的 `deepseek-v4-flash` 也能正确定价。
 
-**但优先级是给长尾兜底的，不是你路由的模型该依赖的机制。** 它会在没人改任何东西的情况下变化：一次表刷新新增了第二个第一方的行（某个平台既卖自家模型、又转售别家），原本能解析的名字就会变成解析不了——静默的，没有报错，只是报表里少了一行价格。**你依赖的模型请用别名钉死**：别名的目标消失是加载期报错，这才是你想要的失效姿态。内置表已经把无法由优先级判定的多厂商模型与补充模型都钉住了，你也可以直接在全局 `pricing.aliases`（或外部 `pricing.supplement` 文件的 `aliases:` 块）里配置：
+**但优先级是给长尾兜底的，不是你路由的模型该依赖的机制。** 它会在没人改任何东西的情况下变化：一次表刷新新增了第二个第一方的行（某个平台既卖自家模型、又转售别家），原本能解析的名字就会变成解析不了——静默的，没有报错，只是报表里少了一行价格。**你依赖的模型请用别名钉死**：别名的目标消失是加载期报错，这才是你想要的失效姿态。内置表已经把无法由优先级判定的多厂商模型与补充模型都钉住了，你也可以直接在 `providers[].pricing.aliases` 里配置自己的：
 
 ```yaml
-pricing:
-  aliases:
-    my-gateway-model-name: gemini/gemini-3.7-flash   # 存的是"指向哪条有价的 key"，不是抄一份数字
+providers:
+  - name: my-gateway
+    pricing:
+      aliases:
+        my-gateway-model-name: gemini/gemini-3.7-flash   # 存的是"指向哪条有价的 key"，不是抄一份数字
 ```
 
 别名**只解析一跳**——指向另一条别名、或者指向一个不存在的 key，都是加载期错误。`vmr check` 会把每个 provider 实际解析到的结果、以及当前生效的别名条数打印出来，所以这一步从不需要你自己猜测。
 
-**`providers[].pricing.overrides`** 是一条 first-match-wins 的规则列表：每条要么是 `discount`（对"下层解析出的费率"打折——下层可以是标准表，也可以是列表里更靠后的另一条 override），要么是显式的四分量费率（`in_fresh`/`cache_read`/`cache_write`/`out` 必须**四个一起给**——只给一部分会被拒绝，因为"其余的免费"和"其余的没写"是两件不同的事，vmr 不会替你猜是哪一种）。没有时间维度——具体模型的规则要写在 `"*"` 通配兜底规则**前面**，不能写在后面：既然某条规则命中与否不再取决于请求发生的时刻，一条被更早规则重复覆盖的模型模式就永远是死配置，`vmr check`/`vmr start`/热重载都会在加载期直接拒绝，而不是让它悄悄地永远不生效。显式费率还可以自带 `currency:`——省得你把厂商发票上的数字先手工换算成 `pricing.currency` 再填进来；`discount` 规则不能带 `currency:`（它是个无量纲乘数，不存在货币这回事）。
+**`providers[].pricing.rates`** 是一条 first-match-wins 的规则列表：每条要么是 `discount`（对"下层解析出的费率"打折——下层可以是标准表，也可以是列表里更靠后的另一条 rate 规则），要么是显式的四分量费率（`in_fresh`/`cache_read`/`cache_write`/`out` 必须**四个一起给**——只给一部分会被拒绝，因为"其余的免费"和"其余的没写"是两件不同的事，vmr 不会替你猜是哪一种）。没有时间维度——具体模型的规则要写在 `"*"` 通配兜底规则**前面**，不能写在后面：既然某条规则命中与否不再取决于请求发生的时刻，一条被更早规则重复覆盖的模型模式就永远是死配置，`vmr check`/`vmr start`/热重载都会在加载期直接拒绝，而不是让它悄悄地永远不生效。显式费率跟账号唯一的 `pricing.currency` 标注共用同一个书写币种——不支持逐行各写各的币种。
 
-**缺失永远比错误安全**：一个 `metric: cost` 账号在加载期就会被拒绝——`vmr check`/`vmr start`/热重载走的是同一条校验路径——除非它配置要服务的**每一个**上游模型，在**所有可能的 override 组合**下都能解析出完整的四分量费率，而不只是常见情形下。显式写 `0.0` 算"已定价"（有些分量确实免费）；缺失字段不算——把缺失的 `cache_read` 静默当 0，会让账号显得比实际便宜，进而拿到更多流量、超支。这是 vmr 唯一一处刻意不做优雅降级的地方。
+**费率解析不出来，只是那一行没有 $ 数字，从来不是拒绝启动的理由。** `vmr report`/`vmr analyze` 对解析不出费率的模型直接降级为"这一行没有 $ 估算"——定价缺口只丢一个数字，从不拖累报表的其余部分。显式写 `0.0` 算"已定价"（有些分量确实免费）；一条本该显式给四分量、却只给了一部分的费率行仍然是加载期错误（局部显式费率会被拒绝，同上）——把缺失的 `cache_read` 静默当 0 会让估算显得比实际便宜。
 
-**`pricing.supplement` 的行也可以是非美元原生的**——补充表/standard-override 文件（见 `pricing.example.yaml`）里的某一行可以自带 `currency:`，直接抄厂商官网的原生货币价目表，不用手工换算。折算成 USD 用的汇率来自一个 `exchange_rate:` 块，可以就写在补充表文件自己里面（**推荐**：这样这份文件完全自包含、可以直接搬到别的部署用，而且它解析出来的 USD 价格不会因为某个 `config.yaml` 出于记账原因调整了自己的汇率而跟着漂移），对补充表没声明汇率的货币，则退回 `config.yaml` 自己的 `pricing.exchange_rate`。
+**从旧版配置迁移**：顶层 `pricing:` 块（`currency`/`exchange_rate`/`supplement`/`standard`/`rates`/`aliases`）会在加载期被直接拒绝并给出迁移指引——把 `exchange_rate` 移到新的顶层 `exchange_rate:`，把 `currency`/`aliases`/`rates` 移进各自账号自己的 `providers[].pricing`。`providers[].pricing.map`/`.overrides` 改名为 `aliases`/`rates`（形状不变）。外部 `pricing.yaml` 补充表（不管之前是怎么配置的）已经彻底不再支持——把它的行迁进对应 provider 的 `pricing.rates`/`pricing.aliases`；很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**。`metric: cost` 的配额 Limit 是加载期错误，错误信息会指出迁移路径：把预算换算一次成 `tokens` 数额（预算 ÷ 价格），按模型/按分量的差异用 `model_multipliers`/`token_weights` 表达（见上文[额度感知路由](#额度感知路由-quota-aware-routing)）——`$` 估算照样能从 `vmr report`/`vmr analyze` 拿到。
 
-**从旧版 `pricing.yaml` 侧车迁移**（P2.2 之前的机制，现已移除——`vmr report` 不再识别 `-pricing` 参数；和上面 `pricing.supplement: ./pricing.yaml` 只是撞了同一个文件名，两者并不是一回事——旧侧车的字段形状（`in_fresh_per_1m`/`date_range`/`updated_at` 等）不是新补充表的形状）：旧文件 `rates:` 里的每一条，对应改写成匹配 provider 下的一条 `providers[].pricing.overrides`，用显式四分量费率表达（`in_fresh_per_1m`/`cache_read_per_1m`/`cache_write_per_1m`/`out_per_1m` 直接对应新的 `in_fresh`/`cache_read`/`cache_write`/`out`）。`date_range`/`hour_range` 两元数组没有对应字段了（限时促销/错峰时间窗已作为复杂度/价值不匹配的一处简化被砍掉——见 `docs/VirtualModelRouter_Design_v4_Quota.md` 定价相关章节）——直接丢弃，只保留覆盖你当前实际生效价格的那一行。旧文件顶层的 `currency`/`exchange_rate`/`updated_at` 对应新的全局 `pricing:` 块的 `currency`/`exchange_rate`（`updated_at` 没有对应字段——标准表自带生成日期）。很多行在核对过标准表是否已经覆盖同一模型、且价格可接受之后，可以直接**删掉**——内置价目表存在的意义正是让这份文件的大部分内容变得不再必要。
+`vmr report` 的 $ 估算在生成报表时独立解析这同样两层——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价。`vmr report` 自己的展示币种选项（与每个账号自己的 `pricing.currency` 书写标注相互独立）见下文[成本估算与定价](#成本估算与定价)。
 
-`vmr report` 的 $ 估算走的是同样两层，在生成报表时独立解析——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价。它对费率完整性的要求**刻意比** `metric: cost` **宽松**——报表遇到价格缺口只是那一行不显示 $ 数字，不是整份报表失败，因为报表的设计哲学就是"定价问题绝不能拖累报表其余部分"。`vmr report` 自己的展示币种选项（和上面的记账币种相互独立）见下文[成本估算与定价](#成本估算与定价)。
-
-完整设计，包括留给后续批次的一切（单账号多窗口、滚动窗口、接官方用量 API 校准）：`docs/VirtualModelRouter_Design_v4_Quota.md`。
+完整设计：`docs/VirtualModelRouter_Design_v4_Quota.md`。
 
 ## 审计与报表
 
@@ -547,12 +541,12 @@ Markdown 按九个编号章节组织，每章回答一个运维问题。下面�
 
 - **§0 摘要** —— headline 数字 + 最多 3 条自动亮点（缓存效率低、工具 schema 浪费、端点异常）。
 - **§1 成本与 Token 经济** —— 缓存命中/fresh/cache_write/reasoning 拆分，按模型缓存效率，按角色的消息字符/预估 token 占比。
-- **§2 按量计费等价成本** —— 只要定价数据能解析出结果就渲染（见下文[成本估算与定价](#成本估算与定价)）；按日期/模型/端点/客户端各一张表，每张都带合计行，末尾附一份本次用了哪些定价来源的摘要（标准表生成日期、补充表、override 条数、别名条数）。
+- **§2 按量计费等价成本** —— 只要定价数据能解析出结果就渲染（见下文[成本估算与定价](#成本估算与定价)）；按日期/模型/端点/客户端各一张表，每张都带合计行，末尾附一份本次用了哪些定价来源的摘要（标准表生成日期、账号覆盖规则条数）。
 
-  **这个数字的含义**：这些流量若按 vmr 能解析到的公开价逐 Token 计费要花多少钱——渠道有自定价时用渠道价，否则用第一方列表价。它**不是**你实际付的钱——包月套餐的边际成本是 0，经转售商或代理的真实单价只有你自己知道。它回答的是"这个套餐买得值不值"。想看实付金额，把你的真实费率写进 `providers[].pricing.overrides` 或 `pricing.supplement`。
+  **这个数字的含义**：这些流量若按 vmr 能解析到的公开价逐 Token 计费要花多少钱——渠道有自定价时用渠道价，否则用第一方列表价。它**不是**你实际付的钱——包月套餐的边际成本是 0，经转售商或代理的真实单价只有你自己知道。它回答的是"这个套餐买得值不值"。想看实付金额，把你的真实费率写进 `providers[].pricing.rates`。
 
   每个合计还会说明它漏掉了什么：端点解析不出费率的那些行（成本未知，不是 0）、总额里有多少来自"上游没返回 usage、按字节数推算 Token"的降级估算、以及有多少个端点的单价缺分量（缺失分量按 0 计价，所以那些数字是偏低的下界）。
-- **§2.5 账户（Provider）消耗与额度** —— 按上游账户（config.yaml 的 `providers[].name`）上卷的跨模型汇总：token/缓存效率/均值耗时/可靠性（含主要错误类，如 `rate_limit 12(63%)`——用来区分这个账户是硬额度耗尽还是短时被限流）/$ 估算。对没有 $ 定价的 Token Plan/AFP 类账户尤其有用：即使算不出 $，也能通过下方子表看到 token 消耗与配置额度的量级对比。主表本身不含额度列——账户在 config.yaml 里声明的额度（`quota`）只出现在**"额度与消耗对照"子表**里：只列配了 `quota:` 的账户，把本报表窗口重算的消耗与路由半区 `<log_dir>/vmr-quota.json` 的实时计数器并排给出（已用%/周期已过% 并排，另加该周期消耗中有多少来自降级估算而非精确 usage 的标注）——两个消耗数字是两个不同的时间窗口，故意不做减法；计数器仍停留在更早周期时显示 `-`。重算列的精度按 metric 不同，表下脚注会写明：`metric: requests` 是**恒等复现**路由半区的记账（它数的是已转发的上游成功响应，正是路由记账的那一刻——不是客户端请求数，因为所有 attempt 都失败的请求路由半区一分不记）；`tokens`/`cost` 是带已知出入源的估算，且在"有流量但什么都算不出来"（usage 全不可解析、或全无定价）时渲染 `-` 而不是会误导人的 `0`。
+- **§2.5 账户（Provider）消耗与额度** —— 按上游账户（config.yaml 的 `providers[].name`）上卷的跨模型汇总：token/缓存效率/均值耗时/可靠性（含主要错误类，如 `rate_limit 12(63%)`——用来区分这个账户是硬额度耗尽还是短时被限流）/$ 估算。对没有 $ 定价的 Token Plan/AFP 类账户尤其有用：即使算不出 $，也能通过下方子表看到 token 消耗与配置额度的量级对比。主表本身不含额度列——账户在 config.yaml 里声明的额度（`quota`）只出现在**"额度与消耗对照"子表**里：只列配了 `quota:` 的账户，把本报表窗口重算的消耗与路由半区 `<log_dir>/vmr-quota.json` 的实时计数器并排给出（已用%/周期已过% 并排，另加该周期消耗中有多少来自降级估算而非精确 usage 的标注）——两个消耗数字是两个不同的时间窗口，故意不做减法；计数器仍停留在更早周期时显示 `-`。重算列的精度按 metric 不同，表下脚注会写明：`metric: requests` 是**恒等复现**路由半区的记账（它数的是已转发的上游成功响应，正是路由记账的那一刻——不是客户端请求数，因为所有 attempt 都失败的请求路由半区一分不记）；`metric: tokens` 是带已知出入源的估算，且在"有流量但什么都算不出来"（usage 全不可解析）时渲染 `-` 而不是会误导人的 `0`。
 - **§3 可靠性** —— 端点可用度/错误率、错误类别拆分，以及 Quirk 修复频次拆分（每个端点的成功响应里，有多少比例需要剥离 think/thinking-process 或命中软屏蔽检测——单条请求的详情页本来就会逐一叙述这些步骤，这里是跨请求的频次统计，不用把几千个详情页挨个打开才能看出规律），因为每个入口协议面都各自独立路由，三张表都按实际用到的协议各拆一份（openai 排第一、anthropic 第二，其余协议按字母序），外加每小时错误数图表。
 - **§4 延迟与吞吐** —— 按模型、按端点的 ttft/耗时分位数，都按吞吐量降序排列，各自带样本量，n<20 标 `⚠️low-n`。
 - **§5 负载分布** —— 按虚拟模型、按工作负载类（交互 vs 定时脚手架）、按端点、按客户端（后两张表还带每请求输入/输出 token 分位数），外加每小时和每日的请求量/输入 token Mermaid 图表。
@@ -569,9 +563,9 @@ Markdown 按九个编号章节组织，每章回答一个运维问题。下面�
 
 #### 成本估算与定价
 
-`vmr report`（用 `-c config.yaml`，跟它找 `log_dir` 用的是同一个参数）用的是和 `metric: cost` 额度完全相同的两层定价模型——二进制内置的标准价目表，叠加你 `config.yaml` 里声明的 `providers[].pricing`/全局 `pricing:` 块——完整配置形态见上文[定价与 cost 计量档位](#定价与-cost-计量档位)（`map`/`overrides`/`discount` 全部原样适用）。找不到 `config.yaml` 时优雅降级为只用标准表的列表价、没有账号覆盖——不会因此拖累报表的其余部分。和 `metric: cost` 额度账号不同（只要有一个模型解析出不完整的费率就在加载期直接拒绝），报表里某一行价格解析不完整或缺失时，只是那一行不显示 $ 数字——报表的哲学是"定价缺口只丢一个数字，不丢整份报表"。
+`vmr report`（用 `-c config.yaml`，跟它找 `log_dir` 用的是同一个参数）用的是上文[定价与成本估算](#定价与成本估算)描述的同一套两层定价模型（`aliases`/`rates`/`discount` 全部原样适用）——二进制内置的标准价目表，叠加你 `config.yaml` 里声明的 `providers[].pricing`。找不到 `config.yaml` 时优雅降级为只用标准表的列表价、没有账号覆盖——不会因此拖累报表的其余部分。报表里某一行价格解析不完整或缺失时，只是那一行不显示 $ 数字——报表的哲学是"定价缺口只丢一个数字，不丢整份报表"。
 
-**展示币种和记账币种相互独立。** `-currency CODE`（或 `report.yaml` 的 `currency`）决定报表 $ 列实际显示成什么币种——比如记账用 `pricing.currency: USD`，但想给别人看一份 `-currency CNY` 的报表。这是一次纯粹的展示层最终换算（`internal/pricing.Resolver.WithDisplayFactor`），发生在每个数字已经按记账币种算完之后——从不改变 `metric: cost` 账号实际被扣掉的金额。所需的汇率来自 `config.yaml` 的 `pricing.exchange_rate` 和/或 `report.yaml` 自己的 `exchange_rate`（同样"1 美元 = X `<货币代码>`"的形状——见 `report.example.yaml`），后者在 key 撞车时优先；而且当完全没有 `config.yaml` 可用时，这是唯一能让 `-currency` 生效的办法，因为 `report.yaml` 本来就设计成能独立使用。`-currency` 解析不出汇率时降级为显示记账币种、打一行警告——不是硬错误。
+**展示币种。** `-currency CODE`（或 `report.yaml` 的 `currency`）决定报表 $ 列实际显示成什么币种——比如每个账号内部都按 USD 解析，但想给别人看一份 `-currency CNY` 的报表。这是一次纯粹的展示层最终换算（`internal/pricing.Resolver.WithDisplayFactor`），发生在每个数字已经按 USD 算完之后（解析结果现在恒为 USD——见上文[定价与成本估算](#定价与成本估算)）。所需的汇率来自 `config.yaml` 顶层的 `exchange_rate` 和/或 `report.yaml` 自己的 `exchange_rate`（同样"1 美元 = X `<货币代码>`"的形状——见 `report.example.yaml`），后者在 key 撞车时优先；而且当完全没有 `config.yaml` 可用时，这是唯一能让 `-currency` 生效的办法，因为 `report.yaml` 本来就设计成能独立使用。`-currency` 解析不出汇率时降级为显示 USD、打一行警告——不是硬错误。
 
 #### Agent 感知分析
 
