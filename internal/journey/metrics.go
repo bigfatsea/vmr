@@ -395,6 +395,7 @@ type JourneySummary struct {
 	// machine-readable counterpart to the human-readable fact-layer
 	// (render_md.go's renderStep), P4 (see structure.go's doc comment).
 	Structure JourneyStructure `json:"structure"`
+	Bodies    map[string]string `json:"bodies,omitempty"`
 	// Cost is the estimated $ spend for this Journey (cost.go), nil when no
 	// price book was available at render time — never a fake $0. Every other
 	// field here is a pure function of the Journey; this one also needs a
@@ -435,10 +436,12 @@ func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
 // copy without it. One constructor is what keeps that from recurring the
 // next time JourneySummary gains a field.
 func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, cost *CostFact) JourneySummary {
+	s := BuildStructure(j)
 	return JourneySummary{
 		ID: j.ID, Title: j.Title, From: j.From, To: j.To, Partial: j.Partial,
 		Metrics: m, Findings: findings, LLMFindings: llmFindings,
-		Structure: BuildStructure(j),
+		Structure: s,
+		Bodies:    s.Bodies,
 		Cost:      cost,
 	}
 }
