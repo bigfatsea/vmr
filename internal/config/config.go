@@ -51,6 +51,9 @@ const (
 	// disk-full risk onto every config that left the field unset — a default
 	// has to actually default (see TTL.AuditRetention for the migration note).
 	DefaultAuditRetentionDays = 90
+	// DefaultAnalyticsServeDir is the root directory /reports/ serves when
+	// analytics.serve is enabled and analytics.serve_dir is unset.
+	DefaultAnalyticsServeDir = "./reports"
 	// minAPIKeyLen is the shortest an api_keys entry may be. It exists
 	// solely so audit.KeyTag's trailing 8-character window can never be
 	// the whole key — a short key would otherwise have its full secret
@@ -269,6 +272,14 @@ type TTL struct {
 	AuditRetention CalendarDuration `yaml:"audit_retention"`
 }
 
+// AnalyticsConfig holds configuration for the optional /reports/ static hosting.
+// Disabled by default; when enabled, serves generated analytics reports and dashboard
+// assets from ServeDir.
+type AnalyticsConfig struct {
+	Serve    bool   `yaml:"serve"`
+	ServeDir string `yaml:"serve_dir"`
+}
+
 // ModelDefaultEntry declares capabilities and context ceiling for a real
 // upstream model across all virtual models that route to it. Keyed by real
 // model name under Config.ModelDefaults ("*" for fallback).
@@ -335,9 +346,10 @@ type Config struct {
 	// nothing about where vmr writes should depend on implicit environment
 	// state. Note: a log_dir change needs a restart (the audit logger opens
 	// its directory once at startup); image_cache_dir follows hot reloads.
-	LogDir              string `yaml:"log_dir"`
-	ImageCacheDir       string `yaml:"image_cache_dir"`
-	ImageDownscaleMaxPx int    `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
+	LogDir              string          `yaml:"log_dir"`
+	ImageCacheDir       string          `yaml:"image_cache_dir"`
+	ImageDownscaleMaxPx int             `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
+	Analytics           AnalyticsConfig `yaml:"analytics"`
 	// ExtraRedactHeaders names additional client request headers to mask in
 	// the audit trail the same way the built-in credential list (see
 	// audit.credentialHeaders) already masks Authorization/X-Api-Key/etc —
@@ -507,6 +519,10 @@ func (c *Config) applyDefaults() {
 	c.ImageCacheDir = expandTilde(c.ImageCacheDir)
 	if c.ImageCacheDir == "" {
 		c.ImageCacheDir = rundir.Resolve("image_cache", "vmr_image_cache", "image_cache")
+	}
+	c.Analytics.ServeDir = expandTilde(strings.TrimSpace(c.Analytics.ServeDir))
+	if c.Analytics.ServeDir == "" {
+		c.Analytics.ServeDir = DefaultAnalyticsServeDir
 	}
 	if c.Timeouts.Connect <= 0 {
 		c.Timeouts.Connect = Duration(DefaultConnectTimeout)
