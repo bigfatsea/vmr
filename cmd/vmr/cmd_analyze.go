@@ -25,6 +25,7 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/config"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
 	story "vmr/internal/journey"
 	"vmr/internal/report"
@@ -88,12 +89,6 @@ type analyzeRun struct {
 	cfg           *config.Config
 	cfgErr        error
 	showUngrouped bool
-	// htmlOn/redactOn (E1): -journey only, single match only — a
-	// self-contained HTML view of one journey, optionally with every
-	// conversation body swapped for a length placeholder. Same "one journey
-	// at a time" constraint as -llm-addr.
-	htmlOn   bool
-	redactOn bool
 }
 
 // validateAnalyzeModeFlags checks the mutual-exclusion rules across
@@ -166,8 +161,6 @@ func cmdAnalyze(args []string) error {
 	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them — writes journeys/index.{md,json} listing every candidate, but no j-*.md. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-macro-only/-journey-only/-details")
 	journeyOnlyFlag := fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.{json,md}/macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only")
 	// story-half flags.
-	htmlFlag := fs.Bool("html", false, "with a single-match -journey or with -compare: also write a self-contained .html dashboard (journey dashboards land in journeys/details/, comparison dashboards in compares/) — verdict/structure/metrics/findings for a journey, sides/divergence/diff/LLM for a comparison; inline CSS/JS, zero external requests. No effect on any other mode")
-	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links, finding text and (for -compare) the LLM section — structure, metrics, roles, token counts and tool names stay. For sharing outside the team")
 	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
 	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
 	includePartialFlag := fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
@@ -215,12 +208,6 @@ func cmdAnalyze(args []string) error {
 	if llmAddrExplicit && llmAddr != "" && (*benchmarkFlag || !hasSelector) {
 		return fmt.Errorf("-llm-addr is not supported with -benchmark or the default suite (would fire one LLM call per journey) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
 	}
-	if *redactFlag && !*htmlFlag {
-		return fmt.Errorf("-redact only applies with -html")
-	}
-	if (*htmlFlag || *redactFlag) && *journeyArg == "" && *compareArg == "" {
-		return fmt.Errorf("-html/-redact only apply with -journey (a single journey) or -compare (a pair)")
-	}
 
 	paths, err := resolveInputPaths(fs, *configPath)
 	if err != nil {
@@ -257,8 +244,6 @@ func cmdAnalyze(args []string) error {
 		selfTrafficTags:    rc.SelfTrafficClientTags,
 		reportConfigSource: rc.SourcePath,
 		showUngrouped:      *showUngrouped,
-		htmlOn:             *htmlFlag,
-		redactOn:           *redactFlag,
 	})
 }
 
@@ -287,16 +272,11 @@ func dispatchAnalyze(r *analyzeRun) error {
 		return err
 	}
 
-	// The compares/ index is scan-derived on every successful analyze
-	// invocation (D21) — regardless of which mode ran and whether it touched
-	// compares/. Failed runs rebuild nothing: they produced no snapshot, and
-	// creating ./reports as a side effect of a failed invocation pollutes cwd
-	// (TestCmdReport_NoMatches regression).
-	rebuildCompares := func() {
-		if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
-			fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
-		}
-	}
+	// Every successful run converges on finishAnalyze below — the single
+	// exit that refreshes the skeleton pages, rebuilds the compares index,
+	// and commits the manifest. Failed runs touch none of that: they
+	// produced no snapshot, and creating ./reports as a side effect of a
+	// failed invocation pollutes cwd (TestCmdReport_NoMatches regression).
 
 	switch {
 	case r.listOnly:
@@ -308,18 +288,35 @@ func dispatchAnalyze(r *analyzeRun) error {
 	case r.journeyArg != "":
 		err = dispatchJourney(r, su)
 	default:
-		rep, err := dispatchDefaultSuite(r, su)
-		if err != nil {
-			return err
+		var rep *report.Report2
+		rep, err = dispatchDefaultSuite(r, su)
+		if err == nil {
+			return finishAnalyze(r, rep)
 		}
-		rebuildCompares()
-		return commitManifest(r, rep)
 	}
 	if err != nil {
 		return err
 	}
-	rebuildCompares()
-	return commitManifest(r, nil)
+	return finishAnalyze(r, nil)
+}
+
+// finishAnalyze is the one successful-run exit shared by every analyze
+// mode (§5.4's "每次 analyze 调用都幂等刷新骨架页"): the six skeleton
+// dashboard pages are rewritten into the output root first, so /reports/
+// always serves pages from the running binary (a skeleton refresh failure
+// only warns on stderr — pages may be stale, never the analysis itself);
+// then the compares index is rebuilt from what this run wrote (D21);
+// commitManifest runs last as the snapshot's admission token (§3.4). rep
+// is nil for modes that didn't run the report half; the manifest then
+// stamps only the slices that actually exist on disk.
+func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
+	if err := dashboard.WriteSkeletons(r.outDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed (pages may be stale until next analyze): %v\n", err)
+	}
+	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
+		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
+	}
+	return commitManifest(r, rep)
 }
 
 // commitManifest is the snapshot's admission token (§3.4): built after
@@ -335,17 +332,15 @@ func commitManifest(r *analyzeRun, rep *report.Report2) error {
 	return nil
 }
 
-// runMacroOnly is -macro-only's whole run: the macro report half plus the
-// compares-index rebuild and the manifest commit (§3.4: manifest last).
+// runMacroOnly is -macro-only's whole run: the macro report half, then the
+// same finishAnalyze exit every other mode uses (skeleton refresh, compares
+// index, manifest last per §3.4).
 func runMacroOnly(r *analyzeRun) error {
 	rep, err := runReportHalf(r)
 	if err != nil {
 		return err
 	}
-	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
-		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
-	}
-	return commitManifest(r, rep)
+	return finishAnalyze(r, rep)
 }
 
 // runBenchmark finishes the -benchmark zoom: corpus statistics.
@@ -364,7 +359,7 @@ func dispatchCompare(r *analyzeRun, su *storySetup) error {
 		return err
 	}
 	priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
-	return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
+	return compareJourneys(su.cands, su.byIdx, ids[0], ids[1], su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy)
 }
 
 // dispatchJourney routes -journey's zoom: single-match render, or a batch
@@ -384,13 +379,10 @@ func dispatchJourney(r *analyzeRun, su *storySetup) error {
 			return err
 		}
 		priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
-		return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy, r.htmlOn, r.redactOn)
+		return renderJourney(targets[0], su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, llmOpts, r.lang, su.idx, priceRes, ccy)
 	}
 	if r.llmAddrExplicit {
 		return fmt.Errorf("-llm-addr is not supported when -journey matches more than one journey (%d matched by %q) — use a single id/pattern that resolves to exactly one journey", len(targets), r.journeyArg)
-	}
-	if r.htmlOn {
-		return fmt.Errorf("-html/-redact need a -journey selector that resolves to exactly one journey (%d matched by %q)", len(targets), r.journeyArg)
 	}
 	// true: a -journey selector naming several targets is still a
 	// user-named set, not the default suite's implicit batch (P13.1).

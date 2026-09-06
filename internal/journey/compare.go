@@ -39,8 +39,8 @@ type JourneyRef struct {
 	From  time.Time `json:"from"`
 	To    time.Time `json:"to"`
 	// Steps/ToolCalls are the tale-of-the-tape's own row data — carried on
-	// the ref so RenderComparisonHTML doesn't need the full JourneySummary
-	// (it only ever gets a Comparison).
+	// the ref so consumers of the comparison JSON don't need the full
+	// JourneySummary (they only ever get a Comparison).
 	Steps      int    `json:"steps"`
 	ToolCalls  int    `json:"tool_calls"`
 	ReportFile string `json:"report_file,omitempty"`

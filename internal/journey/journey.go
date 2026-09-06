@@ -169,8 +169,8 @@ type Step struct {
 	// what metrics.go's contextCurve renders, one point per Step.
 	Context ContextPoint
 	// Attempts mirrors audit.Record.Attempts, trimmed to the (Provider,
-	// Model) pairs modelusage.go tallies plus the count render_html_
-	// dashboard.go's failover marker needs.
+	// Model) pairs modelusage.go tallies plus the count render_spine.go's
+	// failover marker needs.
 	Attempts []AttemptFact
 	// NewToolResults is every tool_result this Step's own delta introduced —
 	// the results answering the PREVIOUS Step's tool calls (a well-formed

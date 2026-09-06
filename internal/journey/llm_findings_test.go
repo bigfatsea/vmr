@@ -988,11 +988,4 @@ data: [DONE]`},
 			t.Errorf("Markdown artifact carries structure-breaking LLM content %q:\n%s", raw, md.String())
 		}
 	}
-
-	// HTML artifact: no active tag may survive.
-	var html strings.Builder
-	htmlFindings(func(format string, args ...any) { html.WriteString(fmt.Sprintf(format, args...)) }, res, i18n.StoryHTML(i18n.ZH), false)
-	if strings.Contains(html.String(), "<script>") || strings.Contains(html.String(), "<h") {
-		t.Errorf("HTML artifact carries active markup from LLM content:\n%s", html.String())
-	}
 }

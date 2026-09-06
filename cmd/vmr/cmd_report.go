@@ -298,9 +298,6 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	}
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
 		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
-	if err := writeToolWasteCard(rep, opts.outDir, opts.lang, tw); err != nil {
-		return nil, err
-	}
 
 	if dw != nil {
 		n, err := dw.Close()
@@ -340,20 +337,4 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(requestsDir, "failed.md"))
 	return rep, nil
-}
-
-// writeToolWasteCard writes {out}/tool-waste.html — the standalone
-// shareable card — whenever the report has tool data. Carries only tool
-// names/counts/byte sizes (no conversation content), 0600 like every other
-// derived file. Skipped silently when nothing declared tools.
-func writeToolWasteCard(rep *report.Report2, outDir string, lang i18n.Lang, tw io.Writer) error {
-	if len(rep.Tools) == 0 {
-		return nil
-	}
-	twPath := filepath.Join(outDir, "tool-waste.html")
-	if err := os.WriteFile(twPath, []byte(report.RenderToolWasteHTML(rep, lang)), 0o600); err != nil {
-		return err
-	}
-	fmt.Fprintf(tw, "%s\n", twPath)
-	return nil
 }

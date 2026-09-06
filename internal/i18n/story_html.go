@@ -1,10 +1,11 @@
 // Ver 2026-08-28, by Sonnet 5
 
-// Pairs with internal/journey/render_html.go + render_html_dashboard.go — the
-// single-page HTML journey dashboard (`vmr analyze -journey <id> -html`).
-// Fixed UI strings only; every number and every piece of conversation
-// content comes from the Journey itself (or, under -redact, a length
-// placeholder or a bare count).
+// Chrome of the retired single-page HTML journey dashboard
+// (`vmr analyze -journey <id> -html`): the self-contained renderers were
+// retired with the `-html`/`-redact` flags (D6/D15), and this text is kept
+// only until its own removal lands. Fixed UI strings only; every number
+// and every piece of conversation content came from the Journey itself
+// (or, under -redact, a length placeholder or a bare count).
 package i18n
 
 import "fmt"
