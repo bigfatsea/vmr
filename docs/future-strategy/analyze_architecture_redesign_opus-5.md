@@ -2,8 +2,7 @@
 
 # vmr analyze 架构重构方案：领域切片数据核心 + ViewModel 双轨渲染 + 内容寻址缓存
 
-<!-- Status: 设计提案（未实施）。本文取代 analysis-report-dashboard-redesign 与
-     analysis-report-dashboard-redesign-filestructure 两份草案，是这条线唯一的当前状态文档。 -->
+<!-- Status: 设计提案（未实施）。这条线唯一的当前状态文档；早期草案已删除，不再引用。 -->
 
 ---
 
@@ -32,9 +31,9 @@
 | **HTML 看板运行时加载** | `analyze` 只写 JSON；看板是常驻静态骨架，浏览器侧 `fetch` 切片渲染。生成 JSON 即等于交付看板。 |
 | **内容寻址缓存** | 复用 `ctxgraph` 已有的内容哈希底座，把缓存从"解析层"补到"产物层"，实现日志未变不重算、数据未变不重绘。 |
 
-### 0.3 关键裁决（与前两份草案的分歧点，此处为准）
+### 0.3 关键裁决
 
-前两份草案在若干处互相矛盾或与代码现状不符。本文逐条裁决，理由见对应章节：
+每条都是评审中真实产生过分歧的点，此处为准，理由见对应章节：
 
 | # | 议题 | 裁决 | 章节 |
 |---|---|---|---|
@@ -56,6 +55,9 @@
 | D16 | 托管目录 | **默认 `./reports`，与 `analyze -o` 同一默认值**；`analytics.serve_dir` 可覆盖。不走 `rundir`。 | §6.5 |
 | D17 | 详单文件名 | **加 `r-` 类型前缀**，与 journey 的 `j-` 同一套约定。 | §1.1 |
 | D18 | Journey JSON 的完整性 | **补成自包含**：`structure` 是 tree，同文件内加一张按内容哈希去重的 `bodies` blob 表；工具配对从 `matched bool` 升为三级 `match`。 | §3.6 |
+| D19 | `-partial` 后缀 | **取消**。`partial` 是本次加载范围的函数，不该编进内容寻址的文件名；统一为 `j-<id>.{json,md}`，标记进字段/banner/索引行。 | §1.1 |
+| D20 | 详情文件的准入边界 | **作业清单来自索引，不扫目录**；不给每条 journey 加独立指纹，改为全量运行清扫 orphan。 | §3.4 |
+| D21 | 对比的发现入口 | **新增 `compares/index.{json,md}`**，扫目录派生、每次运行重建；`compares/` 整个子树不进 manifest 指纹。 | §3.8 |
 
 ### 0.4 明确不做
 
@@ -68,7 +70,7 @@
 
 ## 1. 现状基线
 
-在提任何目标之前，先把基线钉准——前两份草案的多处结论建立在过时或错误的基线上。
+在提任何目标之前先把基线钉准：这套产物的形态与既有资产反直觉之处不少，基线错一处，后面整段推导作废。
 
 ### 1.1 产出物全景（按数据层级）
 
@@ -76,7 +78,7 @@
 [L1 事实层] 原始、不可变、以请求坐标为序
   ├── vmr-requests.json                     全量请求明细行（RequestRow[]）
   ├── vmr-requests-failed.jsonl             异常/截断请求机读流
-  ├── details/r-<ts>_<virt>_<real>_<outcome>_<h8>.md   单请求深钻详单（懒物化）
+  ├── details/<ts>_<virt>_<real>_<outcome>_<h8>.md     单请求深钻详单（懒物化）
   └── evidence/sysprompt-<h8>.md            系统提示词证据块（内容寻址去重）
 
 [L2 宏观聚合层] 全量横扫后的统计
@@ -100,7 +102,9 @@
 
 [L5 内部缓存层] 可再生，非交付物
   ├── .parse-cache/<filehash>.json          消息解析 + manifest + report 事实分片
-  └── stories/.llm-cache/<key>.json         LLM 语义解读缓存
+  └── <llm_cache_dir>/<key>.json            LLM 语义解读缓存（路径由 -llm-cache-dir /
+                                            report.yaml 的 llm_cache_dir 显式指定，
+                                            无隐式默认；两处都不设 = 永不缓存）
 ```
 
 **术语：请求坐标（coord）与详单文件名不是同一个东西。**
@@ -135,59 +139,44 @@ r-20260901-142233.117_coding_gpt-5-codex_ok_3f9a1c04.md
 | 实体 | 形态 | 说明 |
 |---|---|---|
 | 请求详单 | `r-<ts>_<virt>_<real>_<outcome>_<h8>.md` | 本方案新增 `r-` 前缀 |
-| Journey | `j-<id>.{json,md}` | 既有 |
+| Journey | `j-<id>.{json,md}` | ID 既有以 `j-` 为前缀生成；本方案消除落盘文件名中历史冗余的 `journey-` 前缀（原 `journey-j-...`），使文件名与 ID 及 `r-` 完全对齐。**`-partial` 后缀一并取消**，见下 |
 | 对比 | `compare-<a>-vs-<b>.{json,md}` | 既有，本身已自述类型 |
 | 系统提示词证据 | `sysprompt-<h8>.md` | 既有，本身已自述类型。这里的 `h8` 是**提示词正文**的内容哈希前 4 字节，与请求坐标无关——两处同名不同源，实施时不要合并 |
 
-**基线修正一：`evidence/` 是被两份草案完全遗漏的一整类产出物。**
-它由 `internal/reqdetail` 的 `EnsureSysPromptEvidence` 写出，与 `details/` 同级，
-被 `internal/report` 的详单渲染和 `internal/story` 的脊柱渲染共同引用。
-它按系统提示词内容哈希去重，是全套产物里唯一天然内容寻址的人读资产。
-任何目录拓扑设计必须给它位置，否则第一次实施就会撞墙。
+**`-partial` 不再进文件名（新增裁决 D19）。** 现状 `JourneyReportFile` 在头部疑似被截断时写出
+`journey-<id>-partial.{json,md}`。取消这个后缀，`partial` 只作为 JSON 字段 + `.md` 顶部 banner +
+索引行标记（三处今天都已存在）。三条理由，任何一条单独都足够：
 
-**基线修正二：草案讨论的两个"要删的 flag"并不存在。**
-仓内没有 `-html-inline`，也没有 `-split-by-client`：
+- **ID 与 partial 的稳定性等级不同，不该焊在一个字符串里。** `deriveID` 的每个分量都来自链自身的
+  manifest，注释明写"与加载了哪些别的文件无关"；而 `IsPartialHead` 的判据是"根 manifest 落在
+  **本次输入里最早那个文件**的前 50 行"——它是本次加载范围的函数。把一个随 `-from` 翻转的量
+  编进内容寻址的文件名，等于让同一份内容在不同运行下换名字。
+- **它破坏"ID → 路径是全函数"这条约定。** `#data=journeys/details/j-<id>.json`（§6.2）、
+  §7.2 以 `Journey.ID` 为身份 Key 的指纹表、`vmr-report.md` 的交叉链接，都假设由 ID 直接拼出路径。
+  有了后缀就得试两个名字或回查索引。
+- **"补回日志后两个文件互不冲突"这个好处是假的。** 真把缺失的历史日志补进输入集，链会向前延伸，
+  `chain[0]` 与 `RootHash()` 随之改变——**ID 本身就变了**，产出的本来就是一个新文件名。
+  后缀在这里没有贡献任何隔离，只额外制造了"同一 ID 两个文件名"这一类：
+  时间窗一变就留下永不被覆盖的陈旧副本（覆盖判断反而是同名覆盖最简单）。
 
-- HTML **只有自包含一种形态**，由 `internal/story/render_html*.go`、`render_compare_html.go`、
-  `internal/report/toolwaste_html.go` 三处 Go 渲染器直接吐出带数据的整页（`go:embed` 的
-  CSS/JS 内联进去）。仓内确实有一个 `-html` 开关，但它切的是"要不要出这份 HTML"
-  （且只对单匹配 `-journey` / `-compare` 生效），不是"内联还是 fetch"；`tool-waste.html`
-  连这个开关都没有，无条件写出。`-html` 还带一个 `-redact` 修饰符（正文换成
-  `‹text: N chars›` 占位、去掉详单链接与 Finding 文本），它随自包含 HTML 一并删除（D15，§6.4）。
-  因此 §6.4 的裁决不是"删一个可选开关"，而是**废弃现有全部 HTML 渲染器**——
-  这是替换，不是新增，Phase 2 的工作量与风险都因此高于草案估计。
-- 按客户端/定时类拆分索引是**无条件行为**（`WriteRequestsIndex` 逐组写兄弟文件），没有开关可关。
-  它当初被拆出来是为了消除"索引内联一遍、兄弟文件再导出一遍"的重复渲染，不是为了给 `grep` 提供多文件。
-  这一点值得说准，因为草案"保住多文件 grep"的辩护打的是个不存在的靶子——
-  而真正的问题不在拆不拆，在这份人读索引有没有职责（§3.7）。
+**既有资产澄清：**
+- **`evidence/` 是不可遗漏的一整类产出物**：由 `internal/reqdetail` 的 `EnsureSysPromptEvidence` 写出，与 `details/` 同级，被宏观详单与 Journey 脊柱共用。它按系统提示词正文 md5 去重，是全套产物中天然内容寻址的人读资产，目标拓扑中移至 `requests/evidence/`。
+- **现状展现形态的真实边界**：仓内 HTML 仅有自包含一种形态（由 `render_html*.go`、`render_compare_html.go`、`toolwaste_html.go` 吐出整页；`-html` 仅控制是否为单匹配任务/对比生成页面；`tool-waste.html` 无条件写出；`-redact` 为脱敏修饰符）。按客户端拆分索引则是 `WriteRequestsIndex` 的无条件行为。因此，废弃自包含 HTML 是整套渲染器的**替换**而非删开关（D6/D15），人读请求索引则是**整族废弃**（D7）。
 
 ### 1.2 展现层的真实耦合形态
 
-草案给出的"7,087 + 4,749 = 11,836 行"是错的（`internal/i18n` 实测约 4.5k 行 / 30 个非测试文件），
-且这类数字随每次重构漂移，按项目文档规约本就不该写进设计文档当作结构性指标。
-真正有意义的是**耦合形态**，与行数无关：
-
-1. **表格逐格拼接**。`newTable` / `t.row(cells...)` 之上是一层层 `xxxCell()` 函数，
-   列宽、列序、修饰符全在字符流里定死。
-2. **业务判断混进字符流**。"样本量 < 20 追加 `⚠️low-n`"、"覆盖率 < 90% 挂脚注 `¹`"、
-   "工具参数按深度截断"——这些是数据事实或表现策略，现在都以"拼字符串时顺手判断"的形态存在。
+1. **表格逐格拼接**。`newTable` / `t.row(cells...)` 之上是一层层 `xxxCell()` 函数，列宽、列序、修饰符全在字符流里定死。
+2. **业务判断混进字符流**。"样本量 < 20 追加 `⚠️low-n`"、"覆盖率 < 90% 挂脚注 `¹`"、"工具参数按深度截断"——这些数据事实或表现策略，目前都在拼字符串时现算。
 3. **计算与渲染不可分割**。没有任何入口能表达"读现有 JSON、套新渲染器、重出 Markdown"。
-4. **i18n 与章节一一配对**。`internal/i18n/report_*.go` 与 `internal/report/section_*.go`
-   逐文件配对，由 `archtest` 强制。这是有意为之的纪律（见 `KNOWN_ISSUES` 里"i18n 微文件不合并"一条），
-   重构时必须重新表述而不是绕开。
+4. **i18n 与章节一一配对**。`internal/i18n/report_*.go` 与 `internal/report/section_*.go` 逐文件配对，由 `archtest` 强制。重构为 ViewModel 时需重新对齐配对（§5.2）。
 
-### 1.3 已有的缓存资产（草案的最大事实错误）
+### 1.3 既有缓存资产与真实缺口
 
-草案称当前"缺乏产物级缓存"。实际上仓内已有两层成熟缓存：
+仓内已有两层成熟缓存底座：
+- **L1 输入解析缓存**（`report.BuildCached` + `ctxgraph.FileCache` + `internal/report/factscache.go`）：按文件内容 sha256 为 key 缓存消息解析、manifest 与逐记录聚合事实，覆盖了解压、JSONL 解析、消息哈希与建图等最昂贵开销。
+- **LLM 推断缓存**（目录由 `-llm-cache-dir` / `report.yaml` 的 `llm_cache_dir` 显式指定，无隐式默认路径）：按模型 + Prompt + 输入指纹缓存语义解读。
 
-- `report.BuildCached` + `ctxgraph.FileCache` + `internal/report/factscache.go`：
-  按**文件内容 sha256** 为 key 缓存消息解析、manifest 与 report 侧的逐记录聚合事实。
-  这一层覆盖的正是最贵的开销——解压、JSONL 解析、消息哈希、建图。
-- `stories/.llm-cache/`：LLM 推断结果缓存。
-
-**真实缺口只有一层**：从"内存里的聚合结果"到"磁盘上的 Markdown/JSON 产物"之间，没有任何复用。
-把已有的说成没有，会让实施阶段重复造轮子，也会让"缓存收益"被系统性高估——
-详见 §7.3 对切片级缓存 ROI 的重估。
+**真实缺口只有一层**：从"内存里的聚合结果"到"磁盘上的 Markdown/JSON 产物"之间无复用（即新增的 L2 产物数据缓存与 L3 表现层缓存，§7.1）。因此缓存设计应聚焦于填补该层，而非重复造底座。
 
 ### 1.4 必须遵守的既有约束
 
@@ -230,7 +219,7 @@ r-20260901-142233.117_coding_gpt-5-codex_ok_3f9a1c04.md
 这是全系统唯一能回答"整体是变好还是变差"的量化依据。
 
 价值成立，命名不成立。`corpus` 是学术黑话，收敛为 **Journey Benchmarks**：
-文件 `journeys/benchmarks.{json,md}`，CLI 主名 `-benchmark`，`-corpus` 别名一并删除（§8）。
+文件 `journeys/benchmarks.{json,md}`，CLI flag 由 `-corpus` 更名为 `-benchmark`，**不保留 `-corpus` 别名**（§8）。
 
 ---
 
@@ -244,7 +233,7 @@ r-20260901-142233.117_coding_gpt-5-codex_ok_3f9a1c04.md
    外部脚本消费某一类时不应被迫解析另外两类。
 2. **前端渐进加载**。看板按 Tab 异步取切片，首屏不必下载全量。
 
-草案给出的第三条理由——"改价只失效 finance 切片"——**不成立**，理由见 §7.3。
+常被追加的第三条理由——"改价只失效 finance 切片"——**不成立**，理由见 §7.3。
 把缓存动机剥离出去很重要：它决定了切片边界按"消费者关注点"划，而不是按"失效源"划。
 
 ### 3.2 切片划分
@@ -275,8 +264,7 @@ macro/context-efficiency.json   会话膨胀、Compaction 损失、工具 Schema
 
 ### 3.3 补齐渲染期现算的事实
 
-要让 JSON 成为无损真源，以下现在只存在于渲染代码里的事实必须下沉。
-草案列了前三条，其余是审查中补上的：
+要让 JSON 成为无损真源，以下现在只存在于渲染代码里的事实必须下沉：
 
 1. **统计置信度**。`cacheEffCell` 在覆盖率 < 0.9 时挂 `¹`、`ppCell` 在 n < 20 时挂 `⚠️low-n`——
    改为在对应 Row 上显式暴露 `tokens_coverage_pct`、`dur_low_n`，由数据侧确定性填充，
@@ -294,7 +282,7 @@ macro/context-efficiency.json   会话膨胀、Compaction 损失、工具 Schema
    不是整个分析结果）。
 6. **跨产物链接**。`journeyLink` 这类"请求 → journey"的交叉链接现在由 cmd 层临时组装，
    没有落进任何产物。看板需要它，应作为 `requests/index.json` 的一个字段。
-7. **时间的双字段形态**。每个时间点落 `ts`（epoch，供排序筛选）+ `ts_display`
+7. **时间的双字段形态**。每个时间点落 `ts`（epoch 毫秒，供排序筛选）+ `ts_display`
    （`fmtutil.DisplayZone` 定稿串，供显示）。理由与守卫见 §5.6。
 
 ### 3.4 产物提交顺序与原子性
@@ -307,31 +295,44 @@ macro/context-efficiency.json   会话膨胀、Compaction 损失、工具 Schema
 
 这与 `vmr-quota.json` "结构损坏整文件拒绝，绝不部分采纳"是同一条原则。
 
-**准入检查分两档，因为浏览器做不了完整那档。** `crypto.subtle` 只在 secure context
-可用——`http://localhost` 算，局域网上的 `http://192.168.x.x` 不算，`file://` 更不算——
-所以"重算每个切片的 sha256 比对 manifest"这条只对 Go 侧读取方成立：
+**准入检查分两档：**
+- **Go 侧读取方（`-render-only`、脚本）**：完整校验。`manifest.json` 存在且列载切片的 sha256 均与 manifest 记录一致，任一不符整套拒绝。
+- **浏览器骨架页**：轻量校验。`manifest.json` 存在且 `format` 版本对齐（§6.6），不做前端哈希校验（`crypto.subtle` 受 secure context 限制）。未写完崩溃的目录因缺少 manifest 会直接进入前端 404 引导分支。
 
-| 读取方 | 准入检查 |
-|---|---|
-| `-render-only`、内部/外部脚本 | 完整：manifest 存在 **且** 逐切片重算指纹一致，否则拒绝整套 |
-| 浏览器骨架页 | 弱化：manifest 存在 + `format` 比对（§6.6），不做切片哈希校验 |
+**裁决 D20：manifest 盖章的是"一次审计输入横扫产出的那套快照"，逐任务详情靠索引界定，不靠指纹。**
+覆盖面就是这几份：五个 macro 切片、`requests/index.json`、`journeys/index.json`、`journeys/benchmarks.json`。
+`journeys/details/j-<id>.json` 数量随语料增长，进 manifest 会让它随任务量膨胀；
+`compares/` 整个子树是跨调用累积的按需产物，与审计输入无关，理由见 §3.8（D21）。
+两条纪律替代逐文件指纹：
 
-弱化那档是可以接受的：切片指纹防的是"写到一半崩溃"，而 manifest 最后写这条纪律
-已经让那种目录连 manifest 都没有——前端的 404 分支正好覆盖它。真正落到前端的
-残余风险只有"manifest 写完之后有人手动改了某个切片"，那不是本方案要防的威胁模型。
+1. **作业清单来自索引，不来自扫目录。** `-render-only` 与全量运行都只遍历 `journeys/index.json` 列出的 id——
+   而 `index.json` 本身在 manifest 的指纹覆盖内。于是"哪些 journey 属于本套产物"始终可信。
+2. **全量运行清扫 `journeys/details/` 的 orphan。** 时间窗一变（上次一百条、这次六十条），
+   会留下几十份上次的陈旧文件：它们不在本次索引里，`grep`/`ls` 却照样撞得到。
+   全量运行结束时删除（或至少告警）索引未列出的详情文件。这是**残留**问题不是**完整性**问题——
+   加指纹解决不了它，列表就能。
+   **清扫范围严格限于 `journeys/details/`**：`compares/` 与 `requests/details|evidence/` 是按需累积产物，
+   它们本来就不该出现在本次索引里，扫进去等于每次全量运行都把用户跑过的对比全删了。
+
+不给单文件加指纹是有意的：manifest 的切片指纹防的是"写到一半崩溃"，而 manifest 最后写这条纪律
+已让那种目录连 manifest 都没有。剩下的残余风险只有"有人手动改了某个文件"，那不在本方案的威胁模型内——
+对 macro 切片都不防的东西，没有理由单独为详情文件建一套两级指纹链。
 
 ### 3.5 产物精简决策
 
 | 原产出物 | 决策 | 理由 |
 |---|---|---|
 | `vmr-requests.md` 与全部 `vmr-requests-<tag>.md` / `-cron-*.md` | **整族删除**（D7） | 人读请求索引没有独占职责，详见 §3.7。数据留在 `requests/index.json`，浏览交给 `request-browser.html`。 |
-| `vmr-requests-failed.md` | **保留** | 唯一的例外：它是排障入口，量小（实测数十行），"出错了"是不该先开浏览器的那一类信息。 |
-| `stories/` 命名空间 | **改名 + 下沉** | → `journeys/`，单任务实例进 `journeys/details/`，对比提至根级 `compares/`，避免海量 `j-<id>` 淹没索引 |
+| `vmr-requests.json` | **迁移 + 补齐投影** | → `requests/index.json`，补齐会话标题映射投影与 journey 交叉链接，作为请求明细机读单一真源（§3.3、§3.7）。 |
+| `vmr-requests-failed.jsonl` | **下沉** | → `requests/failed.jsonl`，失败/异常请求机读流。 |
+| `vmr-requests-failed.md` | **保留并下沉** | → `requests/failed.md`，排障入口，量小（实测数十行），"出错了"是不该先开浏览器的那一类信息。 |
+| `stories/` 命名空间（含 `vmr-stories.*`） | **改名 + 下沉** | 目录 → `journeys/`，候选集索引 → `journeys/index.{json,md}`，单任务实例进 `journeys/details/`，对比提至根级 `compares/`，避免海量 `j-<id>` 淹没索引 |
 | `stories/vmr-story-corpus.*` | **重定位 + 更名** | → `journeys/benchmarks.{json,md}` |
 | `tool-waste.html` | **拆数据** | 数据源下沉为 `macro/context-efficiency.json`；HTML 归一为骨架 + fetch 形态（§6.4），不再有自包含单文件 |
 | `vmr-report.json` | **解构** | 一步拆为五切片，不留兼容视图（§3.2、§8.1） |
 | `details/`、`evidence/` | **下沉对称** | → `requests/details/`、`requests/evidence/`，与 `journeys/details/` 同构；维持懒物化 |
-| `.parse-cache/`、`stories/.llm-cache/` | **归一** | → `.cache/parse/`、`.cache/llm/`，消除散落隐藏目录 |
+| `.parse-cache/` | **归一** | → `.cache/parse/`，消除输出根下的散落隐藏目录。LLM 缓存无隐式默认路径（`llm_cache_dir` 显式指定），本方案不改其解析规则，只把 `.cache/llm/` 定为文档推荐值 |
+| 对比的发现入口 | **新增 `compares/index.{json,md}`**（D21） | 现状没有任何地方列出"跑过哪些对比"，见 §3.8 |
 
 ### 3.6 Journey 切片自包含：tree + 同文件 blob 表
 
@@ -367,30 +368,16 @@ macro/context-efficiency.json   会话膨胀、Compaction 损失、工具 Schema
 }
 ```
 
-`bodies` 按内容哈希去重，一段文本无论被工具结果、`new_events` 还是别处引用几次都只存一份。
-**blob/tree 分离这条原则被保留了**——`ToolCallRef` 原注释反对的是"同一个 blob 在同一棵树里
-挂两个地址"，那是在论证需要一张共享表，不是在论证正文不能进 JSON。
-唯一变的是 blob store 的位置：从"外部审计日志"搬进同一个文件，JSON 因此自包含。
+`bodies` 按内容哈希去重，无论被工具结果、`new_events` 还是别处引用均仅存一份。blob store 从外部审计日志移入同文件，JSON 自包含且树形结构不膨胀。
+**体积完全可控**：工具结果与 compaction 摘录本就有 3000 字符上限，工具参数上限 3000；截断口径收敛为数据层统一截断，消除数据与渲染的漂移。
+唯一**不设上限**的是 `resp_ref` 承载的 RespText/Reasoning：`.md` 现状把它完整渲染（`spineWhyRespCap` 只决定内联还是折叠，从不切内容），若数据层沿用 `structure` 现有的 2000 上限，单一渲染路径（§5.0）会让人读产物凭空变短。
+去重还天然使重复执行的相同命令输出折叠为一份。若启用 `-llm-addr`，解读结果（模型、耗时、状态与正文）同理落入 `j-<id>.json` 的 `llm_interpretation`，彻底杜绝旁路拼接。
 
-**体积可控，因为要补的东西全都已经被渲染器自己截过**：工具结果与 compaction 摘录
-本就上限 3000 字符，工具参数上限 3000。截断口径随之收敛为**数据层截一次、Markdown 渲染
-它拿到的东西**，"structure 截 2000、md 截 3000"这个漂移面一并消失。
-唯一放开上限的是 RespText/Reasoning（代码注释已判定"一个 Step 自陈的理由从来不会大到需要截"）。
-去重还顺手带来一个现在没有的收益：agent 原地打转重复执行同一条命令得到同样输出时
-（`exact_repeat_tool_call` 正是在检测这个），`.md` 里逐份铺开的重复结果在 blob 表里折叠成一份。
-
-**为什么请求详单不照此办理**（§5.0 的豁免因此是有原则的，不是随手划的）：
-journey 层的 `appendNewEvents` 已经做完 seen-hash 去重，一条消息在一条 journey 里只出现一次，
-正文量是 O(N)；而请求详单按定义要展示**那一轮的全部历史**，agent 每轮重发全历史，
-全量物化是 O(N²)——`KNOWN_ISSUES` 有实测，`story.Step` 曾经持有完整记录时峰值 RSS 达 43GB。
-同一条"自包含"原则，两个量级不同的结论。线画在"去重之后是 O(N) 还是 O(N²)"上，
-不画在"是不是对话正文"上。
+**为什么请求详单不照此办理**：Journey 层的 `appendNewEvents` 经 seen-hash 去重后正文量是 O(N)；而请求详单展示单轮全历史，每轮重发全量物化是 O(N²)（实测峰值 RSS 达 43GB）。线画在去重后是 O(N) 还是 O(N²) 上。
 
 ### 3.7 为什么删掉人读的请求索引
 
-**裁决 D7。** 不是"合并还是拆分"的版式问题——是这份产物有没有独占职责的问题。
-
-把人实际会带来的问题逐条归位，请求索引只剩一个候选职责：
+**裁决 D7。** 不是版式问题，是该产物没有独占职责。把实际排障与分析问题归位，请求索引只剩一个候选职责：
 
 | 问题 | 谁回答 |
 |---|---|
@@ -401,20 +388,42 @@ journey 层的 `appendNewEvents` 已经做完 seen-hash 去重，一条消息在
 | 哪些请求失败了 | `requests/failed.md` |
 | **按维度筛选、排序、定位一条请求** | ← 只剩这一条 |
 
-而 Markdown 恰好是干这件事最差的形态。实测语料 4550 条请求 / 718 个会话，
-人读索引 11800 行——没有人线性读它。真实用法只有两种：**精确定位**（`grep` 一个坐标或模型名，
-打 `requests/index.json` 同样有效，`jq` 还能按结构筛）与**探索性筛选**
-（"上周 cache 命中率低的那些请求"，Markdown 根本做不到，这正是 `request-browser.html` 的活）。
+而 Markdown 恰是完成该职责最差的形态：
+1. **精确定位**：`grep` 或 `jq` 查 `requests/index.json` 结构更准、开销更低；
+2. **探索性筛选**（按耗时、Token、Cache 过滤）：Markdown 无法交互，正是 `request-browser.html` 的核心定位。
+3. **严重冗余**：九成以上的请求已被 Journey 覆盖，会话卡片与定时任务分类完全在 Journey 索引中重复表达。
 
-它还和 journey 半区大面积重叠：111 条 journey 覆盖 94% 的请求；
-journey 索引已经按 `task / cron / heartbeat` 分类，与请求索引按客户端/定时类拆兄弟文件
-是同一套分类做了两遍；会话卡片头几乎逐字是 journey 索引那一行，而且卡片自己就链过去。
-真正独占的只有逐轮的 token/延迟/cache-eff 列——那恰恰是最典型的"要排序要筛选"的表格数据。
+因此：`requests/index.json` 作为唯一数据真源，`requests/failed.md` 保留为排障入口，人读请求索引全族废弃。
 
-所以：`requests/index.json` 留作数据真源（喂看板、`jq`、LLM），
-`requests/failed.md` 留作排障入口，人读的全量索引整族删除。
-将来若出现只有它能回答的问题，从 `index.json` 再生成一份是低成本的——
-现在为一个想不出用途的产物挑版式不是。
+### 3.8 对比索引：为什么它反而不是 YAGNI
+
+**裁决 D21。** 现状 `compares/` 只有一堆 `compare-<a>-vs-<b>.{json,md}`，没有任何清单。
+"按需产物、用时显式指名两个 id" 听上去足以免掉索引——**但那要求用户手上已经有那两个 id**。
+实际情况是：文件名由两个完整 Journey ID 拼成（`compare-` + 两个 `j-<client>-<start>-<end>-<code>`，
+单个就几十字符），跑过几组之后要回看其中一份，得凭记忆拼出上百字符的路径。这不是不方便，是做不到。
+
+而"没索引就看目录"这条退路在本方案里被堵死了：§6.5 的托管纪律明确**禁用目录列表**
+（`requests/details/` 单目录可达数千文件，列表响应本身就是一次拒绝服务）。
+于是没有索引 = 没有任何发现路径。这与 §3.7 删掉请求索引不矛盾——那边删的是**重复**的浏览入口
+（数据在 `index.json`、交互在 `request-browser.html`），这边补的是**唯一**的发现入口。
+
+**形态：扫描派生，不是累积状态。** `compares/index.{json,md}` 由**扫 `compares/*.json` 现算**，
+每次 `vmr analyze` 调用（不论哪种模式）重建一遍。这一条选择排掉三类麻烦：
+
+- 不需要读-改-写一份会漂移的累积清单；
+- 手工删掉某份对比后重跑即自愈，不会留下指向 404 的行；
+- 与 L2 缓存无交互——命中与否，索引都是目录的函数，永远自洽。
+
+**整个 `compares/` 子树不进 manifest 指纹（D20 边界的一次澄清）。**
+manifest 盖章的是"同一次审计输入横扫产出的那套快照"：五个 macro 切片、`requests/index.json`、
+`journeys/index.json`、`journeys/benchmarks.json`。`compares/` 是跨多次调用累积的按需产物，
+内容随"用户跑过哪些对比"变化，与审计输入无关。硬塞进 manifest 会立刻造出一个假失效——
+L2 缓存命中时 manifest 不重写，此时新加一份对比就让记录的指纹对不上，
+§3.4 的完整校验会把**整套完全正常的产物**判为无效。
+
+**不做"前端勾选两条 journey 直接跳对比页"。** 对比只能由 CLI 离线算出，前端跳过去只会 404。
+真正费事的是把两个长 ID 拼进命令行，所以 §6.2 给的是可复制的 `vmr analyze -compare <a>,<b>`——
+补上"还没跑过的对比"这一半，而不是假装前端能算。
 
 ---
 
@@ -440,13 +449,13 @@ reports/
 │   ├── index.json / index.md
 │   ├── benchmarks.json / benchmarks.md
 │   └── details/j-<id>.{json,md}      # .json 自包含：structure（tree）+ bodies（blob 表），§3.6
-├── compares/
-│   ├── index.json / index.md
+├── compares/                         # 按需累积子树，整体不进 manifest（D21）
+│   ├── index.json / index.md         # 扫 compares/*.json 派生的"跑过哪些对比"清单
 │   └── compare-<a>-vs-<b>.{json,md}
 ├── *.html                            # 看板骨架页（go:embed 资产，每次运行幂等覆盖，零业务数据）
 └── .cache/
     ├── parse/<filehash>.json
-    └── llm/<key>.json
+    └── llm/<key>.json              # 仅当用户把 llm_cache_dir 指到这里；该路径无隐式默认（§3.5）
 ```
 
 目录 0700、文件 0600。
@@ -455,17 +464,12 @@ reports/
 
 ## 5. Markdown 渲染重构：ViewModel 分层
 
-### 5.0 单一渲染路径：把"两条路径要一致"消解成"只有一条路径"
+### 5.0 单一渲染路径
 
-**裁决 D11。** 草案（与本文早先版本）默认存在两条路径：全量运行从内存聚合结果直接渲染，
-`-render-only` 从落盘 JSON 渲染。于是必须再加一条测试去证明两者字节一致（原 §9 的核心断言）。
-这是典型的"造出边缘情况再去守住它"。
-
-正确的做法是让它不可能发生：
+**裁决 D11。** 杜绝"全量运行走内存、`-render-only` 走落盘 JSON"的双轨分叉与一致性负担：
 
 > **聚合类产物的渲染只有一条路径：`聚合 → 写 JSON → 读 JSON → ViewModel → 序列化 → 写 Markdown`。**
-> 全量运行不是"顺便也写一份 JSON"，而是**先写 JSON，再走与 `-render-only` 完全相同的后半段**。
-> `-render-only` 因此不是一个平行实现，只是**跳过前半段**。
+> 全量运行先写 JSON，再走与 `-render-only` 完全相同的后半段；`-render-only` 仅为跳过前半段的快捷入口。
 
 三个直接后果：
 
@@ -563,11 +567,7 @@ HTML 侧的"模板"本就是必然存在的骨架页 + JS 渲染函数（§6.1�
 推论：无 `go:embed` 模板、无 `-templates <dir>` 逃生口、无模板指纹、无"外置模板不参与
 golden 比对"的特例。L3 缓存指纹只含 ViewModel 指纹 + 渲染器版本 + 语言（§7.1）。
 
-**关于"先把 HTML 模板化，再回头重构 Markdown"的分步提议**：路线图已经是这个顺序（Phase 2 → Phase 3），
-但要点不在先后，而在两者**无依赖**——HTML 侧消费的是领域切片（§5.6），Markdown 侧消费的是同一批切片经
-ViewModel 的投影，中间没有共享模板资产。所以先做哪个都不会给另一个留债，
-也不存在"等 HTML 模板化完成后 Markdown 才能沿用其模板体系"这条路径——那条路径需要一个跨 Go/JS 的
-模板运行时，是比 `text/template` 更重的引入。
+**HTML 与 Markdown 无共享模板依赖**：路线图虽为 Phase 2 → Phase 3，但两者完全解耦——HTML 侧直接消费领域切片（§5.6），Markdown 侧消费切片经 ViewModel 的内存投影，无需引入跨语言模板运行时。
 
 ### 5.4 `-render-only`：覆盖面必须诚实
 
@@ -576,7 +576,8 @@ vmr analyze -render-only [-o reports]
 ```
 
 检测到 `manifest.json` 与各切片存在且指纹自洽，跳过全部日志解压、解析、哈希与建图，
-只做 `JSON 读取 → ViewModel 构建 → 序列化渲染 → 写盘`。
+只做 `JSON 读取 → ViewModel 构建 → 序列化渲染 → 写盘`。逐任务详情的作业清单来自
+`journeys/index.json`，不扫目录（D20/§3.4）。
 
 **裁决 D5：覆盖全部人读的聚合类产物，详单与证据永久除外。**
 
@@ -585,6 +586,7 @@ vmr analyze -render-only [-o reports]
 | `vmr-report.md` | ✅ | 补齐 §3.3 的缺口后，五个 macro 切片即全部输入 |
 | `journeys/index.md`、`benchmarks.md` | ✅ | 输入本就是已落盘的聚合结构 |
 | `journeys/details/j-<id>.md` | ✅ | 依赖 §3.6 把 journey JSON 补成自包含；`RenderMarkdown` 随之从吃 `*Journey` 改吃 `JourneySummary` |
+| `compares/index.md`、`compare-*.md` | ✅ | 索引由扫 `compares/*.json` 派生，单份对比的输入是已落盘的对比 JSON |
 | `requests/failed.md` | ✅ | 输入是 `failed.jsonl`，本就已落盘 |
 | `requests/details/*.md`、`evidence/*.md` | ❌ 永远不行 | 输入是原始 `audit.Record` + manifest。把它们放进 JSON 是 O(N²)（§3.6 末段），且默认套件本就不物化它们 |
 
@@ -606,9 +608,9 @@ vmr analyze -render-only [-o reports]
 Action 建议、亮点句）跟随 `-lang` 落盘，只有 Finding 的 `Code` 是跨语言稳定标识。
 因此 **`-render-only` 只能渲染出与 JSON 同语言的 Markdown**。
 
-草案把"切换中英文输出"列为 `-render-only` 的应用场景，这是错的。
-要支持跨语言重绘，必须把全部人读文本改为渲染侧从 `Code` + 结构化参数派生——
-那是对既有语言政策的推翻，影响 JSON 契约的所有消费者，应作为独立议题单独评审，不塞进本次重构。
+"用 `-render-only` 切换中英文输出"因此不成立。要支持跨语言重绘，就得把全部人读文本改为
+渲染侧从 `Code` + 结构化参数派生——那是推翻既有语言政策、影响 JSON 全部消费者的独立议题，
+单独评审，不塞进本次重构。
 
 ### 5.6 ViewModel 不落盘：谁负责格式化，以及漂移怎么防
 
@@ -625,9 +627,9 @@ Action 建议、亮点句）跟随 `-lang` 落盘，只有 Finding 的 `Code` �
 HTML 前端有自己的一份格式化函数。** 代价是格式化逻辑存在 Go 与 JS 两份实现，
 两条纪律把漂移钉死：
 
-- **时间不给前端算。** 切片里每个时间点同时落 `ts`（epoch，供排序/筛选）与
+- **时间不给前端算。** 切片里每个时间点同时落 `ts`（epoch 毫秒，供排序/筛选）与
   `ts_display`（`fmtutil.DisplayZone` 定稿串，供显示）。前端只显示后者、只用前者排序，
-  一行时区代码都不写。§11.1 第 4 条从"靠自律"变成"靠数据结构"。
+  一行时区代码都不写。毫秒制与 JS `Date` 以及审计指标的 `dur_ms`/`ttft_ms` 天然对齐。§11.1 第 4 条从"靠自律"变成"靠数据结构"。
 - **数值格式化用共享 fixture 钉住。** 一份 `testdata/fmt_cases.json`（raw 值 → 期望显示串），
   Go 侧由 `fmtutil` 测试消费，JS 侧由一个纯函数测试消费（Node 跑，不进构建链）。
   `FmtTokens` / `FmtBytes` / `FmtPercent` / 货币的任何改动，两侧同时红。
@@ -655,7 +657,7 @@ vmr analyze
 | `macro-dashboard.html` | `macro/*.json` |
 | `request-browser.html` | `requests/index.json`。**人读请求索引删除后（§3.7），这是浏览逐条请求的唯一交互入口**，因此筛选/排序/分面是它的必需能力而非加分项：按客户端、模型、端点、outcome、时间窗筛，按耗时/token/cache-eff 排，行内链向 `requests/details/` 与所属 journey |
 | `journey-viewer.html` | `journeys/details/j-<id>.json` |
-| `journey-compare.html` | `compares/compare-*.json` |
+| `journey-compare.html` | `compares/compare-*.json`；无 `#data=` 时取 `compares/index.json` 列出跑过的对比（§3.8） |
 | `benchmarks.html` | `journeys/benchmarks.json` |
 | `tool-waste.html` | `macro/context-efficiency.json` |
 
@@ -683,72 +685,33 @@ reports/journey-viewer.html#data=journeys/details/j-a1b2.json     (file 布局)
   骨架页在 `fetch` 失败且 `location.protocol === 'file:'` 时显示一行提示，
   给出"用 vmr 自带托管或任意静态服务器打开"的指引——**不做静默空白页**。
 
-缺省行为：无 hash 参数时按约定探测——每个骨架页内置自己的默认索引路径
-（`journey-viewer.html` → `journeys/index.json`，`journey-compare.html` → `compares/index.json`），
-取到后列出候选让用户点选。
+缺省行为：无 hash 参数时按约定探测默认索引（`journey-viewer.html` → `journeys/index.json`，
+`journey-compare.html` → `compares/index.json`），取到后列出候选供点选；索引不存在（从没跑过 `-compare`）
+时展示空状态与生成引导，不阻断界面。
 
-**零编译扩展**：切片是稳定契约，看板只是它的一个消费者。
-需要一块专属大屏（例如只看成本的财务视图）时，复制一个骨架页、改 JS、
-指向同一份 `macro/finance.json` 即可，不触碰任何 Go 源码、不需要重新构建二进制。
-这正是切片拆分在"关注点分离"之外的第二重回报。
-代价与边界随之而来：从复制那一刻起，这个副本就是切片 schema 的消费者——
-版本探测样板随复制继承（§6.6），schema 演进纪律见 §8.1 的作用域注记。
+`journey-viewer.html` 的候选列表另附一个**零成本的补充**：勾选两条 journey 后，
+给出可复制的 `vmr analyze -compare <a>,<b>` 命令行——而**不是**直接跳转到对比页。
+对比数据只能由 CLI 离线算出来，前端跳过去只会得到 404；把两个长 ID 拼进命令行才是这里真正费事的部分。
+
+**零编译扩展**：切片是稳定契约，看板只是消费者。复制骨架页、修改 JS、指向特定切片即可定制大屏，无需重新编译二进制。副本随复制继承版本探测逻辑（§6.6）。
 
 ### 6.3 前端工程化边界
 
-草案对图表只字未提，但宏观看板要画的东西（延迟分位、按小时热力、Spearman 散点、
-成本堆叠）不是表格能替代的。两条路必须现在就选，否则工作量估算无意义：
-
-- **选定：零依赖内联 SVG**。手写坐标轴 + path，够用于折线/柱状/热力/散点四种形态。
-  可复用的是**视觉系统**（`internal/story/render_html_assets.go` 的 "VMR Forensics"：
-  暗色飞行数据记录仪 / 亮色工程方格纸），不是图表代码：现状全部的 SVG 只有
-  `render_html_dashboard.go` 里一条无坐标轴的 sparkline `<polyline>`。
-  四种图元连同坐标轴、刻度、图例基本是从零写——Phase 2 的估算按此计。
-- 否决：引入图表库。即使 `go:embed` 进二进制，也会带来体积、升级与 CSP 三重负担，
-  换来的只是省几百行手写 SVG。
-
-主题通过 CSS 变量注入，暗/亮双色 + 系统跟随，与 `/status.html`、`/log.html` 保持同一套视觉。
+- **选定：零依赖内联 SVG**。手写坐标轴与 path，覆盖折线/柱状/热力/散点四种形态，复用既有 "VMR Forensics" 视觉系统（暗色飞行记录仪 / 亮色工程方格纸）。
+- **否决图表库**：避免体积、更新及 CSP 限制负担。
+- **主题系统**：通过 CSS 变量注入，支持暗/亮及跟随系统，与 `/status.html` 保持一致视觉。
 
 ### 6.4 自包含 HTML：废弃现有渲染器
 
-**裁决 D6（翻转草案）。** 先把事实摆正：自包含不是一个可关的开关，而是**现状唯一形态**
-（§1.1 基线修正二），废弃它意味着删掉三处 Go HTML 渲染器并重建为骨架页——这是替换，工作量记在 Phase 2。
+**裁决 D6。** 仓内现有三处 HTML 渲染器均为自包含形态（数据内联嵌入）。其唯一独占场景是 `file://` 直开，但该场景无真实需求：vmr 作为常驻服务天然提供 `/reports/` 托管，任何静态服务器亦可开箱即用；跨机交付则已被 Markdown 详单完整覆盖。
+自包含的代价则是冗余持有敏感对话数据、排版调整必须重编译。因此三处旧 HTML 渲染器随 `internal/story/assets/` 一并废弃，统一收敛为骨架 + fetch。
 
-自包含形态的唯一独占场景是 `file://` 直开——`fetch` 在 `file://` 源下被同源策略拦死（§6.2）。
-但这个场景没有真实用户路径：
-
-- vmr 本身就是常驻 HTTP 服务，`/reports/` 托管（§6.5）是必然存在的能力；
-  骨架 + fetch 是纯静态资产，任何静态文件服务器指向 `reports/` 也可用。
-- "把单个文件转交他人"的价值已被 Markdown 覆盖：`journeys/details/j-<id>.md`
-  就是给人读的完整详单。转发一个 URL + auth key，或转发一份 `.md`。
-
-而自包含形态的代价是实打实的：数据变更必须重跑 Go 才能刷新页面，
-渲染逻辑被锁在 Go 里改一行版式就要重编译，且它把决策正文（RespText、工具参数、
-Finding 文本）复制成第三份 0600 资产。
-（说清边界：journey HTML 本就**不内联逐步对话**，每行链出到 `details/*.md`——
-泄露面比"把全语料再抄一份"小得多，但不是零。）
-功能能被必然存在的特性替代，就删——三处 HTML 渲染器与 `internal/story/assets/` 一并退场，
-不保留任何"内联 / fetch"双分支。
-
-**裁决 D15：`-redact` 一并删除，不迁移。** 它是自包含 HTML 的修饰符，
-唯一用途是产出"一份可以带出本机的脱敏文件"。骨架 + fetch 形态下这个用途无处安放
-（脱敏后是一组 JSON 切片加一个骨架页，"转交一个文件"变成"转交一个目录"），
-而实际使用频次接近零——为一个没人用的能力保留一整条自包含渲染分支，
-恰好是本方案要消灭的那种"双形态"债务。真需要脱敏分享时，
-`-journey` 的 Markdown 详单加人工删节是更诚实的路径：它至少不会让人误以为
-自动脱敏覆盖了所有正文字段。同步删除：`-redact` flag、`render_html*.go` 里的
-全部 `redact bool` 分支、`i18n` 侧对应的占位文案、UserGuide 双语的 `-redact` 段落。
+**裁决 D15：`-redact` 一并删除。** 作为自包含 HTML 的修饰符，在骨架形态下无处安放且实际用量极低。真需分享脱敏内容时，直接人工删节 Markdown 详单是更诚实且安全的路径。同步清理：`-redact` flag、Go 渲染器中的 `redact bool` 分支及双语文档。
 
 ### 6.5 `/reports/` HTTP 托管与安全模型
 
 **裁决 D9：默认关闭，且 `api_keys` 未配置时硬性拒绝。**
-
-草案说"JSON 强制通过 `s.auth()` 保护"。但 `internal/server` 的实际实现是：
-**未配置 `api_keys` 时鉴权直接放行**（这对聊天协议端点是合理的本机默认，
-对承载全部对话正文的报表目录不是）。照搬这个模型，等于在
-`listen` 被改成非回环地址且没配 key 的常见场景下，把整个语料裸奔在局域网上。
-
-必须同时满足的四条：
+在 `internal/server` 中，未配置 `api_keys` 时鉴权默认放行（`len(cfg.APIKeys) == 0` 直接返回 ok）。若直接套用，在局域网开放且未配 key 时会导致承载对话正文的报表裸奔。必须同时满足的四条：
 
 1. **显式开关**。新增配置项（如 `analytics.serve: false` 为默认），不开不挂路由。
    同步更新 `config.example.yaml` 与 `config.example.zh.yaml`（严格 YAML + 双语示例是硬规则）。
@@ -765,7 +728,8 @@ Finding 文本）复制成第三份 0600 资产。
 再 `vmr start`，不配任何东西就该看得到看板。
 
 - 分析侧：`analyze -o` 的默认值维持现状 `./reports`（相对进程工作目录，
-  与 `config.yaml` 的默认查找位置同一个目录，本方案不改）。
+  与 `config.yaml` 的默认查找位置同一个目录，本方案不改）。注意 `report.yaml` 的
+  `output` 字段一旦配置就顶掉这个默认值——那种情况与显式 `-o` 同类，`serve_dir` 必须跟着对齐。
 - 服务侧：`analytics.serve_dir` 默认同为 `./reports`；显式配置时按 `vmr start`
   进程的工作目录解析相对路径。输出目录被 `-o` 指到别处时，把 `serve_dir` 配成同一个值。
 - 目录不存在不是启动错误——只是 `/reports/*` 一律 404，日志提示"尚未生成分析产物"。
@@ -802,16 +766,14 @@ Phase 2 落地那一刻，`KNOWN_ISSUES` 里"JSON 无外部脚本消费方"的�
 渲染异常一律 catch，错误提示把"manifest format 不一致"列为首要嫌疑并指向 banner——
 用户看到的是"渲染不出来可能因为版本不一致，重新 analyze 即可"，而不是一片空白面板。
 
-**为什么放骨架页样板，而不是注入用户副本**：注入做不到——副本 JS 完全归用户所有。
-但副本是从骨架页**复制**出来的：版本检查与 fetch 封装、主题变量同层，是"复制起点"代码
-的一部分，复制即继承（除非刻意删除）。配套纪律：**升级二进制后，自定义面板从最新骨架页
-重新复制起点**。对完全自建、不基于骨架页的第三方代码没有任何手段，也不追——
-这条机制的价值边界就是"自带页面全覆盖 + 派生面板靠复制继承 + 自建面板自担风险"。
+**为什么放骨架页样板，而不是注入用户副本**：注入做不到，副本 JS 完全归用户所有。但版本检查与
+fetch 封装、主题变量同层，是"复制起点"代码的一部分，复制即继承。配套纪律：**升级二进制后，
+自定义面板从最新骨架页重新复制起点**。价值边界到此为止——自带页面全覆盖、派生面板靠复制继承、
+完全自建的面板自担风险。
 
-**版本戳不进切片。** 逐片盖章是 N 份冗余副本，只会引入"切片与 manifest 版本不一致"的
-漂移面；§8.1 已裁决整套产物一个版本单位、版本戳统一收在 manifest。页面检查走 manifest
-正好与"读取方以 manifest 为准入"（§3.4，前端本就在列）同构；缓存侧同理——L2 的 Digest
-已含格式版本（§7.1），Phase 4 的 `-no-cache` 旁路覆盖缓存对照，无需第二套版本源。
+**版本戳不进切片。** 整套产物是一个版本单位（§8.1），逐片盖章只是 N 份冗余副本加一个
+"切片与 manifest 版本不一致"的新漂移面。页面查 manifest 与"读取方以 manifest 为准入"
+（§3.4）同构；缓存侧的 L2 Digest 本就含格式版本（§7.1），不需要第二套版本源。
 
 ---
 
@@ -931,22 +893,11 @@ Digest(c₁, c₂, …, cₙ) :=
 
 ### 7.3 缓存粒度：整套一个指纹，不做切片级隔离
 
-**裁决 D1（后半）。** 草案的核心卖点是"改价只失效 `finance.json`，可靠性与负载切片 100% 命中"。
-三条理由否决它：
-
-1. **收益接近零**。定价变更不改审计日志，L1 全命中；剩下的只是内存里重跑一遍分桶累加。
-   切片级隔离省下的是这一段的一部分——毫秒级。
-   （注意这与 §7.1 里 L2 的收益不矛盾：L2 省的是**输入未变时整套跳过**，
-   包含 Journey 半区那两遍未被 L1 覆盖的解压；切片级隔离省的是**输入未变、只有配置变**时的分桶累加。
-   前者量级大，后者量级小，而复杂度全在后者。）
-2. **隔离并不干净**。`summary.json` 里有总支出、`context-efficiency.json` 的 Finding 也可能带成本口径。
-   定价变更实际会牵连多个切片，"只有 finance 失效"是理想化的。
-3. **引入一致性缺陷**。允许 finance 用旧缓存、reliability 重算，就允许同一份报表内部
-   出现来自不同输入快照的数字，而没有任何机制发现它。这类"看起来对、其实自相矛盾"的产物
-   比重算慢几百毫秒危险得多。
-
-**决定：切片拆分保留（为消费弹性），缓存粒度是整套产物一个指纹。**
-要么全套有效，要么全套重算。Phase 4 的复杂度因此砍掉一大半。
+**裁决 D1（后半）。** 否决切片级缓存隔离（如"改价只重算 finance"）：
+1. **收益极小**：配置变动不改审计日志，L1 全命中；切片隔离仅省下内存分桶累加（毫秒级）。
+2. **切片并不正交**：`summary.json` 含总支出，`context-efficiency.json` 的 Finding 亦带成本，改价实际波及多切片。
+3. **杜绝一致性缺陷**：允许切片混合快照会导致同一份报表各切片数字互搏。
+**决定：切片拆分为消费弹性服务，缓存粒度为整套产物一个指纹。** 要么全套有效，要么全套重算。
 
 ### 7.4 失效矩阵
 
@@ -997,9 +948,9 @@ schema 消费者，`KNOWN_ISSUES` 里"JSON 无外部脚本消费方"的条目随
 
 ### 8.2 `manifest.json` 的职责
 
-草案没定义它是给谁用的，导致字段无从设计。定死为**三个职责，一份文件**：
+先定死它是给谁用的，否则字段无从设计。**三个职责，一份文件**：
 
-1. **准入与一致性**：切片清单 + 每个切片的内容指纹（读取方的唯一入口，见 §3.4）。
+1. **准入与一致性**：本次快照的清单 + 每份的内容指纹，读取方的唯一入口（见 §3.4）。清单就是五个 macro 切片 + `requests/index.json` + `journeys/index.json` + `journeys/benchmarks.json`——逐任务详情由 `journeys/index.json` 索引（D20），`compares/` 子树整体在外（D21），manifest 因此不随任务量或对比次数膨胀。
 2. **溯源**：输入文件列表与哈希、生成时间、时区、时间窗、语言、格式版本、实际生效的配置文件路径。
 3. **发现**：切片路径 → 语义标签的映射，供前端与内部脚本免硬编码路径地遍历。
 
@@ -1021,7 +972,7 @@ schema 消费者，`KNOWN_ISSUES` 里"JSON 无外部脚本消费方"的条目随
 
 ## 9. 测试与守卫
 
-草案完全没提测试，而这套重构恰好会动到仓内最强的几条守卫。逐条给出去处：
+这套重构会动到仓内最强的几条守卫。逐条给出去处：
 
 | 现有守卫 | 重构后 |
 |---|---|
@@ -1039,14 +990,17 @@ schema 消费者，`KNOWN_ISSUES` 里"JSON 无外部脚本消费方"的条目随
 | — | **新增**：切片内每个时间点必须同时有 `ts` 与 `ts_display`（§5.6），缺一即失败——把"前端不做时区换算"从约定变成可测断言 |
 | — | **新增**：骨架页版本探测逻辑写成纯函数（期望版本 × manifest 版本 → 行为），随看板 JS 的 Node 测试一并覆盖（§6.6） |
 | — | **新增**：`bodies` 表无孤儿、无悬引用——每个 `*_ref` 都能解析，每个 blob 都至少被引用一次（§3.6）。两个方向都要查：悬引用会让渲染缺内容，孤儿 blob 会让文件白白变大 |
-| — | **新增**：工具配对的三级 `match` 与决策脊柱实际渲染的配对一致（§3.6）——这条正是为了钉死「JSON 说没配上、Markdown 渲染了 23 段」那个缺陷不再复现 |
+| — | **新增**：工具配对的三级 `match` 与决策脊柱实际渲染的配对一致（§3.6）——这条正是为了钉死「JSON 说没配上、Markdown 渲染了几十段」那个缺陷不再复现 |
+| — | **新增**：换一个更窄的时间窗重跑，`journeys/details/` 里不残留上一次的孤儿文件（D20/§3.4）——orphan 清扫是纪律，得有测试盯着 |
+| — | **新增**：orphan 清扫**不动** `compares/`、`requests/details|evidence/`（D20）。这条测试比上一条更要紧：范围写错就是每次全量运行删光用户跑过的对比 |
+| — | **新增**：`compares/index.json` ≡ `compares/*.json` 的目录内容（D21/§3.8）——写一份对比、跑一次 analyze、索引里就该多一行；手删一份、重跑、行就该消失 |
 
 ---
 
 ## 10. 路线图
 
-工作量按"改动面 + 未知度"给区间，不追求精确。
-草案给的 14~19 人天低估了两处：journey JSON 的自包含化（§3.6）与图表实现（§6.3）。
+工作量按"改动面 + 未知度"给区间，不追求精确。最容易被低估的两处已计入：
+journey JSON 的自包含化（§3.6）与图表实现（§6.3，现状仓内只有一条无坐标轴的 sparkline，四种图元基本从零写）。
 
 ```
 Phase 1 — 数据层闭环                                        4~6 人天
@@ -1054,10 +1008,12 @@ Phase 1 — 数据层闭环                                        4~6 人天
   ├── 补齐 §3.3 全部渲染期现算事实（含 SessionAnalysis 投影、时间双字段）
   ├── journey JSON 自包含化（D18/§3.6）：bodies blob 表、三级 match、截断口径归一
   ├── 目录拓扑归位：journeys/ 、compares/ 、requests/details|evidence 、.cache/
-  ├── 详单文件名加 r- 前缀（D17）——reqdetail.FileName 与其两个 wrapper 的单点改动
-  ├── 产物提交顺序与原子性（manifest 最后写）
+  ├── 详单文件名加 r- 前缀（D17）——reqdetail.FileName 单点改动（两个包装函数透传自动继承）
+  ├── journey 文件名归一（D19）：去 journey- 冗余前缀、去 -partial 后缀，JourneyReportFile 单点改动
+  ├── 产物提交顺序与原子性（manifest 最后写）+ journeys/details/ orphan 清扫（D20/§3.4）
+  ├── compares/index.{json,md}：扫目录派生，每次运行重建（D21/§3.8）
   ├── 人读请求索引整族删除（D7/§3.7），vmr-report.md 的相关链接改指看板与 journeys/index.md
-  └── CLI 面收敛：vmr report / vmr story / -corpus 别名删除，internal/story 更名 internal/journey
+  └── CLI 面收敛：vmr report / vmr story 别名删除，-corpus 更名 -benchmark、-story-only 更名 -journey-only（均不留别名），internal/story 更名 internal/journey
 
 Phase 2 — HTML 看板（替换现有三处自包含渲染器，非纯新增）   5~7 人天
   ├── go:embed 骨架 + 主题变量系统（复用 VMR Forensics 视觉）
@@ -1112,33 +1068,38 @@ Phase 1 与 Phase 2 之间无强依赖，可并行。Phase 4 因为放弃了切�
 
 ### 11.2 已知取舍（避免下一个评审重提）
 
-| 决定 | 为什么 |
+这张表只给"一句话为什么"，完整论证在各自章节——重提之前先读那一节。
+
+| 决定 | 一句话为什么 |
 |---|---|
-| 不做切片级缓存隔离 | §7.3：收益毫秒级，代价是产物内部一致性缺陷 |
-| Markdown 不用模板引擎 | §5.3：VM 模式固定后序列化即渲染；text/template 只引入运行期拼写错误类，换不来表达力 |
-| 不支持跨语言 `-render-only` | §5.5：JSON 按既有政策带语言；要改先改语言政策，不在本次范围 |
-| `requests/details/*.md` 永不进 `-render-only` | §3.6 末段：请求详单按定义展示那一轮的全历史，全量物化是 O(N²)；journey 去重后是 O(N)，所以那边自包含、这边不 |
-| 不引入图表库 | §6.3：体积 + 升级 + CSP 三重负担，换几百行手写 SVG |
-| 二进制版本不进缓存指纹 | §7.4：每次构建全量失效，收益为零 |
-| journey JSON 携带正文，体积翻倍也接受 | §3.6：实测 json 与 md 已同量级（12.1 vs 12.3 MB / 81 条），补齐后约 18 MB。「JSON 比 Markdown 少」本身就是缺陷，不是节俭；blob 表按内容哈希去重，且所有补入字段都已被渲染器截到 3000 字符 |
-| 废弃自包含 HTML（现状唯一形态），`-redact` 一并删除 | §6.4：价值被托管 + Markdown 覆盖；代价是决策正文第三份副本与"改版式要重编译"。`-redact` 是自包含形态的修饰符，骨架形态下无处安放且实际用量接近零（D15） |
-| 删除全部人读请求索引 | §3.7：它唯一的候选职责是「按维度筛选定位一条请求」，而 Markdown 是干这件事最差的形态；4550 条请求没人线性读，精确定位靠 `jq`/`grep` 打 `index.json`，探索性筛选靠 `request-browser.html`。与 journey 半区还大面积重叠（94% 覆盖、分类做两遍）。`failed.md` 例外保留 |
-| 报告产物无兼容期 | §8.1：产物是审计日志的可再生派生物；兼容边界只在审计日志格式 |
-| 聚合类产物只有一条渲染路径 | §5.0：与其造出两条路径再用测试证明其一致，不如让第二条不存在 |
-| ViewModel 不落盘 | §5.6：前端要 raw 不要 display，落盘即成第二本账；漂移改用跨语言 fixture 守卫 |
-| 看板参数走 `#` 不走 `?` | §6.2：hash 不进服务端，托管方式无关；`?` 把纯前端选择变成服务端输入 |
-| `file://` 直开不支持 | §6.2：opaque origin 下 `fetch` 全被拦，无解；给提示页而非静默空白 |
-| 托管目录不走 `rundir` | §6.5：`rundir` 是运行期状态的归属，报表是用户产物——要 `cd` 进去 grep、要 gitignore、要按项目分开放，属于项目目录（D16） |
-| 详单文件名加 `r-` 前缀 | §1.1：与 `j-<id>` 同一套约定，一个 ID 脱离目录上下文后仍能自述类型（D17） |
-| `ctxgraph` 的 md5 内容寻址底座不改 | §7.2：`Hash`/`SysHash`/`Lineage` 根哈希/`ReqHash8` 都是语料内部身份标签，不参与缓存判据；换 sha256 要重算全部 `.parse-cache`、改 `Hash` 宽度、动 Journey ID 形态，收益为零 |
-| 版本探测进骨架页样板，不注入用户副本 | §6.6：注入做不到；"复制即继承"让检查随副本传播，自建面板自担风险 |
-| 版本不一致只警告不阻断渲染 | §6.6：加性变更下老页面大概率照常渲染；阻断会把可渲染的数据挡在门外 |
-| 切片不带独立版本戳，版本查 manifest | §6.6：整套一个版本单位（§8.1）；逐片盖章是 N 份冗余，徒增漂移面 |
+| 不做切片级缓存隔离（§7.3） | 收益毫秒级，代价是同一份报表各切片数字互搏 |
+| Markdown 不用模板引擎（§5.3） | VM 模式固定后序列化即渲染；模板只换来运行期拼写错误 |
+| 不支持跨语言 `-render-only`（§5.5） | JSON 按既有政策带语言；要改先改语言政策 |
+| `requests/details/*.md` 永不进 `-render-only`（§3.6 末段） | 详单展示单轮全历史，全量物化是 O(N²)；journey 去重后才是 O(N) |
+| 不引入图表库（§6.3） | 体积 + 升级 + CSP 三重负担，换几百行手写 SVG |
+| 二进制版本不进缓存指纹（§7.4） | 每次构建全量失效，收益为零 |
+| journey JSON 携带正文（§3.6） | "JSON 比 Markdown 少"本身就是缺陷；blob 表去重后增幅约五成，可接受 |
+| 废弃自包含 HTML 与 `-redact`（§6.4，D6/D15） | 价值被托管 + Markdown 覆盖；`-redact` 在骨架形态下无处安放 |
+| 删除全部人读请求索引（§3.7，D7） | 唯一候选职责是"筛选定位一条请求"，而 Markdown 是干这件事最差的形态；`failed.md` 例外 |
+| 报告产物无兼容期（§8.1） | 产物是审计日志的可再生派生物；兼容边界只在审计日志格式 |
+| 聚合类产物只有一条渲染路径（§5.0） | 与其造两条路径再证明其一致，不如让第二条不存在 |
+| ViewModel 不落盘（§5.6） | 前端要 raw 不要 display；落盘即成第二本账 |
+| 看板参数走 `#` 不走 `?`（§6.2） | hash 不进服务端；`?` 把纯前端选择变成服务端输入 |
+| `file://` 直开不支持（§6.2） | opaque origin 下 `fetch` 全被拦，无解；给提示页而非空白 |
+| 托管目录不走 `rundir`（§6.5，D16） | `rundir` 是运行期状态的归属，报表是要 grep、要 gitignore 的用户产物 |
+| 详单文件名加 `r-` 前缀（§1.1，D17） | 一个 ID 脱离目录上下文后仍能自述类型 |
+| `-partial` 不进文件名（§1.1，D19） | ID 与加载范围无关、partial 是加载范围的函数，两者不该焊在一个字符串里 |
+| 逐任务详情不进 manifest 指纹（§3.4，D20） | manifest 不随任务量膨胀；作业清单靠索引界定，残留靠 orphan 清扫 |
+| `compares/` 有索引、但整个子树不进 manifest（§3.8，D21） | 目录列表被 §6.5 禁用，没索引就没发现路径；而它是跨调用累积的，进 manifest 会让 L2 命中后新增对比造出假失效 |
+| `ctxgraph` 的 md5 底座不改（§7.2） | 那些是语料内部身份标签，不参与缓存判据；换 sha256 收益为零、迁移成本高 |
+| 版本探测进骨架页样板，不注入副本（§6.6） | 注入做不到；"复制即继承"让检查随副本传播 |
+| 版本不一致只警告不阻断（§6.6） | 加性变更下老页面大概率照常渲染；阻断会把可渲染的数据挡在门外 |
+| 切片不带独立版本戳（§6.6） | 整套一个版本单位；逐片盖章是 N 份冗余，徒增漂移面 |
 
 ### 11.3 顺带机会（不属于本方案，但实施时应留出口子）
 
-`KNOWN_ISSUES` 记录的分析半区真实瓶颈是**内存**（万级记录 GB 级 RSS），
-不是草案臆测的"写盘开销"。切片化天然把产物写入拆成了若干段，
+`KNOWN_ISSUES` 记录的分析半区真实瓶颈是**内存**（万级记录 GB 级 RSS），不是写盘开销。
+切片化天然把产物写入拆成了若干段，
 如果 Phase 1 的序列化写成流式（逐切片构建、写完即释放），可以顺手削掉一部分峰值。
 这不是本方案的目标，但实施时不要把结构写死成"必须全部切片同时驻留内存"。
 
