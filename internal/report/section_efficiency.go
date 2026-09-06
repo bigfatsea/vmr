@@ -59,11 +59,11 @@ func renderEfficiency(w func(string, ...any), rep *Report2, o Row, lang i18n.Lan
 	}
 }
 
-// renderToolWasteTotals is §7's top-line: the four window totals
-// tool-waste.html leads with (bytes shipped, dead-weight bytes, wasted
-// tokens, tool-set shape count) — the report's headline efficiency figures,
-// which otherwise lived only in the HTML card (问题 3 / R3a-2). Reuses the
-// card's own i18n labels so the two can't disagree.
+// renderToolWasteTotals is §7's top-line: the four window totals leading
+// the tool-waste block (bytes shipped, dead-weight bytes, wasted
+// tokens, tool-set shape count) — the report's headline efficiency figures.
+// Reuses i18n.ToolWaste's own labels so the JSON slice and this block
+// can't disagree.
 func renderToolWasteTotals(w func(string, ...any), rep *Report2, lang i18n.Lang) {
 	if len(rep.Tools) == 0 {
 		return
@@ -83,6 +83,28 @@ func renderToolWasteTotals(w func(string, ...any), rep *Report2, lang i18n.Lang)
 		tw.StatDead, fmtBytesGB(waste), pct,
 		tw.StatTokens, twTokens(waste),
 		tw.StatShapes, len(rep.Tools))
+}
+
+// toolWasteBytesPerToken is the rough JSON→token divisor for the "≈ tokens
+// wasted" figure. Tool-schema JSON is dense ASCII (keys, braces, quotes), so
+// ~4 bytes/token holds close; the label carries the "≈". A precise count
+// would mean threading the marshaled schema text through the report's
+// aggregation just for this one display number — not worth it against a
+// <10% error on dense ASCII.
+const toolWasteBytesPerToken = 4
+
+// twTokens renders a byte count as its rough wasted-token equivalent for
+// the §7 tool-waste block.
+func twTokens(bytes int64) string {
+	tok := bytes / toolWasteBytesPerToken
+	switch {
+	case tok >= 1_000_000:
+		return strconv.FormatFloat(float64(tok)/1e6, 'f', 1, 64) + "M"
+	case tok >= 1_000:
+		return strconv.FormatFloat(float64(tok)/1e3, 'f', 1, 64) + "K"
+	default:
+		return strconv.FormatInt(tok, 10)
+	}
 }
 
 // renderToolShapeDetail lists, for one declared-tool-set shape, which tools

@@ -1,8 +1,9 @@
 // Ver 2026-08-28, by Sonnet 5
 
-// Pairs with internal/journey/render_compare_html.go — the single-page HTML
-// comparison dashboard (`vmr analyze -compare a,b -html`). Fixed UI
-// strings only.
+// Chrome of the retired single-page HTML comparison dashboard
+// (`vmr analyze -compare a,b -html`): the self-contained renderers were
+// retired with the `-html`/`-redact` flags (D6/D15), and this text is kept
+// only until its own removal lands. Fixed UI strings only.
 package i18n
 
 import "fmt"

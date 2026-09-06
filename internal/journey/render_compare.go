@@ -340,9 +340,8 @@ func renderDeliverable(w func(string, ...any), d DeliverableFact, t i18n.Compare
 	renderDeliverableSide(w, "B", d.B, t)
 }
 
-// renderCost renders each side's estimated spend — the same CostPair the HTML
-// dashboard's tale-of-the-tape and facts strip already carry, kept off the
-// Markdown until now (口径对齐: .md now matches JSON/HTML). A "$X vs —" split
+// renderCost renders each side's estimated spend — the same CostPair the
+// comparison JSON's extras.cost carries (口径对齐: .md matches JSON). A "$X vs —" split
 // (exactly one side priced) draws a footnote so the blank isn't read as
 // "free" (F-3).
 func renderCost(w func(string, ...any), cp CostPair, t i18n.CompareText) {

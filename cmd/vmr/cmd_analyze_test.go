@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
 	story "vmr/internal/journey"
 	"vmr/internal/report"
@@ -641,80 +641,59 @@ func TestCmdAnalyze_CompareWildcard(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_CompareHTML covers 12-D: -compare -html writes a
-// self-contained comparison dashboard (0600) with the three sections, and
-// -redact drops the excerpt bodies without leaking.
-func TestCmdAnalyze_CompareHTML(t *testing.T) {
-	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+// TestCmdAnalyze_WritesSkeletonPages pins §5.4's implementation discipline:
+// every analyze invocation idempotently refreshes the six skeleton
+// dashboard pages into the output root — the default suite, the zoom modes,
+// everything. The pages carry zero business data (data is fetched
+// client-side from the JSON slices), so a skeleton at the root is always
+// safe to overwrite and always in sync with the running binary.
+func TestCmdAnalyze_WritesSkeletonPages(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 9, 1, 10, min, 0, 0, time.UTC) }
+	path := writeStoryJSONL(t, []audit.Record{
+		storyRec(at(0), []any{storyMsg("system", "sys"), storyMsg("user", "skeleton probe")}, storySSE("开工")),
+	})
 
-	aU1 := storyMsg("user", "candidate A SECRET-A opening")
-	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("plan A"))
-	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
-	bU1 := storyMsg("user", "candidate B SECRET-B opening")
-	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("plan B"))
-	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+	assertSkeletons := func(t *testing.T, outDir string) {
+		t.Helper()
+		names, err := dashboard.AssetNames()
+		if err != nil {
+			t.Fatalf("dashboard.AssetNames: %v", err)
+		}
+		if len(names) == 0 {
+			t.Fatal("dashboard.AssetNames returned no pages")
+		}
+		for _, name := range names {
+			fi, err := os.Stat(filepath.Join(outDir, name))
+			if err != nil {
+				t.Errorf("skeleton page %s missing at output root: %v", name, err)
+				continue
+			}
+			if fi.Mode().Perm() != 0o600 {
+				t.Errorf("skeleton page %s mode = %v, want 0600", name, fi.Mode().Perm())
+			}
+		}
+	}
 
-	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
 	outDir := filepath.Join(t.TempDir(), "out")
-	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
-	if err != nil {
-		t.Fatalf("setupStoryRun: %v", err)
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
+		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
-	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+	assertSkeletons(t, outDir)
 
-	run := func(args ...string) string {
-		if err := captureStdoutErr(t, func() error { return cmdAnalyze(args) }); err != nil {
-			t.Fatalf("cmdAnalyze %v: %v", args, err)
-		}
-		hs, _ := filepath.Glob(filepath.Join(outDir, "compares", "compare-*.html"))
-		if len(hs) != 1 {
-			t.Fatalf("want exactly one compare-*.html, got %v", hs)
-		}
-		info, err := os.Stat(hs[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0o600 {
-			t.Errorf("compare HTML mode = %v, want 0600", info.Mode().Perm())
-		}
-		data, err := os.ReadFile(hs[0])
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(data)
+	// A second run over the same output root must refresh in place —
+	// idempotent, never an error.
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
+		t.Fatalf("cmdAnalyze rerun: %v", err)
 	}
+	assertSkeletons(t, outDir)
 
-	full := run("-o", outDir, "-compare", idA+","+idB, "-html", path)
-	for _, want := range []string{"<!doctype html>", `id="sides"`, `id="diff"`, "<table class=\"abtbl\"", "SECRET-A", "SECRET-B"} {
-		if !strings.Contains(full, want) {
-			t.Errorf("compare dashboard missing %q", want)
-		}
+	// A zoom mode (no macro report half at all) refreshes too — "every
+	// analyze invocation" means every mode, not just the default suite.
+	zoomDir := filepath.Join(t.TempDir(), "zoom")
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", zoomDir, "-macro-only", path}) }); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	if regexp.MustCompile(`(?:src|href)\s*=\s*"https?://`).FindString(full) != "" {
-		t.Error("compare dashboard references an external resource")
-	}
-
-	os.RemoveAll(filepath.Join(outDir, "stories"))
-	red := run("-o", outDir, "-compare", idA+","+idB, "-html", "-redact", path)
-	for _, secret := range []string{"SECRET-A", "SECRET-B"} {
-		if strings.Contains(red, secret) {
-			t.Errorf("redacted compare dashboard leaked %q", secret)
-		}
-	}
-	if !strings.Contains(red, "‹text:") {
-		t.Error("redacted compare dashboard has no length placeholders")
-	}
-}
-
-// TestCmdAnalyze_HTMLRejectedWithoutJourneyOrCompare covers the widened
-// flag rule (12-D): -html now needs -journey OR -compare.
-func TestCmdAnalyze_HTMLRejectedWithoutJourneyOrCompare(t *testing.T) {
-	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
-	err := cmdAnalyze([]string{"-o", filepath.Join(t.TempDir(), "o"), "-html", path})
-	if err == nil || !strings.Contains(err.Error(), "-journey") {
-		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
-	}
+	assertSkeletons(t, zoomDir)
 }
 
 // TestCmdAnalyze_LLMAddrRejectedInDefaultSuite covers the batch-mode

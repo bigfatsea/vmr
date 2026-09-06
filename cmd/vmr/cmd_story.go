@@ -222,7 +222,7 @@ func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 // dry-run/degrade contract compareJourneys' own LLM section follows: a
 // dry run never leaves a journeys/ directory behind, and a call
 // failure only drops the LLM section, never fails the command.
-func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string, htmlOn, redactOn bool) error {
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string) error {
 	t := i18n.CLI(lang)
 	chain := ctxgraph.ChainFrom(target, byIdx)
 	partial := story.IsPartialHead(chain, firstPath)
@@ -287,16 +287,6 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return err
 	}
 	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
-	if htmlOn {
-		htmlPath := filepath.Join(journeysDir, "details", journeyBaseName(j)+".html")
-		// 0600: same sensitivity as the .md — the redacted variant still
-		// keeps structure and metrics, but the un-redacted one carries full
-		// conversation bodies.
-		if err := os.WriteFile(htmlPath, []byte(story.RenderHTML(j, m, findings, cost, lang, redactOn)), 0o600); err != nil {
-			return err
-		}
-		fmt.Printf("wrote %s\n", htmlPath)
-	}
 	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", journeyBaseName(j)+".md")))
 	return saveStoryIndex(idx, outDir, lang)
 }
@@ -309,7 +299,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison), and the output filename picks up the
 // same "-partial" self-disclosure suffix if either side is.
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string, htmlOn, redactOn bool) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -376,7 +366,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	llmSection, llmResult := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
+	llmSection := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
 
 	comparesDir, err := ensureComparesDir(outDir)
 	if err != nil {
@@ -404,15 +394,6 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
-	if htmlOn {
-		htmlPath := filepath.Join(comparesDir, base+".html")
-		// 0600: same sensitivity as the .md — the un-redacted variant carries
-		// full excerpt text.
-		if err := os.WriteFile(htmlPath, []byte(story.RenderComparisonHTML(cmp, llmResult, lang, redactOn)), 0o600); err != nil {
-			return err
-		}
-		fmt.Printf("wrote %s\n", htmlPath)
-	}
 	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), filepath.ToSlash(filepath.Join("details", journeyBaseName(jA)+".md")))
 	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), filepath.ToSlash(filepath.Join("details", journeyBaseName(jB)+".md")))
 	return saveStoryIndex(idx, outDir, lang)
@@ -420,12 +401,11 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 
 // compareLLMSections runs the overall and divergence LLM interpretation
 // calls for -compare, degrading gracefully on failure without failing the
-// command. Returns both the Markdown section (for the .md report) and the
-// structured result (for the .html dashboard) from the same two calls.
-func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) (string, story.CompareLLMResult) {
-	result := story.CompareLLMResult{Model: llmOpts.Model}
+// command. Returns the Markdown section for the .md report from the same
+// two calls.
+func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
 	if llmOpts.Addr == "" {
-		return "", result
+		return ""
 	}
 	var llmSection string
 	pack := story.BuildEvidencePack(jA, jB, cmp, lang)
@@ -435,7 +415,6 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 	} else {
-		result.Overall = res
 		llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
 	}
 
@@ -447,7 +426,6 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
-			result.Divergence, result.DivergenceUsed = divRes, true
 			divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
 			if llmSection != "" {
 				llmSection += "\n" + divSection
@@ -456,7 +434,7 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 			}
 		}
 	}
-	return llmSection, result
+	return llmSection
 }
 
 // renderJourneys renders every given candidate (skipping partial-head ones

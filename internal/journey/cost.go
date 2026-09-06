@@ -14,6 +14,7 @@ package journey
 
 import (
 	"sort"
+	"strconv"
 
 	"vmr/internal/pricing"
 )
@@ -160,4 +161,39 @@ func ComputeJourneyCost(j *Journey, res *pricing.Resolver, currency string) Cost
 		return fact.ByModel[a].Endpoint < fact.ByModel[b].Endpoint
 	})
 	return fact
+}
+
+// moneyDecimals shows cents for small amounts, whole units past $100 where
+// the cents are noise on a shareable report.
+func moneyDecimals(v float64) int {
+	if v >= 100 {
+		return 0
+	}
+	return 2
+}
+
+// fmtMoney formats c's total with its currency — "$4.80" for USD/blank,
+// "CNY 34.20" otherwise, a trailing "+" when the estimate is partial.
+func fmtMoney(c CostFact) string {
+	amt := strconv.FormatFloat(c.TotalAmount(), 'f', moneyDecimals(c.TotalAmount()), 64)
+	s := amt
+	if c.Currency == "" || c.Currency == "USD" {
+		s = "$" + amt
+	} else {
+		s = c.Currency + " " + amt
+	}
+	if c.Partial() {
+		s += "+"
+	}
+	return s
+}
+
+// totMoney is fmtMoney with an unresolved side rendered as a dash rather
+// than "$0" — a comparison row where only one side priced must read as
+// "unknown", never "free".
+func totMoney(c CostFact) string {
+	if !c.Resolved {
+		return "—"
+	}
+	return fmtMoney(c)
 }

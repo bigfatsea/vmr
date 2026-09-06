@@ -88,8 +88,8 @@ func journeyAnthropicCoverageNote(j *Journey, t i18n.SpineText) string {
 
 // journeyAnthropicCoverageCodes returns the affected detector/metric list
 // when j has zero anthropic-messages Steps (ok=false otherwise) —
-// language-independent, so both the Markdown note above and the HTML
-// dashboard (render_html.go) wrap the same list in their own localized prose.
+// language-independent, so the Markdown note above can wrap the list in
+// its own localized prose.
 func journeyAnthropicCoverageCodes(j *Journey) (codes string, ok bool) {
 	share := protocolShare([]*Journey{j})
 	if len(share) == 0 || share[core.ProtocolAnthropicMessages] > 0 {

@@ -1288,47 +1288,6 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 	}
 }
 
-// TestCmdStory_HTMLFlagParity covers the deprecated alias reaching the same
-// -html/-redact dashboards `vmr analyze` does — the flags were missing from
-// cmdStory's own FlagSet, so `vmr story -journey X -html` errored out with
-// "flag provided but not defined". Both the happy path (a dashboard file
-// lands next to the .md) and the same rejection rules cmdAnalyze enforces.
-func TestCmdStory_HTMLFlagParity(t *testing.T) {
-	outDir := filepath.Join(t.TempDir(), "out")
-	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
-
-	if err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-journey", idA, "-html", "-o", outDir, path})
-	}); err != nil {
-		t.Fatalf("vmr story -journey -html: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(idA, false), ".md")+".html")); err != nil {
-		t.Errorf("journey dashboard not written: %v", err)
-	}
-
-	if err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-compare", idA + "," + idB, "-html", "-redact", "-o", outDir, path})
-	}); err != nil {
-		t.Fatalf("vmr story -compare -html -redact: %v", err)
-	}
-	htmlData, err := os.ReadFile(filepath.Join(outDir, "compares", "compare-"+idA+"-vs-"+idB+".html"))
-	if err != nil {
-		t.Fatalf("compare dashboard not written: %v", err)
-	}
-	if strings.Contains(string(htmlData), `<a href="journey-`) {
-		t.Error("redacted compare dashboard links to the un-redacted per-journey report")
-	}
-
-	if err := cmdAnalyze([]string{"-redact", "-journey", idA, "-o", outDir, path}); err == nil ||
-		!strings.Contains(err.Error(), "-html") {
-		t.Errorf("-redact without -html should be rejected, got %v", err)
-	}
-	if err := cmdAnalyze([]string{"-html", "-o", outDir, path}); err == nil ||
-		!strings.Contains(err.Error(), "-journey") {
-		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
-	}
-}
-
 // TestCmdStory_BatchRendersIncludeCost pins Problem 3: default-suite,
 // -render-all and multi-target -journey batch rendering previously passed a
 // nil cost to writeJourneyFile (on the historical misconception that pricing

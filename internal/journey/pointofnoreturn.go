@@ -58,7 +58,7 @@ var ponrRetryCodes = map[FindingCode]bool{
 }
 
 // ComputePointOfNoReturn locates the turn from j and its already-computed
-// findings (RenderHTML passes the same slice it renders). Language-
+// findings (the same slice the renderers walk). Language-
 // independent — it reads Finding.Code and Finding.StepSeq only, never the
 // localized text.
 func ComputePointOfNoReturn(j *Journey, findings []Finding) *PointOfNoReturn {

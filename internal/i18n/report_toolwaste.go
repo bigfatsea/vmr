@@ -1,9 +1,9 @@
 // Ver 2026-08-29, by Sonnet 5
 
-// Pairs with internal/report/toolwaste_html.go — the standalone
-// tool-schema-waste card (`{out}/tool-waste.html`, written by `vmr analyze`
-// whenever the report has tool data). Fixed UI strings only; every number
-// comes from the report's own rep.Tools rows.
+// Chrome strings for the §7 tool-waste figures (renderToolWasteTotals in
+// internal/report/section_efficiency.go and the retired standalone
+// tool-schema-waste card). Fixed UI strings only; every number comes from
+// the report's own rep.Tools rows.
 package i18n
 
 import "fmt"

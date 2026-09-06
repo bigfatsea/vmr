@@ -17,9 +17,12 @@ import (
 // whole-document renderers, not sections, so they pair with a non-section
 // file by design.
 var i18nReportExceptions = map[string]string{
-	"doc":       "render_doc.go",
-	"requests":  "requests.go",
-	"toolwaste": "toolwaste_html.go",
+	"doc":      "render_doc.go",
+	"requests": "requests.go",
+	// report_toolwaste.go's card counterpart (toolwaste_html.go) was retired
+	// with the self-contained HTML renderers (D6); its remaining consumer is
+	// §7's Markdown tool-waste block in the efficiency section.
+	"toolwaste": "section_efficiency.go",
 }
 
 // reportI18nPairingProblems compares the section_*.go module-name set with
