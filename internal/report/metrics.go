@@ -129,6 +129,10 @@ func finishRow(r *Row) {
 	r.StreamMSP50, r.StreamMSP95 = percentiles(r.streamMS)
 	if r.Requests > 0 {
 		r.SuccessRate = round2(float64(r.OK) / float64(r.Requests))
+		r.TokensCoveragePct = round2(float64(r.TokensKnown) / float64(r.Requests) * 100)
+	}
+	if r.RequestsWithDur > 0 && r.RequestsWithDur < 20 {
+		r.DurLowN = true
 	}
 	if r.TokensIn > 0 {
 		r.CacheHitRate = cacheHitRate(r.TokensInCached, r.TokensIn)
@@ -171,6 +175,10 @@ func finishEndpoint(e *EndpointRow) {
 	}
 	if e.Requests > 0 {
 		e.SuccessRate = round2(float64(e.RequestsOK) / float64(e.Requests))
+		e.TokensCoveragePct = round2(float64(e.TokensKnown) / float64(e.Requests) * 100)
+	}
+	if e.RequestsWithDur > 0 && e.RequestsWithDur < 20 {
+		e.DurLowN = true
 	}
 	if e.tokDurMS > 0 {
 		e.TokOutPerSec = round2(float64(e.TokensOut) / (float64(e.tokDurMS) / 1000))
@@ -187,6 +195,10 @@ func finishClient(c *ClientRow) {
 	c.OutTokP50, c.OutTokP95 = percentiles(c.outToks)
 	if c.Requests > 0 {
 		c.SuccessRate = round2(float64(c.OK) / float64(c.Requests))
+		c.TokensCoveragePct = round2(float64(c.TokensKnown) / float64(c.Requests) * 100)
+	}
+	if c.RequestsWithDur > 0 && c.RequestsWithDur < 20 {
+		c.DurLowN = true
 	}
 	c.inToks, c.outToks = nil, nil
 }
