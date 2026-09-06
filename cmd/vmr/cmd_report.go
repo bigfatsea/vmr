@@ -106,7 +106,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 func resolvePricingForAnalyze(cfg *config.Config, cfgErr error, configPath, displayCCY string, exchangeRate map[string]float64) (*pricing.Resolver, string) {
 	tw := timestampWriter{w: os.Stderr}
 	if cfgErr != nil {
-		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no supplement, no account overrides)\n", configPath, cfgErr)
+		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides)\n", configPath, cfgErr)
 	}
 	resolver, info := buildPricing(cfg, cfgErr, configPath, tw, displayCCY, exchangeRate)
 	ccy := "USD"
