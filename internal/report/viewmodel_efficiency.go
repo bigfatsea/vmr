@@ -76,19 +76,19 @@ func vmToolWasteTotals(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: fmt.Sprintf("> **%s** %s · **%s** %s (%.0f%%) · **%s** %s · **%s** %d\n\n",
 		tw.StatShipped, fmtBytesGB(shipped),
 		tw.StatDead, fmtBytesGB(waste), pct,
-		tw.StatTokens, vmTwTokens(waste),
+		tw.StatTokens, twTokens(waste),
 		tw.StatShapes, len(rep.Tools))})
 }
 
-// vmToolWasteBytesPerToken is the rough JSON→token divisor for the
+// toolWasteBytesPerToken is the rough JSON→token divisor for the
 // "≈ tokens wasted" figure. Tool-schema JSON is dense ASCII (keys, braces,
 // quotes), so ~4 bytes/token holds close; the label carries the "≈".
-const vmToolWasteBytesPerToken = 4
+const toolWasteBytesPerToken = 4
 
-// vmTwTokens renders a byte count as its rough wasted-token equivalent for
+// twTokens renders a byte count as its rough wasted-token equivalent for
 // the §7 tool-waste block.
-func vmTwTokens(bytes int64) string {
-	tok := bytes / vmToolWasteBytesPerToken
+func twTokens(bytes int64) string {
+	tok := bytes / toolWasteBytesPerToken
 	switch {
 	case tok >= 1_000_000:
 		return strconv.FormatFloat(float64(tok)/1e6, 'f', 1, 64) + "M"

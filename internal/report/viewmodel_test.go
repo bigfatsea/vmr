@@ -9,6 +9,8 @@ package report
 import (
 	"strings"
 	"testing"
+
+	"vmr/internal/i18n"
 )
 
 func TestRenderMarkdownStructure(t *testing.T) {
@@ -112,3 +114,38 @@ func TestRenderMarkdownPanicsOnUnknownBlock(t *testing.T) {
 type unknownBlock struct{}
 
 func (unknownBlock) isBlock() {}
+
+func TestSummaryInteractiveShare(t *testing.T) {
+	rep := &Report2{
+		Workloads: []WorkloadRow{
+			{Class: "interactive", TrafficStats: TrafficStats{Requests: 40}},
+			{Class: "heartbeat", TrafficStats: TrafficStats{Requests: 5}},
+			{Class: "compaction", TrafficStats: TrafficStats{Requests: 3}},
+		},
+	}
+	if n := summaryInteractiveShare(rep); n != 40 {
+		t.Errorf("interactive share = %d, want 40", n)
+	}
+	if n := summaryInteractiveShare(&Report2{}); n != -1 {
+		t.Errorf("empty Workloads = %d, want -1", n)
+	}
+	if n := summaryInteractiveShare(nil); n != -1 {
+		t.Errorf("nil Report2 = %d, want -1", n)
+	}
+}
+
+func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
+	base := &Report2{Meta: Meta{Format: Format, Inputs: []string{"a.jsonl"}}}
+	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
+		loaded := *base
+		loaded.Meta.ReportConfigPath = "/etc/vmr/report.yaml"
+		if md := Markdown(&loaded, lang, nil, nil); !strings.Contains(md, "/etc/vmr/report.yaml") {
+			t.Errorf("lang=%v: loaded report.yaml path missing from the meta header", lang)
+		}
+		absent := *base
+		md := Markdown(&absent, lang, nil, nil)
+		if strings.Contains(md, "report.yaml)") || !strings.Contains(md, i18n.Doc(lang).MetaReportConfig("")) {
+			t.Errorf("lang=%v: 'no report.yaml loaded' must still say so explicitly:\n%s", lang, md)
+		}
+	}
+}

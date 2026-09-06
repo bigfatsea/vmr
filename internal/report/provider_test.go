@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+func f64(v float64) *float64 { return &v }
+
 func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
 		{

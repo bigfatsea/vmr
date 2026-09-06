@@ -34,30 +34,30 @@ func vmCompactionsSection(rep *Report2, lang i18n.Lang) SectionVM {
 		}
 		tbl.row(fmtDisplayFull(c.TS), orDash(c.Summarizes), orDash(c.ContinuesTo),
 			sizeDelta,
-			vmRetentionRatio(c.TokensIn, c.TokensOut),
-			vmEntitySample(c.SwallowedEntities))
+			retentionRatio(c.TokensIn, c.TokensOut),
+			entitySample(c.SwallowedEntities))
 	}
 	tbl.note(t.Footnote)
 	sec.Blocks = append(sec.Blocks, tbl)
 	return sec
 }
 
-// vmRetentionRatio renders tokens_out/tokens_in as a percentage — how much
+// retentionRatio renders tokens_out/tokens_in as a percentage — how much
 // of the original size the summary retained (a LOWER number is MORE
 // compression; a number at or above 100% means this call didn't shrink
 // anything, worth a second look at whether it's really a compaction rather
 // than a heuristic false-positive). "-" when tokens_in is unknown or zero.
-func vmRetentionRatio(in, out int64) string {
+func retentionRatio(in, out int64) string {
 	if in <= 0 {
 		return "-"
 	}
 	return pctStr(round2(float64(out) / float64(in)))
 }
 
-// vmEntitySample renders up to 3 swallowed entities inline, with a "+N
+// entitySample renders up to 3 swallowed entities inline, with a "+N
 // more" tail when there are more — a triage aid in a table cell, not the
 // full list (which stays in the JSON slice's swallowed_entities field).
-func vmEntitySample(entities []string) string {
+func entitySample(entities []string) string {
 	if len(entities) == 0 {
 		return "-"
 	}

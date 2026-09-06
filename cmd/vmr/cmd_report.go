@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -285,19 +286,12 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	rep.Meta.DetailsEnabled = detailsPresentFor(opts.detailsOn, detailDir) // see its own doc comment
 	report.LocalizeEfficiency(rep, opts.lang)
 	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
-	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
 	if err := report.WriteJSON(rep, jsonPath); err != nil {
 		return nil, err
 	}
 	if err := report.WriteMacroSlices(opts.outDir, rep, opts.lang); err != nil {
 		return nil, err
 	}
-	storiesLink, lineageToJourney := loadStoriesLink(opts.outDir)
-	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink, lineageToJourney)), 0o600); err != nil {
-		return nil, err
-	}
-	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
-		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
 
 	if dw != nil {
 		n, err := dw.Close()
@@ -306,6 +300,8 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 		}
 		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
 	}
+
+	_, lineageToJourney := loadStoriesLink(opts.outDir)
 
 	// Requests index (requests/index.json, the machine-readable single
 	// source of truth with the session projection and journey cross-links;
@@ -332,9 +328,60 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 		return nil, fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, requestsDir, opts.lang, detailDir); err != nil {
+
+	// Single render path from disk JSON (D11): render vmr-report.md and requests/failed.md
+	if err := renderMacroReportFromDisk(opts.outDir, opts.lang); err != nil {
+		return nil, fmt.Errorf("render macro report: %w", err)
+	}
+	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
+	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+
+	if err := renderFailedIndexFromDisk(requestsDir, opts.lang, detailDir); err != nil {
 		return nil, fmt.Errorf("failed-requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s\n", filepath.Join(requestsDir, "failed.md"))
 	return rep, nil
+}
+
+// renderMacroReportFromDisk reads vmr-report.json and requests/index.json from
+// outDir, builds the MacroReportVM, and serializes it to vmr-report.md (D11).
+func renderMacroReportFromDisk(outDir string, lang i18n.Lang) error {
+	rep, err := report.LoadReport(outDir)
+	if err != nil {
+		return fmt.Errorf("load report json: %w", err)
+	}
+	storiesLink, lineageToJourney := loadStoriesLink(outDir)
+	md := report.MacroMarkdown(rep, lang, storiesLink, lineageToJourney)
+	mdPath := filepath.Join(outDir, "vmr-report.md")
+	return os.WriteFile(mdPath, []byte(md), 0o600)
+}
+
+// renderFailedIndexFromDisk reads requests/index.json (or requests/failed.jsonl)
+// from requestsDir and renders requests/failed.md (D11).
+func renderFailedIndexFromDisk(requestsDir string, lang i18n.Lang, detailDir string) error {
+	var rows []report.RequestRow
+	indexPath := filepath.Join(requestsDir, "index.json")
+	if data, err := os.ReadFile(indexPath); err == nil {
+		var idx report.RequestsIndex
+		if err := json.Unmarshal(data, &idx); err == nil {
+			rows = idx.Requests
+		}
+	}
+	if len(rows) == 0 {
+		failedJSONLPath := filepath.Join(requestsDir, "failed.jsonl")
+		if data, err := os.ReadFile(failedJSONLPath); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				var r report.RequestRow
+				if err := json.Unmarshal([]byte(line), &r); err == nil {
+					rows = append(rows, r)
+				}
+			}
+		}
+	}
+	return report.WriteFailedIndex(rows, requestsDir, lang, detailDir)
 }

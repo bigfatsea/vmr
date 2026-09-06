@@ -78,10 +78,12 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 	if err != nil {
 		return err
 	}
-	if err := idx.Save(filepath.Join(journeysDir, "index.json")); err != nil {
+	indexPath := filepath.Join(journeysDir, "index.json")
+	if err := idx.Save(indexPath); err != nil {
 		return err
 	}
-	md := story.RenderStoryIndexMarkdown(idx, lang)
+	diskIdx := story.LoadStoryIndex(indexPath)
+	md := story.RenderStoryIndexMarkdown(diskIdx, lang)
 	if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
 		return err
 	}
@@ -377,20 +379,30 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if partialA || partialB {
 		base += "-partial"
 	}
-	mdPath := filepath.Join(comparesDir, base+".md")
-	md := story.RenderComparisonMarkdown(cmp, lang)
-	if llmSection != "" {
-		md += "\n" + llmSection
-	}
-	if err := os.WriteFile(mdPath, []byte(md), 0o600); err != nil {
-		return err
-	}
 	jsonPath := filepath.Join(comparesDir, base+".json")
 	data, err := json.MarshalIndent(cmp, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(jsonPath, data, 0o600); err != nil {
+		return err
+	}
+
+	diskData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return err
+	}
+	var diskCmp story.Comparison
+	if err := json.Unmarshal(diskData, &diskCmp); err != nil {
+		return err
+	}
+
+	mdPath := filepath.Join(comparesDir, base+".md")
+	md := story.RenderComparisonMarkdown(diskCmp, lang)
+	if llmSection != "" {
+		md += "\n" + llmSection
+	}
+	if err := os.WriteFile(mdPath, []byte(md), 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
@@ -568,16 +580,25 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	if err != nil {
 		return err
 	}
-	mdPath := filepath.Join(journeysDir, "benchmarks.md")
-	if err := os.WriteFile(mdPath, []byte(story.RenderCorpusMarkdown(stats, lang)), 0o600); err != nil {
-		return err
-	}
 	jsonPath := filepath.Join(journeysDir, "benchmarks.json")
 	data, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		return err
 	}
 	if err := os.WriteFile(jsonPath, data, 0o600); err != nil {
+		return err
+	}
+
+	diskData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return err
+	}
+	var diskStats story.CorpusStats
+	if err := json.Unmarshal(diskData, &diskStats); err != nil {
+		return err
+	}
+	mdPath := filepath.Join(journeysDir, "benchmarks.md")
+	if err := os.WriteFile(mdPath, []byte(story.RenderCorpusMarkdown(diskStats, lang)), 0o600); err != nil {
 		return err
 	}
 	if skippedPartial > 0 {
@@ -658,14 +679,7 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	if materializeDetails {
 		story.EnsureJourneyDetails(os.Stderr, j, recs, detailDir, evidenceDir, prof, lang)
 	}
-	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(journeysDir), "vmr-report.md"))
-	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil, materializeDetails, cost)
-	if llmSection != "" {
-		md += "\n" + llmSection
-	}
-	if err := os.WriteFile(outPath, []byte(md), 0o600); err != nil {
-		return "", err
-	}
+
 	jsonPath := filepath.Join(detailsDir, base+".json")
 	summary := story.NewJourneySummary(j, m, findings, llmFindings, cost)
 	data, err := json.MarshalIndent(summary, "", "  ")
@@ -673,6 +687,25 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 		return "", err
 	}
 	if err := os.WriteFile(jsonPath, data, 0o600); err != nil {
+		return "", err
+	}
+
+	diskData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		return "", err
+	}
+	var s story.JourneySummary
+	if err := json.Unmarshal(diskData, &s); err != nil {
+		return "", err
+	}
+
+	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(journeysDir), "vmr-report.md"))
+	linkDetails := materializeDetails || detailDirHasFiles(detailDir)
+	md := story.RenderMarkdownFromSummary(&s, lang, reportMDErr == nil, linkDetails)
+	if llmSection != "" {
+		md += "\n" + llmSection
+	}
+	if err := os.WriteFile(outPath, []byte(md), 0o600); err != nil {
 		return "", err
 	}
 	return outPath, nil

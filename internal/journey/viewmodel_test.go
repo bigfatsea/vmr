@@ -101,47 +101,6 @@ func vmEquivalenceSysChangeFixture(t *testing.T) *Journey {
 	return j
 }
 
-// TestRenderFromSummary_ByteEquivalence is the old→new transition guard (§9):
-// for the same Journey, Metrics, Findings and CostFact, RenderMarkdown (eats
-// *Journey) and RenderMarkdownFromSummary (eats the self-contained
-// JourneySummary, via its published JSON shape) must produce byte-identical
-// Markdown — in both languages, in link and coordinate mode. When 3C deletes
-// the old path, this test dies with it; until then it is what makes the old
-// renderer's continued presence safe.
-func TestRenderFromSummary_ByteEquivalence(t *testing.T) {
-	cost := &CostFact{Currency: "USD", Resolved: true, PricedSteps: 4, TotalSteps: 4}
-	total := 1.23
-	cost.Total = &total
-
-	for _, fixture := range []struct {
-		name string
-		j    func(t *testing.T) *Journey
-	}{
-		{"golden", func(t *testing.T) *Journey { return buildGoldenJourney(t) }},
-		{"rich", vmEquivalenceFixture},
-		{"syschange", vmEquivalenceSysChangeFixture},
-	} {
-		for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
-			for _, linkDetails := range []bool{true, false} {
-				t.Run(fixture.name+"/"+lang.String()+"/linkDetails-"+boolStr(linkDetails), func(t *testing.T) {
-					j := fixture.j(t)
-					m := ComputeMetrics(j)
-					findings := ComputeFindings(j, lang)
-
-					summary := NewJourneySummary(j, m, findings, nil, cost)
-					roundtrip := jsonRoundTripSummary(t, summary)
-
-					want := RenderMarkdown(j, m, findings, lang, false, linkDetails, cost)
-					got := RenderMarkdownFromSummary(roundtrip, lang, false, linkDetails)
-					if got != want {
-						t.Errorf("viewmodel path diverged from the old render path (lang=%s linkDetails=%v)\n=== new ===\n%s\n=== old ===\n%s", lang, linkDetails, got, want)
-					}
-				})
-			}
-		}
-	}
-}
-
 // vmStepHeaderSeq reports whether blk is a spine Step header ("**<tag>
 // Step N · ts>**"), returning its Seq.
 func vmStepHeaderSeq(blk VMBlock) (int, bool) {

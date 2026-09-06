@@ -1,7 +1,12 @@
 // Ver 2026-08-31, by Sonnet 5
 package report
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"vmr/internal/fmtutil"
+)
 
 // TestFinishCell_UnclassifiedFailureIsNotABareDash pins the fix for the
 // pre-routing-reject / queue-cancel case: outcome != "ok" with an empty
@@ -176,5 +181,38 @@ func TestTagSummary_UsageOutOKGate(t *testing.T) {
 	// row A still drives fresh/cached through the in-side gate.
 	if s.fresh != 10 || s.cached != 1 {
 		t.Errorf("fresh=%d cached=%d, want 10/1 (row A's input-side totals)", s.fresh, s.cached)
+	}
+}
+
+// TestFmtDisplayFullConvertsToDisplayZone proves fmtDisplayFull converts
+// through fmtutil.DisplayZone rather than reading the input timestamp's
+// own embedded offset.
+func TestFmtDisplayFullConvertsToDisplayZone(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.FixedZone("TEST-05:00", -5*3600)
+	defer func() { fmtutil.DisplayZone = origZone }()
+
+	const in = "2026-07-24T08:17:58+08:00"
+	const want = "2026-07-23 19:17:58"
+
+	got := fmtDisplayFull(in)
+	if got != want {
+		t.Errorf("fmtDisplayFull(%q) = %q, want %q (DisplayZone conversion not applied)", in, got, want)
+	}
+}
+
+// TestFmtDisplayFullUsesSpaceSeparator proves fmtDisplayFull uses a space
+// between date and time ("2026-07-24 00:17:58"), not RFC3339's "T".
+func TestFmtDisplayFullUsesSpaceSeparator(t *testing.T) {
+	origZone := fmtutil.DisplayZone
+	fmtutil.DisplayZone = time.UTC
+	defer func() { fmtutil.DisplayZone = origZone }()
+
+	const in = "2026-07-24T00:17:58Z"
+	const want = "2026-07-24 00:17:58"
+
+	got := fmtDisplayFull(in)
+	if got != want {
+		t.Errorf("fmtDisplayFull(%q) = %q, want %q (space separator, not RFC3339 T)", in, got, want)
 	}
 }

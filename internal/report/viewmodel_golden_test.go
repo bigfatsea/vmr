@@ -22,6 +22,81 @@ import (
 	"vmr/internal/i18n"
 )
 
+// fixedRow is a Row with every rendered field populated; identity fields
+// are overwritten by the with* helpers.
+func fixedRow(id string) Row {
+	r := Row{Date: id, Model: id, Protocol: "openai-completions"}
+	r.TrafficStats = fixedStats(50, 45, 3, 500_000, 350_000, 120_000)
+	r.Canceled = 1
+	r.Truncated = 1
+	r.Fallbacks = 3
+	r.FallbackRecovered = 2
+	r.FallbackFailed = 1
+	r.SuccessRate = 0.9
+	r.CacheHitRate = 0.7
+	r.ReasoningShare = 0.05
+	r.TokensKnown = 45
+	r.CacheEfficiency = 0.72
+	r.RequestsWithDur = 44
+	r.DurMSP50 = 1500
+	r.DurMSP95 = 9000
+	r.TTFTKnown = 44
+	r.TTFTMSP50 = 320
+	r.TTFTMSP95 = 950
+	r.DurMSMax = 35_000
+	r.SlowRequests = 2
+	r.TokOutPerSec = 50.25
+	r.RoleChars = map[string]int64{"user": 12_000, "assistant": 48_000, "tool": 140_000}
+	r.RoleTokens = map[string]int64{"user": 3_000, "assistant": 12_000, "tool": 35_000}
+	return r
+}
+
+// fixedStats fills the TrafficStats core: requests/ok/errors, token split.
+func fixedStats(reqs, ok, errs int, in, cached, out int64) TrafficStats {
+	return TrafficStats{
+		Requests: reqs, OK: ok, Errors: errs,
+		TokensIn: in, TokensInCached: cached, TokensInFresh: in - cached, TokensOut: out,
+	}
+}
+
+func withSpeed(r Row, proto string, tokPerSec float64, cost *float64) Row {
+	r.Protocol = proto
+	r.TokOutPerSec = tokPerSec
+	r.CostEstimate = cost
+	return r
+}
+
+func withWorkload(class string, reqs, ok, errs int, in, cached, out int64, known int, cacheEff, toolRate float64) WorkloadRow {
+	w := WorkloadRow{Class: class}
+	w.TrafficStats = fixedStats(reqs, ok, errs, in, cached, out)
+	w.TokensKnown = known
+	w.CacheEfficiency = cacheEff
+	w.ToolCallRate = toolRate
+	return w
+}
+
+func withSessionErrs(s SessionRow) SessionRow {
+	s.Errors = 1
+	return s
+}
+
+func withDate(r Row, cost *float64) Row {
+	r.CostEstimate = cost
+	return r
+}
+
+func withClient(key string, stats TrafficStats, cost *float64) ClientRow {
+	c := ClientRow{ClientKey: key}
+	c.TrafficStats = stats
+	c.SuccessRate = 0.9
+	c.InTokP50 = 9000
+	c.InTokP95 = 31_000
+	c.OutTokP50 = 2000
+	c.OutTokP95 = 9100
+	c.CostEstimate = cost
+	return c
+}
+
 // goldenFixture is a compact but branch-rich input: enough to exercise
 // paragraphs, tables with conditional notes, a folded table, a details
 // block, mermaid, footnotes, and both languages' full string sets —

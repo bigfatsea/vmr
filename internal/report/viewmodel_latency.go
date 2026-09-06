@@ -33,7 +33,7 @@ func vmLatencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	// each group sorted by tok/s descending
 	if len(rep.EndpointsAll) > 0 {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.ByEndpointTitle + "\n\n"})
-		protocols, byProto := vmProtocolBuckets(rep.EndpointsAll)
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
 		eh := t.EndpointHeaders(SlowThresholdMS / 1000)
 		for _, p := range protocols {
 			rows := append([]EndpointRow(nil), byProto[p]...)

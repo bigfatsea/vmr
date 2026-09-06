@@ -42,7 +42,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	}
 	if nonzero {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.ErrorByEndpointTitle + "\n\n"})
-		protocols, byProto := vmProtocolBuckets(rep.EndpointsAll)
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
 		for _, p := range protocols {
 			rows := byProto[p]
 			hasAny := false
@@ -83,7 +83,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	}
 	if quirkNonzero {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.QuirkByEndpointTitle + "\n\n"})
-		protocols, byProto := vmProtocolBuckets(rep.EndpointsAll)
+		protocols, byProto := protocolBuckets(rep.EndpointsAll)
 		for _, p := range protocols {
 			rows := byProto[p]
 			hasAny := false
@@ -138,7 +138,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 
 func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.EndpointHealthTitle + "\n\n"})
-	protocols, byProto := vmProtocolBuckets(rep.EndpointsAll)
+	protocols, byProto := protocolBuckets(rep.EndpointsAll)
 	for _, p := range protocols {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
 		var mainRows, lowNRows []EndpointRow
@@ -153,8 +153,8 @@ func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
 			tbl := &TableVM{Headers: t.EndpointHeaders[:]}
 			for _, e := range mainRows {
 				tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
-					pctStr(e.Availability), pctHundred(e.ErrorRate)+vmErrorRateMarker(e),
-					vmTopErrorClassShort(e))
+					pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
+					topErrorClassShort(e))
 			}
 			sec.Blocks = append(sec.Blocks, tbl)
 		}
@@ -162,8 +162,8 @@ func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
 			tbl := &TableVM{Headers: t.EndpointHeaders[:]}
 			for _, e := range lowNRows {
 				tbl.row(e.Endpoint, strconv.Itoa(e.Attempts), strconv.Itoa(e.OK),
-					pctStr(e.Availability), pctHundred(e.ErrorRate)+vmErrorRateMarker(e),
-					vmTopErrorClassShort(e))
+					pctStr(e.Availability), pctHundred(e.ErrorRate)+errorRateMarker(e),
+					topErrorClassShort(e))
 			}
 			if len(mainRows) > 0 {
 				tbl.Fold = t.LowSampleOpen(len(lowNRows))
@@ -173,25 +173,25 @@ func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
 	}
 }
 
-// vmEndpointProtocol extracts the leading "protocol:" segment from an
+// endpointProtocol extracts the leading "protocol:" segment from an
 // EndpointRow.Endpoint label ("protocol:provider:model").
-func vmEndpointProtocol(endpoint string) string {
+func endpointProtocol(endpoint string) string {
 	if i := strings.IndexByte(endpoint, ':'); i >= 0 {
 		return endpoint[:i]
 	}
 	return endpoint
 }
 
-// vmProtocolBuckets splits endpoint rows by protocol, preserving each
+// protocolBuckets splits endpoint rows by protocol, preserving each
 // row's relative order within its bucket. "openai-completions" sorts
 // first, "anthropic-messages" second, any other protocol follows
 // alphabetically — the fixed group order every §3/§4 by-protocol table
 // renders in.
-func vmProtocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
+func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	byProto := map[string][]EndpointRow{}
 	var order []string
 	for _, e := range eps {
-		p := vmEndpointProtocol(e.Endpoint)
+		p := endpointProtocol(e.Endpoint)
 		if _, ok := byProto[p]; !ok {
 			order = append(order, p)
 		}
@@ -217,11 +217,11 @@ func vmProtocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	return order, byProto
 }
 
-// vmErrorRateMarker is the §3 endpoint-health error-rate cell suffix.
+// errorRateMarker is the §3 endpoint-health error-rate cell suffix.
 // Low-n rows (same n<20 cutoff as render_cells.go's ppCell) get §4's
 // ⚠️low-n instead of the error-rate ⚠️: 50% off 2 attempts is not 50% off
 // 300.
-func vmErrorRateMarker(e EndpointRow) string {
+func errorRateMarker(e EndpointRow) string {
 	switch {
 	case e.Attempts < 20:
 		return " ⚠️low-n"
@@ -232,10 +232,10 @@ func vmErrorRateMarker(e EndpointRow) string {
 	}
 }
 
-func vmTopErrorClassShort(e EndpointRow) string {
+func topErrorClassShort(e EndpointRow) string {
 	if len(e.ErrorClasses) == 0 {
 		return "-"
 	}
-	cls, n := vmTopErrorClassCount(e.ErrorClasses)
+	cls, n := topErrorClassCount(e.ErrorClasses)
 	return cls + " ×" + strconv.Itoa(n)
 }

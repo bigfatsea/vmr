@@ -248,7 +248,7 @@ type TaskStructure struct {
 // Task/Step/Event/ToolCall skeleton plus self-contained bodies blob store (D18 / §3.6).
 type JourneyStructure struct {
 	Tasks  []TaskStructure   `json:"tasks"`
-	Bodies map[string]string `json:"bodies,omitempty"`
+	Bodies map[string]string `json:"-"`
 }
 
 // BuildStructure assembles j's already-computed Task/Step/Event data into
