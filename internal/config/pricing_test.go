@@ -312,6 +312,106 @@ func TestPricing_LegacyTopLevelPricingBlock_Rejected(t *testing.T) {
 	}
 }
 
+// TestPricing_ProviderLegacyMapField_RenamedToAliases pins the
+// pricing-architecture simplification plan §7.2 promise: a pre-2026-09
+// config that still says `pricing.map:` decodes cleanly into the new
+// `aliases` field, so migrating users do not have to hand-edit field
+// names just to load the file. Resolved pricing must be identical to the
+// post-rename `aliases:` form.
+func TestPricing_ProviderLegacyMapField_RenamedToAliases(t *testing.T) {
+	yaml := pricingCfg("", `pricing:
+      map:
+        my-alias: gpt-4o
+`, "gpt-4o")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse with legacy pricing.map: %v", err)
+	}
+	pol, ok := cfg.ProviderPricingPolicies["p1"]
+	if !ok {
+		t.Fatalf("provider policy not built: %+v", cfg.ProviderPricingPolicies)
+	}
+	got, ok := pol.Aliases["my-alias"]
+	if !ok || got != "gpt-4o" {
+		t.Errorf("Aliases[my-alias] = (%q, %v), want (gpt-4o, true)", got, ok)
+	}
+	if len(pol.Overrides) != 0 {
+		t.Errorf("Overrides = %d rules, want 0 — legacy `map:` must NOT populate rates", len(pol.Overrides))
+	}
+}
+
+// TestPricing_ProviderLegacyOverridesField_RenamedToRates pins the
+// pricing-architecture simplification plan §7.2 promise for `overrides`
+// → `rates`. A pre-2026-09 config that still says `pricing.overrides:`
+// decodes into the new `rates` field with full resolution parity.
+func TestPricing_ProviderLegacyOverridesField_RenamedToRates(t *testing.T) {
+	yaml := pricingCfg("", `pricing:
+      overrides:
+        - {model: gpt-4o, in_fresh: 100, cache_read: 10, cache_write: 100, out: 300}
+`, "gpt-4o")
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse with legacy pricing.overrides: %v", err)
+	}
+	pol, ok := cfg.ProviderPricingPolicies["p1"]
+	if !ok {
+		t.Fatalf("provider policy not built: %+v", cfg.ProviderPricingPolicies)
+	}
+	if len(pol.Overrides) != 1 {
+		t.Fatalf("Overrides = %d rules, want 1 — legacy `overrides:` must populate rates", len(pol.Overrides))
+	}
+	if pol.Overrides[0].Model != "gpt-4o" {
+		t.Errorf("Overrides[0].Model = %q, want gpt-4o", pol.Overrides[0].Model)
+	}
+}
+
+// TestPricing_ProviderLegacyDualWriteMapAndAliases_Rejected pins the
+// dual-write guard: writing BOTH `map` (legacy) and `aliases` (current)
+// for the same meaning is ambiguous, and must be a load-time error rather
+// than a silent winner-take-all. Same shape the plan's normalize() sketch
+// specified.
+func TestPricing_ProviderLegacyDualWriteMapAndAliases_Rejected(t *testing.T) {
+	yaml := pricingCfg("", `pricing:
+      map: {a: gpt-4o}
+      aliases: {b: gpt-4o-mini}
+`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "both `map`") || !strings.Contains(err.Error(), "`aliases`") {
+		t.Errorf("want dual-write rejection naming both `map` and `aliases`, got %v", err)
+	}
+}
+
+// TestPricing_ProviderLegacyDualWriteOverridesAndRates_Rejected pins the
+// dual-write guard for `overrides` vs `rates`.
+func TestPricing_ProviderLegacyDualWriteOverridesAndRates_Rejected(t *testing.T) {
+	yaml := pricingCfg("", `pricing:
+      overrides:
+        - {model: gpt-4o, in_fresh: 100, cache_read: 10, cache_write: 100, out: 300}
+      rates:
+        - {model: gpt-4o-mini, in_fresh: 1, cache_read: 0.1, cache_write: 1, out: 3}
+`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "both `overrides`") || !strings.Contains(err.Error(), "`rates`") {
+		t.Errorf("want dual-write rejection naming both `overrides` and `rates`, got %v", err)
+	}
+}
+
+// TestPricing_ProviderUnknownField_Rejected pins that the legacy-shim
+// `UnmarshalYAML` still rejects misspelled keys — the allow-list names
+// exactly `currency`/`aliases`/`rates` (current) and `map`/`overrides`
+// (legacy); any other key, including typos like `alises:`, is a load-time
+// error rather than silently ignored. The error names the offending key
+// and the allowed set so the user can self-correct without guessing.
+func TestPricing_ProviderUnknownField_Rejected(t *testing.T) {
+	yaml := pricingCfg("", `pricing:
+      alises: {a: gpt-4o}
+`, "gpt-4o")
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), `unknown field "alises"`) {
+		t.Errorf("want unknown-field rejection naming alises, got %v", err)
+	}
+}
+
 func TestPricing_MetricCost_Rejected(t *testing.T) {
 	yaml := pricingCfg("", `quota:
   limits:

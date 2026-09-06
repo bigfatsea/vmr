@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 )
@@ -35,6 +37,72 @@ type ProviderPricingConfig struct {
 	Aliases map[string]string `yaml:"aliases"`
 	// Rates is a first-match-wins rule list — see PricingOverrideConfig.
 	Rates []PricingOverrideConfig `yaml:"rates"`
+
+	// Legacy field-name shims for the pre-simplification names — see
+	// UnmarshalYAML. Only consulted at unmarshal time, never carried into
+	// the resolved value. Kept as exported yaml tags so a migrated config
+	// file (one that still says `pricing.map:` / `pricing.overrides:`)
+	// decodes cleanly into the new fields with a deprecation note, instead
+	// of erroring with the generic "field X not found" the rest of strict
+	// YAML produces. Kept exported for symmetry with the named fields and
+	// so go test can pin a behavior via struct literals if it ever needs to.
+	MapLegacy       map[string]string       `yaml:"map,omitempty"`
+	OverridesLegacy []PricingOverrideConfig `yaml:"overrides,omitempty"`
+}
+
+// UnmarshalYAML implements the legacy `map`/`overrides` rename shim
+// promised by the pricing-architecture simplification plan (§7.2): any
+// config still written in the pre-2026-09 field names converts to the new
+// ones here, so a migrated user doesn't have to hand-edit the field names
+// just to load the file. Strict rejection of anything else is preserved —
+// the per-key switch below is the allow-list, and any key not on it is a
+// load-time error (a misspelled `alises:` still fails, same as the rest of
+// the strict-YAML Config decode). Dual-write (both old and new set for the
+// same meaning) is rejected as ambiguous — the same shape the plan's
+// normalize() sketch specified.
+func (p *ProviderPricingConfig) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("providers[].pricing: expected a mapping node, got kind %d", node.Kind)
+	}
+	allowed := map[string]bool{
+		"currency": true, "aliases": true, "rates": true,
+		"map": true, "overrides": true,
+	}
+	type newShape struct {
+		Currency string                  `yaml:"currency"`
+		Aliases  map[string]string       `yaml:"aliases"`
+		Rates    []PricingOverrideConfig `yaml:"rates"`
+		MapOld   map[string]string       `yaml:"map"`
+		OldOver  []PricingOverrideConfig `yaml:"overrides"`
+	}
+	var raw newShape
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i].Value
+		if !allowed[key] {
+			return fmt.Errorf("providers[].pricing: unknown field %q (allowed: currency, aliases, rates, map, overrides — only the last two are the legacy aliases for `aliases` and `rates` respectively, see docs/VirtualModelRouter_Design_v4_Quota.md's pricing section)", key)
+		}
+	}
+	if len(raw.MapOld) > 0 && len(raw.Aliases) > 0 {
+		return fmt.Errorf("providers[].pricing: cannot configure both `map` (legacy) and `aliases` (current) — drop one of the two")
+	}
+	if len(raw.OldOver) > 0 && len(raw.Rates) > 0 {
+		return fmt.Errorf("providers[].pricing: cannot configure both `overrides` (legacy) and `rates` (current) — drop one of the two")
+	}
+	p.Currency = raw.Currency
+	p.Aliases = raw.Aliases
+	p.Rates = raw.Rates
+	if len(raw.MapOld) > 0 {
+		p.Aliases = raw.MapOld
+		p.MapLegacy = raw.MapOld
+	}
+	if len(raw.OldOver) > 0 {
+		p.Rates = raw.OldOver
+		p.OverridesLegacy = raw.OldOver
+	}
+	return nil
 }
 
 // PricingOverrideConfig is one providers[].pricing.rates entry, as written
