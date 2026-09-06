@@ -32,7 +32,7 @@
 | **Group 1A** (Macro 切片) | `feat/p1-g1a-macro-slice` | 52752 | **DONE (已合并)** | `internal/report/aggregate.go`<br>`internal/report/export.go`<br>`internal/report/rows.go`<br>`internal/report/manifest.go`<br>`internal/report/metrics.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/report/...` |
 | **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 52810 | **DONE (已合并)** | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
 | **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 57016 | **DONE (已合并)** | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
-| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 待派发 | READY (准备派发) | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go test -v -race ./cmd/vmr/...` |
+| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 重新派发（登记 PID 后替换） | RE-DISPATCH（含 cmd 测试欠账修复） | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
 
 ---
 

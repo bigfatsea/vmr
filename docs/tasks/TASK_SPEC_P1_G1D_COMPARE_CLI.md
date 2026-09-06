@@ -22,10 +22,17 @@
 4. Git 规范：提交信息遵循短命令式，如 `feat(cli): derives compares index, retire report/story aliases, rename flags to -benchmark/-journey-only`，严禁任何 trailer。
 5. 共享文件禁改：CHANGELOG.md / KNOWN_ISSUES.md / 设计文档由主控独占，Worker 严禁修改；待登记项写入不提交的 `NOTES_FOR_LEAD.md`。
 6. 并发抗干扰：严禁 `git add .`，仅 `git add <file>` 精准暂存白名单文件。
+7. 交接现状（重要）：本 worktree 存在前一 Agent 中断留下的**未提交半成品**（`compares_index.go`、`compares_index_test.go` 为新增，另有 4 个 cmd 文件的零散改动，**当前不能编译**）。可拣可弃：有用的拿走，编译不过的部分直接改对或重写，以最终编译通过 + 验收全绿为准，不承诺保留任何半成品代码。
+8. 语义变更预警：主干上 `cmd/vmr` 现有 5 个失败测试（`TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot`、`TestCmdAnalyze_DefaultSuiteExcludesHeartbeat`、`TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent`、`TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks`、`TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists`——后者还会 panic）。它们断言的是旧拓扑（`vmr-requests.md`、`stories/`、`journey-*.md`），是已合并的 Group 1A/1B/1C 改变产物拓扑后未同步的欠账，**归入本组任务 0 修复**。若排查发现根因在 `internal/`（白名单外），修复方案写入不提交的 `NOTES_FOR_LEAD.md` 交回主控，不得擅改 internal。
 
 ---
 
 ## 二、具体研发任务清单 (Action Plan)
+
+### 任务 0: 修复 main 遗留的 5 个失败 cmd 测试（拓扑欠账）
+- 背景：已合并的 Group 1A/1B/1C 改变了产物拓扑（删除人读请求索引、`stories/`→`journeys/`、`journey-*.md`→`j-*.md`），cmd 层测试未同步，main 上 `go test ./cmd/vmr/...` 为红。
+- 目标修改：把上述 5 个测试的断言同步到新拓扑（`journeys/index.*`、`j-*.md`、`requests/*`）；`TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists` 的 panic（`cmd_analyze_test.go:447`）须查明是真回归还是断言过期，真回归则记录到 `NOTES_FOR_LEAD.md`。
+- 验收：`go test -race ./cmd/vmr/...` 全绿。
 
 ### 任务 1: 对比索引扫描派生（D21 / §3.8）
 - 背景：现状 `compares/` 子树跨调用累积，无目录列表时用户无法发现已跑过的对比；对比只能离线计算，索引是唯一的发现路径。
@@ -54,7 +61,8 @@
 ---
 
 ## 三、测试与验收步骤
-1. 局部单元测试：`go test -v -race ./cmd/vmr/...`
+1. 全局编译：`go build ./...`
+2. 局部单元测试：`go test -v -race ./cmd/vmr/...`（必须全绿，含任务 0 的 5 个修复）
 2. 架构门禁测试：`go test -v ./internal/archtest/...`
 3. 检查变更范围：`git status -s`（确认无越界文件）
 4. 执行 Commit：`git add ... && git commit -m "feat(cli): derives compares index, retire report/story aliases, rename flags to -benchmark/-journey-only"`
