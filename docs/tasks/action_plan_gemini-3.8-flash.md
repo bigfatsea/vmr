@@ -76,6 +76,6 @@
 ---
 
 ## 阶段后续规划 (Phase 2 - Phase 4)
-- **Phase 2 波次划分**（按文件交集重排）：波次 A = 2A（新建 internal/dashboard，不碰 archtest——预算已由主控预登记）∥ 2C（server/config/archtest 边界）；波次 B = 2B（删旧自包含 HTML 渲染器 + 接线 WriteSkeletons + fmtutil 侧 fixture 消费 + 删 -html/-redact），必须在 2A/2C 合并后串行（与两者均有交集）。2A 的 `testdata/fmt_cases.json` 是 2B 的 Go 侧消费契约，字段结构不得擅改。
+- **Phase 2 波次划分**（按文件交集重排）：波次 A = 2A（新建 internal/dashboard，不碰 archtest——预算已由主控预登记）∥ 2C（server/config/archtest 边界）；波次 B = 2B（删旧自包含 HTML 渲染器 + 接线 WriteSkeletons + fmtutil 侧 fixture 消费 + 删 -html/-redact），必须在 2A/2C 合并后串行（与两者均有交集）。波次 B 已派发（分支 feat/p2-g2b-html-retirement，PID 回填）。2A 的 `testdata/fmt_cases.json` 是 2B 的 Go 侧消费契约，字段结构不得擅改。
 - **Phase 3 (ViewModel 与 Markdown 序列化器)**: 3A (Report ViewModel) ∥ 3B (Journey ViewModel) 可并行；3C (-render-only 整合与单轨渲染接线) 在 3A/3B 合并后串行。
 - **Phase 4 (产物级缓存)**: 单组串行（Digest + L2/L3 + -no-cache + 冷热一致性），在 Phase 3 之后。
