@@ -29,10 +29,10 @@
 
 | 任务组 | 分支名称 | 进程号 (PID) | 状态 | 修改白名单 | 独立验收命令 |
 |---|---|---|---|---|---|
-| **Group 1A** (Macro 切片) | `feat/p1-g1a-macro-slice` | 待登记 | PENDING | `internal/report/aggregate.go`<br>`internal/report/export.go`<br>`internal/report/rows.go`<br>`internal/report/manifest.go`<br>`internal/report/metrics.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/report/...` |
-| **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 待登记 | PENDING | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
-| **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 待登记 | PENDING | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
-| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 待登记 | PENDING | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go test -v -race ./cmd/vmr/...` |
+| **Group 1A** (Macro 切片) | `feat/p1-g1a-macro-slice` | 52752 | RUNNING (运行中) | `internal/report/aggregate.go`<br>`internal/report/export.go`<br>`internal/report/rows.go`<br>`internal/report/manifest.go`<br>`internal/report/metrics.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/report/...` |
+| **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 52810 | RUNNING (运行中) | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
+| **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 待登记 | QUEUED (等待 1A/1C 完成) | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
+| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 待登记 | QUEUED (等待 1A/1C 完成) | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go test -v -race ./cmd/vmr/...` |
 
 ---
 
