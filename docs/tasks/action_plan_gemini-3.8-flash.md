@@ -32,7 +32,9 @@
 | **Group 1A** (Macro 切片) | `feat/p1-g1a-macro-slice` | 52752 | **DONE (已合并)** | `internal/report/aggregate.go`<br>`internal/report/export.go`<br>`internal/report/rows.go`<br>`internal/report/manifest.go`<br>`internal/report/metrics.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/report/...` |
 | **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 52810 | **DONE (已合并)** | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
 | **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 57016 | **DONE (已合并)** | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
-| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 重新派发（登记 PID 后替换） | RE-DISPATCH（含 cmd 测试欠账修复） | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
+| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 61207 | RE-DISPATCH（进行中） | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
+| **Group 2A** (看板骨架资产包) | `feat/p2-g2a-dashboard` | 派发后回填 | IN PROGRESS | `internal/dashboard/**` (全新建) | `go build ./...`<br>`go test -v -race ./internal/dashboard/...` |
+| **Group 2C** (/reports/ 托管与配置) | `feat/p2-g2c-server-hosting` | 派发后回填 | IN PROGRESS | `internal/server/reports*.go` (新建)<br>`internal/server/server.go`<br>`internal/config/{config,config_validate}.go` + tests<br>`config.example*.yaml`<br>`internal/archtest/import_boundaries_test.go` | `go test -v -race ./internal/server/... ./internal/config/...` |
 
 ---
 
@@ -74,6 +76,6 @@
 ---
 
 ## 阶段后续规划 (Phase 2 - Phase 4)
-- **Phase 2 (HTML 看板与安全托管)**: Group 2A (纯前端骨架页与内联 SVG), Group 2B (废弃旧自包含 HTML 与 -redact), Group 2C (跨语言 Fixture 与 /reports/ 鉴权路由)。
-- **Phase 3 (ViewModel 与 Markdown 序列化器)**: Group 3A (Report ViewModel), Group 3B (Journey ViewModel), Group 3C (-render-only 整合与单轨渲染)。
-- **Phase 4 (产物级缓存)**: Group 4A (有序链式 sha256 Digest), Group 4B (L2/L3 缓存调度), Group 4C (-no-cache 旁路与冷热一致性)。
+- **Phase 2 波次划分**（按文件交集重排）：波次 A = 2A（新建 internal/dashboard，不碰 archtest——预算已由主控预登记）∥ 2C（server/config/archtest 边界）；波次 B = 2B（删旧自包含 HTML 渲染器 + 接线 WriteSkeletons + fmtutil 侧 fixture 消费 + 删 -html/-redact），必须在 2A/2C 合并后串行（与两者均有交集）。2A 的 `testdata/fmt_cases.json` 是 2B 的 Go 侧消费契约，字段结构不得擅改。
+- **Phase 3 (ViewModel 与 Markdown 序列化器)**: 3A (Report ViewModel) ∥ 3B (Journey ViewModel) 可并行；3C (-render-only 整合与单轨渲染接线) 在 3A/3B 合并后串行。
+- **Phase 4 (产物级缓存)**: 单组串行（Digest + L2/L3 + -no-cache + 冷热一致性），在 Phase 3 之后。

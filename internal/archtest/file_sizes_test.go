@@ -93,6 +93,11 @@ var fileLineExemptions = map[string]int{
 	"internal/taskseg/taskseg.go":  70,
 	"internal/taskseg/openclaw.go": 150,
 	"internal/taskseg/segment.go":  200,
+
+	// P2 dashboard skeleton pages: the Go side is only embed + WriteSkeletons;
+	// the bulk of the dashboard lives in embedded HTML/JS assets that are not
+	// line-counted here.
+	"internal/dashboard/dashboard.go": 400,
 }
 
 // TestArchitecture_CoreFileSizes counts newlines, exactly what `wc -l`
