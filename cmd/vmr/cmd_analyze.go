@@ -287,13 +287,16 @@ func dispatchAnalyze(r *analyzeRun) error {
 		return err
 	}
 
-	// The compares/ index is scan-derived on every analyze invocation
-	// (D21) — regardless of which mode ran and whether it touched compares/.
-	defer func() {
+	// The compares/ index is scan-derived on every successful analyze
+	// invocation (D21) — regardless of which mode ran and whether it touched
+	// compares/. Failed runs rebuild nothing: they produced no snapshot, and
+	// creating ./reports as a side effect of a failed invocation pollutes cwd
+	// (TestCmdReport_NoMatches regression).
+	rebuildCompares := func() {
 		if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
 			fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 		}
-	}()
+	}
 
 	switch {
 	case r.listOnly:
@@ -309,11 +312,13 @@ func dispatchAnalyze(r *analyzeRun) error {
 		if err != nil {
 			return err
 		}
+		rebuildCompares()
 		return commitManifest(r, rep)
 	}
 	if err != nil {
 		return err
 	}
+	rebuildCompares()
 	return commitManifest(r, nil)
 }
 
