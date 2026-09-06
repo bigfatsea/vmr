@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"vmr/internal/ctxgraph"
@@ -12,14 +13,13 @@ import (
 	"vmr/internal/taskseg"
 )
 
-// storySetup bundles the outcome of vmr story's scan/stitch/candidate/
-// index-row pipeline — every mode (listing, -journey, -compare, -corpus,
-// -render-all) starts from the same setup. Factored out (P9.1) so
-// cmdAnalyze can run this pipeline once from its own unified flag set's
-// resolution, without going through vmr story's own flag.FlagSet. Split
-// into its own file alongside cmdStory (P9.1's real-corpus validation run)
-// once extracting it pushed cmd_story.go over its file-size budget — same
-// package, no new import boundary.
+// storySetup bundles the outcome of the analyze journey half's
+// scan/stitch/candidate/index-row pipeline — every mode (listing, -journey,
+// -compare, -benchmark, -render-all) starts from the same setup. Factored
+// out (P9.1) so cmdAnalyze can run this pipeline once from its own unified
+// flag set's resolution. Split into its own file once extracting it pushed
+// cmd_story.go over its file-size budget — same package, no new import
+// boundary.
 type storySetup struct {
 	g         *ctxgraph.Graph
 	byIdx     map[int]*ctxgraph.Lineage
@@ -31,21 +31,27 @@ type storySetup struct {
 	prof      taskseg.Profile
 }
 
-// setupStoryRun runs vmr story's scan/stitch/candidate/index-row pipeline —
-// the piece every mode dispatch in cmdStory (and, since P9.1, cmdAnalyze)
-// starts from. No behavior change from what cmdStory ran inline before
-// P9.1: same calls, same order, same self-traffic filtering.
+// setupStoryRun runs the journey half's scan/stitch/candidate/index-row
+// pipeline — the piece every mode dispatch in cmdAnalyze starts from: same
+// calls, same order, same self-traffic filtering as the pre-P9.1 inline
+// body.
 func setupStoryRun(paths []string, outDir string, includeSelfTraffic bool, llmKey string, selfTrafficTags []string, showUngrouped bool, lang i18n.Lang) (*storySetup, error) {
 	// indexPath is computed (and LoadStoryIndex'd) up front, before
 	// anything is scanned — this is a pure string join plus a best-effort
 	// file read, no directory creation, so it stays safe to do even on an
-	// -llm-dry-run path that must leave reports/stories/ untouched if it
-	// returns early (ensureStoriesDir/idx.Save only happen once each
+	// -llm-dry-run path that must leave journeys/ untouched if it
+	// returns early (ensureJourneysDir/idx.Save only happen once each
 	// branch below reaches its own normal write point).
-	storiesDir := filepath.Join(outDir, "stories")
-	indexPath := filepath.Join(storiesDir, "vmr-stories.json")
+	journeysDir := filepath.Join(outDir, "journeys")
+	indexPath := filepath.Join(journeysDir, "index.json")
+	if _, err := os.Stat(indexPath); err != nil {
+		legacyPath := filepath.Join(outDir, "stories", "vmr-stories.json")
+		if _, err := os.Stat(legacyPath); err == nil {
+			indexPath = legacyPath
+		}
+	}
 	prior := story.LoadStoryIndex(indexPath)
-	cacheDir := filepath.Join(outDir, ".parse-cache") // shared with `vmr report` — see cmd_report.go
+	cacheDir := filepath.Join(outDir, ".parse-cache") // shared with the report half — see cmd_report.go
 	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 
 	fmt.Printf("scanning %d file(s)...\n", len(paths))
@@ -63,7 +69,7 @@ func setupStoryRun(paths []string, outDir string, includeSelfTraffic bool, llmKe
 	byIdx := ctxgraph.LineageIndex(g)
 
 	// resolveTaskProfile is the shared cmd/vmr composition-root entry point
-	// `vmr report` also calls — see its own doc comment.
+	// the report half also calls — see its own doc comment.
 	prof := resolveTaskProfile()
 
 	cands := story.ListCandidates(g)

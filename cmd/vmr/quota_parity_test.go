@@ -225,8 +225,8 @@ func reportQuotaRow(t *testing.T, reqs []parityRequest, provider string, ts time
 	}
 	configPath := writeTempFile(t, "config.yaml", yamlFn(logDir))
 	outDir := filepath.Join(dir, "out")
-	if err := cmdReport([]string{"-c", configPath, "-o", outDir, "-details=false", auditPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", "-c", configPath, "-o", outDir, "-details=false", auditPath}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(outDir, "vmr-report.json"))
 	if err != nil {

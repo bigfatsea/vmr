@@ -1,8 +1,8 @@
 // Ver 2026-08-02, by Sonnet 5
 
-// End-to-end tests for the multi-language report/story design (see
+// End-to-end tests for the multi-language report/journey design (see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section):
-// drives cmdReport/cmdStory exactly as the CLI does (flag parsing included), not
+// drives cmdAnalyze exactly as the CLI does (flag parsing included), not
 // internal/report's or internal/journey's package-level API directly — the
 // thing being tested is the whole -lang/report.yaml wiring through cmd/vmr,
 // which no single package's own tests can see end to end.
@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	story "vmr/internal/journey"
 )
 
 // e2eReportFixture writes a one-record audit log guaranteed to trigger the
@@ -99,7 +100,7 @@ func readReportMD(t *testing.T, outDir string) string {
 func TestE2E_ReportDefaultsToEnglish(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := cmdReport([]string{"-o", outDir, path}); err != nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
 	md := readReportMD(t, outDir)
@@ -123,7 +124,7 @@ func TestE2E_ReportDefaultsToEnglish(t *testing.T) {
 func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := cmdReport([]string{"-o", outDir, "-lang", "zh", path}); err != nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
 	md := readReportMD(t, outDir)
@@ -162,7 +163,7 @@ func TestE2E_ReportConfigFileZh(t *testing.T) {
 	if err := os.WriteFile(rcPath, []byte("language: zh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cmdReport([]string{"-o", outDir, "-report-config", rcPath, path}); err != nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
 	md := readReportMD(t, outDir)
@@ -193,7 +194,7 @@ func TestE2E_ReportLangFlagOverridesConfigFile(t *testing.T) {
 	if err := os.WriteFile(rcPath, []byte("language: zh\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := cmdReport([]string{"-o", outDir, "-report-config", rcPath, "-lang", "en", path}); err != nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-lang", "en", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
 	md := readReportMD(t, outDir)
@@ -208,7 +209,7 @@ func TestE2E_ReportLangFlagOverridesConfigFile(t *testing.T) {
 func TestE2E_ReportInvalidLangFlag(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := cmdReport([]string{"-o", outDir, "-lang", "fr", path}); err == nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-lang", "fr", "-o", outDir, path}); err == nil {
 		t.Error("cmdReport -lang fr should return an error, not silently default")
 	}
 }
@@ -225,7 +226,7 @@ func TestE2E_ReportConfigFileInvalidLanguageDegradesToEnglish(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := captureStdout(t, func() {
-		if err := cmdReport([]string{"-o", outDir, "-report-config", rcPath, path}); err != nil {
+		if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdReport: %v", err)
 		}
 	})
@@ -261,7 +262,7 @@ func TestE2E_ReportExplicitConfigFileMissingIsError(t *testing.T) {
 				t.Errorf("fatal error should name the missing config path, got %v", r)
 			}
 		}()
-		_ = cmdReport([]string{"-o", filepath.Join(t.TempDir(), "out"), "-report-config", rcPath, path})
+		_ = cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-o", filepath.Join(t.TempDir(), "out"), path})
 	}()
 }
 
@@ -289,18 +290,18 @@ func e2eStoryFixture(t *testing.T) string {
 func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := cmdStory([]string{"-o", outDir, "-render-all", path}); err != nil {
+	if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -render-all: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	found := false
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
+		if strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".md") {
 			found = true
-			data, err := os.ReadFile(filepath.Join(outDir, "stories", e.Name()))
+			data, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", e.Name()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -310,7 +311,7 @@ func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("expected at least one journey-*.md to be rendered")
+		t.Fatal("expected at least one j-*.md to be rendered")
 	}
 }
 
@@ -319,17 +320,17 @@ func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 func TestE2E_StoryRenderAllLangZh(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := cmdStory([]string{"-o", outDir, "-render-all", "-lang", "zh", path}); err != nil {
+	if err := cmdAnalyze([]string{"-render-all", "-lang", "zh", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -render-all: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	sawTurnsWord := false
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
-			data, err := os.ReadFile(filepath.Join(outDir, "stories", e.Name()))
+		if strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".md") {
+			data, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", e.Name()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -357,8 +358,8 @@ func TestE2E_StoryCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 
 	// Discover both candidate ids the way a user would: list first.
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory list: %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -list-only: %v", err)
 		}
 	})
 	var ids []string
@@ -372,10 +373,10 @@ func TestE2E_StoryCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 		t.Fatalf("want 2 candidate journeys, got %d from listing:\n%s", len(ids), listing)
 	}
 
-	if err := cmdStory([]string{"-o", outDir, "-compare", ids[0] + "," + ids[1], "-lang", "zh", path}); err != nil {
-		t.Fatalf("cmdStory -compare: %v", err)
+	if err := cmdAnalyze([]string{"-compare", ids[0] + "," + ids[1], "-lang", "zh", "-o", outDir, path}); err != nil {
+		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "compares"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,10 +384,10 @@ func TestE2E_StoryCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "compare-") {
 			if strings.HasSuffix(e.Name(), ".md") {
-				mdPath = filepath.Join(outDir, "stories", e.Name())
+				mdPath = filepath.Join(outDir, "compares", e.Name())
 			}
 			if strings.HasSuffix(e.Name(), ".json") {
-				jsonPath = filepath.Join(outDir, "stories", e.Name())
+				jsonPath = filepath.Join(outDir, "compares", e.Name())
 			}
 		}
 	}
@@ -446,7 +447,7 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	// vmr-report.json: efficiency[].finding.
 	reportPath := e2eReportFixture(t)
 	reportOut := filepath.Join(t.TempDir(), "out")
-	if err := cmdReport([]string{"-o", reportOut, "-lang", "zh", reportPath}); err != nil {
+	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", reportOut, reportPath}); err != nil {
 		t.Fatalf("cmdReport: %v", err)
 	}
 	rep := readReportJSON(t, reportOut)
@@ -470,8 +471,8 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	storyPath := e2eStoryFixture(t)
 	storyOut := filepath.Join(t.TempDir(), "out")
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", storyOut, storyPath}); err != nil {
-			t.Fatalf("cmdStory list: %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-o", storyOut, storyPath}); err != nil {
+			t.Fatalf("cmdAnalyze -list-only: %v", err)
 		}
 	})
 	var ids []string
@@ -484,12 +485,12 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	if len(ids) != 2 {
 		t.Fatalf("want 2 candidate journeys, got %d from listing:\n%s", len(ids), listing)
 	}
-	if err := cmdStory([]string{"-o", storyOut, "-journey", ids[0], "-lang", "zh", storyPath}); err != nil {
-		t.Fatalf("cmdStory -journey: %v", err)
+	if err := cmdAnalyze([]string{"-journey", ids[0], "-lang", "zh", "-o", storyOut, storyPath}); err != nil {
+		t.Fatalf("cmdAnalyze -journey: %v", err)
 	}
-	journeyData, err := os.ReadFile(filepath.Join(storyOut, "stories", "journey-"+ids[0]+".json"))
+	journeyData, err := os.ReadFile(filepath.Join(storyOut, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(ids[0], false), ".md")+".json"))
 	if err != nil {
-		t.Fatalf("journey-%s.json not written: %v", ids[0], err)
+		t.Fatalf("journey json not written: %v", err)
 	}
 	var journey struct {
 		ID string `json:"id"`
@@ -499,17 +500,17 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	}
 
 	// compare-*.json: rows[].label, same fixture/ids as above.
-	if err := cmdStory([]string{"-o", storyOut, "-compare", ids[0] + "," + ids[1], "-lang", "zh", storyPath}); err != nil {
-		t.Fatalf("cmdStory -compare: %v", err)
+	if err := cmdAnalyze([]string{"-compare", ids[0] + "," + ids[1], "-lang", "zh", "-o", storyOut, storyPath}); err != nil {
+		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(storyOut, "stories"))
+	entries, err := os.ReadDir(filepath.Join(storyOut, "compares"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var comparePath string
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "compare-") && strings.HasSuffix(e.Name(), ".json") {
-			comparePath = filepath.Join(storyOut, "stories", e.Name())
+			comparePath = filepath.Join(storyOut, "compares", e.Name())
 		}
 	}
 	if comparePath == "" {

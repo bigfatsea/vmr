@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"path"
@@ -17,8 +16,8 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/pricing"
 	story "vmr/internal/journey"
+	"vmr/internal/pricing"
 	"vmr/internal/taskseg"
 )
 
@@ -54,105 +53,6 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
-// cmdStory is `vmr story`'s own flag set (P15.2: unchanged from before the
-// CLI convergence — same flags, same defaults, including -render-all always
-// meaning "every candidate", with no P9.2/P14.1 category filtering — that
-// filtering is a `vmr analyze`-only default, not a change to what
-// -render-all itself means) and no longer runs its own resolution/dispatch.
-// It parses its flags in-place, then hands the result to dispatchAnalyzeFrom
-// — the same helper cmdReport routes through, so `vmr story`'s five call
-// shapes (bare/-journey/-compare/-corpus/-render-all) can't drift from what
-// `vmr analyze` does for the equivalent flags the way they once did:
-// resolveLLMOptions is now called lazily, through the same
-// resolveLLMOpts closure dispatchAnalyzeFrom builds, instead of
-// unconditionally up front — matching cmdAnalyze's own on-demand validation
-// (IS-25).
-func cmdStory(args []string) error {
-	fs := flag.NewFlagSet("story", flag.ExitOnError)
-	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from, when no input files are given")
-	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
-	journeyArg := fs.String("journey", "", "render this journey: an id or id-prefix, a comma-separated list of ids/prefixes/globs, and/or a shell-style glob (*, ?, [...]) matched against the full id — e.g. -journey j-a,j-b or -journey 'j-openclaw-*'. A selector resolving to exactly one journey renders as before (and alone supports -llm-addr); more than one batches like -render-all")
-	renderAll := fs.Bool("render-all", false, "render every non-partial candidate journey in one batched pass, instead of picking one id at a time")
-	compare := fs.String("compare", "", "compare two journeys' behavior profiles: -compare id1,id2 (each an id, id-prefix, or shell glob; first candidate matching each side wins)")
-	corpus := fs.Bool("corpus", false, "compute corpus-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey")
-	includePartialFlag := fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
-	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
-	llmAddrFlag := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -journey's or -compare's report (-compare also adds a second, divergence-point-scoped section when one was detected; not supported with -render-all/-corpus). Never auto-started; the instance must already be up. Default: report.yaml's llm_addr")
-	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
-	llmKeyFlag := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key (typically \"${SOME_ENV_VAR}\")")
-	llmCacheDirFlag := fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever (no implicit default path)")
-	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything")
-	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
-	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
-	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from the candidate journey list (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
-	htmlFlag := fs.Bool("html", false, "with a single-match -journey or with -compare: also write a self-contained .html dashboard next to the .md ({out}/stories/journey-<id>.html or compare-<a>-vs-<b>.html) — verdict/structure/metrics/findings for a journey, sides/divergence/diff/LLM for a comparison; inline CSS/JS, zero external requests. No effect on any other mode")
-	redactFlag := fs.Bool("redact", false, "with -html: replace every conversation body with a '‹text: N chars›' length placeholder and drop the per-step detail links, finding text and (for -compare) the LLM section — structure, metrics, roles, token counts and tool names stay. For sharing outside the team")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *corpus && (*compare != "" || *journeyArg != "" || *renderAll) {
-		return fmt.Errorf("-corpus is exclusive with -journey/-render-all/-compare — run it on its own")
-	}
-	// Same -html/-redact gate dispatchAnalyzeFrom applies: -redact needs
-	// -html, and both apply only to a single -journey or a -compare pair
-	// (the only two shapes RenderHTML/RenderComparisonHTML cover).
-	if *redactFlag && !*htmlFlag {
-		return fmt.Errorf("-redact only applies with -html")
-	}
-	if (*htmlFlag || *redactFlag) && *journeyArg == "" && *compare == "" {
-		return fmt.Errorf("-html/-redact only apply with -journey (a single journey) or -compare (a pair)")
-	}
-	// The shared helper's llm-addr/selector mode gate is more general
-	// (covers `-llm-addr "..."` on bare/render-all/corpus), so cmdStory's
-	// own LLM validation collapses to a one-line read here. The explicit
-	// flag check (flagPassed) plus the resolved address both have to be
-	// passed through unchanged; dispatchAnalyzeFrom resolves the address
-	// against report.yaml's llm_addr using resolveStringExplicit.
-	llmAddrExplicit := flagPassed(fs, "llm-addr")
-	hasSelector := *compare != "" || *journeyArg != ""
-
-	// -journey/-compare/-corpus/-render-all all carry over to `vmr analyze`
-	// unchanged (same flag, same output). Bare `vmr story` (no selector) is
-	// the one case that does NOT — it lists candidates only, while bare
-	// `vmr analyze` renders the default suite — so the hint calls that out
-	// explicitly rather than implying a blanket 1:1 swap (independent
-	// review, 2026-08-21 — see this file's P9 ActionPlan §4.3's "执行记录").
-	// `-list-only` (P15.1) is bare `vmr story`'s real equivalent.
-	fmt.Fprintln(os.Stderr, "vmr story: alias for `vmr analyze` with -list-only (bare) or -journey/-compare/-corpus/-render-all (unchanged) — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
-
-	return dispatchAnalyzeFrom(analyzeAliasRun{
-		fsAlias:            fs,
-		configPath:         *configPath,
-		reportConfigPath:   *reportConfigPath,
-		outDirFlag:         *outDirFlag,
-		langFlag:           *langFlag,
-		includeSelfTraffic: *includeSelfTraffic,
-		includePartialSet:  flagPassed(fs, "include-partial"),
-		includePartialFlag: *includePartialFlag,
-		llmAddr:            *llmAddrFlag,
-		llmAddrSet:         llmAddrExplicit,
-		llmModel:           *llmModelFlag,
-		llmKey:             *llmKeyFlag,
-		llmCacheDir:        *llmCacheDirFlag,
-		llmDryRun:          *llmDryRun,
-		corpusFlag:         *corpus,
-		compareArg:         *compare,
-		journeyArg:         *journeyArg,
-		renderAllFlag:      *renderAll,
-		listOnly:           !hasSelector && !*corpus && !*renderAll,
-		// storyOnly (a real cmdAnalyze flag, -story-only — see analyzeRun's
-		// own doc comment): `vmr story -render-all` alone never ran the
-		// report half, and `vmr analyze -story-only -render-all` is now its
-		// exact, publicly-reachable equivalent — not an internal-only field
-		// only this forwarder could set.
-		storyOnly:     *renderAll && !hasSelector,
-		showUngrouped: *showUngrouped,
-		htmlOn:        *htmlFlag,
-		redactOn:      *redactFlag,
-		aliasName:     "story",
-	})
-}
-
 // updateJourneyRow finds id's row in idx.Journeys and fills in the
 // full-Journey-only fields (only known once story.BuildChain has actually
 // run) — a no-op if id isn't present (shouldn't happen: every id passed
@@ -170,22 +70,19 @@ func updateJourneyRow(idx *story.StoryIndex, id string, tasks, steps int, render
 	}
 }
 
-// saveStoryIndex writes vmr-stories.json + vmr-stories.md into storiesDir
+// saveStoryIndex writes index.json + index.md into journeysDir
 // (creating it if needed), plus this run's parse cache into
-// {outDir}/.parse-cache (shared with `vmr report` — see cmd_report.go) —
-// called at every branch's normal (non-dry-run) exit point, so `vmr story`
-// leaves this triple behind regardless of which flags were passed, per the
-// design doc's vmr-stories.json section.
+// {outDir}/.parse-cache (shared with report half — see cmd_report.go).
 func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error {
-	storiesDir, err := ensureStoriesDir(outDir)
+	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
 		return err
 	}
-	if err := idx.Save(filepath.Join(storiesDir, "vmr-stories.json")); err != nil {
+	if err := idx.Save(filepath.Join(journeysDir, "index.json")); err != nil {
 		return err
 	}
 	md := story.RenderStoryIndexMarkdown(idx, lang)
-	if err := os.WriteFile(filepath.Join(storiesDir, "vmr-stories.md"), []byte(md), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
 		return err
 	}
 	return ctxgraph.SaveCacheDir(filepath.Join(outDir, ".parse-cache"), idx.Cache)
@@ -265,7 +162,7 @@ func resolveJourneySelector(cands []*ctxgraph.Lineage, ids []string, selector st
 // listJourneys prints the candidate listing (unchanged stdout format) and,
 // as of the vmr-stories.json change, also persists it — idx's rows already
 // carry everything this needs (id, mark info, request count, time range,
-// title), computed once in cmdStory and shared with the index, so this
+// title), computed once and shared with the index, so this
 // function no longer touches ctxgraph/story.PreviewTitles itself.
 func listJourneys(idx *story.StoryIndex, g *ctxgraph.Graph, outDir string, includePartial bool, lang i18n.Lang) error {
 	t := i18n.CLI(lang)
@@ -323,7 +220,7 @@ func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 // renderJourney renders one Journey, optionally appending the single-
 // Journey LLM interpretation section when llmOpts.Addr is set — same
 // dry-run/degrade contract compareJourneys' own LLM section follows: a
-// dry run never leaves a stories/ directory behind, and a call
+// dry run never leaves a journeys/ directory behind, and a call
 // failure only drops the LLM section, never fails the command.
 func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string, htmlOn, redactOn bool) error {
 	t := i18n.CLI(lang)
@@ -349,7 +246,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return nil
 	}
 
-	storiesDir, err := ensureStoriesDir(outDir)
+	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
 		return err
 	}
@@ -385,16 +282,13 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	// true: a single named -journey target, not a batch scope (P13.1).
-	outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, &cost, true, nil)
+	outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, &cost, true, nil)
 	if err != nil {
 		return err
 	}
 	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
 	if htmlOn {
-		htmlPath := filepath.Join(storiesDir, "journey-"+j.ID+".html")
-		if j.Partial {
-			htmlPath = filepath.Join(storiesDir, "journey-"+j.ID+"-partial.html")
-		}
+		htmlPath := filepath.Join(journeysDir, "details", journeyBaseName(j)+".html")
 		// 0600: same sensitivity as the .md — the redacted variant still
 		// keeps structure and metrics, but the un-redacted one carries full
 		// conversation bodies.
@@ -403,7 +297,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		}
 		fmt.Printf("wrote %s\n", htmlPath)
 	}
-	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.Base(outPath))
+	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", journeyBaseName(j)+".md")))
 	return saveStoryIndex(idx, outDir, lang)
 }
 
@@ -440,13 +334,18 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB, lang)
+	// ReportFile points at each side's own journey report; the comparison
+	// lives under compares/, so the .md's side-block link must climb out to
+	// journeys/details/ to resolve.
+	cmp.A.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(jA.ID, jA.Partial)))
+	cmp.B.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(jB.ID, jB.Partial)))
 	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, priceRes, ccy)
 	extras.Sources = story.SourceFiles(idx, jA.ID, jB.ID)
 	cmp.Extras = &extras
 
 	// -llm-dry-run: print the evidence-pack size estimate and return
 	// immediately — deliberately checked BEFORE ensureStoriesDir below, so a
-	// dry run never leaves so much as an empty reports/stories/ directory
+	// dry run never leaves so much as an empty journeys/ directory
 	// behind (design doc C.7: "should I even run this" is a pure query, not
 	// a partial run).
 	if llmOpts.Addr != "" && llmOpts.DryRun {
@@ -461,30 +360,34 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return nil
 	}
 
-	storiesDir, err := ensureStoriesDir(outDir)
-	if err != nil {
-		return err
-	}
-
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	// Each side's own journey-<id>.json picks up the same per-side cost the
 	// tale-of-the-tape shows, computed off cmp.Extras.Cost rather than a
 	// second ComputeJourneyCost pass.
 	costA, costB := extras.Cost.A, extras.Cost.B
-	if err := ensureJourneyFile(jA, storiesDir, lang, prof, detailDir, evidenceDir, &costA); err != nil {
+	journeysDir, err := ensureJourneysDir(outDir)
+	if err != nil {
 		return err
 	}
-	if err := ensureJourneyFile(jB, storiesDir, lang, prof, detailDir, evidenceDir, &costB); err != nil {
+	if err := ensureJourneyFile(jA, journeysDir, lang, prof, detailDir, evidenceDir, &costA); err != nil {
+		return err
+	}
+	if err := ensureJourneyFile(jB, journeysDir, lang, prof, detailDir, evidenceDir, &costB); err != nil {
 		return err
 	}
 
 	llmSection, llmResult := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
 
+	comparesDir, err := ensureComparesDir(outDir)
+	if err != nil {
+		return err
+	}
+
 	base := "compare-" + jA.ID + "-vs-" + jB.ID
 	if partialA || partialB {
 		base += "-partial"
 	}
-	mdPath := filepath.Join(storiesDir, base+".md")
+	mdPath := filepath.Join(comparesDir, base+".md")
 	md := story.RenderComparisonMarkdown(cmp, lang)
 	if llmSection != "" {
 		md += "\n" + llmSection
@@ -492,7 +395,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err := os.WriteFile(mdPath, []byte(md), 0o600); err != nil {
 		return err
 	}
-	jsonPath := filepath.Join(storiesDir, base+".json")
+	jsonPath := filepath.Join(comparesDir, base+".json")
 	data, err := json.MarshalIndent(cmp, "", "  ")
 	if err != nil {
 		return err
@@ -502,7 +405,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 	fmt.Printf("%s\n", mdPath)
 	if htmlOn {
-		htmlPath := filepath.Join(storiesDir, base+".html")
+		htmlPath := filepath.Join(comparesDir, base+".html")
 		// 0600: same sensitivity as the .md — the un-redacted variant carries
 		// full excerpt text.
 		if err := os.WriteFile(htmlPath, []byte(story.RenderComparisonHTML(cmp, llmResult, lang, redactOn)), 0o600); err != nil {
@@ -510,8 +413,8 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		}
 		fmt.Printf("wrote %s\n", htmlPath)
 	}
-	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), journeyBaseName(jA)+".md")
-	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), journeyBaseName(jB)+".md")
+	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), filepath.ToSlash(filepath.Join("details", journeyBaseName(jA)+".md")))
+	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), filepath.ToSlash(filepath.Join("details", journeyBaseName(jB)+".md")))
 	return saveStoryIndex(idx, outDir, lang)
 }
 
@@ -594,7 +497,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		return saveStoryIndex(idx, outDir, lang)
 	}
 
-	storiesDir, err := ensureStoriesDir(outDir)
+	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
 		return err
 	}
@@ -618,25 +521,25 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 			cost := story.ComputeJourneyCost(j, priceRes, ccy)
 			// batchRecs: EnsureJourneyDetails reuses this batch's already-
 			// decompressed records instead of re-reading the source files.
-			outPath, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
+			outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
 			if err != nil {
 				return err
 			}
 			fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
-			updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.Base(outPath))
+			updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", filepath.Base(outPath))))
 		}
 		rendered += len(journeys)
 	}
 	if skippedPartial > 0 {
 		fmt.Print(t.AllRenderedSkipped(skippedPartial))
 	}
-	fmt.Print(t.AllRenderedNote(rendered, storiesDir))
+	fmt.Print(t.AllRenderedNote(rendered, journeysDir))
 	return saveStoryIndex(idx, outDir, lang)
 }
 
 // renderAllJourneys renders every non-partial candidate journey — see
 // renderJourneys. materializeDetails distinguishes an explicit
-// "render everything, details included" ask (vmr story -render-all, or
+// "render everything, details included" ask (-render-all, or
 // vmr analyze -render-all) from the default suite's implicit
 // category=task batch (cmd_analyze.go's dispatchAnalyze passes false
 // there) — the latter is exactly the unbounded-materialization case to
@@ -683,15 +586,15 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	}
 	stats := story.ComputeCorpusStats(journeys)
 
-	storiesDir, err := ensureStoriesDir(outDir)
+	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
 		return err
 	}
-	mdPath := filepath.Join(storiesDir, "vmr-story-corpus.md")
+	mdPath := filepath.Join(journeysDir, "benchmarks.md")
 	if err := os.WriteFile(mdPath, []byte(story.RenderCorpusMarkdown(stats, lang)), 0o600); err != nil {
 		return err
 	}
-	jsonPath := filepath.Join(storiesDir, "vmr-story-corpus.json")
+	jsonPath := filepath.Join(journeysDir, "benchmarks.json")
 	data, err := json.MarshalIndent(stats, "", "  ")
 	if err != nil {
 		return err
@@ -716,18 +619,27 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 // "→ detail" link (P5.2, story.EnsureJourneyDetails) resolves regardless of
 // which command wrote it first.
 func detailAndEvidenceDirs(outDir string) (detailDir, evidenceDir string) {
-	return filepath.Join(outDir, "details"), filepath.Join(outDir, "evidence")
+	return filepath.Join(outDir, "requests", "details"), filepath.Join(outDir, "requests", "evidence")
 }
 
-// ensureStoriesDir creates (if needed) and returns {outDir}/stories.
-// 0o700: story output embeds full conversation bodies, same sensitivity
+// ensureJourneysDir creates (if needed) and returns {outDir}/journeys.
+// 0o700: journey output embeds full conversation bodies, same sensitivity
 // as internal/report's details/ — must not loosen that.
-func ensureStoriesDir(outDir string) (string, error) {
-	storiesDir := filepath.Join(outDir, "stories")
-	if err := os.MkdirAll(storiesDir, 0o700); err != nil {
+func ensureJourneysDir(outDir string) (string, error) {
+	journeysDir := filepath.Join(outDir, "journeys")
+	if err := os.MkdirAll(journeysDir, 0o700); err != nil {
 		return "", err
 	}
-	return storiesDir, nil
+	return journeysDir, nil
+}
+
+// ensureComparesDir creates (if needed) and returns {outDir}/compares.
+func ensureComparesDir(outDir string) (string, error) {
+	comparesDir := filepath.Join(outDir, "compares")
+	if err := os.MkdirAll(comparesDir, 0o700); err != nil {
+		return "", err
+	}
+	return comparesDir, nil
 }
 
 // journeyBaseName returns the base filename (without .md/.json extension)
@@ -749,59 +661,26 @@ func journeyBaseName(j *story.Journey) string {
 // the re-render are both cheap here — EnsureRendered's fingerprint check
 // (P12) makes an already-materialized Step a fast skip, and RenderMarkdown
 // is a pure string build.
-func ensureJourneyFile(j *story.Journey, storiesDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact) error {
+func ensureJourneyFile(j *story.Journey, journeysDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact) error {
 	m := story.ComputeMetrics(j)
 	findings := story.ComputeFindings(j, lang)
 	// true: both -compare sides are user-named targets, same as a single
 	// -journey render (P13.1) — not a batch scope.
-	_, err := writeJourneyFile(j, m, findings, storiesDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true, nil)
+	_, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true, nil)
 	return err
 }
 
-// writeJourneyFile writes j's rendered Markdown plus its behavior-profile
-// JSON (journey-<id>.json, consumed directly by the -compare
-// comparison module) into storiesDir, and returns the Markdown path
-// written. 0o600: same sensitivity note as ensureStoriesDir — the JSON
-// carries token counts and tool-call args derived straight from the
-// conversation body. m/findings are computed once by the caller (so a
-// caller that also needs them for the single-Journey LLM evidence pack, i.e.
-// renderJourney, doesn't pay for ComputeMetrics/ComputeFindings twice);
-// llmSection, when non-empty, is appended to the Markdown after the main
-// render — same "compute the LLM section first, append before writing"
-// pattern compareJourneys already uses.
-//
-// A partial (head-truncated) Journey gets a "-partial"
-// filename suffix — its ID is already unstable (it depends on whatever
-// happened to be the earliest loaded manifest), so the suffix is cheap,
-// visible self-disclosure that this file's beginning isn't the real
-// beginning, without requiring the reader to open it and find the warning
-// line first.
-//
-// Before rendering, EnsureJourneyDetails materializes this Journey's own
-// Step detail pages (and system-prompt/tool evidence blobs) under
-// detailDir/evidenceDir — P5.2's "渲染时目标缺失即按需补生成": the decision
-// spine's "→ detail" links and the system-prompt header's evidence links
-// must resolve without requiring the caller to have separately run
-// `vmr report -details` first. materializeDetails gates this (P13.1): a
-// user-named target (single -journey, either -compare side) always passes
-// true; a batch render (-journey matching several, the default suite, or
-// -render-all) decides per-caller — see renderJourneys/renderAllJourneys'
-// own doc comments. When false, RenderMarkdown's linkDetails is false too
-// (see the call below): the spine renders each Step's "→ detail" pointer as
-// an inline `file:line` coordinate instead of a link, so an unmaterialized
-// detail page is never linked (B10 / review §12.5's 12-B).
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, storiesDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
+func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, journeysDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
+	detailsDir := filepath.Join(journeysDir, "details")
+	if err := os.MkdirAll(detailsDir, 0o700); err != nil {
+		return "", err
+	}
 	base := journeyBaseName(j)
-	outPath := filepath.Join(storiesDir, base+".md")
+	outPath := filepath.Join(detailsDir, base+".md")
 	if materializeDetails {
 		story.EnsureJourneyDetails(os.Stderr, j, recs, detailDir, evidenceDir, prof, lang)
 	}
-	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(storiesDir), "vmr-report.md"))
-	// linkDetails == materializeDetails: this call just wrote (or skipped as
-	// already-current) this Journey's detail pages iff materializeDetails, so
-	// the spine's "→ detail" pointers link only when they will resolve; the
-	// default batch suite (materializeDetails=false) gets inline coordinates
-	// instead of 404 links (P13.1 / B10 / review §12.5).
+	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(journeysDir), "vmr-report.md"))
 	md := story.RenderMarkdown(j, m, findings, lang, reportMDErr == nil, materializeDetails, cost)
 	if llmSection != "" {
 		md += "\n" + llmSection
@@ -809,7 +688,7 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	if err := os.WriteFile(outPath, []byte(md), 0o600); err != nil {
 		return "", err
 	}
-	jsonPath := filepath.Join(storiesDir, base+".json")
+	jsonPath := filepath.Join(detailsDir, base+".json")
 	summary := story.NewJourneySummary(j, m, findings, llmFindings, cost)
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
