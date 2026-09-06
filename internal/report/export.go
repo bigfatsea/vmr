@@ -5,7 +5,11 @@
 // converts every field into the report's own richer ToolShapeRow, rows.go).
 package report
 
-import "sort"
+import (
+	"sort"
+
+	"vmr/internal/i18n"
+)
 
 // ToolShapeStats aggregates tool declaration vs. actual use for one request
 // shape (a distinct declared-tool set). "Actual use" counts only each
@@ -61,3 +65,10 @@ func (a *SessionAnalysis) ToolShapes() []ToolShapeStats {
 	sort.Slice(out, func(i, j int) bool { return out[i].Requests > out[j].Requests })
 	return out
 }
+
+// ExportMacroSlices writes the 5 domain slices to <dir>/macro/*.json (§3.2).
+// Forwarding wrapper around WriteMacroSlices.
+func ExportMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
+	return WriteMacroSlices(dir, r, lang)
+}
+

@@ -16,9 +16,9 @@ import (
 	"vmr/internal/core"
 )
 
-// Format is the aggregate report's JSON structure version. 10 continues the legacy
-// sequence (9 = legacy report) and marks the redesigned layout.
-const Format = 10
+// Format is the aggregate report's JSON structure version. 11 continues the legacy
+// sequence (10 = redesigned layout) and marks the domain-sliced layout (§3.2, D2).
+const Format = 11
 
 // SlowThresholdMS is the default "unbearably slow" cutoff for slow_requests
 // (V2 C-family / F-family). 30s matches the V2 spec.
@@ -54,6 +54,8 @@ type Report2 struct {
 	ProviderQuotaSkippedProviders []string            `json:"provider_quota_skipped_providers,omitempty"`
 	ClientEndpoints               []ClientEndpointRow `json:"client_endpoints,omitempty"`
 	Pricing                       *Pricing            `json:"pricing,omitempty"`
+	CostCoverage                  *CostCoverage       `json:"cost_coverage,omitempty"`
+	Highlights                    []string            `json:"highlights,omitempty"`
 
 	// requests is the per-request export (vmr-requests.json). Unexported so
 	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
@@ -72,6 +74,8 @@ type Meta struct {
 	To               string   `json:"to,omitempty"`
 	SlowThreshold    int      `json:"slow_threshold_ms"`
 	PercentileMethod string   `json:"percentile_method"` // documented in appendix
+	Footnotes        map[string]string `json:"footnotes,omitempty"`
+	Disclaimers      []string          `json:"disclaimers,omitempty"`
 	// DetailsEnabled records whether details/*.md has anything in it for
 	// this run's output — either this run's own -details write, or (via
 	// `vmr analyze`) the story half having already batch-materialized
@@ -181,6 +185,10 @@ type Row struct {
 	Protocol string `json:"protocol,omitempty"`
 
 	TrafficStats
+
+	// Confidence / sample-size disclosures (§3.3)
+	TokensCoveragePct float64 `json:"tokens_coverage_pct,omitempty"`
+	DurLowN           bool    `json:"dur_low_n,omitempty"`
 
 	// A - volume & outcome (beyond the shared core)
 	Canceled          int     `json:"canceled"`
@@ -299,6 +307,8 @@ type EndpointRow struct {
 	Requests           int     `json:"requests,omitempty"`     // requests this endpoint actually served (request-level, ≠ Attempts)
 	RequestsOK         int     `json:"requests_ok,omitempty"`  // subset with overall outcome "ok"
 	SuccessRate        float64 `json:"success_rate,omitempty"` // RequestsOK/Requests - request-level, distinct from Availability (attempt-level)
+	TokensCoveragePct  float64 `json:"tokens_coverage_pct,omitempty"`
+	DurLowN            bool    `json:"dur_low_n,omitempty"`
 	TokensIn           int64   `json:"tokens_in,omitempty"`
 	TokensInCached     int64   `json:"tokens_in_cached,omitempty"`
 	TokensInCacheWrite int64   `json:"tokens_in_cache_write,omitempty"`
@@ -388,6 +398,8 @@ type ClientRow struct {
 	TrafficStats
 
 	SuccessRate float64 `json:"success_rate"`
+	TokensCoveragePct float64 `json:"tokens_coverage_pct,omitempty"`
+	DurLowN           bool    `json:"dur_low_n,omitempty"`
 
 	// per-request input/output token percentiles (⭐ derived, from Usage.In/Out)
 	InTokP50  int64 `json:"in_tok_p50,omitempty"`
@@ -467,7 +479,9 @@ type SessionRow struct {
 // compress vs how big the resulting summary is), not either neighboring
 // session's own token counts.
 type CompactionRow struct {
-	TS          string `json:"ts"`
+	TS          string `json:"-"`
+	TSMS        int64  `json:"-"`
+	TSDisplay   string `json:"-"`
 	Summarizes  string `json:"summarizes,omitempty"`   // predecessor session id
 	ContinuesTo string `json:"continues_to,omitempty"` // successor session id
 
