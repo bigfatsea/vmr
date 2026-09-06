@@ -705,4 +705,3 @@ func TestJourneyReportFile_Normalization(t *testing.T) {
 		}
 	}
 }
-

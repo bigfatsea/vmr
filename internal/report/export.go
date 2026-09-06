@@ -71,4 +71,3 @@ func (a *SessionAnalysis) ToolShapes() []ToolShapeStats {
 func ExportMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
 	return WriteMacroSlices(dir, r, lang)
 }
-

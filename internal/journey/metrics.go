@@ -394,7 +394,7 @@ type JourneySummary struct {
 	// Structure is the complete Task/Step/Event/ToolCall skeleton — the
 	// machine-readable counterpart to the human-readable fact-layer
 	// (render_md.go's renderStep), P4 (see structure.go's doc comment).
-	Structure JourneyStructure `json:"structure"`
+	Structure JourneyStructure  `json:"structure"`
 	Bodies    map[string]string `json:"bodies,omitempty"`
 	// Cost is the estimated $ spend for this Journey (cost.go), nil when no
 	// price book was available at render time — never a fake $0. Every other

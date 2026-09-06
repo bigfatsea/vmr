@@ -65,15 +65,15 @@ type Report2 struct {
 
 // Meta carries provenance + method notes consumed by the appendix.
 type Meta struct {
-	Format           int      `json:"format"`
-	GeneratedAt      string   `json:"generated_at"`
-	Inputs           []string `json:"inputs"`
-	Records          int      `json:"records"`
-	ParseErrors      int      `json:"parse_errors"`
-	From             string   `json:"from,omitempty"`
-	To               string   `json:"to,omitempty"`
-	SlowThreshold    int      `json:"slow_threshold_ms"`
-	PercentileMethod string   `json:"percentile_method"` // documented in appendix
+	Format           int               `json:"format"`
+	GeneratedAt      string            `json:"generated_at"`
+	Inputs           []string          `json:"inputs"`
+	Records          int               `json:"records"`
+	ParseErrors      int               `json:"parse_errors"`
+	From             string            `json:"from,omitempty"`
+	To               string            `json:"to,omitempty"`
+	SlowThreshold    int               `json:"slow_threshold_ms"`
+	PercentileMethod string            `json:"percentile_method"` // documented in appendix
 	Footnotes        map[string]string `json:"footnotes,omitempty"`
 	Disclaimers      []string          `json:"disclaimers,omitempty"`
 	// DetailsEnabled records whether details/*.md has anything in it for
@@ -397,7 +397,7 @@ type ClientRow struct {
 
 	TrafficStats
 
-	SuccessRate float64 `json:"success_rate"`
+	SuccessRate       float64 `json:"success_rate"`
 	TokensCoveragePct float64 `json:"tokens_coverage_pct,omitempty"`
 	DurLowN           bool    `json:"dur_low_n,omitempty"`
 
