@@ -27,6 +27,11 @@
 - golden 下沉到 VM 结构比对；新旧路径（旧吃 `*Journey`，新吃 `JourneySummary`）字节等价过渡测试。**旧渲染路径本组保留不删**（3C 删）。
 - 补 §9 两条守卫（1C 落地后若已有则确认覆盖即可）：`bodies` 无孤儿无悬引用；三级 `match` 与脊柱实际渲染的配对一致。
 
+### 任务 4: 2B 移交的死代码清理（其 NOTES_FOR_LEAD 第 5 条）
+- 退役完全失去消费者的 `internal/i18n/story_html.go`、`story_compare_html.go`（及各自 `_test.go`）——自包含 HTML 渲染器已删，它们现在是无人引用的导出 API。
+- 同理评估并删除 `journey.ComputePointOfNoReturn`、`journey.JourneySeverity`（最后一个生产调用方 render_html.go 已删，仍导出且有测试）：有测试锁行为但零生产调用方的导出 API 按 YAGNI 退役；若认为某个另有价值，记录 `NOTES_FOR_LEAD.md` 说明理由后保留。
+- `compares_index.go` 的 `CompareItem.HTML` 字段不在本组白名单，不动。
+
 ## 三、测试与验收步骤
 1. 全局编译：`go build ./...`
 2. 局部单测：`go test -race ./internal/journey/... ./internal/i18n/...`

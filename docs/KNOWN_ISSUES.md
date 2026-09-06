@@ -124,6 +124,7 @@
 - **`jsonscan` 的 `RewriteModel`/`RewriteRoles`/`RewriteInputRoles` 留在 `jsonscan`，不迁 `adapter`**（2026-09 Q17 收敛）：原评审指出「同批协议字面量在 `jsonscan` 包文档与 `adapter` 得出两个相反归属结论」，最终以重写 `jsonscan` 包文档的边界规则消除，而非移动代码——「字节级扫描与 splice 改写引擎」整体归 `jsonscan`（含带协议字段字面量的改写函数，fuzz 覆盖在此包），「协议路由语义、适配器构造、错误分类」归 `adapter` 及以上。旧表述「需要具体字段名的函数不属于 `jsonscan`」已废止，**不要再提案移动这批改写函数或恢复旧措辞**。
 - **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`；`ModelLabel` 也下沉 `fmtutil`（2026-09 复核：其签名不含任何 core 类型，是纯展示格式化，两个调用方本就 import `fmtutil`，无依赖两难，不构成例外）；`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
 - **`archtest` 的包边界守卫是单向的，与规则本身同构**：CLAUDE.md 的不变量「分析半区不 import 路由半区」是单向禁令，`import_boundaries_test` 只需要守这一半；「audit JSONL 记录是唯一耦合」那半句是**数据流事实**，不是另一条可机检的 import 规则，不存在对应护栏也不需要有。不要因为「只守了一半」提案加反向守卫——反向（路由 import 分析）本来就是合法的依赖方向。
+- **Go 与看板 JS 的金额格式化是两套行为，不在 `fmtutil` 收编统一（2026-09，跨语言 fixture 落地时裁决）**：fixture（`internal/dashboard/testdata/fmt_cases.json`）钉住了 FmtTokens/FmtBytes/FmtPercent 三类两侧一致；金额则刻意不钉——Go 侧金额格式化发生在渲染层（journey 的 `fmtMoney`：≥100 抹分、<100 保留两位，服务于 Markdown 报表的紧凑排版），看板 JS 恒定两位小数（服务于表格对齐），两者的排版语境不同，统一哪一侧都要牺牲另一个语境。`FmtCurrency`/`FmtCost` 的 fixture 条目在 Go 侧测试中显式跳过并注明指向本条。**不要以「消除漂移」名义把金额格式化收进 `fmtutil`**——那会把两种排版策略压成一个错误的全局值；重新裁决的触发条件是出现第三种消费语境或两侧任一行为变更。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的一批微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
@@ -332,11 +333,10 @@
 - **决定不做**：真实语料按 `protocol` 统计 `openai-responses` **0 条 / 0.0%**——一次都没触发过。**触发条件（量化）**：任意一次 `vmr report` 的 `vmr-requests.json` 出现 `protocol == "openai-responses"` 的记录，即重新排期。
 
 
-#### 2.29 [低，暂不做] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
+#### 2.29 [已消解] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
 
-- **现状**：`.parse-cache/` 有 `CacheSchemaVersion`，`journey-<id>.json` 无等价机制——P4 前后生成的旧/新文件字段名相同、形状不同，消费者无法仅凭文件本身分辨。
-- **为什么暂不做**：YAGNI + 已裁决「JSON 无外部脚本消费」——`journey-<id>.json` 至今唯一已知程序化消费方是 `_eval/calibrate_p1b.go`（只读 `EvidenceAnchor`）。没有消费者，就没有人需要探测版本。
-- **触发条件**：出现第一个 `_eval/` 之外的程序化消费方。加 `schema_version int` 成本接近零，但改在下次新增字段时最便宜。
+- **原状**：`.parse-cache/` 有 `CacheSchemaVersion`，`journey-<id>.json` 无等价机制——消费者无法仅凭文件本身分辨新旧形状。
+- **消解方式（2026-09，analyze 架构重构落地时）**：整份产物收敛为一个版本单位——版本探测统一走输出根 `manifest.json` 的 `format` 字段（读取方准入 + 骨架页启动时探测 banner，见设计提案裁决 D14），单文件不再各自长版本戳；切片 schema 此后收敛为加性优先，删改字段必须 bump manifest `format` 并在 CHANGELOG 标注 Breaking。原有的「JSON 无外部脚本消费」前提随骨架页（用户可复制定制面板）落地而失效——从 Phase 2 起，用户副本面板就是事实上的 schema 消费者。
 
 #### 2.73 [低-中，暂不做] LLM 自由文本的 `<`/`>` 未净化即进 `.md` 产物
 
