@@ -12,9 +12,11 @@
 |---|---|---|---|
 | **Phase 0** | 基线绿灯与 `internal/story` -> `internal/journey` 包名重命名 | **DONE (已合并)** | Lead Orchestrator |
 | **Phase 1** | 数据层闭环：五大切片、Manifest 核心、Journey 自包含、命名与拓扑归一 | **DONE (已合并，main 全绿)** | Multi-Agent (Lead + Workers) |
+
+> **全部四个 Phase 已于 2026-09-07 完成**。执行记录：Phase 0~1 沿用前任 Agent 交接（1D 由主控收尾）；Phase 2~4 由本主控派发 9 个 Worker 组完成，期间处置 worker 中途死亡 2 次（1D 提交前退出、4A 挂起 12 分钟后按 PID 终止重派），主控独立验收均在合并前完成。
 | **Phase 2** | HTML 看板：静态骨架页 + 内联 SVG 图表 + /reports/ 安全挂载 | PENDING | Multi-Agent (Lead + Workers) |
 | **Phase 3** | 渲染重构：ViewModel 内存层 + 固定 Markdown 序列化器 + -render-only | **DONE (已合并，main 全绿)** | Multi-Agent (Lead + Workers) |
-| **Phase 4** | 产物级缓存：L2 产物缓存 + L3 表现层缓存 + 冷热一致性守卫 | IN PROGRESS (派发中) | Multi-Agent (Lead + Workers) |
+| **Phase 4** | 产物级缓存：L2 产物缓存 + L3 表现层缓存 + 冷热一致性守卫 | **DONE (已合并，main 全绿)** | Multi-Agent (Lead + Workers) |
 
 ---
 
