@@ -69,7 +69,7 @@ func RenderMarkdown(j *Journey, m Metrics, findings []Finding, lang i18n.Lang, r
 	w("%s", t.BackLinkLine(reportLink))
 
 	if j.Partial {
-		w("> ⚠️ %s\n\n", i18n.StoryHTML(lang).PartialBanner)
+		w("> ⚠️ %s\n\n", t.PartialBanner)
 	}
 
 	if j.Break != nil {

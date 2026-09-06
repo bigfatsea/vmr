@@ -6,11 +6,13 @@
 // (see journey.go); the judgment call this file makes is the inline-vs-reference
 // boundary: a Step's OWN decision content (RespText/Reasoning/tool-call args,
 // plus rule-derived classifications ABOUT content — edit kind, stitch evidence,
-// compaction token/entity counts) is inlined and bounded; an ordinary
-// conversation-history MESSAGE (NewEvents, and a tool call's RESULT text —
-// see ToolCallRef's doc comment for why the result is history, not
-// decision) is a reference only — the audit log is the one place message
-// bodies live, journey-<id>.json is tree, not blob.
+// compaction token/entity counts) is inlined (resp/reasoning/args unlimited or
+// capped at maxBodyExcerptChars — see the per-field comments), a tool call's
+// paired RESULT lives in the same file's deduplicated bodies blob table (D18 /
+// §3.6) referenced by ToolCallRef.Result, and an ordinary conversation-history
+// MESSAGE (NewEvents) is a hash reference only — the message text itself still
+// lives only in the audit log (nothing renders it; the error-marker signal the
+// renderer needs is stamped per Step as HasErrorMarker).
 //
 // Edit/StitchEdge/Compaction are GRAPH-level analysis facts with no other
 // machine-readable home (they cannot be recomputed from a single audit record
@@ -22,6 +24,7 @@ package journey
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"vmr/internal/chatmsg"
@@ -96,6 +99,12 @@ type ToolCallRef struct {
 	Name    string         `json:"name"`
 	ArgsRef string         `json:"args_ref,omitempty"`
 	Result  *ToolResultRef `json:"result,omitempty"`
+	// Repeat is toolCallRepeats' exact-repeat flag for this call — stamped
+	// at build time (the full, untruncated arguments the repeat identity
+	// hashes are only available here) so the renderer's 🔄 tag and the
+	// timeline's 🔄 symbol read a stamped fact instead of re-deriving a
+	// hash over the truncated bodies blob.
+	Repeat bool `json:"repeat,omitempty"`
 }
 
 // EditRef mirrors ctxgraph.Edit — the message-history transition
@@ -148,6 +157,27 @@ type StepStructure struct {
 	Seq int       `json:"seq"`
 	Req string    `json:"req,omitempty"`
 	TS  time.Time `json:"ts"`
+	// Model/Protocol/Outcome are Manifest.Model/Protocol/Outcome verbatim —
+	// Model (the virtual model name) and Outcome are what
+	// reqdetail.FileName needs to recompute this Step's detail-page name
+	// (the real-model segment is derivable from Endpoint's
+	// protocol:provider:model label); Outcome also gates the spine's error
+	// role tag and the overview's failed-steps line; Protocol feeds the
+	// per-journey Anthropic-only detector-coverage disclosure.
+	Model    string `json:"model,omitempty"`
+	Protocol string `json:"protocol,omitempty"`
+	Outcome  string `json:"outcome,omitempty"`
+	// Instruction is Step.Instruction verbatim — the mid-task user
+	// instruction the spine renders for a Step that opens with one.
+	Instruction string `json:"instruction,omitempty"`
+	// HasErrorMarker stamps isErrorMarker containment over this Step's own
+	// NewEvents' text — the one thing the renderer needed event TEXT for
+	// (the spine's error role tag, the overview's first-error node, the
+	// timeline's ❌ column); the events' text itself stays referenced-only
+	// (see EventRef), so the derived fact is stamped where the text was
+	// actually read instead of dragging every message body into the blob
+	// table for a boolean.
+	HasErrorMarker bool `json:"has_error_marker,omitempty"`
 	// DeltaStart is Step.DeltaStart verbatim — a navigation CONVENIENCE
 	// (chatmsg.Messages' 0-based index where this Step's request body stops
 	// matching its predecessor's), not the reconstruction mechanism: at a
@@ -184,9 +214,28 @@ type StepStructure struct {
 	NoReply        bool   `json:"no_reply,omitempty"`
 	Finish         string `json:"finish,omitempty"`
 
-	RespRef   string        `json:"resp_ref,omitempty"`
-	ToolCalls []ToolCallRef `json:"tool_calls,omitempty"`
-	NewEvents []EventRef    `json:"new_events,omitempty"`
+	RespRef string `json:"resp_ref,omitempty"`
+	// RespIsReasoning disambiguates what RespRef holds: false (omitted) —
+	// the Step's stated reply (RespText); true — its Reasoning, stored here
+	// only because RespText was empty. RespRef alone cannot distinguish the
+	// two, and the renderer treats them differently (🤔 prefix, plan vs
+	// report role tag).
+	RespIsReasoning bool `json:"resp_is_reasoning,omitempty"`
+	// ReasoningRef holds the Step's Reasoning when RespText was ALSO
+	// non-empty (both fields can carry content in one response; when
+	// RespText was empty Reasoning lives under RespRef with
+	// RespIsReasoning set, and this is omitted).
+	ReasoningRef string        `json:"reasoning_ref,omitempty"`
+	ToolCalls    []ToolCallRef `json:"tool_calls,omitempty"`
+	NewEvents    []EventRef    `json:"new_events,omitempty"`
+
+	// SysHash/SysChars identify this Step's leading system block — the
+	// (HasSys, SysHash) grouping systemPromptEras (render_md_sysprompt.go,
+	// mirrored over this shape by the viewmodel) needs, plus the char
+	// count that era line shows. SysHash nil = no leading system block;
+	// SysChars is 0 for those Steps and for a manifest without a count.
+	SysHash  *ctxgraph.Hash `json:"sys_hash,omitempty"`
+	SysChars int            `json:"sys_chars,omitempty"`
 }
 
 // TaskStructure mirrors Task: a title plus its Steps' full structure.
@@ -203,11 +252,20 @@ type JourneyStructure struct {
 }
 
 // BuildStructure assembles j's already-computed Task/Step/Event data into
-// its published JSON shape, populating the deduplicated bodies table (D18 / §3.6).
+// its published JSON shape, populating the deduplicated bodies table (D18 / §3.6)
+// and stamping the journey-wide exact-repeat flag per tool call (see
+// ToolCallRef.Repeat).
 func BuildStructure(j *Journey) JourneyStructure {
 	steps := journeySteps(j)
 	bodies := make(blobStore)
 	seq := 0
+	// repeatByStep collects toolCallRepeats' per-call flags in call order per
+	// Step, so buildStepStructure can stamp them without re-hashing arguments
+	// (and without the truncation the bodies blob table would impose).
+	repeatByStep := map[int][]bool{}
+	for _, o := range toolCallRepeats(steps) {
+		repeatByStep[o.StepSeq] = append(repeatByStep[o.StepSeq], o.IsRepeat)
+	}
 	out := JourneyStructure{
 		Tasks:  make([]TaskStructure, 0, len(j.Tasks)),
 		Bodies: bodies,
@@ -215,7 +273,7 @@ func BuildStructure(j *Journey) JourneyStructure {
 	for _, task := range j.Tasks {
 		ts := TaskStructure{Title: task.Title, Steps: make([]StepStructure, 0, len(task.Steps))}
 		for _, s := range task.Steps {
-			ts.Steps = append(ts.Steps, buildStepStructure(steps, seq, s, bodies))
+			ts.Steps = append(ts.Steps, buildStepStructure(steps, seq, s, bodies, repeatByStep[s.Seq]))
 			seq++
 		}
 		out.Tasks = append(out.Tasks, ts)
@@ -280,8 +338,9 @@ func pairToolResults(steps []*Step, i int) map[string]matchedToolResult {
 	return out
 }
 
-// buildStepStructure builds one Step's StepStructure.
-func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore) StepStructure {
+// buildStepStructure builds one Step's StepStructure. repeats is this Step's
+// per-call exact-repeat flags, in ToolCalls order (see ToolCallRef.Repeat).
+func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore, repeats []bool) StepStructure {
 	ss := StepStructure{
 		Seq:            s.Seq,
 		DeltaStart:     s.DeltaStart,
@@ -289,26 +348,48 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore) StepStr
 		HumanInitiated: s.HumanInitiated,
 		NoReply:        s.NoReply,
 		Finish:         s.Finish,
+		Outcome:        s.Outcome,
+		Instruction:    s.Instruction,
+	}
+	for _, ev := range s.NewEvents {
+		if strings.Contains(ev.Msg.Text, isErrorMarker) {
+			ss.HasErrorMarker = true
+			break
+		}
 	}
 
-	// RespText / Reasoning into bodies without character limit (D18 / §3.6)
+	// RespText / Reasoning into bodies without character limit (D18 / §3.6),
+	// keeping the two distinguishable: RespRef holds the reply when there is
+	// one (RespIsReasoning unset), the reasoning otherwise (set); when BOTH
+	// carry content the reasoning also goes under ReasoningRef.
 	respContent := s.RespText
 	if respContent == "" {
 		respContent = s.Reasoning
+		ss.RespIsReasoning = s.Reasoning != ""
 	}
 	if respContent != "" {
 		ss.RespRef = bodies.put(respContent)
+	}
+	if s.Reasoning != "" && !ss.RespIsReasoning {
+		ss.ReasoningRef = bodies.put(s.Reasoning)
 	}
 
 	if s.Manifest != nil {
 		ss.Req = s.Manifest.Req
 		ss.TS = s.Manifest.TS
 		ss.Endpoint = s.Manifest.Endpoint
+		ss.Model = s.Manifest.Model
+		ss.Protocol = s.Manifest.Protocol
 		ss.DurMS = s.Manifest.DurMS
 		ss.TTFTMS = s.Manifest.TTFTMS
 		ss.Usage = s.Manifest.Usage
 		ss.UsageInOK = s.Manifest.UsageInOK
 		ss.UsageOutOK = s.Manifest.UsageOutOK
+		if s.Manifest.HasSys {
+			h := s.Manifest.SysHash
+			ss.SysHash = &h
+		}
+		ss.SysChars = s.SysChars
 	}
 	if s.Edge != nil {
 		ss.Edit = &EditRef{Kind: s.Edge.Kind.String(), LCP: s.Edge.LCP, Coverage: s.Edge.Coverage}
@@ -334,13 +415,16 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore) StepStr
 	if len(s.ToolCalls) > 0 {
 		paired := pairToolResults(steps, i)
 		ss.ToolCalls = make([]ToolCallRef, 0, len(s.ToolCalls))
-		for _, tc := range s.ToolCalls {
+		for k, tc := range s.ToolCalls {
 			var argsRef string
 			if tc.Args != "" {
 				args, _ := truncateText(tc.Args, maxBodyExcerptChars)
 				argsRef = bodies.put(args)
 			}
 			ref := ToolCallRef{ID: tc.ID, Name: tc.Name, ArgsRef: argsRef}
+			if k < len(repeats) {
+				ref.Repeat = repeats[k]
+			}
 			if p, ok := paired[tc.ID]; ok {
 				resText, _ := truncateText(p.result.Text, maxBodyExcerptChars)
 				resRef := bodies.put(resText)

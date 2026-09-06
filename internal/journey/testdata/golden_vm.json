@@ -1,0 +1,163 @@
+{
+  "header": [
+    {
+      "kind": "text",
+      "text": "# Journey j-nokey-20260729T100000-20260729T100006-407cf916\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "\u003e 帮我查一下 A 股新股打新收益\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "\u003e 2 tasks · 3 turns · 2026-07-29 10:00:00 → 10:00:06\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "← Back to [vmr-stories.md](vmr-stories.md)\n\n"
+    }
+  ],
+  "sys_prompt": [
+    {
+      "kind": "text",
+      "text": "## System Prompt\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "- Step 1–3 · 28 chars · → [detail](../evidence/sysprompt-943e842f.md)\n"
+    },
+    {
+      "kind": "text",
+      "text": "\n"
+    }
+  ],
+  "overview": [
+    {
+      "kind": "text",
+      "text": "## Overview\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "- Started 10:00:00\n"
+    },
+    {
+      "kind": "text",
+      "text": "- Ended · Step 3 · finish=stop · 10:00:06\n"
+    },
+    {
+      "kind": "text",
+      "text": "\n"
+    }
+  ],
+  "indicators": [
+    {
+      "kind": "text",
+      "text": "## Behavior Indicators\n\n"
+    },
+    {
+      "kind": "table",
+      "table": {
+        "header": "| Metric | Value |\n|---|---|\n",
+        "rows": [
+          "| Net Working Time | 10.2s |\n",
+          "| Model Time | 9.7s |\n",
+          "| Agent-Side Execution Time | 0.5s |\n",
+          "| Human Idle Time | 0.8s |\n",
+          "| Model/Tool Time Ratio | 19.40× |\n",
+          "| Tool Call Count | 0 |\n",
+          "| Duplicate Action Rate | 0% |\n",
+          "| Output Repetition Rate | 2% |\n",
+          "| Error Recovery Count | n/a |\n",
+          "| Plan/Execution Ratio | 100% |\n",
+          "| Context Utilization | 0% |\n",
+          "| Compaction Count | 0 |\n",
+          "| Compaction Information Loss | 0 |\n",
+          "| Model Switch Count | 0 |\n"
+        ]
+      }
+    },
+    {
+      "kind": "text",
+      "text": "**Context Token Trajectory**: ` ▅█` (start 11 tok → end 81 tok)\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "### Model Usage\n\n"
+    },
+    {
+      "kind": "table",
+      "table": {
+        "header": "| Model (provider) | Steps | in | cached | out |\n|---|---|---|---|---|\n",
+        "rows": [
+          "| agent (provider) | 3 | 800 | 580 | 95 |\n"
+        ]
+      }
+    },
+    {
+      "kind": "text",
+      "text": "No upstream model switch occurred.\n\n"
+    }
+  ],
+  "spine": [
+    {
+      "kind": "text",
+      "text": "## Decision Spine\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "**t01 · 帮我查一下 A 股新股打新收益**\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "**🔷 💬 Step 1 · 10:00:00**\n\n→ [detail](../details/r-20260729-100000.000_agent_agent_ok_5a3c25bf.md)\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "💬 Report · 好的，我来搜索相关数据。\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "**🔷 💬 Step 2 · 10:00:02**\n\n→ [detail](../details/r-20260729-100002.000_agent_agent_ok_3386028d.md)\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "💬 Report · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "**t02 · 继续，把前10名列出来**\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "**🔷 💬 Step 3 · 10:00:06**\n\n→ [detail](../details/r-20260729-100006.000_agent_agent_ok_588f9830.md)\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "💬 Report · 好的，前10名的新股打新收益如下…\n\n"
+    }
+  ],
+  "timeline": [
+    {
+      "kind": "text",
+      "text": "## Tool Call Timeline\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "(no tool calls in this Journey)\n\n"
+    }
+  ],
+  "findings": [
+    {
+      "kind": "text",
+      "text": "## Suspected Issues (candidate list, not a verdict)\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "\u003e ⚠️ Every request in this journey is non-Anthropic Messages protocol. The following signals depend on a field only ever populated for Anthropic Messages protocol and structurally cannot fire on this journey — their absence doesn't mean \"checked, no issue found\": error_retry_unadapted, error_then_unverified_success, error_recovery_count, decision spine's tool-result ❌ badge, structure.json's ToolCalls[].ResultError\n\n"
+    },
+    {
+      "kind": "text",
+      "text": "No rule-detectable suspected issues.\n\n"
+    }
+  ]
+}

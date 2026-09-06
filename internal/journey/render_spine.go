@@ -289,23 +289,6 @@ func joinInts(ns []int) string {
 	return strings.Join(ss, ", ")
 }
 
-// findingTrustTier ranks a FindingCode for display grouping (问题 15):
-// critical codes (real failure modes) read first, low-confidence codes
-// (unverified_entity_reference — see lowConfidenceFindings) last, everything
-// else in between. Mirrors severity.go's criticalFindings/lowConfidenceFindings
-// so the group order and the verdict weighting can never disagree about which
-// codes are trustworthy. Tier ties within the same rank break by earliest
-// StepSeq — deterministic, independent of findings-slice order.
-func findingTrustTier(c FindingCode) int {
-	if criticalFindings[c] {
-		return 0
-	}
-	if lowConfidenceFindings[c] {
-		return 2
-	}
-	return 1
-}
-
 // renderFindingsSection renders findings.go's candidate list — the one
 // place in the document every Finding's full text (not just the ⚠️ mark
 // the decision spine adds) is shown. j is used only for the per-journey

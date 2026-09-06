@@ -1,6 +1,8 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/journey/render_md.go (journey-*.md) and the three
+// Pairs with internal/journey/render_md.go and its viewmodel counterpart
+// internal/journey/viewmodel_build.go (journey-*.md, both render paths), and
+// the three
 // fallback title strings in internal/journey/journey.go (toolLoopTitle,
 // stitchTaskTitle, deriveTitle's placeholder) — Journey/Task titles are
 // mostly a verbatim quote of the user's own message and so aren't localized
@@ -16,6 +18,11 @@ import "strconv"
 type StoryText struct {
 	ListSep     string // joins e.g. swallowed/survived entity lists ("a、b" vs "a, b")
 	JourneyMeta func(tasks, turns int, from, to string) string
+	// PartialBanner is the ⚠️ line shown when a Journey is partial (its tail
+	// lineage's continuation was never recorded). It moved here from the
+	// retired StoryHTMLText (the self-contained dashboard's chrome) — the
+	// Markdown banner and the dashboard banner were the same sentence.
+	PartialBanner string
 	// BackLinkLine is the "journey report → return" edge (P6.2d):
 	// vmr-stories.md (always) and, when reportLink != "", vmr-report.md.
 	BackLinkLine        func(reportLink string) string
@@ -61,7 +68,8 @@ type StoryText struct {
 func Story(lang Lang) StoryText {
 	if lang == ZH {
 		return StoryText{
-			ListSep: "、",
+			ListSep:       "、",
+			PartialBanner: "此 Journey 的开头被所加载的文件范围截断，展示的是可见部分。",
 			JourneyMeta: func(tasks, turns int, from, to string) string {
 				return "> " + strconv.Itoa(tasks) + " 任务 · " + strconv.Itoa(turns) + " 轮 · " + from + " → " + to + "\n\n"
 			},
@@ -133,7 +141,8 @@ func Story(lang Lang) StoryText {
 		}
 	}
 	return StoryText{
-		ListSep: ", ",
+		ListSep:       ", ",
+		PartialBanner: "This journey's beginning is truncated by the loaded file range; only the visible part is shown.",
 		JourneyMeta: func(tasks, turns int, from, to string) string {
 			return "> " + strconv.Itoa(tasks) + " tasks · " + strconv.Itoa(turns) + " turns · " + from + " → " + to + "\n\n"
 		},
