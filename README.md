@@ -69,7 +69,7 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 ### Pillar B: Post-Flight Audit, Story & Forensic Replay
 - **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency.
 - **1-Click Request Replay (`vmr replay`)**: Re-issue any failed request using exact historical byte payloads to reproduce bugs instantly.
-- **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-corpus` to zoom into exactly one view.
+- **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-benchmark` to zoom into exactly one view.
 - **Aggregate Reports (`vmr report`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
 - **Agent Task Narrative (`vmr story`)**: Reconstructs one task's full execution into a Step-by-step story — what context went in, what the model did with it, where a compaction event silently dropped information.
 - **Behavioral Profiling & Divergence Detection (`vmr story -compare`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
