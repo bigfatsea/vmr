@@ -279,20 +279,20 @@ func TestRenderMarkdown_PartialBanner(t *testing.T) {
 
 	// Default: not partial
 	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, false, nil)
-	if strings.Contains(md, i18n.StoryHTML(i18n.EN).PartialBanner) {
+	if strings.Contains(md, i18n.Story(i18n.EN).PartialBanner) {
 		t.Errorf("non-partial journey should not contain warning banner:\n%s", md)
 	}
 
 	// Flagged partial: banner must appear in EN
 	j.Partial = true
 	mdPartialEN := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, false, nil)
-	if !strings.Contains(mdPartialEN, i18n.StoryHTML(i18n.EN).PartialBanner) {
+	if !strings.Contains(mdPartialEN, i18n.Story(i18n.EN).PartialBanner) {
 		t.Errorf("partial journey EN missing partial banner:\n%s", mdPartialEN)
 	}
 
 	// Flagged partial: banner must appear in ZH
 	mdPartialZH := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.ZH), i18n.ZH, false, false, nil)
-	if !strings.Contains(mdPartialZH, i18n.StoryHTML(i18n.ZH).PartialBanner) {
+	if !strings.Contains(mdPartialZH, i18n.Story(i18n.ZH).PartialBanner) {
 		t.Errorf("partial journey ZH missing partial banner:\n%s", mdPartialZH)
 	}
 }

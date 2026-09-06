@@ -4,13 +4,14 @@ package journey
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
-	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -169,26 +170,17 @@ func TestBuildStructure_ToolCallRefHasNoResultText(t *testing.T) {
 	}
 }
 
-// TestBuildStructure_LosslessReconstruction is the acceptance test DevPlan
-// P4/P5 both point at: given only journey-<id>.json's structure field and
-// the audit log (no in-memory Journey), can the same messages fact-layer's
-// rendering (render_md.go's renderStep/renderEvent) shows today be
-// recovered?
-//
-// The correct reconstruction is HASH MATCHING, not a DeltaStart slice — the
-// first version of this test (and the first independent review's proposed
-// fix) sliced msgs[DeltaStart:] and asserted a 1:1 count/order match against
-// NewEvents. That only holds for the "no repeats" case: appendNewEvents
-// (journey.go) applies a JOURNEY-WIDE seen-hash dedup on top of the
-// DeltaStart slice, so whenever this Step's "new" range happens to repeat a
-// message byte-identical to one already seen earlier in the Journey (a
-// user resending the same text, a stitch boundary re-showing content),
-// msgs[DeltaStart:] is a strict SUPERSET of NewEvents — a straight slice
-// comparison would fail (second review's T4 finding). This fixture's step 3
-// deliberately repeats step 1's user message verbatim to force exactly that
-// case, and the reconstruction matches each EventRef.Hash against the
-// refetched record's own message hashes (computed the same way
-// ctxgraph.BuildManifest does) instead of assuming positional alignment.
+// TestBuildStructure_LosslessReconstruction is §9's rewritten acceptance test
+// (D18): given ONLY journeys/details/j-<id>.json — the published
+// JourneySummary, exercised as a real file so nothing in-memory can sneak in —
+// the same .md renders byte-for-byte. The pre-D18 version of this test proved
+// the weaker claim "structure plus the audit log can reconstruct what the
+// fact layer showed"; after 1C's bodies blob table and this package's
+// viewmodel layer, the audit log is not an input at all, so the assertion is
+// structural now: file in, .md out, equal to the old render path's bytes.
+// (The old test's hash-matching discipline — match EventRef.Hash against the
+// refetched record's own message hashes, never a raw DeltaStart slice — lives
+// on in the contract comment on StepStructure.DeltaStart.)
 func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := msg("system", "you are a helpful research assistant")
@@ -202,11 +194,9 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 	}))
 	r2 := mkRec(at(1), "", []any{sys, u1, a1, t1}, sseText("the rate is 7.1"))
 	// Step 3 resends u1 verbatim (byte-identical map literal) after a2 —
-	// LCP still matches the [u1,a1,t1] prefix, so DeltaStart lands right
-	// after t1 and msgs[DeltaStart:] = [a2, u1-again]; global dedup then
-	// drops u1-again from NewEvents (its hash was already seen at step 1),
-	// leaving NewEvents = [a2] only. A DeltaStart-slice reconstruction sees
-	// 2 "new" messages; the real answer is 1.
+	// its NewEvents then carry a2 only (u1's repeat is dropped by the
+	// journey-wide seen-hash dedup), the case that used to force
+	// hash-matching over DeltaStart slicing.
 	r3 := mkRec(at(2), "", []any{sys, u1, a1, t1, a2, u1}, sseText("sure, anything else?"))
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
@@ -215,105 +205,84 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	steps := journeySteps(j)
-	structure := BuildStructure(j)
-	var ssteps []StepStructure
-	for _, task := range structure.Tasks {
-		ssteps = append(ssteps, task.Steps...)
+	m := ComputeMetrics(j)
+	findings := ComputeFindings(j, i18n.EN)
+	summary := NewJourneySummary(j, m, findings, nil, nil)
+
+	// Publish exactly what j-<id>.json publishes: marshal, write to disk,
+	// read the file back, unmarshal. Everything below this line sees only
+	// the file's contents — the in-memory Journey/summary is out of scope.
+	data, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
 	}
-	if len(ssteps) != len(steps) {
-		t.Fatalf("got %d structure steps, want %d", len(ssteps), len(steps))
+	file := filepath.Join(t.TempDir(), "j-test.json")
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		t.Fatalf("write j-<id>.json: %v", err)
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read back j-<id>.json: %v", err)
+	}
+	var published JourneySummary
+	if err := json.Unmarshal(raw, &published); err != nil {
+		t.Fatalf("unmarshal j-<id>.json: %v", err)
 	}
 
-	// Sanity: confirm the fixture actually exercises the hard case before
-	// trusting the reconstruction loop below to have tested anything real.
-	step3 := ssteps[2]
-	if len(step3.NewEvents) != 1 {
-		t.Fatalf("test setup: step 3 NewEvents = %d, want 1 (a2 only — u1's repeat must be deduped); fixture no longer exercises the dedup case", len(step3.NewEvents))
+	got := RenderMarkdownFromSummary(&published, i18n.EN, false, true)
+	want := RenderMarkdown(j, m, findings, i18n.EN, false, true, nil)
+	if got != want {
+		t.Errorf(".md rendered from j-<id>.json alone diverges from the old render path\n=== from json ===\n%s\n=== from journey ===\n%s", got, want)
 	}
+}
 
-	wantBasename := ctxgraph.CanonicalPath(path)
-	for i, s := range steps {
-		ss := ssteps[i]
-		if ss.Req == "" {
-			t.Fatalf("step %d: empty Req", s.Seq)
-		}
-		basename, line, err := ctxgraph.ParseReqCoord(ss.Req)
-		if err != nil {
-			t.Fatalf("step %d: ParseReqCoord(%q): %v", s.Seq, ss.Req, err)
-		}
-		if basename != wantBasename {
-			t.Fatalf("step %d: Req basename %q, want %q", s.Seq, basename, wantBasename)
-		}
+// TestBuildStructure_BodiesNoOrphansNoDangling is §9's two-sided bodies
+// guard: every *_ref in the structure resolves to a blob (a dangling
+// reference means the rendering silently loses content), and every blob is
+// referenced at least once (an orphan means the file carries dead weight).
+func TestBuildStructure_BodiesNoOrphansNoDangling(t *testing.T) {
+	for _, name := range []string{"golden", "rich"} {
+		t.Run(name, func(t *testing.T) {
+			var j *Journey
+			if name == "golden" {
+				j = buildGoldenJourney(t)
+			} else {
+				j = vmEquivalenceFixture(t)
+			}
+			summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
 
-		// True external I/O: refetch the record by coordinate alone (no
-		// in-memory Step/Manifest involved from here on) and rebuild a
-		// fresh Manifest the same way ctxgraph.BuildManifest always does —
-		// this IS the canonical way to recover the Hash↔(role,text) mapping
-		// EventRef.Hash's doc comment points at.
-		raw, err := audit.LineAt(path, line)
-		if err != nil {
-			t.Fatalf("step %d: LineAt(%d): %v", s.Seq, line, err)
-		}
-		var rec audit.Record
-		if err := json.Unmarshal(raw, &rec); err != nil {
-			t.Fatalf("step %d: unmarshal refetched record: %v", s.Seq, err)
-		}
-		m, ok := ctxgraph.BuildManifest(&rec, path, line)
-		if !ok {
-			t.Fatalf("step %d: BuildManifest failed on refetched record", s.Seq)
-		}
-		msgs := chatmsg.Messages(rec.Client.Request.Body)
-
-		// hash -> (role, text), for every message BuildManifest assigned a
-		// Key to (i.e. every non-leading-system message — the leading
-		// system block uses a separate hash space, SysHash, not Keys; none
-		// of this fixture's NewEvents are leading-system events past step
-		// 1, and step 1's single system message is checked separately
-		// below without going through this map).
-		byHash := make(map[ctxgraph.Hash]chatmsg.Message, len(m.Keys))
-		for k, h := range m.Keys {
-			byHash[h] = msgs[m.MsgIdx[k]]
-		}
-
-		for _, evRef := range ss.NewEvents {
-			if evRef.Role == "system" {
-				// Leading system message: Keys/MsgIdx don't cover it (see
-				// the byHash comment above) — verified structurally instead
-				// (it must be msgs[0], and only step 1 ever introduces it).
-				if s.Seq != 1 || len(msgs) == 0 || msgs[0].Role != "system" {
-					t.Errorf("step %d: unexpected system-role NewEvent outside the leading-system special case", s.Seq)
+			referenced := map[string]bool{}
+			addRef := func(ref, what string) {
+				if ref == "" {
+					return
 				}
-				continue
+				if _, ok := summary.Bodies[ref]; !ok {
+					t.Errorf("dangling %s %q: not in the bodies table", what, ref)
+				}
+				referenced[ref] = true
 			}
-			got, found := byHash[evRef.Hash]
-			if !found {
-				t.Errorf("step %d: EventRef.Hash %x not found among the Req-refetched record's own message hashes — coordinate does not actually resolve to this content", s.Seq, evRef.Hash)
-				continue
+			for _, ss := range vmSteps(&summary) {
+				addRef(ss.RespRef, "resp_ref")
+				addRef(ss.ReasoningRef, "reasoning_ref")
+				for _, tc := range ss.ToolCalls {
+					addRef(tc.ArgsRef, "args_ref")
+					if tc.Result != nil {
+						addRef(tc.Result.Ref, "result ref")
+					}
+				}
+				if ss.Compaction != nil {
+					addRef(ss.Compaction.PredecessorExcerptRef, "predecessor_excerpt_ref")
+				}
 			}
-			if got.Role != evRef.Role {
-				t.Errorf("step %d: hash-matched message role %q, structure claims %q", s.Seq, got.Role, evRef.Role)
+			for h := range summary.Bodies {
+				if !referenced[h] {
+					t.Errorf("orphan blob %s: stored in bodies but referenced by nothing", h)
+				}
 			}
-		}
-	}
-
-	// The reconstructed text for step 3's sole NewEvent must be a2's own
-	// text, not u1's (proving the dedup didn't just happen to leave the
-	// count right for the wrong reason).
-	m3, ok := ctxgraph.BuildManifest(&r3, path, 3)
-	if !ok {
-		t.Fatal("BuildManifest failed reconstructing step 3's own record")
-	}
-	msgs3 := chatmsg.Messages(r3.Client.Request.Body)
-	gotHash := ssteps[2].NewEvents[0].Hash
-	foundText := ""
-	for k, h := range m3.Keys {
-		if h == gotHash {
-			foundText = msgs3[m3.MsgIdx[k]].Text
-		}
-	}
-	if want := a2["content"].(string); foundText != want {
-		t.Errorf("step 3's sole NewEvent hash-resolves to %q, want %q (a2's text, not u1's repeat)", foundText, want)
+			if len(summary.Bodies) == 0 {
+				t.Error("fixture no longer populates the bodies table — the guard is vacuous")
+			}
+		})
 	}
 }
 

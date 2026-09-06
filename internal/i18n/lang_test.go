@@ -75,7 +75,6 @@ var bundleConstructors = map[string]func(Lang) any{
 	"LLM":            func(l Lang) any { return LLM(l) },
 	"CLI":            func(l Lang) any { return CLI(l) },
 	"ClientEndpoint": func(l Lang) any { return ClientEndpoint(l) },
-	"CompareHTML":    func(l Lang) any { return CompareHTML(l) },
 	"Corpus":         func(l Lang) any { return Corpus(l) },
 	"Indicators":     func(l Lang) any { return Indicators(l) },
 	"ModelUsage":     func(l Lang) any { return ModelUsage(l) },
@@ -83,7 +82,6 @@ var bundleConstructors = map[string]func(Lang) any{
 	"ProviderQuota":  func(l Lang) any { return ProviderQuota(l) },
 	"Spine":          func(l Lang) any { return Spine(l) },
 	"StoryFindings":  func(l Lang) any { return StoryFindings(l) },
-	"StoryHTML":      func(l Lang) any { return StoryHTML(l) },
 	"StoryIndexT":    func(l Lang) any { return StoryIndexT(l) },
 	"ToolWaste":      func(l Lang) any { return ToolWaste(l) },
 }

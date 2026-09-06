@@ -1,8 +1,9 @@
-// Ver 2026-07-29 12:00, by Sonnet 5
+// Ver 2026-09-15, by pi
 
 package journey
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,26 +70,22 @@ func goldenFixture() []audit.Record {
 	}
 }
 
-// TestGoldenMarkdown locks in RenderMarkdown's exact byte output for a small
-// fixed corpus — the acceptance criterion ("golden test: a small testdata/
-// corpus, Markdown output byte-stable, idempotent across re-runs"), and the
-// gap flagged: nothing before this pinned the FULL rendered document, only
-// substrings within it
-// (TestRenderMarkdown_BasicStructure and friends) — a change that shifted
-// step numbering, broke a <details> pairing, or reordered fields would slip
-// through those. Runs both languages (this is the one place test
-// infrastructure itself has to fork by language, since a golden
-// test's whole point is pinning the FULL byte-for-byte output, which is
-// necessarily language-specific) — regenerate both with `UPDATE_GOLDEN=1 go
-// test ./internal/journey/ -run TestGoldenMarkdown` after a deliberate
-// rendering change, review the diff, then commit it.
+// TestGoldenMarkdown is the golden test sunk to the ViewModel layer (§9):
+// the pinned structure is BuildJourneyVM's output — compared structurally
+// against testdata/golden_vm.json (reviewable, and resilient to unrelated
+// serialization churn in a way a raw string diff is not) — and the fixed
+// serializer is smoke-tested end to end by asserting its output still matches
+// the byte-level golden .md files. A deliberate rendering change regenerates
+// both with `UPDATE_GOLDEN=1 go test ./internal/journey/ -run TestGoldenMarkdown`,
+// review the diff, then commit.
 func TestGoldenMarkdown(t *testing.T) {
 	for _, tc := range []struct {
 		lang     i18n.Lang
 		goldenMD string
+		goldenVM string
 	}{
-		{i18n.EN, filepath.Join("testdata", "golden.md")},
-		{i18n.ZH, filepath.Join("testdata", "golden_zh.md")},
+		{i18n.EN, filepath.Join("testdata", "golden.md"), filepath.Join("testdata", "golden_vm.json")},
+		{i18n.ZH, filepath.Join("testdata", "golden_zh.md"), filepath.Join("testdata", "golden_vm_zh.json")},
 	} {
 		t.Run(tc.lang.String(), func(t *testing.T) {
 			path := writeJSONL(t, goldenFixture())
@@ -104,21 +101,39 @@ func TestGoldenMarkdown(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			got := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), tc.lang, false, true, nil)
+			summary := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), nil, nil)
+			vm := BuildJourneyVM(&summary, tc.lang, false, true)
+
+			vmGot, err := json.MarshalIndent(vm, "", "  ")
+			if err != nil {
+				t.Fatalf("marshal VM: %v", err)
+			}
+			mdGot := SerializeJourneyVM(vm)
 
 			if os.Getenv("UPDATE_GOLDEN") != "" {
-				if err := os.WriteFile(tc.goldenMD, []byte(got), 0o644); err != nil {
+				if err := os.WriteFile(tc.goldenVM, vmGot, 0o644); err != nil {
 					t.Fatal(err)
 				}
-				t.Skipf("regenerated %s — review the diff, then re-run without UPDATE_GOLDEN", tc.goldenMD)
+				if err := os.WriteFile(tc.goldenMD, []byte(mdGot), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				t.Skipf("regenerated %s and %s — review the diff, then re-run without UPDATE_GOLDEN", tc.goldenVM, tc.goldenMD)
 			}
 
-			want, err := os.ReadFile(tc.goldenMD)
+			vmWant, err := os.ReadFile(tc.goldenVM)
+			if err != nil {
+				t.Fatalf("reading golden VM file (run with UPDATE_GOLDEN=1 to create it): %v", err)
+			}
+			if string(vmGot) != string(vmWant) {
+				t.Errorf("golden VM structure mismatch — after reviewing why, regenerate with UPDATE_GOLDEN=1 and diff the result before committing")
+			}
+
+			mdWant, err := os.ReadFile(tc.goldenMD)
 			if err != nil {
 				t.Fatalf("reading golden file (run with UPDATE_GOLDEN=1 to create it): %v", err)
 			}
-			if got != string(want) {
-				t.Errorf("golden output mismatch — after reviewing why, regenerate with UPDATE_GOLDEN=1 and diff the result before committing.\n=== got ===\n%s\n=== want ===\n%s", got, string(want))
+			if mdGot != string(mdWant) {
+				t.Errorf("golden output mismatch — after reviewing why, regenerate with UPDATE_GOLDEN=1 and diff the result before committing.\n=== got ===\n%s\n=== want ===\n%s", mdGot, string(mdWant))
 			}
 		})
 	}
