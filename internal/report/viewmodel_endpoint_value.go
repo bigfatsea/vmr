@@ -1,0 +1,121 @@
+// Ver 2026-09-15, by Opus 5
+
+// §6.6 端点性价比 view model: not "what did this endpoint cost" (§2
+// already answers that) but "what did it cost per unit of work delivered,
+// and what did its failures cost in time". Every figure is derived at
+// render time from fields §2 and §3 already carry. Pairs with
+// internal/i18n/report_endpoint_value.go.
+package report
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+
+	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
+)
+
+// vmValueRow is the rendered form of one endpoint's efficiency, computed
+// once so the table body stays a formatting exercise.
+type vmValueRow struct {
+	endpoint     string
+	costPer1MOut float64
+	costPerReq   float64
+	hasCost      bool
+	tokensOut    int64
+	requestsOK   int
+	failed       int
+	availability float64 // 0..1 fraction, NOT 0..100 — EndpointRow.ErrorRate is the other convention
+	wastedMS     int64
+}
+
+func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
+	rows := vmEndpointValueRows(rep)
+	if len(rows) == 0 {
+		return SectionVM{}
+	}
+	t := i18n.EndpointValue(lang)
+	sec := SectionVM{ID: "endpoint-value", Title: t.Title}
+
+	priced := rep.Pricing != nil
+	if priced {
+		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.IntroPriced})
+	} else {
+		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.IntroUnpriced})
+	}
+
+	headers := append([]string(nil), t.BaseHeaders[:]...)
+	if priced {
+		cur := ""
+		if rep.Pricing.Currency != "" {
+			cur = " (" + rep.Pricing.Currency + ")"
+		}
+		ph := t.PricedHeaders(cur)
+		headers = append(headers, ph[0], ph[1])
+	}
+	tail := t.TailHeaders
+	headers = append(headers, tail[0], tail[1], tail[2])
+	tbl := &TableVM{Headers: headers}
+	for _, r := range rows {
+		cells := []string{r.endpoint, strconv.Itoa(r.requestsOK), fmtutil.FmtTokens(r.tokensOut)}
+		if priced {
+			if r.hasCost {
+				cells = append(cells, fmt.Sprintf("%.4f", r.costPer1MOut), fmt.Sprintf("%.4f", r.costPerReq))
+			} else {
+				cells = append(cells, "-", "-")
+			}
+		}
+		cells = append(cells, strconv.Itoa(r.failed), pctStr(r.availability), fmtDurMS(r.wastedMS))
+		tbl.row(cells...)
+	}
+	notes := t.WastedNote + t.NoMoneyNote1 + t.NoMoneyNote2
+	if priced {
+		notes += t.PricedCompareNote
+	}
+	tbl.note(notes + "\n")
+	sec.Blocks = append(sec.Blocks, tbl)
+	return sec
+}
+
+// vmEndpointValueRows builds the sorted body. Sort key: cheapest per unit
+// of output first when pricing is available (that is the question the
+// section exists to answer), else most wasted time first.
+func vmEndpointValueRows(rep *Report2) []vmValueRow {
+	var out []vmValueRow
+	for _, e := range rep.EndpointsAll {
+		// An endpoint that never served a request has no unit of work to
+		// divide by; its failures still show up in §3 端点健康.
+		if e.RequestsOK == 0 && e.WastedMS == 0 {
+			continue
+		}
+		r := vmValueRow{
+			endpoint: e.Endpoint, tokensOut: e.TokensOut, requestsOK: e.RequestsOK,
+			failed: e.Failed, availability: e.Availability, wastedMS: e.WastedMS,
+		}
+		if e.CostEstimate != nil && *e.CostEstimate > 0 {
+			if e.TokensOut > 0 {
+				r.costPer1MOut = *e.CostEstimate / float64(e.TokensOut) * 1e6
+				r.hasCost = true
+			}
+			if e.RequestsOK > 0 {
+				r.costPerReq = *e.CostEstimate / float64(e.RequestsOK)
+			}
+		}
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.hasCost != b.hasCost {
+			return a.hasCost // priced rows first: they carry the comparison
+		}
+		if a.hasCost && a.costPer1MOut != b.costPer1MOut {
+			return a.costPer1MOut < b.costPer1MOut
+		}
+		if a.wastedMS != b.wastedMS {
+			return a.wastedMS > b.wastedMS
+		}
+		return a.endpoint < b.endpoint
+	})
+	return out
+}
