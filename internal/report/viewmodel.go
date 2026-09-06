@@ -21,11 +21,6 @@
 //
 // The VM is memory-only (D12) — it is never persisted; the JSON slices are
 // the machine-readable contract, this is the Markdown-only projection.
-//
-// Transition note: until the legacy renderer (render_doc.go +
-// section_*.go) is deleted, some small pure helpers are duplicated here
-// under a vm prefix rather than shared, so the two paths stay independent
-// and the byte-equivalence test compares two real implementations.
 package report
 
 import (
