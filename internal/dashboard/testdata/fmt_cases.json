@@ -1,0 +1,40 @@
+{
+  "cases": [
+    {"fn": "FmtTokens", "input": 0, "want": "0"},
+    {"fn": "FmtTokens", "input": 5, "want": "5"},
+    {"fn": "FmtTokens", "input": 999, "want": "999"},
+    {"fn": "FmtTokens", "input": 1000, "want": "1.0K"},
+    {"fn": "FmtTokens", "input": 1234, "want": "1.2K"},
+    {"fn": "FmtTokens", "input": 999999, "want": "1000.0K"},
+    {"fn": "FmtTokens", "input": 1000000, "want": "1.00M"},
+    {"fn": "FmtTokens", "input": 1500000, "want": "1.50M"},
+    {"fn": "FmtTokens", "input": 999999999, "want": "1000.00M"},
+    {"fn": "FmtTokens", "input": 1000000000, "want": "1.00B"},
+    {"fn": "FmtTokens", "input": 1500000000, "want": "1.50B"},
+    {"fn": "FmtTokens", "input": -5, "want": "-5"},
+
+    {"fn": "FmtBytes", "input": 0, "want": "0B"},
+    {"fn": "FmtBytes", "input": 999, "want": "999B"},
+    {"fn": "FmtBytes", "input": 1024, "want": "1.0KB"},
+    {"fn": "FmtBytes", "input": 1536, "want": "1.5KB"},
+    {"fn": "FmtBytes", "input": 1048576, "want": "1.0MB"},
+    {"fn": "FmtBytes", "input": 3670016, "want": "3.5MB"},
+    {"fn": "FmtBytes", "input": 536870912000, "want": "500.0GB"},
+    {"fn": "FmtBytes", "input": 2199023255552, "want": "2.0TB"},
+
+    {"fn": "FmtPercent", "input": 0, "want": "0.0%"},
+    {"fn": "FmtPercent", "input": 0.4234, "want": "42.3%"},
+    {"fn": "FmtPercent", "input": 1, "want": "100.0%"},
+    {"fn": "FmtPercent", "input": -0.05, "want": "-5.0%"},
+
+    {"fn": "FmtCurrency", "input": 0, "want": "$0.00"},
+    {"fn": "FmtCurrency", "input": 1.23, "want": "$1.23"},
+    {"fn": "FmtCurrency", "input": 0.05, "want": "$0.05"},
+    {"fn": "FmtCurrency", "input": 1250.5, "want": "$1250.50"},
+
+    {"fn": "FmtCost", "input": 0, "want": "$0.00"},
+    {"fn": "FmtCost", "input": 1.23, "want": "$1.23"},
+    {"fn": "FmtCost", "input": 0.05, "want": "$0.05"},
+    {"fn": "FmtCost", "input": 1250.5, "want": "$1250.50"}
+  ]
+}

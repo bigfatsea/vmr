@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-06, VMR Forensics Tool Waste (§6.2: consumes macro/context-efficiency.json — schema waste card) -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Forensics — Tool Schema Waste</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0e14%22/><path d=%22M6 8l10 16 10-16%22 fill=%22none%22 stroke=%22%23ffb000%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/></svg>">
+  <style>
+    :root {
+      --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0;
+      --code: #eceef1; --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+        --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    }
+    [data-theme="dark"] { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+      --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    [data-theme="light"] { --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0; --code: #eceef1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--ink); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+    a { color: var(--trace); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; word-break: break-all; }
+    header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; font-family: var(--sans); }
+    .topbar-inner { max-width: 800px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .brand span.badge { background: var(--amber); color: #000; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
+    nav.nav-links a.active { font-weight: 700; color: var(--trace); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
+    button { cursor: pointer; }
+
+    .banner { max-width: 800px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; font-family: var(--sans); }
+    .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
+    .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.hidden { display: none; }
+
+    .container { max-width: 800px; margin: 0 auto; padding: 24px 20px 60px; }
+    .recbar { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 26px; }
+    .hero { text-align: center; margin-bottom: 28px; }
+    .hpct { font-size: 68px; font-weight: 700; color: var(--amber); letter-spacing: -0.02em; line-height: 1; }
+    .hcap { font-family: var(--sans); font-size: 14.5px; color: var(--ink-dim); max-width: 480px; margin: 10px auto 0; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 24px; }
+    .stat { border: 1px solid var(--rule); border-radius: 5px; padding: 9px 11px; background: var(--panel); }
+    .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); font-family: var(--mono); }
+    .stat .v { font-size: 17px; font-weight: 700; margin-top: 3px; font-family: var(--mono); }
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 7px 9px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: middle; }
+    th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); font-family: var(--mono); }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    td.shape { font-size: 11.5px; word-break: break-word; }
+    .bar { display: inline-block; width: 96px; height: 9px; border-radius: 5px; background: var(--amber); overflow: hidden; vertical-align: middle; border: 1px solid var(--rule); }
+    .bar span { display: block; height: 100%; background: var(--go); }
+    .foot { margin-top: 24px; font-size: 11.5px; color: var(--ink-dim); font-family: var(--sans); line-height: 1.5; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 200; }
+    .modal-overlay.hidden { display: none; }
+    .modal-card { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 24px; width: 440px; max-width: 90vw; font-family: var(--sans); }
+    @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } .hpct { font-size: 52px; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span>VMR FORENSICS</span><span class="badge">Tool Waste</span></div>
+      <nav class="nav-links">
+        <a href="macro-dashboard.html">Macro Dashboard</a>
+        <a href="request-browser.html">Request Browser</a>
+        <a href="journey-viewer.html">Journey Viewer</a>
+        <a href="journey-compare.html">Compare</a>
+        <a href="benchmarks.html">Benchmarks</a>
+        <a href="tool-waste.html" class="active">Tool Waste</a>
+      </nav>
+      <div class="top-actions">
+        <button id="btn-auth">🔑 Key</button>
+        <button id="btn-theme">🌓 Theme</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner-file" class="banner alert hidden">
+    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+  </div>
+  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span></div>
+  <div id="banner-missing" class="banner alert hidden">
+    <span>⚠️ 这不是一套完整的 analyze 产物（manifest.json 或 macro/context-efficiency.json 缺失）。</span>
+  </div>
+
+  <div class="container">
+    <div class="recbar">VMR FORENSICS · TOOL SCHEMA WASTE CARD</div>
+
+    <div class="hero">
+      <div class="hpct" id="hero-pct">—</div>
+      <div class="hcap" id="hero-cap">of shipped tool schema bytes were never used by any model call</div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Shipped Schema</div><div class="v" id="stat-shipped">—</div></div>
+      <div class="stat"><div class="k">Dead Bytes</div><div class="v" id="stat-dead">—</div></div>
+      <div class="stat"><div class="k">≈ Tokens Wasted</div><div class="v" id="stat-tokens">—</div></div>
+      <div class="stat"><div class="k">Tool Shapes</div><div class="v" id="stat-shapes">—</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table id="tools-table">
+        <thead>
+          <tr>
+            <th>Shape / Signature</th>
+            <th class="num">Shipped</th>
+            <th class="num">Called</th>
+            <th class="num">Wasted Bytes</th>
+            <th>Waste</th>
+          </tr>
+        </thead>
+        <tbody id="tools-body">
+          <tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="foot" id="foot-note">
+      本卡片无对话正文，只有工具名、调用次数与字节量。"≈ tokens wasted" 按 ~4 bytes/token 的稠密 ASCII 启发式估算；准确值需在定价层核算。 "Shipped" 记每次请求随载荷发送的 schema 字节量；"Wasted" 记从未被调用工具的 schema 字节。低浪费率是理想态；高浪费率通常意味着声明的工具面远大于实际用法。
+    </div>
+  </div>
+
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
+      <p style="color:var(--ink-dim); font-size:12.5px; margin-bottom:16px;">Data slices require auth when <code>api_keys</code> is configured. Stored in <code>localStorage['vmr_status_key']</code>.</p>
+      <input type="password" id="input-api-key" style="width:100%; margin-bottom:16px; padding:8px 10px;" placeholder="Bearer token…">
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save" style="background:var(--trace); color:#fff; border:none;">Save & Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    // Same divisor toolWasteBytesPerToken in internal/report/toolwaste_html.go.
+    const BYTES_PER_TOKEN = 4;
+
+    (async function() {
+      Theme.init();
+      const dom = {
+        bannerFile: document.getElementById('banner-file'),
+        bannerVersion: document.getElementById('banner-version'),
+        bannerVersionText: document.getElementById('banner-version-text'),
+        bannerMissing: document.getElementById('banner-missing'),
+        btnAuth: document.getElementById('btn-auth'),
+        btnTheme: document.getElementById('btn-theme'),
+        authModal: document.getElementById('auth-modal'),
+        inputApiKey: document.getElementById('input-api-key'),
+        btnAuthSave: document.getElementById('btn-auth-save'),
+        btnAuthCancel: document.getElementById('btn-auth-cancel'),
+        heroPct: document.getElementById('hero-pct'),
+        heroCap: document.getElementById('hero-cap'),
+        statShipped: document.getElementById('stat-shipped'),
+        statDead: document.getElementById('stat-dead'),
+        statTokens: document.getElementById('stat-tokens'),
+        statShapes: document.getElementById('stat-shapes'),
+        toolsBody: document.getElementById('tools-body'),
+        footNote: document.getElementById('foot-note')
+      };
+
+      function updateAuthButton() {
+        const k = Auth.getKey();
+        dom.btnAuth.textContent = k ? `🔑 ***${k.slice(-4)}` : '🔑 Key';
+      }
+      updateAuthButton();
+      dom.btnAuth.onclick = () => { dom.inputApiKey.value = Auth.getKey(); dom.authModal.classList.remove('hidden'); };
+      dom.btnAuthCancel.onclick = () => dom.authModal.classList.add('hidden');
+      dom.btnAuthSave.onclick = () => { Auth.setKey(dom.inputApiKey.value); dom.authModal.classList.add('hidden'); updateAuthButton(); loadAll(); };
+      dom.btnTheme.onclick = () => {
+        const cur = Theme.getPreference();
+        Theme.setPreference(cur === 'auto' ? 'dark' : (cur === 'dark' ? 'light' : 'auto'));
+      };
+
+      async function loadAll() {
+        if (location.protocol === 'file:') {
+          dom.bannerFile.classList.remove('hidden');
+        }
+        try {
+          const m = await fetchSlice('manifest.json');
+          const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
+          if (st === 'banner') {
+            dom.bannerVersionText.textContent = `⚠️ 期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${m.format}。请运行全量 vmr analyze。`;
+            dom.bannerVersion.classList.remove('hidden');
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.bannerMissing.classList.remove('hidden');
+        }
+
+        try {
+          const ce = await fetchSlice('macro/context-efficiency.json');
+          renderToolWaste(ce);
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.bannerMissing.classList.remove('hidden');
+          dom.heroPct.textContent = '—';
+          dom.toolsBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">无法读取 macro/context-efficiency.json</td></tr>`;
+        }
+      }
+
+      function renderToolWaste(ce) {
+        const tools = ce.Tools || ce.tools || [];
+        if (tools.length === 0) {
+          dom.heroPct.textContent = '0%';
+          dom.toolsBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">No tool schemas tracked in this snapshot.</td></tr>`;
+          return;
+        }
+
+        // Sort by schema waste desc, shape asc — matching report's ordering.
+        tools.sort((a, b) => {
+          const wa = b.SchemaWasteBytes ?? b.schema_waste_bytes ?? 0;
+          const wb = a.SchemaWasteBytes ?? a.schema_waste_bytes ?? 0;
+          if (wa !== wb) return wa - wb;
+          const sa = a.Shape || a.shape || '';
+          const sb = b.Shape || b.shape || '';
+          return sa.localeCompare(sb);
+        });
+
+        let shipped = 0, waste = 0;
+        tools.forEach(t => {
+          shipped += t.SchemaBytesShipped ?? t.schema_bytes_shipped ?? 0;
+          waste += t.SchemaWasteBytes ?? t.schema_waste_bytes ?? 0;
+        });
+
+        const pct = shipped > 0 ? Math.round(waste / shipped * 100) : 0;
+        dom.heroPct.textContent = pct + '%';
+        dom.statShipped.textContent = FmtBytes(shipped);
+        dom.statDead.textContent = FmtBytes(waste);
+        dom.statTokens.textContent = FmtTokens(Math.round(waste / BYTES_PER_TOKEN));
+        dom.statShapes.textContent = tools.length;
+
+        dom.toolsBody.innerHTML = tools.slice(0, 20).map(t => {
+          const sh = t.SchemaBytesShipped ?? t.schema_bytes_shipped ?? 0;
+          const w = t.SchemaWasteBytes ?? t.schema_waste_bytes ?? 0;
+          const declared = t.DeclaredCount ?? t.declared_count ?? 0;
+          const called = t.CalledCount ?? t.called_count ?? 0;
+          const ratio = sh > 0 ? (w / sh) : 0;
+          const shape = t.Shape || t.shape || '(unnamed)';
+          const sig = t.Signature || t.signature || '';
+          return `
+            <tr>
+              <td class="shape">${shape}${sig ? `<span style="display:block; margin-top:3px; font-size:10px; color:var(--ink-dim);">${sig}</span>` : ''}</td>
+              <td class="num">${declared} / ${called}</td>
+              <td class="num">${FmtBytes(sh)}</td>
+              <td class="num" style="color:var(--amber);">${FmtBytes(w)}</td>
+              <td><span class="bar"><span style="width:${Math.min(100, ratio * 100).toFixed(0)}%;"></span></span><span style="margin-left:8px; font-size:11px; color:var(--ink-dim);">${FmtPercent(ratio, 0)}</span></td>
+            </tr>
+          `;
+        }).join('') + (tools.length > 20 ? `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">…${tools.length - 20} more shapes (view full list in the macro report JSON)</td></tr>` : '');
+      }
+
+      loadAll();
+    })();
+  </script>
+</body>
+</html>
