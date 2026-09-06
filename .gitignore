@@ -20,8 +20,9 @@ skills-lock.json
 # (use report.example.yaml as template)
 /report.yaml
 
-# Your own pricing supplement, referenced from config.yaml's pricing.supplement
-# (use pricing.example.yaml as template)
+# Personal pricing scratchpad (the supplement-file mechanism is no longer
+# supported — the runtime never loads this; keeping the path gitignored so
+# any future ad-hoc work the user takes on stays out of the repo)
 /pricing.yaml
 
 # Test & coverage
