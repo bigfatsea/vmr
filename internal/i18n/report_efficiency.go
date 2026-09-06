@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_efficiency.go (§7 Efficiency & Waste)
+// Pairs with internal/report/viewmodel_efficiency.go (§7 Efficiency & Waste)
 // and internal/report/metrics.go's buildFindings. See
 // docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection: the
 // six Finding* closures here are called with EN by Build (populating
@@ -22,7 +22,7 @@ type FindingText struct {
 	Title, Value, Implicated, Action string
 }
 
-// EfficiencyText is section_efficiency.go's text plus metrics.go's finding
+// EfficiencyText is viewmodel_efficiency.go's text plus metrics.go's finding
 // generators, in one language.
 type EfficiencyText struct {
 	Title            string

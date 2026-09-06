@@ -1,7 +1,7 @@
 // Ver 2026-08-29, by Sonnet 5
 
 // Chrome strings for the §7 tool-waste figures (renderToolWasteTotals in
-// internal/report/section_efficiency.go and the retired standalone
+// internal/report/viewmodel_efficiency.go and the retired standalone
 // tool-schema-waste card). Fixed UI strings only; every number comes from
 // the report's own rep.Tools rows.
 package i18n

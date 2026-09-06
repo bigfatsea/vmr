@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_reliability.go (§3 Reliability).
+// Pairs with internal/report/viewmodel_reliability.go (§3 Reliability).
 package i18n
 
-// ReliabilityText is section_reliability.go's text, in one language.
+// ReliabilityText is viewmodel_reliability.go's text, in one language.
 type ReliabilityText struct {
 	Title                  string
 	OutcomeTitle           string

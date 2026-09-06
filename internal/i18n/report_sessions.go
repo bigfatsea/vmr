@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_sessions.go (§6 Sessions & Tasks).
+// Pairs with internal/report/viewmodel_sessions.go (§6 Sessions & Tasks).
 package i18n
 
-// SessionsText is section_sessions.go's text, in one language.
+// SessionsText is viewmodel_sessions.go's text, in one language.
 type SessionsText struct {
 	Title               string
 	NoInteractive       string

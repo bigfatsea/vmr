@@ -142,7 +142,7 @@ func checkDocRefs(w docWorld, docRel, content string) []string {
 				continue
 			}
 			if strings.HasSuffix(sub, ".go") {
-				// A glob (internal/report/section_*.go) is how the docs
+				// A glob (internal/report/viewmodel_*.go) is how the docs
 				// name a file convention rather than one file; it holds as
 				// long as something still matches it.
 				if strings.Contains(sub, "*") {
@@ -403,7 +403,7 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"CLAUDE.md", "`tokenutil.Estimate` shares its coefficients"},
 		{"CLAUDE.md", "`i18n.LLM(lang).SystemPrompt` is the prompt"},
 		{"CLAUDE.md", "see internal/router/router.go and docs/UserGuide.md"},
-		{"CLAUDE.md", "one section per internal/report/section_*.go"},
+		{"CLAUDE.md", "one section per internal/report/viewmodel_*.go"},
 		{"CLAUDE.md", "`time.Duration` and `json.RawMessage` are out of scope"},
 		{"internal/report/detail.go", "see docs/future-strategy/analyze_architecture_redesign_opus-5.md"},
 		{"internal/report/detail.go", "moved to internal/reqdetail/render.go"},

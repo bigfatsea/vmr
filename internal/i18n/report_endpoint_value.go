@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_endpoint_value.go (§6.6 Endpoint Value).
+// Pairs with internal/report/viewmodel_endpoint_value.go (§6.6 Endpoint Value).
 package i18n
 
-// EndpointValueText is section_endpoint_value.go's text, in one language.
+// EndpointValueText is viewmodel_endpoint_value.go's text, in one language.
 type EndpointValueText struct {
 	Title             string
 	IntroPriced       string

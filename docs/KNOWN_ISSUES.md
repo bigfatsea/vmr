@@ -116,7 +116,7 @@
 - **`imgprep.ImageInfo` → `audit.ImageInfo` 的字段拷贝**：换 `imgprep` 不依赖 `audit`，保住公共工具包零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
 - **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/journey/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
-- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：同一份文本要进 Markdown 与 HTML 两种产物，而 HTML 侧的转义早已由 `story/mdlite.go` 在渲染时全量完成（`<script>` 从来进不去）。真正没人管的是 Markdown **结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`（含无空格形态）、主题分隔线 `---`）——而它在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
+- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**： Finding 文本同时进 Markdown 产物与机读 JSON，而 Markdown 的**结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`（含无空格形态）、主题分隔线 `---`）——在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前（自包含 HTML 随骨架页形态退役后，HTML 侧转义面已消失，但构造期转义的理由不变）。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **`core.StickyBackstopTTL` 不迁回 `internal/sticky`**：迁回制造一条 `config` → `sticky` 的新依赖边，仅用于读一个常量；不做这个校验则 `sticky_ttl` 超过 backstop 的配置会「看起来被接受、实际静默失效」。
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：降级估算的统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（Q04 的 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
@@ -127,7 +127,7 @@
 - **Go 与看板 JS 的金额格式化是两套行为，不在 `fmtutil` 收编统一（2026-09，跨语言 fixture 落地时裁决）**：dashboard 包的格式化 fixture（testdata/fmt_cases.json，由 fmtutil 侧测试与看板 JS 各跑一遍）钉住了 FmtTokens/FmtBytes/FmtPercent 三类两侧一致；金额则刻意不钉——Go 侧金额格式化发生在渲染层（journey 的 `fmtMoney`：≥100 抹分、<100 保留两位，服务于 Markdown 报表的紧凑排版），看板 JS 恒定两位小数（服务于表格对齐），两者的排版语境不同，统一哪一侧都要牺牲另一个语境。`FmtCurrency`/`FmtCost` 的 fixture 条目在 Go 侧测试中显式跳过并注明指向本条。**不要以「消除漂移」名义把金额格式化收进 `fmtutil`**——那会把两种排版策略压成一个错误的全局值；重新裁决的触发条件是出现第三种消费语境或两侧任一行为变更。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
-- **`i18n` 的一批微文件不合并**：与 `internal/report/section_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
+- **`i18n` 的一批微文件不合并**：与 `internal/report/viewmodel_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
 - **`i18n` 的 `type XxxText` + `if lang == ZH` 样板不改写成 `map[Lang]T` + 泛型 `pick`**：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉，还新引入泛型 helper 与「key 缺失怎么办」。收益为负。
 - **`internal/probe` 不登记进 `zeroInternalDepPackages`**：那张表的语义是「**承诺**永远零依赖」，不是「当前碰巧零依赖的都登记」。`probe` 独立成包是为避免 `diagnose`→`router` import cycle，未来 import `core` 完全合理。（`rundir` / `buildinfo` / `sysinfo` 与 `tokenutil` 均作为基础叶子包登记守卫。）
 - **`internal/core/core.go` 不按领域拆成 `endpoint.go`/`quota.go`/`pricing.go`**：同包拆文件不改变任何编译依赖，是代码导航整理不是架构重构。真正解决「core 会不会长成上帝包」的是准入规则，已写在包注释里并对存量逐条复核过。
@@ -144,8 +144,8 @@
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
-- **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；HTML 看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
-- **`internal/journey/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §2.51。
+- **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
+- **不自建 Markdown→HTML 的渲染层**（2026-09 收敛，原 journey 侧的 mdlite 微渲染器已随自包含 HTML 退役删除）：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。已知瑕疵 §2.51 随之失去载体。
 - **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
 - **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
 - **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗候选预过滤出局，最强者仅作诊断兜底**：旧规则豁免同桶候选的理由是“用户可以走开几天再回来接同一个 anchor”——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。2026-09 收敛为**淘汰优先于排序**（与 `strategy` 包 `Condition`/`Dimension` 分离同型）：超窗候选不参与赢家竞争，避免「高分超窗者先赢再降级」遮蔽窗内合法前驱；仅当过滤后无任何窗内候选时，最强超窗者作为降级 `AmbiguousMatch` 边保留供人查看——真的走开三天回来接着聊的人不会消失进 `NoPredecessorFound`。
@@ -309,10 +309,10 @@
 - **触发条件**：界限清楚、随时可做；改动会给两个函数各加一个分支，注意 `archtest` per-function 行预算。
 
 
-#### 2.51 [低] `internal/journey/mdlite.go` 行内代码里的 `**` 会在 `<code>` 内注入 `<strong>`
+#### 2.51 [已消解] 旧 mdlite 渲染器行内代码里的 `**` 会在 `<code>` 内注入 `<strong>`
 
-- **现状**：`mdInline` 先 `mdWrap` 处理 `` ` ``、再处理 `**`；若 `-compare -html` 的 LLM 解读段在行内代码里输出 `**`（如 `` `glob/**` ``），第二遍会在已生成的 `<code>` 内注入 `<strong>`。纯展示层轻微瑕疵——`html.EscapeString` 最前置，无 XSS。
-- **为什么待定**：真观察到 LLM 频繁触发再微调解析状态机；`mdlite` 只覆盖解读段实际用到的 Markdown 子集这一取舍见 §1.5。
+- **原状**：`mdInline` 先处理行内代码再处理 `**`，两遍处理下 `` `glob/**` `` 会在已生成的 `<code>` 内注入 `<strong>`（纯展示瑕疵，无 XSS）。
+- **消解方式（2026-09）**：`mdlite.go` 随自包含 HTML 渲染器退役整体删除（见 §1.5「不自建 Markdown→HTML 渲染层」条），该瑕疵失去载体。若未来重建 web 化渲染层，用现成渲染器并重新评估此类转义边界。
 
 
 #### 2.6 [低] §2.5 表格的标记符号已达四个

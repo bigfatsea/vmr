@@ -1,11 +1,11 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_tokens.go (§1 Cost & Token Economy).
+// Pairs with internal/report/viewmodel_tokens.go (§1 Cost & Token Economy).
 package i18n
 
 import "strconv"
 
-// TokensText is section_tokens.go's text, in one language.
+// TokensText is viewmodel_tokens.go's text, in one language.
 type TokensText struct {
 	Title               string
 	ClassBreakdownFmt   func(known int) string

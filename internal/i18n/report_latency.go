@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_latency.go (§4 Latency & Throughput).
+// Pairs with internal/report/viewmodel_latency.go (§4 Latency & Throughput).
 package i18n
 
-// LatencyText is section_latency.go's text, in one language.
+// LatencyText is viewmodel_latency.go's text, in one language.
 type LatencyText struct {
 	Title           string
 	Headers         func(slowSec int) [6]string // model, protocol, ttft p50/p95(n), dur p50/p95/max(n), slow>Ns, tok/s

@@ -1,11 +1,11 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_cost.go (§2 Cost Estimate).
+// Pairs with internal/report/viewmodel_cost.go (§2 Cost Estimate).
 package i18n
 
 import "fmt"
 
-// CostText is section_cost.go's text, in one language.
+// CostText is viewmodel_cost.go's text, in one language.
 type CostText struct {
 	Title                 string
 	NoPricingBody         string

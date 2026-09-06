@@ -1,11 +1,11 @@
 // Ver 2026-08-12 23:40, by Opus 5
 
-// Pairs with internal/report/section_provider.go (§2.5 Provider Spend & Quota).
+// Pairs with internal/report/viewmodel_provider.go (§2.5 Provider Spend & Quota).
 package i18n
 
 import "strconv"
 
-// ProviderText is section_provider.go's text, in one language.
+// ProviderText is viewmodel_provider.go's text, in one language.
 type ProviderText struct {
 	Title   string
 	Intro   string
@@ -50,7 +50,7 @@ func Provider(lang Lang) ProviderText {
 	}
 }
 
-// ProviderQuotaText is section_provider.go's renderProviderQuotaTable text
+// ProviderQuotaText is viewmodel_provider.go's renderProviderQuotaTable text
 // ("额度与消耗对照" sub-table), in one language.
 type ProviderQuotaText struct {
 	Title               string

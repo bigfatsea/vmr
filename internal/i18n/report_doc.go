@@ -1,12 +1,12 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/render_doc.go: the document title, the meta
+// Pairs with internal/report/viewmodel_doc.go: the document title, the meta
 // line, §0 summary + auto highlights, §8's link line, and the appendix.
 package i18n
 
 import "strconv"
 
-// DocText is render_doc.go's text, in one language.
+// DocText is viewmodel_doc.go's text, in one language.
 type DocText struct {
 	Title    string
 	MetaLine func(inputs string, format, records, parseErrors int, from, to string) string
@@ -72,7 +72,7 @@ type DocText struct {
 	AppendixClientReconciliation   func(clients string) string
 }
 
-// Doc returns render_doc.go's text for lang.
+// Doc returns viewmodel_doc.go's text for lang.
 func Doc(lang Lang) DocText {
 	if lang == ZH {
 		return DocText{

@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_sticky.go (§6.5 Sticky Effectiveness).
+// Pairs with internal/report/viewmodel_sticky.go (§6.5 Sticky Effectiveness).
 package i18n
 
-// StickyText is section_sticky.go's text, in one language.
+// StickyText is viewmodel_sticky.go's text, in one language.
 type StickyText struct {
 	Title            string
 	Intro1           string

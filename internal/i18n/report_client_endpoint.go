@@ -1,10 +1,10 @@
 // Ver 2026-08-12 23:40, by Opus 5
 
-// Pairs with internal/report/section_client_endpoint.go (§5.5 Per-Client
+// Pairs with internal/report/viewmodel_client_endpoint.go (§5.5 Per-Client
 // Upstream Attribution).
 package i18n
 
-// ClientEndpointText is section_client_endpoint.go's text, in one language.
+// ClientEndpointText is viewmodel_client_endpoint.go's text, in one language.
 type ClientEndpointText struct {
 	Title   string
 	Intro   string

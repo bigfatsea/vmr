@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/section_workload.go (§5 Workload Distribution).
+// Pairs with internal/report/viewmodel_workload.go (§5 Workload Distribution).
 package i18n
 
-// WorkloadText is section_workload.go's text, in one language.
+// WorkloadText is viewmodel_workload.go's text, in one language.
 type WorkloadText struct {
 	Title             string
 	ByModelTitle      string
