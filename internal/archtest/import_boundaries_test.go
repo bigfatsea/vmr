@@ -173,6 +173,21 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/report",
 		"vmr/internal/journey",
 	},
+	// server is the HTTP surface and admin layer. Under the two-halves
+	// contract (docs/VirtualModelRouter_Design_v4_Analytics.md Part 2:
+	// "Two halves, one contract"), the routing half and analytics half
+	// remain strictly decoupled: server serves requests and static reports
+	// by path alone, and must never import any package from the analytics
+	// half. The JSONL audit log and filesystem artifacts are the only coupling.
+	// Note: chatmsg is excluded from this list because router/respnorm legitimately
+	// depend on chatmsg.Usage for quota sniffing, so server depends on it transitively.
+	"vmr/internal/server": {
+		"vmr/internal/report",
+		"vmr/internal/journey",
+		"vmr/internal/ctxgraph",
+		"vmr/internal/taskseg",
+		"vmr/internal/reqdetail",
+	},
 }
 
 // zeroInternalDepPackages must not depend on any other vmr/internal/*

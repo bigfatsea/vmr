@@ -45,6 +45,9 @@ func (c *Config) validateBasic() error {
 			return fmt.Errorf("extra_redact_headers[%d]: empty header name", i)
 		}
 	}
+	if c.Analytics.Serve && strings.TrimSpace(c.Analytics.ServeDir) == "" {
+		return fmt.Errorf("analytics: serve_dir must not be empty when serve is enabled")
+	}
 	for _, proxy := range [...]struct{ name, val string }{
 		{"http_proxy", c.HTTPProxy},
 		{"https_proxy", c.HTTPSProxy},

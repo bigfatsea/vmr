@@ -44,6 +44,9 @@ type Server struct {
 	audit  *audit.Logger // nil = auditing disabled
 	inst   instance      // zero value outside `vmr start` (tests, embedding)
 	logTee *logtee.Tee   // nil = live-log streaming unavailable (/log answers 503)
+	// reports is non-nil only when analytics.serve is on at Handler() mount
+	// time — see mountReports in reports.go.
+	reports *reportsState
 	// started is when this Server began serving — /health's uptime basis.
 	// Separate from inst.startedAt, which only `vmr start` fills in and
 	// which /status therefore reports conditionally: /health has no
@@ -71,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /help.zh.html", s.helpPageZH)
 	mux.HandleFunc("GET /log", s.auth(s.adminLog))
 	mux.HandleFunc("GET /log.html", s.logPage)
+	s.mountReports(mux)
 	return mux
 }
 

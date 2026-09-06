@@ -97,6 +97,9 @@ listen: 127.0.0.1:8800
 #                                  #（默认状态）不改变任何行为。
 # log_dir: ~/.vmr/logs           # 审计 JSONL 目录；按原样使用（~/ 会展开）；不写 = ~/.vmr/logs。改这个需要重启
 # image_cache_dir: ~/.vmr/image_cache  # 缩图结果缓存目录；规则相同；不写 = ~/.vmr/image_cache；支持热重载
+# analytics:                      # 用于 analyze 报表与看板的 /reports/ 静态托管（默认关闭）
+#   serve: false                 # true = 挂载 /reports/*；false = 不注册路由（404）
+#   serve_dir: ./reports         # 静态托管根目录；相对路径按 vmr start 工作目录解析
 # timeouts:                       # "等多久"——请求路径上的等待上限，Go duration 语法
 #   connect: 10s
 #   response_header: 120s        # 从上游收到首字节的时间

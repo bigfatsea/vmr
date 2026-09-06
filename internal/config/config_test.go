@@ -2,6 +2,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -987,5 +989,56 @@ func TestModelStrategyValidDimensionAccepted(t *testing.T) {
 func TestModelStrategyUnsetInheritsDefault(t *testing.T) {
 	if _, err := Parse([]byte(validYAML)); err != nil {
 		t.Fatalf("default (omitted) strategy should keep validating: %v", err)
+	}
+}
+
+func TestAnalyticsConfig_Defaults(t *testing.T) {
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Analytics.Serve != false {
+		t.Errorf("default analytics.serve: got %v, want false", cfg.Analytics.Serve)
+	}
+	if cfg.Analytics.ServeDir != "./reports" {
+		t.Errorf("default analytics.serve_dir: got %q, want \"./reports\"", cfg.Analytics.ServeDir)
+	}
+}
+
+func TestAnalyticsConfig_Explicit(t *testing.T) {
+	yaml := "analytics:\n  serve: true\n  serve_dir: /var/reports\n" + validYAML
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Analytics.Serve != true {
+		t.Errorf("analytics.serve: got %v, want true", cfg.Analytics.Serve)
+	}
+	if cfg.Analytics.ServeDir != "/var/reports" {
+		t.Errorf("analytics.serve_dir: got %q, want \"/var/reports\"", cfg.Analytics.ServeDir)
+	}
+}
+
+func TestAnalyticsConfig_TildeExpansion(t *testing.T) {
+	yaml := "analytics:\n  serve: true\n  serve_dir: ~/my-reports\n" + validYAML
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home dir in this environment")
+	}
+	want := filepath.Join(home, "my-reports")
+	if cfg.Analytics.ServeDir != want {
+		t.Errorf("analytics.serve_dir tilde expansion: got %q, want %q", cfg.Analytics.ServeDir, want)
+	}
+}
+
+func TestAnalyticsConfig_UnknownFieldRejected(t *testing.T) {
+	yaml := "analytics:\n  serve: true\n  unknown_option: 123\n" + validYAML
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "unknown_option") {
+		t.Fatalf("expected error mentioning unknown_option, got %v", err)
 	}
 }
