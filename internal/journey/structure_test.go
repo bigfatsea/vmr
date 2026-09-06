@@ -12,6 +12,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -230,9 +231,9 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 	}
 
 	got := RenderMarkdownFromSummary(&published, i18n.EN, false, true)
-	want := RenderMarkdown(j, m, findings, i18n.EN, false, true, nil)
+	want := RenderMarkdownFromSummary(&summary, i18n.EN, false, true)
 	if got != want {
-		t.Errorf(".md rendered from j-<id>.json alone diverges from the old render path\n=== from json ===\n%s\n=== from journey ===\n%s", got, want)
+		t.Errorf(".md rendered from unmarshaled j-<id>.json diverges from in-memory summary\n=== from json ===\n%s\n=== from summary ===\n%s", got, want)
 	}
 }
 
@@ -298,11 +299,14 @@ func TestBuildStructure_VolumeBoundedByStepsNotProseLength(t *testing.T) {
 	small := buildJourneyWithArgsLen(t, 20)
 	huge := buildJourneyWithArgsLen(t, 200000) // two orders of magnitude beyond structureExcerptChars
 
-	smallJSON, err := json.Marshal(BuildStructure(small))
+	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small, i18n.EN), nil, nil)
+	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge, i18n.EN), nil, nil)
+
+	smallJSON, err := json.Marshal(smallSummary)
 	if err != nil {
 		t.Fatalf("marshal small: %v", err)
 	}
-	hugeJSON, err := json.Marshal(BuildStructure(huge))
+	hugeJSON, err := json.Marshal(hugeSummary)
 	if err != nil {
 		t.Fatalf("marshal huge: %v", err)
 	}
@@ -357,6 +361,10 @@ func buildJourneyWithArgsLen(t *testing.T, argsLen int) *Journey {
 		t.Fatalf("Build: %v", err)
 	}
 	return j
+}
+
+func mkManifest(ts time.Time) *ctxgraph.Manifest {
+	return &ctxgraph.Manifest{TS: ts}
 }
 
 // TestBuildStructure_BodiesIntegrity locks the D18 / §3.6 invariants:

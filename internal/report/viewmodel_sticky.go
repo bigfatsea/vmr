@@ -23,15 +23,15 @@ func vmStickySection(rep *Report2, lang i18n.Lang) SectionVM {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.Intro1 + t.Intro2})
 
 	tbl := &TableVM{Headers: t.TableHeaders[:]}
-	vmStickyRow(tbl, t.RowContinued, eff.Continued)
-	vmStickyRow(tbl, t.RowSwitched, eff.Switched)
+	stickyRow(tbl, t.RowContinued, eff.Continued)
+	stickyRow(tbl, t.RowSwitched, eff.Switched)
 	// The headline: one number, stated plainly, or an explicit "not
 	// enough data" — never a percentage computed from a handful of
 	// requests.
 	verdict := ""
 	switch {
-	case eff.Continued.TokensKnown < vmStickyMinBasis || eff.Switched.TokensKnown < vmStickyMinBasis:
-		verdict = t.InsufficientData(vmStickyMinBasis)
+	case eff.Continued.TokensKnown < stickyMinBasis || eff.Switched.TokensKnown < stickyMinBasis:
+		verdict = t.InsufficientData(stickyMinBasis)
 	case eff.Continued.CacheEfficiency > eff.Switched.CacheEfficiency:
 		verdict = t.Working(pctStr(eff.Continued.CacheEfficiency), pctStr(eff.Switched.CacheEfficiency),
 			pctStr(eff.Continued.CacheEfficiency-eff.Switched.CacheEfficiency))
@@ -51,7 +51,7 @@ func vmStickySection(rep *Report2, lang i18n.Lang) SectionVM {
 		mt := &TableVM{Title: t.ByModelTitle, Headers: t.ByModelHeaders[:]}
 		for _, m := range eff.ByModel {
 			delta := "-"
-			if m.Continued.TokensKnown >= vmStickyMinBasis && m.Switched.TokensKnown >= vmStickyMinBasis {
+			if m.Continued.TokensKnown >= stickyMinBasis && m.Switched.TokensKnown >= stickyMinBasis {
 				delta = pctStr(m.Continued.CacheEfficiency - m.Switched.CacheEfficiency)
 			}
 			mt.row(m.Model, m.Protocol,
@@ -65,14 +65,14 @@ func vmStickySection(rep *Report2, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// vmStickyMinBasis is the smallest per-group usage-bearing sample this
+// stickyMinBasis is the smallest per-group usage-bearing sample this
 // section will draw a conclusion from. Below it the numbers still render
 // (with the existing ⚠️low-n cell treatment) but the verdict line refuses
 // to call it — a cache-efficiency gap computed from three requests is
 // noise, and stating it as a finding is worse than saying nothing.
-const vmStickyMinBasis = 20
+const stickyMinBasis = 20
 
-func vmStickyRow(tbl *TableVM, label string, g StickyGroup) {
+func stickyRow(tbl *TableVM, label string, g StickyGroup) {
 	tbl.row(label, strconv.Itoa(g.Requests), strconv.Itoa(g.TokensKnown),
 		cacheEffCell(g.CacheEfficiency, g.TokensKnown, g.Requests),
 		fmtutil.FmtTokens(g.TokensInCached), fmtutil.FmtTokens(g.TokensInFresh))

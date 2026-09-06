@@ -716,13 +716,8 @@ func TestRenderSpine_InferredFindingRendering(t *testing.T) {
 		Action:         "人工复核",
 	}
 
-	var sb strings.Builder
-	w := func(format string, args ...any) {
-		sb.WriteString(fmt.Sprintf(format, args...))
-	}
-
-	renderFindingsSection(w, &Journey{}, []Finding{finding}, i18n.ZH)
-	rendered := sb.String()
+	sum := JourneySummary{Findings: []Finding{finding}}
+	rendered := SerializeJourneyVM(&JourneyVM{Findings: buildVMFindings(&sum, i18n.ZH)})
 
 	if !strings.Contains(rendered, "[AI推测 · 置信度: HIGH]") {
 		t.Errorf("rendered output missing AI推测 badge:\n%s", rendered)
@@ -754,12 +749,8 @@ func TestRenderSpine_MixedSourceSameCode(t *testing.T) {
 		Finding:        "AI 推测：计划条目未见后续执行",
 	}
 
-	var sb strings.Builder
-	w := func(format string, args ...any) {
-		sb.WriteString(fmt.Sprintf(format, args...))
-	}
-	renderFindingsSection(w, &Journey{}, []Finding{ruleFinding, llmFinding}, i18n.ZH)
-	rendered := sb.String()
+	sum := JourneySummary{Findings: []Finding{ruleFinding, llmFinding}}
+	rendered := SerializeJourneyVM(&JourneyVM{Findings: buildVMFindings(&sum, i18n.ZH)})
 
 	if !strings.Contains(rendered, "[规则检测]") {
 		t.Errorf("expected the rule-sourced entry to be tagged [规则检测] when an LLM-sourced sibling shares its Code:\n%s", rendered)
@@ -770,10 +761,10 @@ func TestRenderSpine_MixedSourceSameCode(t *testing.T) {
 
 	// A single-source hit (no sibling with the other Source) must NOT pick
 	// up the [规则检测] tag — it stays bare, as before this change.
-	sb.Reset()
-	renderFindingsSection(w, &Journey{}, []Finding{ruleFinding}, i18n.ZH)
-	if strings.Contains(sb.String(), "[规则检测]") {
-		t.Errorf("a lone rule finding (no LLM sibling) should not be tagged:\n%s", sb.String())
+	sumSingle := JourneySummary{Findings: []Finding{ruleFinding}}
+	renderedSingle := SerializeJourneyVM(&JourneyVM{Findings: buildVMFindings(&sumSingle, i18n.ZH)})
+	if strings.Contains(renderedSingle, "[规则检测]") {
+		t.Errorf("a lone rule finding (no LLM sibling) should not be tagged:\n%s", renderedSingle)
 	}
 }
 
@@ -981,11 +972,11 @@ data: [DONE]`},
 
 	// Markdown artifact: the findings section must not gain a heading, list
 	// item or table row out of the model's text.
-	var md strings.Builder
-	renderFindingsSection(func(format string, args ...any) { md.WriteString(fmt.Sprintf(format, args...)) }, j, res, i18n.ZH)
+	sumRes := JourneySummary{Findings: res}
+	mdStr := SerializeJourneyVM(&JourneyVM{Findings: buildVMFindings(&sumRes, i18n.ZH)})
 	for _, raw := range []string{"\n# injected heading", "\n- injected item", "| a | b |"} {
-		if strings.Contains(md.String(), raw) {
-			t.Errorf("Markdown artifact carries structure-breaking LLM content %q:\n%s", raw, md.String())
+		if strings.Contains(mdStr, raw) {
+			t.Errorf("Markdown artifact carries structure-breaking LLM content %q:\n%s", raw, mdStr)
 		}
 	}
 }

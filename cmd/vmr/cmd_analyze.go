@@ -158,6 +158,7 @@ func cmdAnalyze(args []string) error {
 	// Default-suite-only scope knob (P9.2) — meaningless (rejected) with a selector above.
 	renderAllFlag := fs.Bool("render-all", false, "default suite only: materialize every non-partial candidate journey, including the heartbeat/poll ones (default: those low-signal heartbeat candidates are the only ones excluded; render one on demand with -journey <id>)")
 	macroOnlyFlag := fs.Bool("macro-only", false, "default suite only: run just the macro report half — no candidate scan, no journey rendering, no journeys/ output. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-list-only/-journey-only")
+	renderOnlyFlag := fs.Bool("render-only", false, "re-render all resident human-readable Markdown products from existing on-disk JSON without re-aggregating audit logs")
 	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them — writes journeys/index.{md,json} listing every candidate, but no j-*.md. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-macro-only/-journey-only/-details")
 	journeyOnlyFlag := fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.{json,md}/macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only")
 	// story-half flags.
@@ -172,6 +173,15 @@ func cmdAnalyze(args []string) error {
 	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if *renderOnlyFlag {
+		if *journeyArg != "" || *compareArg != "" || *benchmarkFlag || *renderAllFlag || *macroOnlyFlag || *listOnlyFlag || *journeyOnlyFlag || flagPassed(fs, "details") || flagPassed(fs, "include-partial") || *llmAddrFlag != "" || *llmModelFlag != "" || *llmDryRun {
+			return fmt.Errorf("-render-only re-renders existing products from disk — mutually exclusive with log aggregation flags")
+		}
+		rc := resolveReportConfig(*reportConfigPath, os.Stdout)
+		outDir := resolveString(*outDirFlag, rc.Output, "reports")
+		return runRenderOnly(outDir, *langFlag, flagPassed(fs, "lang"))
 	}
 
 	hasSelector, err := validateAnalyzeModeFlags(*journeyArg, *compareArg, *benchmarkFlag, *renderAllFlag, *macroOnlyFlag, *listOnlyFlag, *journeyOnlyFlag, flagPassed(fs, "details"))
@@ -428,6 +438,11 @@ func dispatchDefaultSuite(r *analyzeRun, su *storySetup) (*report.Report2, error
 		rep, err = runReportHalf(r)
 		if err != nil {
 			return nil, err
+		}
+		// Now that vmr-report.md exists, re-render journeys/details/j-<id>.md from disk
+		// so reportMDExists is consistently true (matching -render-only) (D11).
+		if err := renderAllFromDisk(r.outDir, r.lang); err != nil {
+			return nil, fmt.Errorf("render from disk: %w", err)
 		}
 	}
 	return rep, nil

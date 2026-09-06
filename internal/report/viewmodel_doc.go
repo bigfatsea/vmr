@@ -9,12 +9,24 @@
 package report
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
+
+// StoriesLinkInfo carries the "vmr-report.md → journeys/index.md"
+// navigation edge (P6.2a, architecture doc §7.5).
+type StoriesLinkInfo struct {
+	// Path is relative to vmr-report.md itself, e.g. "journeys/index.md".
+	Path                   string
+	JourneyCount           int
+	FromDisplay, ToDisplay string
+}
 
 // BuildMacroReportVM builds the whole vmr-report.md view model in lang.
 // stories is nil when this run's output root has no journeys index to link
@@ -54,10 +66,35 @@ func BuildMacroReportVM(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, 
 }
 
 // MacroMarkdown is the VM path's one-call entry: build the view model and
-// serialize it. Byte-equivalence with the legacy Markdown() is pinned by
-// the transition test for as long as both paths exist.
+// serialize it.
 func MacroMarkdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) string {
 	return RenderMarkdown(BuildMacroReportVM(rep, lang, stories, journeyLink))
+}
+
+// Markdown renders rep via the single ViewModel path.
+func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) string {
+	return MacroMarkdown(rep, lang, stories, journeyLink)
+}
+
+// LoadReport reads vmr-report.json from dir, and if requests/index.json is
+// present, restores rep.requests from RequestsIndex.
+func LoadReport(dir string) (*Report2, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "vmr-report.json"))
+	if err != nil {
+		return nil, err
+	}
+	var rep Report2
+	if err := json.Unmarshal(data, &rep); err != nil {
+		return nil, err
+	}
+	reqPath := filepath.Join(dir, "requests", "index.json")
+	if reqData, err := os.ReadFile(reqPath); err == nil {
+		var idx RequestsIndex
+		if err := json.Unmarshal(reqData, &idx); err == nil {
+			rep.requests = idx.Requests
+		}
+	}
+	return &rep, nil
 }
 
 // vmMetaHeader builds the blocks between the H1 and §0: the data-source
@@ -95,26 +132,26 @@ func vmSummarySection(rep *Report2, lang i18n.Lang) SectionVM {
 		fmtutil.FmtTokens(o.TokensInFresh),
 		cacheEffCell(o.CacheEfficiency, o.TokensKnown, o.Requests),
 		durCell(o.DurMSP95, p95n),
-		vmSummaryCostCell(rep, o, t.SummaryCostUnknown))
+		summaryCostCell(rep, o, t.SummaryCostUnknown))
 	sec.Blocks = append(sec.Blocks, tbl)
 	// P-07: name the interactive share explicitly — the top-line request
 	// figure includes every workload class.
-	if n := vmSummaryInteractiveShare(rep); n >= 0 && o.Requests > 0 {
+	if n := summaryInteractiveShare(rep); n >= 0 && o.Requests > 0 {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.SummaryInteractiveNote(o.Requests, n, pctStr(float64(n)/float64(o.Requests)))})
 	}
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.SummaryStarNote})
 	hl := t.HighlightsAuto + "\n"
-	for _, h := range vmHighlights(rep, lang) {
+	for _, h := range highlights(rep, lang) {
 		hl += "- " + h + "\n"
 	}
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: hl + "\n"})
 	return sec
 }
 
-// vmSummaryCostCell is §0's headline money cell: "Unpriced" rather than a
+// summaryCostCell is §0's headline money cell: "Unpriced" rather than a
 // number whenever nothing resolved a rate — never 0, which reads as "this
 // traffic was free".
-func vmSummaryCostCell(rep *Report2, o Row, unknown string) string {
+func summaryCostCell(rep *Report2, o Row, unknown string) string {
 	if rep.Pricing == nil || o.CostEstimate == nil {
 		return unknown
 	}
@@ -125,10 +162,10 @@ func vmSummaryCostCell(rep *Report2, o Row, unknown string) string {
 	return money(*o.CostEstimate, cur)
 }
 
-// vmSummaryInteractiveShare returns how many of rep's total requests belong
+// summaryInteractiveShare returns how many of rep's total requests belong
 // to the "interactive" workload class, or -1 when rep.Workloads is empty
 // (a signal the caller should skip the note). (P-07)
-func vmSummaryInteractiveShare(rep *Report2) int {
+func summaryInteractiveShare(rep *Report2) int {
 	if rep == nil || len(rep.Workloads) == 0 {
 		return -1
 	}
@@ -141,13 +178,13 @@ func vmSummaryInteractiveShare(rep *Report2) int {
 	return n
 }
 
-// vmHighlightWasteFloorBytes is the minimum absolute tool-schema waste for
+// highlightWasteFloorBytes is the minimum absolute tool-schema waste for
 // the §0 auto-highlight — below ~8 MB across the whole window it isn't a
 // headline, whatever the utilization ratio.
-const vmHighlightWasteFloorBytes = 8 << 20
+const highlightWasteFloorBytes = 8 << 20
 
-// vmHighlights generates ≤3 auto highlights from the finished buckets.
-func vmHighlights(rep *Report2, lang i18n.Lang) []string {
+// highlights generates ≤3 auto highlights from the finished buckets.
+func highlights(rep *Report2, lang i18n.Lang) []string {
 	t := i18n.Doc(lang)
 	var out []string
 	// 1. workload with low cache-eff
@@ -160,7 +197,7 @@ func vmHighlights(rep *Report2, lang i18n.Lang) []string {
 	// 2. tool shape with the largest ABSOLUTE schema waste (rep.Tools is
 	// sorted by SchemaWasteBytes desc), floored so a few MB of unavoidable
 	// slack doesn't manufacture a highlight on a well-behaved corpus.
-	if len(rep.Tools) > 0 && rep.Tools[0].SchemaWasteBytes >= vmHighlightWasteFloorBytes {
+	if len(rep.Tools) > 0 && rep.Tools[0].SchemaWasteBytes >= highlightWasteFloorBytes {
 		tl := rep.Tools[0]
 		out = append(out, t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
 			fmtBytesGB(tl.SchemaWasteBytes), pctStr(tl.DeclareUtilization), len(tl.NeverCalled)))
@@ -174,7 +211,7 @@ func vmHighlights(rep *Report2, lang i18n.Lang) []string {
 		}
 	}
 	if worst != nil && worst.Attempts >= 4 && worst.ErrorRate > 5 {
-		top := vmTopErrorClass(worst, lang)
+		top := topErrorClass(worst, lang)
 		out = append(out, t.EndpointWarn(worst.Endpoint, strconv.FormatFloat(float64(worst.ErrorRate), 'f', 1, 64), top))
 	}
 	if len(out) == 0 {
@@ -183,10 +220,10 @@ func vmHighlights(rep *Report2, lang i18n.Lang) []string {
 	return out
 }
 
-// vmTopErrorClassCount finds the error class with the highest count over
+// topErrorClassCount finds the error class with the highest count over
 // the sorted keys — ties always resolve to the alphabetically-first class
 // name, never map order.
-func vmTopErrorClassCount(classes map[string]int) (cls string, n int) {
+func topErrorClassCount(classes map[string]int) (cls string, n int) {
 	for _, c := range sortedKeysInt(classes) {
 		if m := classes[c]; m > n {
 			cls, n = c, m
@@ -195,11 +232,11 @@ func vmTopErrorClassCount(classes map[string]int) (cls string, n int) {
 	return cls, n
 }
 
-func vmTopErrorClass(e *EndpointRow, lang i18n.Lang) string {
+func topErrorClass(e *EndpointRow, lang i18n.Lang) string {
 	if len(e.ErrorClasses) == 0 {
 		return ""
 	}
-	cls, n := vmTopErrorClassCount(e.ErrorClasses)
+	cls, n := topErrorClassCount(e.ErrorClasses)
 	return i18n.Doc(lang).TopErrorSuffix(cls, n)
 }
 

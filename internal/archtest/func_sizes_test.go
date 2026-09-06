@@ -75,8 +75,6 @@ var funcLineExemptions = map[string]int{
 	// image-conversion blocks were extracted into beginAudit/toAuditImages/
 	// downscaleImages.
 	"internal/server/server.go:chatHandler": 130,
-
-	"internal/report/section_reliability.go:renderReliability": 135,
 }
 
 // funcBudgetRoots are the trees this test governs: the shipped binary's own

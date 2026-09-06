@@ -51,7 +51,7 @@ func vmProvidersSection(rep *Report2, lang i18n.Lang) SectionVM {
 				cacheEffCell(p.CacheEfficiency, p.TokensKnown, p.Requests),
 				fmtDurMS(p.DurMSMean),
 				pctStr(p.ErrorRate / 100),
-				vmTopErrorClassProviderCell(p),
+				topErrorClassProviderCell(p),
 			}
 			if priced {
 				if p.CostEstimate != nil {
@@ -124,14 +124,14 @@ func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 			anyNoOverlap = true
 		}
 		tbl.row(
-			vmQuotaRowProviderCell(r.Provider, r.Models),
+			quotaRowProviderCell(r.Provider, r.Models),
 			r.Metric,
 			windowConsumed,
 			liveUsed,
 			numStr(r.Amount),
 			pct,
 			pctHundred(r.PeriodElapsedPct),
-			vmPeriodRangeCell(r.PeriodStart, r.PeriodEndsAt),
+			periodRangeCell(r.PeriodStart, r.PeriodEndsAt),
 		)
 	}
 	// WindowFootnote/StalePeriodFootnote explain the two CONSUMPTION
@@ -155,7 +155,7 @@ func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 	}
 	// The skipped-attempts note belongs to this sub-table (it describes
 	// what the window recomputation ignored), so it lives and dies with it.
-	if s := vmSkippedAttemptsNote(rep, lang); s != "" {
+	if s := skippedAttemptsNote(rep, lang); s != "" {
 		tbl.note(s)
 	}
 	// The legacy path closed the block with one more blank line.
@@ -163,44 +163,43 @@ func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 	sec.Blocks = append(sec.Blocks, tbl)
 }
 
-// vmSkippedAttemptsNote renders the P-5-2 line under §2.5 when some
+// skippedAttemptsNote renders the P-5-2 line under §2.5 when some
 // EndpointsAll rows carried a provider name not found in the quotas map.
-// Reuses the legacy writer (providerquota.go survives the transition) by
-// capturing its output.
-func vmSkippedAttemptsNote(rep *Report2, lang i18n.Lang) string {
+// Directly calls providerquota.go's renderSkippedAttemptsNote.
+func skippedAttemptsNote(rep *Report2, lang i18n.Lang) string {
 	var buf strings.Builder
 	renderSkippedAttemptsNote(func(format string, args ...any) { fmt.Fprintf(&buf, format, args...) }, rep, lang)
 	return buf.String()
 }
 
-// vmQuotaRowProviderCell renders the quota sub-table's first column: the
+// quotaRowProviderCell renders the quota sub-table's first column: the
 // provider name, suffixed with the row's model scope when it carries one.
-func vmQuotaRowProviderCell(provider string, models []string) string {
+func quotaRowProviderCell(provider string, models []string) string {
 	if len(models) == 0 {
 		return provider
 	}
 	return provider + " (" + strings.Join(models, ", ") + ")"
 }
 
-// vmTopErrorClassProviderCell renders a provider's dominant error class as
+// topErrorClassProviderCell renders a provider's dominant error class as
 // "rate_limit 12(63%)" — the share of FAILED attempts, mirroring
 // section_reliability's topErrorClassShort in spirit but against
 // ProviderRow.
-func vmTopErrorClassProviderCell(p ProviderRow) string {
+func topErrorClassProviderCell(p ProviderRow) string {
 	if len(p.ErrorClasses) == 0 {
 		return "-"
 	}
-	cls, n := vmTopErrorClassCount(p.ErrorClasses)
+	cls, n := topErrorClassCount(p.ErrorClasses)
 	if p.Failed <= 0 {
 		return cls + " " + strconv.Itoa(n)
 	}
 	return cls + " " + strconv.Itoa(n) + "(" + pctStr2(n, p.Failed) + ")"
 }
 
-// vmPeriodRangeCell formats a Limit's current period as "MM-DD ~ MM-DD" in
+// periodRangeCell formats a Limit's current period as "MM-DD ~ MM-DD" in
 // fmtutil.DisplayZone — the timezone invariant every human-facing
 // timestamp in this package goes through.
-func vmPeriodRangeCell(start, end time.Time) string {
+func periodRangeCell(start, end time.Time) string {
 	const layout = "01-02"
 	return start.In(fmtutil.DisplayZone).Format(layout) + " ~ " + end.In(fmtutil.DisplayZone).Format(layout)
 }

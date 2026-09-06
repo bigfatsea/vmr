@@ -16,9 +16,9 @@ import (
 	"vmr/internal/i18n"
 )
 
-// vmValueRow is the rendered form of one endpoint's efficiency, computed
+// valueRow is the rendered form of one endpoint's efficiency, computed
 // once so the table body stays a formatting exercise.
-type vmValueRow struct {
+type valueRow struct {
 	endpoint     string
 	costPer1MOut float64
 	costPerReq   float64
@@ -31,7 +31,7 @@ type vmValueRow struct {
 }
 
 func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
-	rows := vmEndpointValueRows(rep)
+	rows := endpointValueRows(rep)
 	if len(rows) == 0 {
 		return SectionVM{}
 	}
@@ -78,18 +78,18 @@ func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// vmEndpointValueRows builds the sorted body. Sort key: cheapest per unit
+// endpointValueRows builds the sorted body. Sort key: cheapest per unit
 // of output first when pricing is available (that is the question the
 // section exists to answer), else most wasted time first.
-func vmEndpointValueRows(rep *Report2) []vmValueRow {
-	var out []vmValueRow
+func endpointValueRows(rep *Report2) []valueRow {
+	var out []valueRow
 	for _, e := range rep.EndpointsAll {
 		// An endpoint that never served a request has no unit of work to
 		// divide by; its failures still show up in §3 端点健康.
 		if e.RequestsOK == 0 && e.WastedMS == 0 {
 			continue
 		}
-		r := vmValueRow{
+		r := valueRow{
 			endpoint: e.Endpoint, tokensOut: e.TokensOut, requestsOK: e.RequestsOK,
 			failed: e.Failed, availability: e.Availability, wastedMS: e.WastedMS,
 		}

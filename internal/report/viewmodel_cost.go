@@ -49,8 +49,8 @@ func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
 }
 
 // vmCostByDate renders §2's per-day table and returns its totals.
-func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmCostTotal {
-	dateTot := vmCostTotalOf(len(rep.ByDate), func(i int) *float64 { return rep.ByDate[i].CostEstimate })
+func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+	dateTot := costTotalOf(len(rep.ByDate), func(i int) *float64 { return rep.ByDate[i].CostEstimate })
 	if dateTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByDateTitle(cur), Headers: t.ByDateHeaders[:]}
 		for _, d := range rep.ByDate {
@@ -58,11 +58,11 @@ func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmC
 			// rate. Render "-" ("unknown ≠ zero"), not a dropped row.
 			cost := "-"
 			if d.CostEstimate != nil {
-				cost = vmMoney(*d.CostEstimate, cur)
+				cost = money(*d.CostEstimate, cur)
 			}
 			tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut), cost)
 		}
-		tbl.row(t.TotalLabel, "", "", vmMoney(dateTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", money(dateTot.sum, cur))
 		if dateTot.unpriced > 0 {
 			tbl.note(t.ByDatePartialNote + "\n\n")
 			tbl.note(t.UnpricedNote(dateTot.unpriced, dateTot.priced+dateTot.unpriced, t.UnitDays) + "\n\n")
@@ -73,17 +73,17 @@ func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmC
 }
 
 // vmCostByModel renders §2's per-model table and returns its totals.
-func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmCostTotal {
-	modelTot := vmCostTotalOf(len(rep.ByModel), func(i int) *float64 { return rep.ByModel[i].CostEstimate })
+func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+	modelTot := costTotalOf(len(rep.ByModel), func(i int) *float64 { return rep.ByModel[i].CostEstimate })
 	if modelTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByModelTitle(cur), Headers: t.ByModelHeaders[:]}
 		for _, m := range rep.ByModel {
 			if m.CostEstimate != nil {
 				tbl.row(m.Model, m.Protocol, fmtutil.FmtTokens(m.TokensInFresh), fmtutil.FmtTokens(m.TokensOut),
-					vmMoney(*m.CostEstimate, cur))
+					money(*m.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", "", vmMoney(modelTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", "", money(modelTot.sum, cur))
 		if modelTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(modelTot.unpriced, modelTot.priced+modelTot.unpriced, t.UnitModels) + "\n\n")
 		}
@@ -95,13 +95,13 @@ func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vm
 // vmCostByEndpoint renders §2's per-endpoint table, plus the two caveats
 // only EndpointRow carries the data for (degraded-estimate share,
 // incomplete-rate endpoints) — both stated once, after this table.
-func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmCostTotal {
+func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
 	// Forwarded == 0: this endpoint never served a request (every attempt
 	// failed), so it has no cost to attribute and its absence from the
 	// total is not a pricing gap.
-	epTot := vmCostTotalOf(len(rep.EndpointsAll), func(i int) *float64 {
+	epTot := costTotalOf(len(rep.EndpointsAll), func(i int) *float64 {
 		if rep.EndpointsAll[i].CostEstimate == nil && rep.EndpointsAll[i].Forwarded == 0 {
-			return vmSkipRow
+			return skipRow
 		}
 		return rep.EndpointsAll[i].CostEstimate
 	})
@@ -110,10 +110,10 @@ func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string)
 		for _, e := range rep.EndpointsAll {
 			if e.CostEstimate != nil {
 				tbl.row(e.Endpoint, fmtutil.FmtTokens(e.TokensInFresh), fmtutil.FmtTokens(e.TokensOut),
-					vmMoney(*e.CostEstimate, cur))
+					money(*e.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", vmMoney(epTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", money(epTot.sum, cur))
 		if epTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(epTot.unpriced, epTot.priced+epTot.unpriced, t.UnitEndpoints) + "\n\n")
 		}
@@ -140,17 +140,17 @@ func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string)
 }
 
 // vmCostByClient renders §2's per-client table and returns its totals.
-func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) vmCostTotal {
-	clientTot := vmCostTotalOf(len(rep.ByClient), func(i int) *float64 { return rep.ByClient[i].CostEstimate })
+func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+	clientTot := costTotalOf(len(rep.ByClient), func(i int) *float64 { return rep.ByClient[i].CostEstimate })
 	if clientTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByClientTitle(cur), Headers: t.ByClientHeaders[:]}
 		for _, c := range rep.ByClient {
 			if c.CostEstimate != nil {
 				tbl.row(c.ClientKey, fmtutil.FmtTokens(c.TokensInFresh), fmtutil.FmtTokens(c.TokensOut),
-					vmMoney(*c.CostEstimate, cur))
+					money(*c.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", vmMoney(clientTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", money(clientTot.sum, cur))
 		if clientTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(clientTot.unpriced, clientTot.priced+clientTot.unpriced, t.UnitClients) + "\n\n")
 		}
@@ -159,26 +159,26 @@ func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) v
 	return clientTot
 }
 
-// vmCostTotal is one §2 table's totals-row inputs: the sum over rows that
+// costTotal is one §2 table's totals-row inputs: the sum over rows that
 // actually resolved a rate, and how many rows did and didn't.
-type vmCostTotal struct {
+type costTotal struct {
 	sum              float64
 	priced, unpriced int
 }
 
-// vmSkipRow is vmCostTotalOf's "this row belongs in neither count"
+// skipRow is costTotalOf's "this row belongs in neither count"
 // sentinel — distinct from nil, which means "counted, and it has no
 // price". Compared by pointer identity, so no real rate can ever collide
 // with it.
-var vmSkipRow = new(float64)
+var skipRow = new(float64)
 
-// vmCostTotalOf walks n rows through get: a rate pointer counts toward the
-// total, nil counts as unpriced, vmSkipRow counts as neither.
-func vmCostTotalOf(n int, get func(i int) *float64) vmCostTotal {
-	var ct vmCostTotal
+// costTotalOf walks n rows through get: a rate pointer counts toward the
+// total, nil counts as unpriced, skipRow counts as neither.
+func costTotalOf(n int, get func(i int) *float64) costTotal {
+	var ct costTotal
 	for i := 0; i < n; i++ {
 		switch c := get(i); {
-		case c == vmSkipRow:
+		case c == skipRow:
 		case c != nil:
 			ct.sum += *c
 			ct.priced++
@@ -189,8 +189,8 @@ func vmCostTotalOf(n int, get func(i int) *float64) vmCostTotal {
 	return ct
 }
 
-// vmMoney renders one $ cell — one place, so the totals row and the detail
+// money renders one $ cell — one place, so the totals row and the detail
 // rows can never drift in precision or currency placement.
-func vmMoney(v float64, currency string) string {
+func money(v float64, currency string) string {
 	return fmt.Sprintf("%.4f %s", v, currency)
 }

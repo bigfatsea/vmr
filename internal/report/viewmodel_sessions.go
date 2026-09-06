@@ -71,7 +71,7 @@ func vmSessionsSection(rep *Report2, journeyLink map[string]string, lang i18n.La
 			continue
 		}
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: "**" + ck + "**\n\n"})
-		head, tail := vmSplitSessionLongTail(rows)
+		head, tail := splitSessionLongTail(rows)
 		tbl := &TableVM{Headers: t.TableHeaders[:]}
 		for _, s := range head {
 			vmSessionRow(tbl, s, journeyLink, t)
@@ -91,30 +91,30 @@ func vmSessionsSection(rep *Report2, journeyLink map[string]string, lang i18n.La
 }
 
 const (
-	// vmSessionsHeadRows is how many sessions per client render un-collapsed
+	// sessionsHeadRows is how many sessions per client render un-collapsed
 	// in §6 before the tail folds into a <details>.
-	// vmSessionsLongTailTurnCap is the turn count at or below which a tail
+	// sessionsLongTailTurnCap is the turn count at or below which a tail
 	// session is "short" enough to fold. Real corpora put a few hundred
 	// near-identical low-turn cron sessions behind every client's handful
 	// of real conversations; without a fold §6 is ~45% of the whole macro
 	// report and its signal drowns.
-	vmSessionsHeadRows        = 20
-	vmSessionsLongTailTurnCap = 12
+	sessionsHeadRows        = 20
+	sessionsLongTailTurnCap = 12
 )
 
-// vmSplitSessionLongTail divides one client's session rows — already
+// splitSessionLongTail divides one client's session rows — already
 // sorted by Requests (turns) desc, the rep.Sessions order — into a head
 // shown inline and a tail folded into a <details>. The tail is only ever
 // the run of short (<= turn cap turns) sessions past the head cutoff: any
 // session above that turn count stays in the head even if it sorts past
 // the cutoff, so the fold never hides a substantial conversation. Returns
 // (rows, nil) when there is nothing worth folding.
-func vmSplitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
-	if len(rows) <= vmSessionsHeadRows {
+func splitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
+	if len(rows) <= sessionsHeadRows {
 		return rows, nil
 	}
-	split := vmSessionsHeadRows
-	for split < len(rows) && rows[split].Requests > vmSessionsLongTailTurnCap {
+	split := sessionsHeadRows
+	for split < len(rows) && rows[split].Requests > sessionsLongTailTurnCap {
 		split++
 	}
 	if split >= len(rows) {
@@ -123,9 +123,9 @@ func vmSplitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
 	return rows[:split], rows[split:]
 }
 
-// vmFormatSessionTimeRange produces a compact "08-16 02:39 → 02:42" or
+// formatSessionTimeRange produces a compact "08-16 02:39 → 02:42" or
 // "08-16 02:39 → 08-17 11:47" display in fmtutil.DisplayZone (问题 23).
-func vmFormatSessionTimeRange(fromStr, toStr string) string {
+func formatSessionTimeRange(fromStr, toStr string) string {
 	if fromStr == "" && toStr == "" {
 		return "-"
 	}
@@ -170,19 +170,19 @@ func vmSessionRow(tbl *TableVM, s SessionRow, journeyLink map[string]string, t i
 	if journey := journeyLink[s.ID]; journey != "" {
 		id = "[" + id + "](stories/" + journey + ")"
 	}
-	timeRange := vmFormatSessionTimeRange(s.From, s.To)
+	timeRange := formatSessionTimeRange(s.From, s.To)
 	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form
 	// user/model text, so an unclosed "<!--" would otherwise swallow the
 	// rest of the file in an HTML-aware renderer (B4).
-	tbl.row(id, timeRange, reqdetail.EscapeHTML(vmTruncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
+	tbl.row(id, timeRange, reqdetail.EscapeHTML(truncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
 }
 
-// vmTruncateTitle shortens s to at most maxRunes runes, appending an
+// truncateTitle shortens s to at most maxRunes runes, appending an
 // ellipsis when cut. Rune-based, unlike a byte slice - a truncated CJK
 // title never splits a multi-byte UTF-8 sequence into mojibake.
-func vmTruncateTitle(s string, maxRunes int) string {
+func truncateTitle(s string, maxRunes int) string {
 	r := []rune(s)
 	if len(r) <= maxRunes {
 		return s
