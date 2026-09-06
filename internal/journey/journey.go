@@ -64,14 +64,13 @@ type Journey struct {
 }
 
 // JourneyReportFile is the single source of truth for a journey report's
-// markdown filename - cmd/vmr's file writer and compare's link rendering
-// must agree on it, and a private second copy would drift (a silent bad
-// link reads exactly like a working one). The .json sibling shares the
-// stem.
+// markdown filename (D19 / §1.1). Artifacts are uniformly named j-<id>.{json,md},
+// exactly aligned with ID: no redundant "journey-" prefix and no "-partial" suffix.
+// The .json sibling shares the stem.
 func JourneyReportFile(id string, partial bool) string {
-	base := "journey-" + id
-	if partial {
-		base += "-partial"
+	base := id
+	if !strings.HasPrefix(base, "j-") {
+		base = "j-" + base
 	}
 	return base + ".md"
 }
