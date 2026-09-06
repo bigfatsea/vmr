@@ -11,7 +11,7 @@
 | 阶段 | 核心目标 | 状态 | 负责人 |
 |---|---|---|---|
 | **Phase 0** | 基线绿灯与 `internal/story` -> `internal/journey` 包名重命名 | **DONE (已合并)** | Lead Orchestrator |
-| **Phase 1** | 数据层闭环：五大切片、Manifest 核心、Journey 自包含、命名与拓扑归一 | **IN PROGRESS (派发中)** | Multi-Agent (Lead + Workers) |
+| **Phase 1** | 数据层闭环：五大切片、Manifest 核心、Journey 自包含、命名与拓扑归一 | **DONE (已合并，main 全绿)** | Multi-Agent (Lead + Workers) |
 | **Phase 2** | HTML 看板：静态骨架页 + 内联 SVG 图表 + /reports/ 安全挂载 | PENDING | Multi-Agent (Lead + Workers) |
 | **Phase 3** | 渲染重构：ViewModel 内存层 + 固定 Markdown 序列化器 + -render-only | PENDING | Multi-Agent (Lead + Workers) |
 | **Phase 4** | 产物级缓存：L2 产物缓存 + L3 表现层缓存 + 冷热一致性守卫 | PENDING | Multi-Agent (Lead + Workers) |
@@ -32,7 +32,7 @@
 | **Group 1A** (Macro 切片) | `feat/p1-g1a-macro-slice` | 52752 | **DONE (已合并)** | `internal/report/aggregate.go`<br>`internal/report/export.go`<br>`internal/report/rows.go`<br>`internal/report/manifest.go`<br>`internal/report/metrics.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/report/...` |
 | **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 52810 | **DONE (已合并)** | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
 | **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 57016 | **DONE (已合并)** | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
-| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 61207 | RE-DISPATCH（进行中） | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
+| **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 61207→主控收尾 | **DONE (已合并)** | | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
 | **Group 2A** (看板骨架资产包) | `feat/p2-g2a-dashboard` | 61591 | **DONE (已合并)** | `internal/dashboard/**` (全新建) | `go build ./...`<br>`go test -v -race ./internal/dashboard/...` |
 | **Group 2C** (/reports/ 托管与配置) | `feat/p2-g2c-server-hosting` | 61590 | **DONE (已合并)** | `internal/server/reports*.go` (新建)<br>`internal/server/server.go`<br>`internal/config/{config,config_validate}.go` + tests<br>`config.example*.yaml`<br>`internal/archtest/import_boundaries_test.go` | `go test -v -race ./internal/server/... ./internal/config/...` |
 

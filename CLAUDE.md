@@ -9,7 +9,7 @@ core's, and neither is an afterthought to the other.
 - **Routing half** — hides provider, account, key, priority, and failover behind a stable
   virtual model name (`coding`, `agent`, `claude`), with error-aware failover,
   prompt-cache session stickiness, and token-plan quota pacing.
-- **Analytics half** — `vmr analyze` (unified entry point producing the full navigable suite, or zooming into specific views with `-journey`/`-compare`/`-corpus`; `vmr report` and `vmr story` retained as deprecated transition aliases): read-only, offline consumers of the routing half's JSONL audit log. Neither is on the request path.
+- **Analytics half** — `vmr analyze` (unified entry point producing the full navigable suite, or zooming into specific views with `-journey`/`-compare`/`-benchmark`): read-only, offline consumers of the routing half's JSONL audit log. Neither is on the request path.
 
 Three ingress protocols, **never translated into each other** — `POST /v1/chat/completions`
 (OpenAI), `POST /v1/messages` (Anthropic), `POST /v1/responses` (OpenAI Responses). Each
@@ -65,7 +65,7 @@ Routing half:
 
 | Package | Owns |
 | --- | --- |
-| `config` | YAML load, `${ENV}` expansion, strict validation, hot-reload watch. Also resolves each provider's `pricing` (account overrides) and the top-level `exchange_rate` through `internal/pricing` at load time — purely for `vmr report`/`vmr analyze` $ estimates; a rate row missing a component is a config error (all four or none), but an unresolvable model is not — it just leaves that row unpriced |
+| `config` | YAML load, `${ENV}` expansion, strict validation, hot-reload watch. Also resolves each provider's `pricing` (account overrides) and the top-level `exchange_rate` through `internal/pricing` at load time — purely for `vmr analyze`'s $ estimates; a rate row missing a component is a config error (all four or none), but an unresolvable model is not — it just leaves that row unpriced |
 | `adapter`, `adapter/{openai,anthropic,openairesponses}` | `Adapter` interface (compile-time blank-import registry) + shared error classification (`DefaultClassify`) + protocol-domain field/role semantics (`SessionFingerprint`, `TopLevelProbe`) |
 | `strategy` | `Dimension` (ordering) + `Condition` (elimination) — two separate interfaces |
 | `health` | Passive state machine: cooldown, backoff, half-open single-flight |
@@ -84,12 +84,12 @@ Analytics half:
 
 | Package | Owns |
 | --- | --- |
-| `chatmsg` | Message/SSE/usage parsing and tool-call pairing — the one parser `ctxgraph`/`report`/`story` all share |
+| `chatmsg` | Message/SSE/usage parsing and tool-call pairing — the one parser `ctxgraph`/`report`/`journey` all share |
 | `ctxgraph` | Content-addressed manifests, edit classification, conversation lineage and cross-lineage stitching |
-| `taskseg` | Agent-dialect `Profile` (`OpenClawAware`, `Generic`) **and** the session/task segmentation algorithm itself, shared by `report` and `story` rather than duplicated in each |
-| `reqdetail` | Two layers, with different inputs — do not collapse them. Per-record fact extraction (role token/char shares, tool signature, error class, image counts — `report/session.go`'s own aggregation calls these too, not just detail rendering) is a pure function of one `audit.Record` and nothing else. The detail page renderer built on top of it (`details/*.md`, plus its deterministic coordinate-hash filename — `FileName`/`FileNameForRecord`/`FileNameForManifest`) is a pure function of `(record, manifest, prev manifest)`: `prev` is cross-record context the caller injects, so byte-identical output between `report` and `story` requires both to pass the *same* triple — which is why the render fingerprint carries `m`/`prev` identity, not just lang |
-| `report` | `vmr report`: aggregation into `vmr-report.{json,md}` + `vmr-requests.{json,md}`, driving `reqdetail` for `details/*`. A new report section arrives as a new `internal/report/section_*.go` file, not as more lines in an existing one — the `archtest` line budget is what enforces that |
-| `story` | `vmr story`: Journey/Task/Step narrative, behavior indicators, findings, journey comparison, corpus statistics, optional LLM interpretation layer |
+| `taskseg` | Agent-dialect `Profile` (`OpenClawAware`, `Generic`) **and** the session/task segmentation algorithm itself, shared by `report` and `journey` rather than duplicated in each |
+| `reqdetail` | Two layers, with different inputs — do not collapse them. Per-record fact extraction (role token/char shares, tool signature, error class, image counts — `report/session.go`'s own aggregation calls these too, not just detail rendering) is a pure function of one `audit.Record` and nothing else. The detail page renderer built on top of it (`requests/details/*.md`, plus its deterministic coordinate-hash filename with the `r-` prefix — `FileName`/`FileNameForRecord`/`FileNameForManifest`) is a pure function of `(record, manifest, prev manifest)`: `prev` is cross-record context the caller injects, so byte-identical output between `report` and `journey` requires both to pass the *same* triple — which is why the render fingerprint carries `m`/`prev` identity, not just lang |
+| `report` | `vmr analyze`'s macro half: aggregation into the five domain slices under `macro/*.json` plus `requests/index.json`, stamped by `manifest.json` (written last, admission token). A new report section arrives as a new `internal/report/section_*.go` file, not as more lines in an existing one — the `archtest` line budget is what enforces that |
+| `journey` | `vmr analyze`'s journey half: Journey/Task/Step narrative, behavior indicators, findings, journey comparison, benchmark statistics, optional LLM interpretation layer; products under `journeys/`, self-contained `j-<id>.json` (tree + `bodies` blob table) |
 
 Shared guards:
 
@@ -108,7 +108,7 @@ root allowed to see both halves at once.
   image downscale (the largest — a real unmarshal/rewrite/re-marshal), `respnorm`'s
   evidence-based quirk repairs (each behind a content guard, fail-open to "unmodified" on
   any doubt), and `respnorm`'s `[DONE]` delimiter completion.
-- **Two halves, one contract.** `report`/`story`/`ctxgraph`/`taskseg`/`chatmsg`/`reqdetail` never
+- **Two halves, one contract.** `report`/`journey`/`ctxgraph`/`taskseg`/`chatmsg`/`reqdetail` never
   import `router`/`server`/`config`; the JSONL audit record is the only coupling. `archtest`-enforced.
 - **`ctxgraph`/`chatmsg` are the single source of truth** for message hashing and message
   parsing. A private re-implementation can silently disagree with `ctxgraph` about where a
@@ -135,7 +135,7 @@ root allowed to see both halves at once.
 - **Timezone: one display authority.** Everything human-facing — Markdown/CLI output,
   aggregation bucketing, filenames — renders through `fmtutil.DisplayZone`; persisted records
   keep their write-time offset. A timestamp inside an LLM/tool payload is passthrough content,
-  never parsed or converted. `story`'s `deriveID` is the one documented exception.
+  never parsed or converted. `journey`'s `deriveID` is the one documented exception.
 - **`internal/report` is coupled to `audit.Record`'s shape at compile time** — changing the
   record structure means updating `report` and its tests in the same change.
 - **Run `go test ./internal/archtest/...`** after any package-boundary change, any `router`
