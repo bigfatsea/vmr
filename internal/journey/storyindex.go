@@ -93,7 +93,7 @@ type JourneyIndexRow struct {
 // StoryIndex is vmr-stories.json's whole shape: just Journeys. The parse
 // cache used to live here too, as a "files" section — it's since moved to
 // its own content-hash-sharded directory shared with internal/report
-// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache — one level
+// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.cache/parse — one level
 // above storiesDir), so this index stays purely human-scale.
 type StoryIndex struct {
 	Journeys []JourneyIndexRow `json:"journeys"`

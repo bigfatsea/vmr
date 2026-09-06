@@ -1,18 +1,12 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// The redesigned per-request drill-down: vmr-requests.json (the data)
-// + vmr-requests.md (a pure index) + one fully-detailed sibling per group
-// (vmr-requests-<tag>.md per real Chat User, vmr-requests-unresolved.md for
-// sessions with no client_key_tag, vmr-requests-cron-<tag>.md per scheduled
-// class). The index used to duplicate every group's full detail inline
-// *and* export it again to its own sibling file; splitting index from
-// detail means each request's full drill-down (session/task/turn cards, or
-// the scheduled flat table) is written exactly once, in exactly one file.
-// A single-shot scheduled session (heartbeat/dream_diary, exactly one
-// request) never gets its own Chat User card — regardless of which client
-// tag issued it — it folds into its class's dedicated cron-<tag> file
-// instead, so twenty near-identical poll turns don't drown a real
-// conversation and don't appear twice under two different groupings.
+// The per-request data layer: requests/index.json is the machine-readable
+// single source of truth for request rows (D7/§3.7 — the human-readable
+// vmr-requests*.md index family was deleted; interactive browsing is the
+// request-browser.html skeleton page's job, triage stays on
+// requests/failed.md). The index carries a SessionMeta projection (session
+// titles, aliases, per-task titles) and a journey cross-link map so the
+// dashboard can group and navigate without re-deriving them.
 // All displayed timestamps are rendered in fmtutil.DisplayZone (the system
 // default timezone) regardless of the source record's own offset.
 
@@ -34,13 +28,13 @@ import (
 	"vmr/internal/reqdetail"
 )
 
-// RequestsIndex is vmr-requests.json's whole shape: one row per request.
+// RequestsIndex is requests/index.json's whole shape: one row per request.
 // The parse cache used to live here too, as a "files" section (see
 // ctxgraph.FileCache/ScanCached) — it's since moved to its own
 // content-hash-sharded directory shared with internal/journey
-// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache), so this
+// (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.cache/parse), so this
 // index stays purely human-scale.
-// vmr-requests-failed.jsonl stays a plain flat JSONL — it's a filtered
+// requests/failed.jsonl stays a plain flat JSONL — it's a filtered
 // dump of Requests, not itself an independent cache.
 // SessionMeta carries one session's title, alias, and per-task title mapping
 // projected into requests/index.json (§3.3).

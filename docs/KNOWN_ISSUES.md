@@ -103,11 +103,11 @@
 - **持续性故障的日志按"错误文本相同"去重，不做事件级审计**：quota flush 失败（磁盘满、权限变更）与时钟回退都是持续性的，10 秒一次刷屏会淹没日志。flush 侧按错误文本去重（首次 + 每 10 次，附连续失败计数），时钟回退侧每进程最多一条 WARN。**已知代价**：两种错误交替出现时 flush 侧不去重（每 tick 一条——但交替本身就是有效信号）；时钟"回退→恢复→再回退"的第二次不再 WARN。**边界**：需要回退事件级审计的话，这里要换成带去抖窗口的计数器。
 - **`vmr-quota.json` 的结构损坏整文件拒绝，绝不部分采纳**：静默丢掉一个 provider 的账本比报错更危险。版本戳不匹配、nil account map、null bucket 三者任一即视为损坏，由调用方 WARN + 从零开始——与既有的语法损坏路径同构。`version` 字段从"写而不校验"改为真正的门：有版本戳却不校验比没有更危险，下一个人会以为"有版本号所以安全"。
 - **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而“不等即重置”会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
-- **原子写只做文件级 Sync，不做目录 fsync**：全仓的 CreateTemp+Rename 站点（quota 账本、audit 压缩、ctxgraph `.parse-cache`、reqdetail 证据、story LLM 缓存）都不 fsync 父目录——掉电时 rename 的目录项可能未持久化，最近一次落盘可能丢失或回退。刻意取舍：丢失代价分别是“统计计数回退到上次 flush”（quota，文件级 Sync 已做）与“缓存 miss 重算”（其余站点，多数连文件级 Sync 都没做，靠读取侧的哈希/schema 校验把半写内容兜成 miss），全部落在各自 best-effort 契约内；而目录 fsync 每次落盘多一次系统调用，换来的只是把丢失窗口从“最近一个 flush 间隔”缩到零。若未来某站点升级为“不许丢”的契约（如计费级账本），在该站点单独补目录 fsync，而不是全仓统一加。
+- **原子写只做文件级 Sync，不做目录 fsync**：全仓的 CreateTemp+Rename 站点（quota 账本、audit 压缩、ctxgraph `.cache/parse`、reqdetail 证据、story LLM 缓存）都不 fsync 父目录——掉电时 rename 的目录项可能未持久化，最近一次落盘可能丢失或回退。刻意取舍：丢失代价分别是“统计计数回退到上次 flush”（quota，文件级 Sync 已做）与“缓存 miss 重算”（其余站点，多数连文件级 Sync 都没做，靠读取侧的哈希/schema 校验把半写内容兜成 miss），全部落在各自 best-effort 契约内；而目录 fsync 每次落盘多一次系统调用，换来的只是把丢失窗口从“最近一个 flush 间隔”缩到零。若未来某站点升级为“不许丢”的契约（如计费级账本），在该站点单独补目录 fsync，而不是全仓统一加。
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
-- **`.parse-cache/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr report`/`vmr story` 均可从空缓存目录冷启动。触发条件：`.parse-cache/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。**2026-09-05 修正**：`FileCache` 现按内容哈希（`HashFile` 的 sha256）为 key，分片文件名与 map key 对齐——孤儿分片只是多占磁盘、永不扰乱缓存命中（mtime 消歧与字典序覆盖问题随旧 key 一并消失），GC 取舍不变。
-- **`.parse-cache/` 分片文件名 = 内容哈希 = `FileCache` 的 map key，三者对齐**：文件名=内容哈希使同名冲突天然不可能（两份不同内容各得各的分片）。2026-09-05 前 map key 是内嵌 `CanonicalPath`（与文件名刻意不对齐，「从路径反查分片」需遍历读内嵌字段）；现直接按内容哈希索引，反查代价取消，但 `LoadCacheDir` 仍是 best-effort 全扫描契约不变。运维侧想按路径定位分片时 grep 分片内嵌 `CanonicalPath` 即可。**结果取舍**：两个不同路径、内容相同的审计文件（备份副本与原件同批扫描）共享同一 cache entry，且共享 Manifests 的 `Path` 绑定为 last-writer 的路径拼写——功能正确（相同内容经任一路径取回一致），但不保证指向最早扫到的路径。
+- **`.cache/parse/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr analyze` 可从空缓存目录冷启动。触发条件：`.cache/parse/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。**2026-09-05 修正**：`FileCache` 现按内容哈希（`HashFile` 的 sha256）为 key，分片文件名与 map key 对齐——孤儿分片只是多占磁盘、永不扰乱缓存命中（mtime 消歧与字典序覆盖问题随旧 key 一并消失），GC 取舍不变。
+- **`.cache/parse/` 分片文件名 = 内容哈希 = `FileCache` 的 map key，三者对齐**：文件名=内容哈希使同名冲突天然不可能（两份不同内容各得各的分片）。2026-09-05 前 map key 是内嵌 `CanonicalPath`（与文件名刻意不对齐，「从路径反查分片」需遍历读内嵌字段）；现直接按内容哈希索引，反查代价取消，但 `LoadCacheDir` 仍是 best-effort 全扫描契约不变。运维侧想按路径定位分片时 grep 分片内嵌 `CanonicalPath` 即可。**结果取舍**：两个不同路径、内容相同的审计文件（备份副本与原件同批扫描）共享同一 cache entry，且共享 Manifests 的 `Path` 绑定为 last-writer 的路径拼写——功能正确（相同内容经任一路径取回一致），但不保证指向最早扫到的路径。
 - **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参--只有单条下钻、`-compare`、`-render-all` 传 `true`;默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标(`Manifest.Req` 的纯函数),不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`:`vmr analyze` 先跑 story 半区(可能已批量物化)再跑 report 半区,纯 flag 判据会谎报「没写详单」或反之--改查 `r.DetailFile` 是否真实存在(一次 `os.ReadDir` 建 set)。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」,人为改回无条件物化当场失败。这条纪律反复退化过四次,这次靠测试锁死。
 
 ### 1.4 包边界与依赖
@@ -199,9 +199,9 @@
 
 #### 2.56 [低，登记待触发] 一次 `vmr analyze` 至少把全量语料解压三遍
 
-- **现状**：`.parse-cache` 只覆盖 `ctxgraph` 的 manifest 扫描。`PreviewTitles`（全部候选根记录）、每批 `BuildAll` 的 `FetchRecords`、report 半边的 `analyzeFile`（§2.1）各自独立全量解压一遍——全量语料上是 `-render-all` 约 500s 耗时的主要来源。
+- **现状**：`.cache/parse` 只覆盖 `ctxgraph` 的 manifest 扫描。`PreviewTitles`（全部候选根记录）、每批 `BuildAll` 的 `FetchRecords`、report 半边的 `analyzeFile`（§2.1）各自独立全量解压一遍——全量语料上是 `-render-all` 约 500s 耗时的主要来源。**2026-09-07 补充**：产物级 L2 缓存落地后，输入未变时这套重复解压整体被跳过（`-no-cache` 可退回全量对照）；本条针对的仍是冷启动/输入变化后的那一次全量计算。
 - **相关**：`FetchRecords` 的接口形状（返回全量 map）天然逼调用方驻留全部；`PreviewTitles` 是纯提取（读一条、取一句标题、丢弃），可顺手切 `ctxgraph.ForEachRecord`，消掉一个约 600MB 的瞬时峰值。
-- **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `story` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.parse-cache` 从几 MB 涨到约 160MB，且该 cache 是 report 半边共享的。跨包契约 + 双半边影响。
+- **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `story` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.cache/parse` 从几 MB 涨到约 160MB，且该 cache 是 report 半边共享的。跨包契约 + 双半边影响。
 - **触发条件**：内存不再是瓶颈后，时间成为首要痛点时单独立项。
 
 
@@ -331,12 +331,12 @@
 #### 2.22 [低，决定不做] `chatmsg.ToolResultList`/`ToolCallList` 未覆盖 OpenAI Responses API 的 `function_call`/`function_call_output` 形状
 
 - **现状**：`chatmsg.Messages` 已能把 `function_call_output` 渲染成人读文本，但结构化提取层只覆盖 OpenAI Chat Completions 与 Anthropic 两种形状。纯 Responses API 流量下脊柱不展示工具结果、三个 Finding 检测器无证据、`journey-<id>.json` 的 `tool_calls` 会静默报告「这一步没有工具调用」（机读契约降级读者看不出来）。
-- **决定不做**：真实语料按 `protocol` 统计 `openai-responses` **0 条 / 0.0%**——一次都没触发过。**触发条件（量化）**：任意一次 `vmr report` 的 `vmr-requests.json` 出现 `protocol == "openai-responses"` 的记录，即重新排期。
+- **决定不做**：真实语料按 `protocol` 统计 `openai-responses` **0 条 / 0.0%**——一次都没触发过。**触发条件（量化）**：任意一次 `vmr analyze` 的 `requests/index.json` 出现 `protocol == "openai-responses"` 的记录，即重新排期。
 
 
 #### 2.29 [已消解] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
 
-- **原状**：`.parse-cache/` 有 `CacheSchemaVersion`，`journey-<id>.json` 无等价机制——消费者无法仅凭文件本身分辨新旧形状。
+- **已闭环**：`journeys/details/j-<id>.json` 的版本戳统一收在 `manifest.json` 的 `format`（整套产物一个版本单位）；`.cache/parse/` 分片仍自带 `CacheSchemaVersion`。
 - **消解方式（2026-09，analyze 架构重构落地时）**：整份产物收敛为一个版本单位——版本探测统一走输出根 `manifest.json` 的 `format` 字段（读取方准入 + 骨架页启动时探测 banner，见设计提案裁决 D14），单文件不再各自长版本戳；切片 schema 此后收敛为加性优先，删改字段必须 bump manifest `format` 并在 CHANGELOG 标注 Breaking。原有的「JSON 无外部脚本消费」前提随骨架页（用户可复制定制面板）落地而失效——从 Phase 2 起，用户副本面板就是事实上的 schema 消费者。
 
 #### 2.73 [低-中，暂不做] LLM 自由文本的 `<`/`>` 未净化即进 `.md` 产物
@@ -481,11 +481,9 @@
 - **可能方案**：键改 `文件:接收者类型.函数名`（`ast.FuncDecl.Recv` 已有类型信息）。
 - **为什么待定**：需真的出现一个必须豁免的重名方法才有意义。
 
-#### 2.79 [低] 弃用别名 `vmr story` 的 flag 校验宽于 `vmr analyze`
+#### 2.79 [已随别名删除闭环] 弃用别名 `vmr story` 的 flag 校验宽于 `vmr analyze`
 
-- **现状**：迁移期别名 `vmr report`/`vmr story` 与主入口 `vmr analyze` 的 flag 集合存在漂移，个别 flag 别名仍接受而主入口已收紧——方向反了：别名应窄于或等于主入口，否则用户按别名写死的脚本在迁移后会突然不可用。
-- **可能方案**：别名入口复用主入口的同一套 flag 解析，差异只在弃用提示。
-- **拆除触发条件**（对照 `legacy_protocol.go` 的兼容咽喉有明写前提，别名层也应有）：`vmr report` / `vmr story` 这两个别名整体拆除的前提是「CHANGELOG 宣告弃用后满一个次要版本，且当前已无脚本/文档引用」。在那之前，flag 解析收敛到 `vmr analyze` 同一套（差异只在弃用提示）随下一次碰 CLI flag 层时做。
+- **已闭环**：`vmr report`/`vmr story` 两个子命令别名已随 analyze 架构重构整体拆除（`vmr analyze` 是唯一分析入口），本条描述的别名层 flag 漂移随之不存在。
 
 #### 2.80 [低] `sysinfo` 把系统调用失败折叠成 0，违反「missing is not zero」
 

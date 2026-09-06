@@ -51,7 +51,7 @@ func setupStoryRun(paths []string, outDir string, includeSelfTraffic bool, llmKe
 		}
 	}
 	prior := story.LoadStoryIndex(indexPath)
-	cacheDir := filepath.Join(outDir, ".parse-cache") // shared with the report half — see cmd_report.go
+	cacheDir := filepath.Join(outDir, ".cache", "parse") // shared with the report half — see cmd_report.go
 	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 
 	fmt.Printf("scanning %d file(s)...\n", len(paths))

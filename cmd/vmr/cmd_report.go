@@ -287,7 +287,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 		return nil, err
 	}
 	reqPath := filepath.Join(requestsDir, "index.json")
-	cacheDir := filepath.Join(opts.outDir, ".parse-cache")
+	cacheDir := filepath.Join(opts.outDir, ".cache", "parse")
 	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 	now := time.Now()
 	quotas, quotaJSONPath := buildProviderQuotas(cfg, cfgErr, opts.configPath, tw, now)

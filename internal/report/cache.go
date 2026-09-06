@@ -63,12 +63,23 @@ type AnalysisParams struct {
 	IncludePartial     bool
 	IncludeSelfTraffic bool
 	SelfTrafficTags    []string
-	DisplayCCY         string
-	RenderAll          bool
-	Details            bool
-	Mode               string
-	From               string
-	To                 string
+	// LLMSelfTag is the exclusion tag derived from the effective llm_key
+	// (audit.KeyTag), empty when no key — part of the effective self-traffic
+	// exclusion set alongside SelfTrafficTags (§7.2's analysis-params rule:
+	// anything that changes a persisted number goes in the fingerprint).
+	LLMSelfTag string
+	// LLMAddr/LLMModel identify an -llm-addr interpretation run; they only
+	// affect persisted products on the modes that consume them (-journey /
+	// -compare — the caller leaves them empty elsewhere), where an L2 hit
+	// must not silently skip a requested LLM interpretation.
+	LLMAddr    string
+	LLMModel   string
+	DisplayCCY string
+	RenderAll  bool
+	Details    bool
+	Mode       string
+	From       string
+	To         string
 }
 
 // ComputePricingFingerprint computes the deterministic SHA-256 fingerprint
@@ -152,6 +163,9 @@ func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 
 	components = append(components,
 		EncodeString(p.DisplayCCY),
+		EncodeString(p.LLMSelfTag),
+		EncodeString(p.LLMAddr),
+		EncodeString(p.LLMModel),
 		EncodeBool(p.RenderAll),
 		EncodeBool(p.Details),
 		EncodeString(p.Mode),

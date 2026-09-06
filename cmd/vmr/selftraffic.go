@@ -51,6 +51,19 @@ func selfTrafficExcludeTags(llmKey string, extra []string) map[string]bool {
 	return tags
 }
 
+// llmSelfTag is the exclusion tag one effective llm_key contributes to the
+// self-traffic exclusion set (audit.KeyTag), empty when there is no key —
+// the single-string form selfTrafficExcludeTags folds into its map. It is
+// what the L2 cache's analysis-params fingerprint has to see: adding or
+// changing -llm-key/report.yaml llm_key changes which records the run
+// excludes, so it must invalidate the product cache.
+func llmSelfTag(llmKey string) string {
+	if llmKey == "" {
+		return ""
+	}
+	return audit.KeyTag(llmKey)
+}
+
 // filterSelfTrafficCandidates drops any candidate Lineage whose root
 // manifest's ClientKeyTag is a self-traffic tag (P6.4) — filtered here in
 // cmd/vmr, not inside story.ListCandidates: self-traffic identification is

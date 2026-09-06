@@ -64,6 +64,8 @@ type analyzeRun struct {
 	includePartial     bool
 	includeSelfTraffic bool
 	llmKey             string
+	llmAddr            string
+	llmModel           string
 	llmAddrExplicit    bool
 	resolveLLMOpts     func() (llmCLIOptions, error)
 	benchmarkFlag      bool
@@ -217,6 +219,8 @@ func cmdAnalyze(args []string) error {
 		includeSelfTraffic: *fl.includeSelfTraffic,
 		noCache:            *fl.noCache,
 		llmKey:             llmKey,
+		llmAddr:            llmAddr,
+		llmModel:           llmModel,
 		llmAddrExplicit:    llmAddrExplicit,
 		resolveLLMOpts: func() (llmCLIOptions, error) {
 			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *fl.llmDryRun)
@@ -331,8 +335,12 @@ func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
 // slices that actually exist on disk.
 func commitManifest(r *analyzeRun, rep *report.Report2) error {
 	manifest, err := report.BuildManifest(r.outDir, rep, r.lang)
-	if err == nil {
-		_ = report.WriteManifest(r.outDir, manifest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
+		return nil
+	}
+	if err := report.WriteManifest(r.outDir, manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
 	}
 	return nil
 }
@@ -549,12 +557,23 @@ func computeTargetL2(r *analyzeRun, mode string) ([32]byte, bool) {
 		return [32]byte{}, false
 	}
 	pricingFP := resolvePricingFingerprint(r.cfg, r.exchangeRate)
+	// LLM identity rides the params fingerprint only on the modes that
+	// consume it: on -journey/-compare an L2 hit must not silently swallow a
+	// requested -llm-addr interpretation, while on the batch shapes the
+	// resolved value is deliberately ignored (never consulted downstream).
+	llmAddr, llmModel := "", ""
+	if strings.HasPrefix(mode, "journey:") || strings.HasPrefix(mode, "compare:") {
+		llmAddr, llmModel = r.llmAddr, r.llmModel
+	}
 	paramsFP := report.ComputeAnalysisParamsFingerprint(report.AnalysisParams{
 		Lang:               r.lang.String(),
 		TaskProfile:        resolveTaskProfile().Name(),
 		IncludePartial:     r.includePartial,
 		IncludeSelfTraffic: r.includeSelfTraffic,
 		SelfTrafficTags:    r.selfTrafficTags,
+		LLMSelfTag:         llmSelfTag(r.llmKey),
+		LLMAddr:            llmAddr,
+		LLMModel:           llmModel,
 		DisplayCCY:         r.displayCCY,
 		RenderAll:          r.renderAllFlag,
 		Details:            r.detailsOn,

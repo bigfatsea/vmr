@@ -72,7 +72,7 @@ func updateJourneyRow(idx *story.StoryIndex, id string, tasks, steps int, render
 
 // saveStoryIndex writes index.json + index.md into journeysDir
 // (creating it if needed), plus this run's parse cache into
-// {outDir}/.parse-cache (shared with report half — see cmd_report.go).
+// {outDir}/.cache/parse (shared with report half — see cmd_report.go).
 func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error {
 	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
@@ -87,7 +87,7 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 	if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
 		return err
 	}
-	return ctxgraph.SaveCacheDir(filepath.Join(outDir, ".parse-cache"), idx.Cache)
+	return ctxgraph.SaveCacheDir(filepath.Join(outDir, ".cache", "parse"), idx.Cache)
 }
 
 // resolveJourneyID finds the candidate chain whose ID (the content-addressed

@@ -87,7 +87,7 @@ type CachedFile struct {
 // them). It is never authoritative on its own — a missing or stale entry
 // just means ScanCached falls back to parsing that one file fresh, exactly
 // as Scan always has. Persisted as one file per entry under a shared
-// .parse-cache/ directory — see LoadCacheDir/SaveCacheDir — so
+// .cache/parse/ directory — see LoadCacheDir/SaveCacheDir — so
 // internal/journey and internal/report (and any other caller sharing the
 // same output directory) read and write the exact same on-disk cache
 // instead of each keeping an independent copy.
@@ -248,7 +248,7 @@ func hasNilManifest(ms []*Manifest) bool {
 	return false
 }
 
-// LoadCacheDir reads dir (a shared .parse-cache/ directory — see
+// LoadCacheDir reads dir (a shared .cache/parse/ directory — see
 // FileCache's doc comment) into a FileCache: one CachedFile per <hash>.json
 // shard, keyed by each shard's own embedded Hash — the same key SaveCacheDir
 // names the shard file by, so the map and the directory stay aligned.
@@ -331,7 +331,7 @@ func SaveCacheDir(dir string, cache *FileCache) error {
 // this package, not the other way around) so a killed process never leaves
 // a half-written shard that a later LoadCacheDir would trip over.
 func writeCacheShardAtomic(dir, target string, data []byte) error {
-	tmp, err := os.CreateTemp(dir, ".parse-cache-*.tmp")
+	tmp, err := os.CreateTemp(dir, "parse-shard-*.tmp")
 	if err != nil {
 		return err
 	}

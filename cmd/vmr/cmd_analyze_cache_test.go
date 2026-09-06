@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/i18n"
 	"vmr/internal/report"
 )
 
@@ -170,9 +171,25 @@ func TestAnalyzeCache_ColdWarmAndNoCache(t *testing.T) {
 // 2. Config pricing/exchange rate changed -> L2 & L3 invalidated.
 // 3. Report config (self-traffic tags) changed -> L2 & L3 invalidated.
 // 4. Analysis parameter (-lang) changed -> L2 & L3 invalidated.
+// 4b/4c. Self-traffic exclusion (llm_key tag) / LLM identity (journey/compare
+//    modes only) changed -> L2 digest changes.
 // 5. Presentation layer modified (.md deleted) -> L2 hits, L3 invalidated and re-renders .md.
 // 6. Format version mismatch -> L2 & L3 invalidated.
 // 7. Binary version without format change -> L2 & L3 hit.
+
+// baseRun builds the minimal analyzeRun mirroring a default-flags `vmr
+// analyze -o <outDir> <path>` invocation's resolved values, so digest-level
+// assertions in the invalidation matrix stay in sync with what the real run
+// persisted.
+func baseRun(path, outDir string) *analyzeRun {
+	return &analyzeRun{
+		paths:   []string{path},
+		outDir:  outDir,
+		lang:    i18n.EN,
+		noCache: false,
+	}
+}
+
 func TestAnalyzeCache_InvalidationMatrix(t *testing.T) {
 	path1 := crossCheckFixture(t)
 	outDir := filepath.Join(t.TempDir(), "reports")
@@ -267,6 +284,44 @@ exchange_rate:
 	recLang, _ := report.LoadCacheRecord(outDir)
 	if recLang.L2Digest == baseRec.L2Digest {
 		t.Fatalf("Changing -lang must invalidate L2 digest")
+	}
+
+	// Case 4b: effective self-traffic exclusion changed via -llm-key -> the
+	// digest changes (the key's own tag is part of the exclusion set even
+	// though report.yaml's self_traffic_client_tags didn't move).
+	baselineDefault, ok := computeTargetL2(baseRun(path1, outDir), "default")
+	if !ok {
+		t.Fatalf("computeTargetL2 baseline: not ok")
+	}
+	withKey := *baseRun(path1, outDir)
+	withKey.llmKey = "sk-self-traffic-key"
+	targetL2Key, ok := computeTargetL2(&withKey, "default")
+	if !ok {
+		t.Fatalf("computeTargetL2 with llm key: not ok")
+	}
+	if targetL2Key == baselineDefault {
+		t.Fatalf("Adding -llm-key (self-traffic exclusion) must change the L2 digest")
+	}
+
+	// Case 4c: -llm-addr identity on a journey-zoom run -> digest changes, so
+	// an L2 hit cannot silently skip a requested LLM interpretation; the same
+	// identity on the default suite (which never consumes it) must NOT change
+	// the digest.
+	withLLM := *baseRun(path1, outDir)
+	withLLM.llmAddr, withLLM.llmModel, withLLM.llmAddrExplicit = "127.0.0.1:8800", "coding", true
+	targetL2LLM, ok := computeTargetL2(&withLLM, "journey:j-x")
+	if !ok {
+		t.Fatalf("computeTargetL2 with llm addr: not ok")
+	}
+	targetL2LLMDefault, ok := computeTargetL2(&withLLM, "default")
+	if !ok {
+		t.Fatalf("computeTargetL2 with llm addr (default): not ok")
+	}
+	if targetL2LLM == baselineDefault {
+		t.Fatalf("Adding -llm-addr on a -journey run must change the L2 digest")
+	}
+	if targetL2LLMDefault != baselineDefault {
+		t.Fatalf("LLM identity must not affect the default suite's L2 digest (it is never consumed there)")
 	}
 
 	// Case 5: Presentation layer modified (delete vmr-report.md) -> L2 hits, L3 re-renders .md
