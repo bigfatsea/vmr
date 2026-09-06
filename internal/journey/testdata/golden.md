@@ -50,13 +50,13 @@ No upstream model switch occurred.
 
 **🔷 💬 Step 1 · 10:00:00**
 
-→ [detail](../details/20260729-100000.000_agent_agent_ok_5a3c25bf.md)
+→ [detail](../details/r-20260729-100000.000_agent_agent_ok_5a3c25bf.md)
 
 💬 Report · 好的，我来搜索相关数据。
 
 **🔷 💬 Step 2 · 10:00:02**
 
-→ [detail](../details/20260729-100002.000_agent_agent_ok_3386028d.md)
+→ [detail](../details/r-20260729-100002.000_agent_agent_ok_3386028d.md)
 
 💬 Report · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
 
@@ -64,7 +64,7 @@ No upstream model switch occurred.
 
 **🔷 💬 Step 3 · 10:00:06**
 
-→ [detail](../details/20260729-100006.000_agent_agent_ok_588f9830.md)
+→ [detail](../details/r-20260729-100006.000_agent_agent_ok_588f9830.md)
 
 💬 Report · 好的，前10名的新股打新收益如下…
 

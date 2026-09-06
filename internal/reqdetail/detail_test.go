@@ -110,7 +110,7 @@ func TestFileName_DeterministicAndCoordinateUnique(t *testing.T) {
 	req := ctxgraph.ReqCoord("vmr-audit-2026-07-08.jsonl", 42)
 
 	got := FileName(ts, "agent", "MiniMax-M3", "ok", req)
-	if !strings.HasPrefix(got, "20260709-003106.804_agent_MiniMax-M3_ok_") || !strings.HasSuffix(got, ".md") {
+	if !strings.HasPrefix(got, "r-20260709-003106.804_agent_MiniMax-M3_ok_") || !strings.HasSuffix(got, ".md") {
 		t.Errorf("got %q, want the ts-own-offset/model/outcome prefix with a coordinate-hash suffix", got)
 	}
 

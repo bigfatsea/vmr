@@ -73,7 +73,7 @@ func FileName(ts time.Time, virtualModel, realModel, outcome, req string) string
 	if realModel == "" {
 		realModel = "none"
 	}
-	return fmt.Sprintf("%s_%s_%s_%s_%s.md",
+	return fmt.Sprintf("r-%s_%s_%s_%s_%s.md",
 		ts.Format("20060102-150405.000"),
 		sanitizeName(virtualModel), sanitizeName(realModel), sanitizeName(outcome),
 		ctxgraph.ReqHash8(req))

@@ -128,8 +128,22 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
 	w("# %s\n\n", t.FailedIndexTitle)
 	w("%s", t.FailedIndexIntro(len(failed)))
+	targetDir := dir
+	if filepath.Base(dir) != "requests" {
+		targetDir = filepath.Join(dir, "requests")
+	}
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		return err
+	}
+	outPath := filepath.Join(targetDir, "failed.md")
 	if len(failed) == 0 {
-		return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
+		if err := os.WriteFile(outPath, []byte(b.String()), 0o600); err != nil {
+			return err
+		}
+		if targetDir != dir {
+			_ = os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
+		}
+		return nil
 	}
 	clusters, maxCount, maxSpan, maxClasses := clusterFailedRequests(failed)
 	if clusters > 1 || (clusters == 1 && maxCount > 1) {
@@ -141,5 +155,12 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
 			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
 	}
-	return os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
+	content := []byte(b.String())
+	if err := os.WriteFile(outPath, content, 0o600); err != nil {
+		return err
+	}
+	if targetDir != dir {
+		_ = os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), content, 0o600)
+	}
+	return nil
 }

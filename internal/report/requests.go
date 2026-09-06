@@ -42,17 +42,30 @@ import (
 // index stays purely human-scale.
 // vmr-requests-failed.jsonl stays a plain flat JSONL — it's a filtered
 // dump of Requests, not itself an independent cache.
-type RequestsIndex struct {
-	Requests []RequestRow `json:"requests"`
+// SessionMeta carries one session's title, alias, and per-task title mapping
+// projected into requests/index.json (§3.3).
+type SessionMeta struct {
+	Title string            `json:"title,omitempty"`
+	Alias string            `json:"alias,omitempty"`
+	Tasks map[string]string `json:"tasks,omitempty"`
 }
 
-// WriteRequestsJSON writes vmr-requests.json — RequestsIndex's rows only;
+type RequestsIndex struct {
+	Requests    []RequestRow           `json:"requests"`
+	Sessions    map[string]SessionMeta `json:"sessions,omitempty"`
+	JourneyLink map[string]string      `json:"journey_link,omitempty"`
+}
+
+// WriteRequestsJSON writes requests/index.json — RequestsIndex's rows only;
 // the parse cache is persisted separately (see RequestsIndex's doc
 // comment).
 func WriteRequestsJSON(rows []RequestRow, path string) (n int, err error) {
 	idx := RequestsIndex{Requests: rows}
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
+		return 0, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return 0, err
 	}
 	if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -108,94 +121,49 @@ type indexEntry struct {
 	summary tagSummaryData
 }
 
-// WriteRequestsIndex writes vmr-requests.md (a pure per-group index: header
-// + one-line summary + link to that group's sibling file) and one
-// fully-detailed sibling per group: vmr-requests-<tag>.md per real client_key_tag,
-// vmr-requests-unresolved.md for sessions carrying no tag,
-// vmr-requests-cron-<tag>.md per scheduled class. Titles come from sess.
-// journeyLink (P6.2c) maps a session's id (now a Lineage's content-
-// addressed LineageID, see SessionInfo.ID) to a rendered journey-<id>.md
-// path, when `vmr story` has already produced one in this same output
-// root — nil/empty when it hasn't, in which case no session card grows a
-// journey link (this is the "指向另一条命令聚合产物" edge class, so it's
-// existence-gated by the caller, not something this package computes).
+// WriteRequestsIndex writes requests/index.json (the machine-readable single source of truth
+// for per-request drill-down, populated with session analysis projection and journey cross-links).
+// The legacy human-readable Markdown request indexes (vmr-requests.md, vmr-requests-<tag>.md,
+// vmr-requests-cron-*.md) are retired per D7 / §3.7.
 func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang, journeyLink map[string]string, detailDir string) error {
-	t := i18n.Requests(lang)
-	detailSet := buildDetailFileSet(detailDir)
 	rows := rep.RequestRows()
-	sessionTitle, sessionAlias, taskTitle := titleMaps(sess)
-	sessionMeta := map[string]SessionRow{}
-	for _, s := range rep.Sessions {
-		sessionMeta[s.ID] = s
-	}
-	clientOrder := make([]string, 0, len(rep.ByClient))
-	for _, c := range rep.ByClient {
-		clientOrder = append(clientOrder, c.ClientKey)
-	}
-
-	chatUser, scheduled, scheduledOrder := partitionGroups(rows, sessionMeta)
-	chatUserOrder := append([]string(nil), clientOrder...)
-	for k := range chatUser {
-		found := false
-		for _, o := range chatUserOrder {
-			if o == k {
-				found = true
-				break
+	sessions := make(map[string]SessionMeta)
+	if sess != nil {
+		for _, s := range sess.Sessions {
+			meta := SessionMeta{
+				Title: s.Title,
+				Alias: s.DisplayAlias,
+				Tasks: make(map[string]string),
 			}
-		}
-		if !found {
-			chatUserOrder = append(chatUserOrder, k)
+			for _, t := range s.Tasks {
+				meta.Tasks[t.ID] = t.Title
+			}
+			sessions[s.ID] = meta
 		}
 	}
-
-	var entries []indexEntry
-
-	// Chat User siblings: real tags (clientOrder) first, then "(unresolved)".
-	for _, ck := range chatUserOrder {
-		groups := chatUser[ck]
-		if len(groups) == 0 {
-			continue
-		}
-		var tasks, turns int
-		var grows []RequestRow
-		for _, g := range groups {
-			tasks += g.tasks
-			turns += g.requests
-			grows = append(grows, g.rows...)
-		}
-		header := t.ChatUserHeader(ck, len(groups), tasks, turns)
-		file := "vmr-requests-" + sanitize(ck) + ".md"
-		content := renderChatUserDoc(header, groups, sessionTitle, sessionAlias, taskTitle, journeyLink, t, detailSet)
-		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
-			return err
-		}
-		entries = append(entries, indexEntry{header, file, tagSummary(grows)})
+	idx := RequestsIndex{
+		Requests:    rows,
+		Sessions:    sessions,
+		JourneyLink: journeyLink,
 	}
-
-	// Scheduled-class siblings.
-	for _, cls := range scheduledOrder {
-		occ := append([]RequestRow(nil), scheduled[cls]...)
-		sort.SliceStable(occ, func(i, j int) bool { return occ[i].TS < occ[j].TS })
-		header := t.CronHeader(cls, len(occ))
-		file := "vmr-requests-cron-" + cronFileTag(cls) + ".md"
-		content := renderScheduledDoc(header, occ, t, detailSet)
-		if err := os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600); err != nil {
-			return err
-		}
-		entries = append(entries, indexEntry{header, file, tagSummary(occ)})
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return err
 	}
-
-	var b strings.Builder
-	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-	w("# %s\n\n", t.IndexTitle)
-	for _, e := range entries {
-		w("## %s\n\n", e.header)
-		w("%s", t.GroupSummary(e.summary.requests, pctStr2(e.summary.ok, e.summary.requests),
-			fmtutil.FmtTokens(e.summary.fresh), fmtutil.FmtTokens(e.summary.cached), fmtutil.FmtTokens(e.summary.out),
-			pctStr(e.summary.cacheEff)))
-		w("%s", t.GroupDetailLink(e.file))
+	targetDir := dir
+	if filepath.Base(dir) != "requests" {
+		targetDir = filepath.Join(dir, "requests")
 	}
-	return os.WriteFile(filepath.Join(dir, "vmr-requests.md"), []byte(b.String()), 0o600)
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "index.json"), data, 0o600); err != nil {
+		return err
+	}
+	if targetDir != dir {
+		_ = os.WriteFile(filepath.Join(dir, "vmr-requests.json"), data, 0o600)
+	}
+	return nil
 }
 
 // tagSummaryData is the one-line blockquote's basis: request count, success
@@ -354,18 +322,7 @@ func partitionGroups(rows []RequestRow, sessionMeta map[string]SessionRow) (chat
 // their own vmr-requests-<tag>.md — i.e. every tag in partitionGroups'
 // chatUser result except the synthetic "(unresolved)" bucket.
 func clientsWithSiblingFile(rep *Report2) map[string]bool {
-	sessionMeta := map[string]SessionRow{}
-	for _, s := range rep.Sessions {
-		sessionMeta[s.ID] = s
-	}
-	chatUser, _, _ := partitionGroups(rep.RequestRows(), sessionMeta)
-	out := map[string]bool{}
-	for k := range chatUser {
-		if k != "(unresolved)" {
-			out[k] = true
-		}
-	}
-	return out
+	return nil
 }
 
 // renderChatUserDoc renders one Chat User's full detail doc: an H1 header,

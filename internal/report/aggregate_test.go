@@ -531,54 +531,25 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	main, err := os.ReadFile(filepath.Join(dir, "vmr-requests.md"))
+	data, err := os.ReadFile(filepath.Join(dir, "requests", "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(main)
-	// The main index only carries a "## " group header + summary + link per
-	// group now — the full "# Chat User: …" detail card moved to the
-	// per-group sibling file.
-	if !strings.Contains(s, "## Chat User: alice · 2 sessions 2 tasks 2 turns") {
-		t.Errorf("missing alice Chat User index entry with counts:\n%s", s)
+	var idx RequestsIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		t.Fatalf("requests/index.json invalid JSON: %v", err)
 	}
-	if !strings.Contains(s, "[vmr-requests-alice.md](vmr-requests-alice.md)") {
-		t.Errorf("missing link to alice's detail sibling:\n%s", s)
+	if len(idx.Requests) != 3 {
+		t.Errorf("want 3 requests in index.json, got %d", len(idx.Requests))
 	}
-	if !strings.Contains(s, "## Scheduled · heartbeat single-shot sessions × 1") {
-		t.Errorf("missing collapsed heartbeat rollup index entry:\n%s", s)
-	}
-	if !strings.Contains(s, "[vmr-requests-cron-heartbeat.md](vmr-requests-cron-heartbeat.md)") {
-		t.Errorf("missing link to heartbeat's cron detail sibling:\n%s", s)
-	}
-	if strings.Contains(s, "Chat User: bob") {
-		t.Errorf("bob's only record is a single-shot heartbeat and must not get its own Chat User section:\n%s", s)
-	}
-	alice, err := os.ReadFile(filepath.Join(dir, "vmr-requests-alice.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(alice), "# Chat User: alice · 2 sessions 2 tasks 2 turns") {
-		t.Errorf("alice's sibling should carry the full Chat User detail card:\n%s", alice)
-	}
-	// 00:00 UTC on the first record must render as 05:00 in fmtutil.DisplayZone
-	// (TEST+05:00 above), not the source record's own (UTC) offset. The main
-	// index carries no per-request timestamps now (the flat "all requests"
-	// table is gone) — the session card in the per-tag sibling is where the
-	// converted timestamp shows.
-	if !strings.Contains(string(alice), "2026-07-24 05:00:00") {
-		t.Errorf("timestamps should be converted to fmtutil.DisplayZone:\n%s", alice)
+	if len(idx.Sessions) == 0 {
+		t.Errorf("want sessions projection in index.json")
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-bob.md")); !os.IsNotExist(err) {
-		t.Errorf("bob has no interactive traffic and should get no per-tag sibling")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "vmr-requests-cron-heartbeat.md")); err != nil {
-		t.Errorf("missing scheduled-class sibling vmr-requests-cron-heartbeat.md: %v", err)
-	}
-	for _, legacy := range []string{"vmr-requests-index.md", "vmr-requests-index-alice.md"} {
-		if _, err := os.Stat(filepath.Join(dir, legacy)); !os.IsNotExist(err) {
-			t.Errorf("legacy-named file %s should not be written", legacy)
+	// Human-readable request indexes (vmr-requests.md, per-tag siblings) are retired per D7 / §3.7.
+	for _, retired := range []string{"vmr-requests.md", "vmr-requests-alice.md", "vmr-requests-bob.md", "vmr-requests-cron-heartbeat.md"} {
+		if _, err := os.Stat(filepath.Join(dir, retired)); !os.IsNotExist(err) {
+			t.Errorf("retired file %s should not be written", retired)
 		}
 	}
 }
@@ -853,21 +824,20 @@ func TestWriteFailedIndex(t *testing.T) {
 		t.Fatalf("want 3 rows written to vmr-requests-failed.jsonl, got %d", n)
 	}
 
-	// The per-group detail is unaffected: the per-tag sibling still renders
-	// every request, failed ones included (no client_key_tag on these
-	// records, so they land in vmr-requests-unresolved.md).
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "details")); err != nil {
-		t.Fatal(err)
-	}
-	unresolvedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-unresolved.md"))
+	// requests/failed.md is written into requests/ directory
+	failedReqMD, err := os.ReadFile(filepath.Join(dir, "requests", "failed.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	full := string(unresolvedMD)
-	for _, want := range []string{"❌transient", "❌canceled", "⚠️trunc"} {
-		if !strings.Contains(full, want) {
-			t.Errorf("the per-group sibling should still carry %q inline, unmoved:\n%s", want, full)
-		}
+	if !strings.Contains(string(failedReqMD), "3 total.") {
+		t.Errorf("want exactly 3 failed rows reported in requests/failed.md:\n%s", failedReqMD)
+	}
+
+	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "requests", "details")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "requests", "index.json")); err != nil {
+		t.Errorf("missing requests/index.json: %v", err)
 	}
 }
 
