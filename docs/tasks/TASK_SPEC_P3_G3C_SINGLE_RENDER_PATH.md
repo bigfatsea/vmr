@@ -29,8 +29,11 @@
 - 每次 `-render-only` 调用同样幂等刷新骨架页。
 - 语言：渲染产物语言 = JSON 落盘语言（D10），`-lang` 与 JSON 不一致时报错并指引全量重跑。
 
-### 任务 3: 删除旧渲染路径
+### 任务 3: 删除旧渲染路径与移交清单（详见 docs/tasks/HANDOVER_P3_NOTES.md，必读）
 - 删两侧旧渲染入口与吃内存结构的旧函数（保留 VM 构建器）；删新旧字节等价过渡测试；archtest 预算表移除已删文件条目。
+- **3B 移交**：① `JourneyStructure.Bodies` 改 `json:"-"`（当前 j-<id>.json 把 blob 表序列化两份，`structure.bodies` 与顶级 `bodies` 重复，约 2 倍 blob 字节；设计 §3.6 只留顶级一份），`TestBuildStructure_VolumeBoundedByStepsNotProseLength` 尺寸守卫改为 marshal `JourneySummary`；② 删除死代码 `internal/journey/mdlite.go` + `_test.go`（2B 删 render_compare_html 后零生产调用方）。
+- **3A 移交**：删旧路径后把 `vm` 前缀的过渡副本helper 改回原名并删 legacy 原件（完整清单见 HANDOVER_P3_NOTES §3）；`viewmodel_provider.go` 的 `vmSkippedAttemptsNote` 改为直接调用 providerquota.go 存活的 `renderSkippedAttemptsNote` 逻辑。
+- **明确不在本组做**（后续独立变更）：`section_cost.go` 两条从未进 i18n 的英文裸文案迁入 i18n（会改 vmr-report.md 字节，独立措辞变更）；CLAUDE.md/设计文档的 i18n 配对表述更新由主控负责。
 
 ### 任务 4: 守卫与测试
 - 新增 §9 守卫：`-render-only` 产物与全量运行产物**字节一致**（同路径的结构性保证，测试防将来分叉）。
