@@ -98,10 +98,10 @@ func TestResolveInputPaths_NoArgsAndEmptyLogDir(t *testing.T) {
 	}
 }
 
-// TestCmdReport_DefaultsToConfigLogDir exercises the full cmdReport path
+// TestCmdAnalyze_MacroOnlyDefaultsToConfigLogDir exercises the full cmdAnalyze -macro-only path
 // with no positional arguments: it must resolve its input from -c's
-// log_dir, exactly like `vmr story`'s equivalent default.
-func TestCmdReport_DefaultsToConfigLogDir(t *testing.T) {
+// log_dir.
+func TestCmdAnalyze_MacroOnlyDefaultsToConfigLogDir(t *testing.T) {
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, "logs")
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
@@ -114,8 +114,8 @@ func TestCmdReport_DefaultsToConfigLogDir(t *testing.T) {
 	configPath := writeTempFile(t, "config.yaml", minimalConfigYAML+"log_dir: "+logDir+"\n")
 	outDir := filepath.Join(dir, "out")
 
-	if err := cmdReport([]string{"-c", configPath, "-o", outDir}); err != nil {
-		t.Fatalf("cmdReport with no input files (config default): %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", "-c", configPath, "-o", outDir}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only with no input files (config default): %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.json")); err != nil {
 		t.Errorf("expected vmr-report.json to be written: %v", err)

@@ -2,7 +2,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -55,7 +54,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	var resolver *pricing.Resolver
 	var configRates map[string]float64
 	if loadErr != nil {
-		// cmdReport already printed one unified warning for cfgErr — a
+		// runReport already printed one unified warning for cfgErr — a
 		// second, near-identical one here would just repeat it.
 		resolver = pricing.NewResolver(standard, nil)
 	} else {
@@ -150,29 +149,27 @@ func allPathsOutsideDir(paths []string, dir string) bool {
 	return true
 }
 
-// cmdReport aggregates audit JSONL into internal/report's output:
-// vmr-report.json/.md, vmr-requests.json/.md (+ per-tag siblings),
-// vmr-requests-failed.jsonl/.md (error-analysis index: outcome ==
-// error|canceled plus ok-but-truncated, additive — doesn't remove those
-// requests from anything above), and one details/*.md+.json per request.
+// runReport aggregates audit JSONL into internal/report's output:
+// vmr-report.json/.md, macro/*.json, requests/index.json, requests/
+// failed.jsonl/.md (error-analysis index: outcome == error|canceled plus
+// ok-but-truncated), and one requests/details/*.md+.json per request.
 // Inputs may freely mix live plain .jsonl files and .jsonl.zst files that
 // the audit logger's housekeeping sweep has since compressed
 // (internal/report decompresses transparently) — e.g.
-// `vmr report 'vmr-audit-*.jsonl*'`. With no input files given at all,
+// `vmr analyze 'vmr-audit-*.jsonl*'`. With no input files given at all,
 // defaults to <-c config.yaml's log_dir>/vmr-audit-* (see resolveInputPaths
 // in auditpaths.go) — the common case of "just report on this instance's
 // own logs" needs no arguments beyond an optional -c.
-// setupDetailWriter creates {outDir}/details and starts the detail-page
-// worker pool when detailsOn — Build's onRecord hook (nil when !detailsOn)
-// renders+writes each record's detail page during the aggregation pass
-// itself, on its own worker pool, so there's no separate third read of the
-// audit source for detail export. Build's own success/failure never
-// depends on this: a detail-write failure surfaces only when the returned
-// *report.DetailWriter's Close is checked, well after vmr-report.json/md
-// are already safely on disk — same robustness the old separate-
-// WriteDetails-step had, just without the extra pass.
+// setupDetailWriter creates {outDir}/requests/details and starts the
+// detail-page worker pool when detailsOn — Build's onRecord hook (nil when
+// !detailsOn) renders+writes each record's detail page during the
+// aggregation pass itself, on its own worker pool, so there's no separate
+// third read of the audit source for detail export. Build's own
+// success/failure never depends on this: a detail-write failure surfaces
+// only when the returned *report.DetailWriter's Close is checked, well
+// after vmr-report.json/md are already safely on disk.
 func setupDetailWriter(outDir string, detailsOn bool, lang i18n.Lang, tw io.Writer) (dw *report.DetailWriter, detailDir string, onRecord func(*audit.Record, *report.ReqInfo), err error) {
-	detailDir = filepath.Join(outDir, "details")
+	detailDir = filepath.Join(outDir, "requests", "details")
 	if !detailsOn {
 		return nil, detailDir, nil, nil
 	}
@@ -204,12 +201,11 @@ func detailsPresentFor(detailsOn bool, detailDir string) bool {
 	return detailsOn || detailDirHasFiles(detailDir)
 }
 
-// reportRunOpts bundles vmr report's already-resolved parameters — every
-// value cmdReport itself derives from its own flags/report.yaml before the
-// pipeline in runReport starts doing anything. Factored out (P9.1) so
-// cmdAnalyze can drive the exact same pipeline from its own unified flag
-// set's resolution, instead of the pre-P9 approach of re-serializing
-// resolved values into a []string and having cmdReport re-parse them.
+// reportRunOpts bundles the report half's already-resolved parameters —
+// every value derived from analyze's flags/report.yaml before the pipeline
+// in runReport starts doing anything. Factored out (P9.1) so
+// cmdAnalyze drives the exact same pipeline from its own unified flag
+// set's resolution.
 type reportRunOpts struct {
 	configPath string
 	// cfg/cfgErr: config.Load already done once by the caller (cmdAnalyze),
@@ -226,18 +222,15 @@ type reportRunOpts struct {
 	reportConfigPath  string
 }
 
-// runReport executes vmr report's full pipeline — session analysis,
+// runReport executes the report half's full pipeline — session analysis,
 // aggregation, pricing/quota resolution, and every derived file it writes
-// (vmr-report.{json,md}, details/*, vmr-requests*.{json,md,jsonl}) — against
-// already-resolved opts. This is the same pipeline cmdReport's own body ran
-// inline before P9.1; the split has no behavior change of its own, only a
-// different caller (cmdAnalyze, see cmd_analyze.go) can now reach it without
-// going through vmr report's own flag.FlagSet.
-func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
+// (vmr-report.{json,md}, macro/*.json, requests/*) — against
+// already-resolved opts.
+func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.Report2, error) {
 	// cfg/cfgErr come pre-loaded from cmdAnalyze — one config.Load per
 	// analyze run, shared with the story half (P-7-7). buildPricing and
 	// buildProviderQuotas below both consume it; a load failure is NOT
-	// fatal to `vmr report` — both callees degrade independently (pricing
+	// fatal to the report half — both callees degrade independently (pricing
 	// falls back to the embedded standard table; the quota section simply
 	// doesn't render) — see cfgErr's threading below, never returned as
 	// this function's own error.
@@ -245,7 +238,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	if cfgErr != nil {
 		// One unified warning for both degrade paths — buildPricing
 		// and buildProviderQuotas used to each print their own near-
-		// duplicate of this, so a bare-logs `vmr report` run reliably saw
+		// duplicate of this, so a bare-logs report run reliably saw
 		// two warnings naming the same unreadable file.
 		fmt.Fprintf(tw, "config: %s not usable (%v) — $ estimates use the standard price table only (no account overrides), §2.5 renders without quota references\n", opts.configPath, cfgErr)
 	}
@@ -256,22 +249,18 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	// front (the detail writer below needs its output directory to exist
 	// before Build's aggregation pass starts feeding it records).
 	if err := os.MkdirAll(opts.outDir, 0o700); err != nil {
-		return err
+		return nil, err
 	}
 
 	dw, detailDir, onRecord, err := setupDetailWriter(opts.outDir, opts.detailsOn, opts.lang, tw)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	// The gap between this line's timestamp and the first "[1/N]" line below
-	// is session analysis (AnalyzeSessions) — a full, currently silent pass
-	// over every input file that Build() always runs before its own
-	// per-file aggregation loop starts printing. priorCache (from
-	// {outDir}/.parse-cache, shared with `vmr story` — see
-	// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
-	// section) lets that pass skip re-parsing/re-hashing any input file
-	// whose content hasn't changed.
-	reqPath := filepath.Join(opts.outDir, "vmr-requests.json")
+	requestsDir := filepath.Join(opts.outDir, "requests")
+	if err := os.MkdirAll(requestsDir, 0o700); err != nil {
+		return nil, err
+	}
+	reqPath := filepath.Join(requestsDir, "index.json")
 	cacheDir := filepath.Join(opts.outDir, ".parse-cache")
 	priorCache := ctxgraph.LoadCacheDir(cacheDir)
 	now := time.Now()
@@ -279,7 +268,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	fmt.Fprintf(tw, "session analysis + aggregation: scanning %d file(s)...\n", len(paths))
 	rep, sess, cache, err := report.BuildCached(paths, now, tw, pricingInfo, pricingSrc, onRecord, resolveTaskProfile(), priorCache, quotas, opts.excludeClientTags)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Name the live-quota counter's own source path in the report, and
 	// flag when every input audit log lies outside this instance's log_dir
@@ -298,41 +287,41 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
 	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
 	if err := report.WriteJSON(rep, jsonPath); err != nil {
-		return err
+		return nil, err
+	}
+	if err := report.WriteMacroSlices(opts.outDir, rep, opts.lang); err != nil {
+		return nil, err
 	}
 	storiesLink, lineageToJourney := loadStoriesLink(opts.outDir)
 	if err := os.WriteFile(mdPath, []byte(report.Markdown(rep, opts.lang, storiesLink, lineageToJourney)), 0o600); err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
 		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
 	if err := writeToolWasteCard(rep, opts.outDir, opts.lang, tw); err != nil {
-		return err
+		return nil, err
 	}
 
 	if dw != nil {
 		n, err := dw.Close()
 		if err != nil {
-			return fmt.Errorf("details: %w", err)
+			return nil, fmt.Errorf("details: %w", err)
 		}
 		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
 	}
 
-	// Requests index (+ per-tag siblings) + json (data only — the parse
-	// cache is persisted separately, into cacheDir, right below).
+	// Requests index (requests/index.json, the machine-readable single
+	// source of truth with the session projection and journey cross-links;
+	// D7/§3.7 retired the human-readable request markdown indexes) + the
+	// parse cache, persisted separately into cacheDir right below.
 	rows := rep.RequestRows()
-	nReq, err := report.WriteRequestsJSON(rows, reqPath)
-	if err != nil {
-		return fmt.Errorf("requests export: %w", err)
-	}
-	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, nReq)
 	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
-		return fmt.Errorf("parse cache: %w", err)
+		return nil, fmt.Errorf("parse cache: %w", err)
 	}
-	if err := report.WriteRequestsIndex(rep, sess, opts.outDir, opts.lang, lineageToJourney, detailDir); err != nil {
-		return fmt.Errorf("requests index: %w", err)
+	if err := report.WriteRequestsIndex(rep, sess, requestsDir, opts.lang, lineageToJourney, detailDir); err != nil {
+		return nil, fmt.Errorf("requests index: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests.md"))
+	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, len(rows))
 
 	// Failed-requests index: a dedicated error-analysis view (outcome ==
 	// error|canceled, plus ok-but-truncated), each row linking to its
@@ -340,17 +329,17 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) error {
 	// above is unaffected and still lists these same failed requests
 	// inline as before.
 	failedRows := report.FailedRequestRows(rows)
-	failedJSONLPath := filepath.Join(opts.outDir, "vmr-requests-failed.jsonl")
+	failedJSONLPath := filepath.Join(requestsDir, "failed.jsonl")
 	nFailed, err := report.WriteRequestsJSONL(failedRows, failedJSONLPath)
 	if err != nil {
-		return fmt.Errorf("failed-requests export: %w", err)
+		return nil, fmt.Errorf("failed-requests export: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
-	if err := report.WriteFailedIndex(rows, opts.outDir, opts.lang, detailDir); err != nil {
-		return fmt.Errorf("failed-requests index: %w", err)
+	if err := report.WriteFailedIndex(rows, requestsDir, opts.lang, detailDir); err != nil {
+		return nil, fmt.Errorf("failed-requests index: %w", err)
 	}
-	fmt.Fprintf(tw, "%s\n", filepath.Join(opts.outDir, "vmr-requests-failed.md"))
-	return nil
+	fmt.Fprintf(tw, "%s\n", filepath.Join(requestsDir, "failed.md"))
+	return rep, nil
 }
 
 // writeToolWasteCard writes {out}/tool-waste.html — the standalone
@@ -367,49 +356,4 @@ func writeToolWasteCard(rep *report.Report2, outDir string, lang i18n.Lang, tw i
 	}
 	fmt.Fprintf(tw, "%s\n", twPath)
 	return nil
-}
-
-// cmdReport is `vmr report`'s own flag set (P15.2: unchanged from before the
-// CLI convergence — same flags, same defaults, same resolution helpers) and
-// no longer runs its own resolution/dispatch. It parses its flags in-place,
-// then hands the result to dispatchAnalyzeFrom with macroOnly: true
-// (cmd_analyze.go's -macro-only, P15.1) — the same call cmdAnalyze itself
-// makes for `-macro-only`, so "vmr report produces what vmr analyze
-// -macro-only produces" is structural, not a promise kept by hand across
-// two independent implementations (IS-25).
-func cmdReport(args []string) error {
-	fs := flag.NewFlagSet("report", flag.ExitOnError)
-	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from (providers[].pricing / global pricing: block); without a readable config, $ estimates fall back to the built-in standard price table")
-	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
-	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: report.yaml's details, or false — the requests index links to each record's detail filename regardless, computed without needing the file to exist; pass -details to materialize them all up front)")
-	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
-	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY (default: report.yaml's currency, or whatever currency pricing resolved in — usually -c's config.yaml pricing.currency, or USD); needs a matching rate in config.yaml's pricing.exchange_rate or report.yaml's exchange_rate")
-	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml (shared with this alias); absent => auto-load ./report.yaml if present")
-	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from cost/usage totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
-	// cmd_analyze.go/cmd_story.go both resolve -llm-key for
-	// self-traffic exclusion (it identifies PAST self-analysis traffic,
-	// independent of whether this run makes a new LLM call — see
-	// cmd_analyze.go's own comment on this) — cmdReport never had this
-	// flag, so `vmr report`'s self-traffic exclusion could only ever read
-	// report.yaml's llm_key, never override it per-call like its siblings.
-	llmKeyFlag := fs.String("llm-key", "", "identifies past self-analysis traffic to exclude from totals — not used to make a new LLM call (vmr report never does). Default: report.yaml's llm_key")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	fmt.Fprintln(os.Stderr, "vmr report: alias for `vmr analyze -macro-only` — kept for muscle memory, produces byte-identical output. See `vmr analyze -h`.")
-	return dispatchAnalyzeFrom(analyzeAliasRun{
-		fsAlias:            fs,
-		configPath:         *configPath,
-		reportConfigPath:   *reportConfigPath,
-		outDirFlag:         *outDirFlag,
-		langFlag:           *langFlag,
-		includeSelfTraffic: *includeSelfTraffic,
-		llmKey:             *llmKeyFlag,
-		detailsOn:          *detailsFlag,
-		detailsSet:         flagPassed(fs, "details"),
-		displayCCY:         *currencyFlag,
-		macroOnly:          true,
-		aliasName:          "report",
-	})
 }

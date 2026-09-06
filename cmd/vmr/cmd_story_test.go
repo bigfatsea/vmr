@@ -80,8 +80,8 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory (list): %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -list-only: %v", err)
 		}
 	})
 	if !strings.Contains(listing, "调研一下 A 股新股打新收益") {
@@ -108,35 +108,48 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	id := fields[0]
 
 	render := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-journey", id, path}); err != nil {
-			t.Fatalf("cmdStory (render): %v", err)
+		if err := cmdAnalyze([]string{"-journey", id, "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -journey: %v", err)
 		}
 	})
-	if !strings.Contains(render, "journey-"+id+".md") {
+	if !strings.Contains(render, id+".md") {
 		t.Errorf("render output missing the written file path:\n%s", render)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys"))
 	if err != nil {
-		t.Fatalf("reports/stories not created: %v", err)
+		t.Fatalf("journeys/ not created: %v", err)
 	}
-	// One journey now writes two files: journey-<id>.md (the narrative) and
-	// journey-<id>.json (the behavior profile) — plus vmr-stories.json/.md,
-	// written on every invocation (the earlier bare listing call already
-	// wrote them, this render just updates them in place).
-	if len(entries) != 4 {
-		t.Fatalf("want 4 files (journey .md+.json, vmr-stories .md+.json), got %d: %v", len(entries), entries)
+	// One journey now writes two files: j-<id>.md (the narrative) and
+	// j-<id>.json (the behavior profile) in journeys/details/, plus
+	// index.json/.md at the journeys/ root — the earlier bare listing call
+	// already wrote the index pair, this render just updates them in place.
+	var sawIndex bool
+	for _, e := range entries {
+		if !e.IsDir() {
+			sawIndex = true
+		}
 	}
-	content, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+id+".md"))
+	detailsEntries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
+	if err != nil {
+		t.Fatalf("journeys/details not created: %v", err)
+	}
+	if !sawIndex {
+		t.Fatalf("journeys/index not written: %v", entries)
+	}
+	if len(detailsEntries) != 2 {
+		t.Fatalf("want 2 files (journey .md+.json) in journeys/details, got %d: %v", len(detailsEntries), detailsEntries)
+	}
+	content, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(content), "调研一下 A 股新股打新收益") {
 		t.Errorf("rendered journey missing root instruction:\n%s", content)
 	}
-	jsonData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+id+".json"))
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(id, false), ".md")+".json"))
 	if err != nil {
-		t.Fatalf("journey-%s.json not written: %v", id, err)
+		t.Fatalf("j-%s.json not written: %v", id, err)
 	}
 	var summary story.JourneySummary
 	if err := json.Unmarshal(jsonData, &summary); err != nil {
@@ -145,7 +158,7 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	if summary.ID != id {
 		t.Errorf("journey-%s.json's own id field = %q, want %q", id, summary.ID, id)
 	}
-	// P4: writeJourneyFile is journey-<id>.json's only production writer,
+	// P4: writeJourneyFile is j-<id>.json's only production writer,
 	// and it builds JourneySummary via its own literal rather than calling
 	// story.Summarize (which has its own Metrics/Findings it must reuse
 	// rather than recompute — see story.NewJourneySummary's doc comment).
@@ -154,7 +167,7 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	// output, not by any test) — this assertion is what should have caught
 	// it, and is what guards the next field the same way.
 	if len(summary.Structure.Tasks) == 0 {
-		t.Fatal("journey-*.json's structure.tasks is empty — writeJourneyFile likely isn't populating Structure (see story.NewJourneySummary)")
+		t.Fatal("j-*.json's structure.tasks is empty — writeJourneyFile likely isn't populating Structure (see story.NewJourneySummary)")
 	}
 	gotSteps := 0
 	for _, task := range summary.Structure.Tasks {
@@ -185,28 +198,28 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-render-all", path}); err != nil {
-			t.Fatalf("cmdStory -render-all: %v", err)
+		if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -render-all: %v", err)
 		}
 	})
 	if !strings.Contains(out, "2 journey(s) rendered to") {
 		t.Errorf("summary line missing or wrong count:\n%s", out)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
-		t.Fatalf("reports/stories not created: %v", err)
+		t.Fatalf("journeys/details not created: %v", err)
 	}
-	// Two journeys, each writing a .md + .json pair, plus vmr-stories.json/.md.
-	if len(entries) != 6 {
-		t.Fatalf("want 6 files (2 journeys x .md+.json, vmr-stories .md+.json), got %d: %v", len(entries), entries)
+	// Two journeys, each writing a .md + .json pair in journeys/details/.
+	if len(entries) != 4 {
+		t.Fatalf("want 4 files (2 journeys x .md+.json), got %d: %v", len(entries), entries)
 	}
 	var all string
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".md") {
 			continue
 		}
-		content, err := os.ReadFile(filepath.Join(outDir, "stories", e.Name()))
+		content, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", e.Name()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -226,16 +239,16 @@ func TestCmdStory_JourneyCommaSeparatedList(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, path}); err != nil {
-			t.Fatalf("cmdStory -journey (comma list): %v", err)
+		if err := cmdAnalyze([]string{"-journey", idA + "," + idB, "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -journey (comma list): %v", err)
 		}
 	})
 	if !strings.Contains(out, "2 journey(s) rendered to") {
 		t.Errorf("expected the batched-render summary line:\n%s", out)
 	}
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".md")); err != nil {
-			t.Errorf("journey-%s.md not written: %v", id, err)
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+			t.Errorf("j-%s.md not written: %v", id, err)
 		}
 	}
 }
@@ -249,16 +262,16 @@ func TestCmdStory_JourneyWildcardMatchesMultiple(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-journey", "j-*", path}); err != nil {
-			t.Fatalf("cmdStory -journey (wildcard, all): %v", err)
+		if err := cmdAnalyze([]string{"-journey", "j-*", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -journey (wildcard, all): %v", err)
 		}
 	})
 	if !strings.Contains(out, "2 journey(s) rendered to") {
 		t.Errorf("expected both journeys to match 'j-*':\n%s", out)
 	}
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".md")); err != nil {
-			t.Errorf("journey-%s.md not written: %v", id, err)
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+			t.Errorf("j-%s.md not written: %v", id, err)
 		}
 	}
 }
@@ -274,15 +287,15 @@ func TestCmdStory_JourneyWildcardMatchesOne(t *testing.T) {
 	pattern := "*" + idA[len(idA)-8:]
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-journey", pattern, path}); err != nil {
-			t.Fatalf("cmdStory -journey (wildcard, one): %v", err)
+		if err := cmdAnalyze([]string{"-journey", pattern, "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -journey (wildcard, one): %v", err)
 		}
 	})
-	if !strings.Contains(out, "journey-"+idA+".md") || !strings.Contains(out, "tasks") {
+	if !strings.Contains(out, idA+".md") || !strings.Contains(out, "tasks") {
 		t.Errorf("expected the single-journey RenderedNote line for %s:\n%s", idA, out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idB+".md")); err == nil {
-		t.Errorf("journey-%s.md should not have been rendered (pattern only matches idA)", idB)
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idB, false))); err == nil {
+		t.Errorf("j-%s.md should not have been rendered (pattern only matches idA)", idB)
 	}
 }
 
@@ -294,7 +307,7 @@ func TestCmdStory_JourneySelectorNoMatchErrors(t *testing.T) {
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
 	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-journey", idA + ",no-such-id", path})
+		return cmdAnalyze([]string{"-journey", idA + ",no-such-id", "-o", outDir, path})
 	})
 	if err == nil {
 		t.Fatal("expected an error when one comma-separated token matches nothing")
@@ -312,7 +325,7 @@ func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
 	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		return cmdAnalyze([]string{"-journey", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", outDir, path})
 	})
 	if err == nil {
 		t.Fatal("expected an error: -llm-addr with a multi-match -journey selector")
@@ -339,8 +352,8 @@ func TestCmdStory_Compare(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory (list): %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -list-only: %v", err)
 		}
 	})
 	var idA, idB string
@@ -360,8 +373,8 @@ func TestCmdStory_Compare(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, path}); err != nil {
-			t.Fatalf("cmdStory -compare: %v", err)
+		if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -compare: %v", err)
 		}
 	})
 	wantBase := "compare-" + idA + "-vs-" + idB
@@ -369,13 +382,13 @@ func TestCmdStory_Compare(t *testing.T) {
 		t.Errorf("output missing the written comparison path:\n%s", out)
 	}
 
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", wantBase+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "compares", wantBase+".md"))
 	if err != nil {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
 	md := string(mdData)
-	linkA := "[" + idA + "](journey-" + idA + ".md)"
-	linkB := "[" + idB + "](journey-" + idB + ".md)"
+	linkA := "[" + idA + "](../journeys/details/" + story.JourneyReportFile(idA, false) + ")"
+	linkB := "[" + idB + "](../journeys/details/" + story.JourneyReportFile(idB, false) + ")"
 	for _, want := range []string{linkA, linkB, "调研一下 A 股新股打新收益", "帮我写个 release note", "Model Time", "Evidence Provenance", ctxgraph.CanonicalPath(path)} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
@@ -384,15 +397,15 @@ func TestCmdStory_Compare(t *testing.T) {
 
 	// -compare automatically generated the individual journey files
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".md")); err != nil {
-			t.Errorf("journey-%s.md should have been auto-generated by -compare: %v", id, err)
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+			t.Errorf("j-%s.md should have been auto-generated by -compare: %v", id, err)
 		}
-		if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+id+".json")); err != nil {
-			t.Errorf("journey-%s.json should have been auto-generated by -compare: %v", id, err)
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(id, false), ".md")+".json")); err != nil {
+			t.Errorf("j-%s.json should have been auto-generated by -compare: %v", id, err)
 		}
 	}
 
-	jsonData, err := os.ReadFile(filepath.Join(outDir, "stories", wantBase+".json"))
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "compares", wantBase+".json"))
 	if err != nil {
 		t.Fatalf("comparison .json not written: %v", err)
 	}
@@ -403,8 +416,10 @@ func TestCmdStory_Compare(t *testing.T) {
 	if cmp.A.ID != idA || cmp.B.ID != idB {
 		t.Errorf("comparison json ids = %q/%q, want %q/%q", cmp.A.ID, cmp.B.ID, idA, idB)
 	}
-	if cmp.A.ReportFile != "journey-"+idA+".md" || cmp.B.ReportFile != "journey-"+idB+".md" {
-		t.Errorf("comparison json report files = %q/%q, want %q/%q", cmp.A.ReportFile, cmp.B.ReportFile, "journey-"+idA+".md", "journey-"+idB+".md")
+	wantReportA := filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(idA, false)))
+	wantReportB := filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(idB, false)))
+	if cmp.A.ReportFile != wantReportA || cmp.B.ReportFile != wantReportB {
+		t.Errorf("comparison json report files = %q/%q, want %q/%q", cmp.A.ReportFile, cmp.B.ReportFile, wantReportA, wantReportB)
 	}
 	if len(cmp.Rows) == 0 {
 		t.Error("comparison json has no metric rows")
@@ -440,7 +455,7 @@ func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
 
 	for _, val := range []string{"j-something", "j-something,", ",j-something"} {
 		err := captureStdoutErr(t, func() error {
-			return cmdStory([]string{"-o", outDir, "-compare", val, path})
+			return cmdAnalyze([]string{"-compare", val, "-o", outDir, path})
 		})
 		if err == nil {
 			t.Errorf("-compare %q should be a usage error", val)
@@ -462,7 +477,7 @@ func TestCmdStory_CompareUnknownID(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-compare", "no-such-id,j-", path})
+		return cmdAnalyze([]string{"-compare", "no-such-id,j-", "-o", outDir, path})
 	})
 	if err == nil || !strings.Contains(err.Error(), "-compare first id") {
 		t.Errorf("expected a -compare first id error, got: %v", err)
@@ -494,8 +509,8 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-include-partial", path}); err != nil {
-			t.Fatalf("cmdStory (list -include-partial): %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-include-partial", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze (list -include-partial): %v", err)
 		}
 	})
 	var idPartial, idB string
@@ -514,13 +529,13 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 		t.Fatalf("could not find both candidate ids in listing:\n%s", listing)
 	}
 
-	if err := cmdStory([]string{"-o", outDir, "-compare", idPartial + "," + idB, path}); err == nil {
+	if err := cmdAnalyze([]string{"-compare", idPartial + "," + idB, "-o", outDir, path}); err == nil {
 		t.Error("comparing a partial-head journey without -include-partial should error")
 	}
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-include-partial", "-compare", idPartial + "," + idB, path}); err != nil {
-			t.Fatalf("cmdStory -compare with -include-partial: %v", err)
+		if err := cmdAnalyze([]string{"-include-partial", "-compare", idPartial + "," + idB, "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -compare with -include-partial: %v", err)
 		}
 	})
 	if !strings.Contains(out, "-partial.md") {
@@ -539,7 +554,7 @@ func TestCmdStory_ShowUngrouped(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-show-ungrouped", path}); err != nil {
+		if err := cmdAnalyze([]string{"-show-ungrouped", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -show-ungrouped: %v", err)
 		}
 	})
@@ -554,7 +569,7 @@ func TestCmdStory_ShowUngrouped(t *testing.T) {
 // TestCmdStory_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr story`
 // with no positional args is a usage error, not a silent no-op.
 func TestCmdStory_NoInputFiles(t *testing.T) {
-	if err := cmdStory(nil); err == nil {
+	if err := cmdAnalyze([]string{}); err == nil {
 		t.Error("cmdStory with no input files should return an error")
 	}
 }
@@ -570,7 +585,7 @@ func TestCmdStory_UnknownJourney(t *testing.T) {
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-journey", "no-such-id", path})
+		return cmdAnalyze([]string{"-journey", "no-such-id", "-o", outDir, path})
 	})
 	if err == nil {
 		t.Error("cmdStory -journey with an unmatched id prefix should return an error")
@@ -599,52 +614,53 @@ func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
 	// Without -include-partial, the candidate is skipped and -render-all
 	// writes nothing.
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-render-all", path}); err != nil {
+		if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -render-all (no -include-partial): %v", err)
 		}
 	})
 	if !strings.Contains(out, "skipped as partial-head") {
 		t.Errorf("expected the candidate to be skipped as partial-head:\n%s", out)
 	}
-	// vmr-stories.json/.md are still written (every invocation gets one),
-	// but no journey-*.md/.json — the partial-head candidate was skipped.
-	entries, _ := os.ReadDir(filepath.Join(outDir, "stories"))
+	// journeys/index.json/.md are still written (every invocation gets one),
+	// but no j-*.md/.json — the partial-head candidate was skipped.
+	entries, _ := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "journey-") {
-			t.Errorf("no journey file should be written without -include-partial, got %s", e.Name())
+		if strings.HasPrefix(e.Name(), "j-") {
+			t.Errorf("no journey detail file should be written without -include-partial, got %s", e.Name())
 		}
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-stories.json")); err != nil {
-		t.Errorf("vmr-stories.json should still be written: %v", err)
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "index.json")); err != nil {
+		t.Errorf("journeys/index.json should still be written: %v", err)
 	}
 
-	// With -include-partial, it renders — and the filename must carry the
-	// "-partial" suffix.
+	// With -include-partial, it renders. Per D19 the -partial filename
+	// suffix is retired — the partial state lives in the JSON field and the
+	// .md banner instead.
 	out = captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-render-all", "-include-partial", path}); err != nil {
-			t.Fatalf("cmdStory -render-all -include-partial: %v", err)
+		if err := cmdAnalyze([]string{"-render-all", "-include-partial", "-o", outDir, path}); err != nil {
+			t.Fatalf("cmdAnalyze -render-all -include-partial: %v", err)
 		}
 	})
-	if !strings.Contains(out, "-partial.md") {
-		t.Errorf("render output should mention the -partial.md filename:\n%s", out)
+	if !strings.Contains(out, ".md") {
+		t.Errorf("render output should mention the written file:\n%s", out)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
-		t.Fatalf("reports/stories not created: %v", err)
+		t.Fatalf("journeys/details not created: %v", err)
 	}
 	var journeyFiles []os.DirEntry
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "journey-") {
+		if strings.HasPrefix(e.Name(), "j-") {
 			journeyFiles = append(journeyFiles, e)
 		}
 	}
 	if len(journeyFiles) != 2 {
-		t.Fatalf("want 2 journey story files (.md + .json), got %d: %v", len(journeyFiles), entries)
+		t.Fatalf("want 2 journey files (.md + .json), got %d: %v", len(journeyFiles), entries)
 	}
 	for _, e := range journeyFiles {
-		if !strings.Contains(e.Name(), "-partial.") {
-			t.Errorf("file %s missing the -partial suffix", e.Name())
+		if strings.Contains(e.Name(), "-partial") {
+			t.Errorf("file %s must not carry the retired -partial suffix (D19)", e.Name())
 		}
 	}
 }
@@ -695,14 +711,14 @@ func writeTwoCandidateJourneys(t *testing.T, outDir string) (path, idA, idB stri
 	path = writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
 
 	// The id-discovery listing deliberately runs against its own scratch
-	// -o, not the caller's outDir: since vmr-stories.json/.md are now
+	// -o, not the caller's outDir: since journeys/index.{json,md} are now
 	// written on every invocation (including a bare listing), reusing
-	// outDir here would leave reports/stories/ already populated before
-	// the caller's own cmdStory call — which some callers (the -llm-dry-run
+	// outDir here would leave journeys/ already populated before
+	// the caller's own cmdAnalyze call — which some callers (the -llm-dry-run
 	// tests) specifically assert creates nothing.
 	listing := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", filepath.Join(t.TempDir(), "discover"), path}); err != nil {
-			t.Fatalf("cmdStory (list): %v", err)
+		if err := cmdAnalyze([]string{"-list-only", "-o", filepath.Join(t.TempDir(), "discover"), path}); err != nil {
+			t.Fatalf("cmdAnalyze (list): %v", err)
 		}
 	})
 	for _, line := range strings.Split(listing, "\n") {
@@ -735,7 +751,7 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 		"-llm-addr without -llm-model or -dry-run": append([]string{"-llm-addr", "127.0.0.1:1"}, compareArgs...),
 	}
 	for name, args := range cases {
-		if err := captureStdoutErr(t, func() error { return cmdStory(args) }); err == nil {
+		if err := captureStdoutErr(t, func() error { return cmdAnalyze(args) }); err == nil {
 			t.Errorf("%s: expected an error, got none", name)
 		}
 	}
@@ -747,7 +763,7 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 	// is itself the regression guard against silently reintroducing the old
 	// "-llm-addr is only supported with -compare" rejection.
 	if err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out2"), "-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		return cmdAnalyze([]string{"-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", filepath.Join(t.TempDir(), "out2"), path})
 	}); err != nil {
 		t.Errorf("-llm-addr with -journey should degrade away on connection failure, not fail the command: %v", err)
 	}
@@ -756,7 +772,7 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 	// rendered journey in a batch pass is a different cost profile than a
 	// single -journey/-compare call, deliberately not supported.
 	if err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out3"), "-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		return cmdAnalyze([]string{"-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", filepath.Join(t.TempDir(), "out3"), path})
 	}); err == nil {
 		t.Error("-llm-addr with -render-all should be rejected")
 	}
@@ -764,7 +780,7 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 	// -llm-addr with -corpus must be rejected the same way as -render-all —
 	// same "one LLM call per journey in a batch pass" cost-profile reasoning.
 	if err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", filepath.Join(t.TempDir(), "out4"), "-corpus", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		return cmdAnalyze([]string{"-benchmark", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", filepath.Join(t.TempDir(), "out4"), path})
 	}); err == nil {
 		t.Error("-llm-addr with -corpus should be rejected")
 	}
@@ -780,7 +796,7 @@ func TestCmdStory_CompareLLMDryRun(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", path}); err != nil {
+		if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -llm-dry-run: %v", err)
 		}
 	})
@@ -788,15 +804,17 @@ func TestCmdStory_CompareLLMDryRun(t *testing.T) {
 		t.Errorf("dry-run output missing the size estimate line: %q", out)
 	}
 	base := "compare-" + idA + "-vs-" + idB
-	if _, err := os.Stat(filepath.Join(outDir, "stories", base+".md")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "compares", base+".md")); err == nil {
 		t.Error("-llm-dry-run should return before writing the compare .md")
 	}
-	// -llm-dry-run must not leave even an empty stories/ directory behind —
-	// code-review finding: ensureStoriesDir used to run before the dry-run
-	// check, so a "dry run" and "not configured" left different filesystem
-	// state even though both should be pure no-ops.
-	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
-		t.Error("-llm-dry-run should not create reports/stories/ at all")
+	// -llm-dry-run writes no comparison artifacts. The compares/ index
+	// itself is scan-derived on every analyze invocation (D21), so its
+	// presence is expected; what must stay absent is any compare-*.json.
+	entries, _ := os.ReadDir(filepath.Join(outDir, "compares"))
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "compare-") {
+			t.Errorf("-llm-dry-run should not write %s", e.Name())
+		}
 	}
 }
 
@@ -817,13 +835,13 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
-	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
+	cacheDir := filepath.Join(outDir, ".llm-cache")
 
-	if err := cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, path}); err != nil {
+	if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -llm-addr: %v", err)
 	}
 	base := "compare-" + idA + "-vs-" + idB
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", base+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "compares", base+".md"))
 	if err != nil {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
@@ -861,17 +879,17 @@ func TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
-	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", path}); err != nil {
+	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey -llm-addr (no -llm-cache-dir): %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
 	if !strings.Contains(string(mdData), "一句话结论：无缓存路径。") {
 		t.Error("LLM section should still render even with no cache configured")
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", ".llm-cache")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, ".llm-cache")); err == nil {
 		t.Error("no .llm-cache directory should exist when -llm-cache-dir is unset both on the CLI and in report.yaml")
 	}
 }
@@ -903,10 +921,10 @@ func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-report-config", reportConfigPath, path}); err != nil {
+	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportConfigPath, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey (llm settings from report.yaml): %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -941,19 +959,19 @@ func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	}
 
 	t.Run("multi-match -journey", func(t *testing.T) {
-		if err := cmdStory([]string{"-o", outDir, "-journey", idA + "," + idB, "-report-config", reportConfigPath, path}); err != nil {
+		if err := cmdAnalyze([]string{"-journey", idA + "," + idB, "-report-config", reportConfigPath, "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -journey (comma list, report.yaml llm_addr default): %v", err)
 		}
 	})
 	t.Run("-render-all", func(t *testing.T) {
 		outDir2 := filepath.Join(t.TempDir(), "out2")
-		if err := cmdStory([]string{"-o", outDir2, "-render-all", "-report-config", reportConfigPath, path}); err != nil {
+		if err := cmdAnalyze([]string{"-render-all", "-report-config", reportConfigPath, "-o", outDir2, path}); err != nil {
 			t.Fatalf("cmdStory -render-all (report.yaml llm_addr default): %v", err)
 		}
 	})
-	t.Run("-corpus", func(t *testing.T) {
+	t.Run("-benchmark", func(t *testing.T) {
 		outDir3 := filepath.Join(t.TempDir(), "out3")
-		if err := cmdStory([]string{"-o", outDir3, "-corpus", "-report-config", reportConfigPath, path}); err != nil {
+		if err := cmdAnalyze([]string{"-benchmark", "-report-config", reportConfigPath, "-o", outDir3, path}); err != nil {
 			t.Fatalf("cmdStory -corpus (report.yaml llm_addr default): %v", err)
 		}
 	})
@@ -963,7 +981,7 @@ func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	t.Run("explicit -llm-addr with -render-all still rejected", func(t *testing.T) {
 		outDir4 := filepath.Join(t.TempDir(), "out4")
 		err := captureStdoutErr(t, func() error {
-			return cmdStory([]string{"-o", outDir4, "-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+			return cmdAnalyze([]string{"-render-all", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", outDir4, path})
 		})
 		if err == nil {
 			t.Error("expected an error: explicit -llm-addr with -render-all")
@@ -981,7 +999,7 @@ func TestCmdStory_Corpus(t *testing.T) {
 	path, _, _ := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-corpus", path}); err != nil {
+		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -corpus: %v", err)
 		}
 	})
@@ -989,7 +1007,7 @@ func TestCmdStory_Corpus(t *testing.T) {
 		t.Errorf("summary line missing or wrong journey count:\n%s", out)
 	}
 
-	mdPath := filepath.Join(outDir, "stories", "vmr-story-corpus.md")
+	mdPath := filepath.Join(outDir, "journeys", "benchmarks.md")
 	mdData, err := os.ReadFile(mdPath)
 	if err != nil {
 		t.Fatalf("vmr-story-corpus.md not written: %v", err)
@@ -998,7 +1016,7 @@ func TestCmdStory_Corpus(t *testing.T) {
 		t.Error("vmr-story-corpus.md is empty")
 	}
 
-	jsonPath := filepath.Join(outDir, "stories", "vmr-story-corpus.json")
+	jsonPath := filepath.Join(outDir, "journeys", "benchmarks.json")
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
 		t.Fatalf("vmr-story-corpus.json not written: %v", err)
@@ -1028,26 +1046,26 @@ func TestCmdStory_CorpusNoCandidates(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-corpus", path}); err != nil {
+		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -corpus (no candidates): %v", err)
 		}
 	})
 	if !strings.Contains(out, "no candidate journeys to analyze") {
 		t.Errorf("expected the no-candidates message:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-story-corpus.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "benchmarks.md")); err == nil {
 		t.Error("-corpus with zero candidates should not write vmr-story-corpus.md")
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-stories.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "index.json")); err != nil {
 		t.Errorf("vmr-stories.json should still be written even with zero candidates: %v", err)
 	}
 }
 
-// TestCmdStory_CorpusExclusivity covers the exclusivity check that rejects
-// -corpus combined with -journey/-render-all/-compare — each must be
+// TestCmdAnalyze_BenchmarkExclusivity covers the exclusivity check that rejects
+// -benchmark combined with -journey/-render-all/-compare — each must be
 // rejected before any input file is even scanned, and must leave no
-// reports/stories/ directory behind.
-func TestCmdStory_CorpusExclusivity(t *testing.T) {
+// journeys/ directory behind.
+func TestCmdAnalyze_BenchmarkExclusivity(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
 	u1 := storyMsg("user", "hello")
@@ -1056,24 +1074,23 @@ func TestCmdStory_CorpusExclusivity(t *testing.T) {
 	path := writeStoryJSONL(t, []audit.Record{r1, r2})
 
 	cases := map[string][]string{
-		"-corpus with -journey":    {"-corpus", "-journey", "j-something"},
-		"-corpus with -render-all": {"-corpus", "-render-all"},
-		"-corpus with -compare":    {"-corpus", "-compare", "a,b"},
+		"-benchmark with -journey":    {"-benchmark", "-journey", "j-something"},
+		"-benchmark with -render-all": {"-benchmark", "-render-all"},
+		"-benchmark with -compare":    {"-benchmark", "-compare", "a,b"},
 	}
 	for name, extra := range cases {
 		outDir := filepath.Join(t.TempDir(), "out")
 		args := append(append([]string{"-o", outDir}, extra...), path)
-		err := captureStdoutErr(t, func() error { return cmdStory(args) })
+		err := captureStdoutErr(t, func() error { return cmdAnalyze(args) })
 		if err == nil {
 			t.Errorf("%s: expected an error, got none", name)
 			continue
 		}
-		wantErr := "-corpus is exclusive with -journey/-render-all/-compare — run it on its own"
-		if err.Error() != wantErr {
-			t.Errorf("%s: error = %q, want %q", name, err.Error(), wantErr)
+		if !strings.Contains(err.Error(), "exclusive") && !strings.Contains(err.Error(), "drop one or the other") {
+			t.Errorf("%s: error = %q, want an exclusivity error", name, err.Error())
 		}
-		if _, statErr := os.Stat(filepath.Join(outDir, "stories")); statErr == nil {
-			t.Errorf("%s: reports/stories/ should not be created when the exclusivity check rejects the args", name)
+		if _, statErr := os.Stat(filepath.Join(outDir, "journeys")); statErr == nil {
+			t.Errorf("%s: journeys/ should not be created when the exclusivity check rejects the args", name)
 		}
 	}
 }
@@ -1129,12 +1146,12 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
-	cacheDir := filepath.Join(outDir, "stories", ".llm-cache")
+	cacheDir := filepath.Join(outDir, ".llm-cache")
 
-	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, path}); err != nil {
+	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey -llm-addr: %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -1145,7 +1162,7 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 		}
 	}
 
-	jsonData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".json"))
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(idA, false), ".md")+".json"))
 	if err != nil {
 		t.Fatalf("journey .json not written: %v", err)
 	}
@@ -1203,10 +1220,10 @@ func TestCmdStory_JourneyWithRealLLM(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
-	if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-report-config", reportYamlPath, path}); err != nil {
+	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportYamlPath, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory with real report.yaml: %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", "journey-"+idA+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -1224,14 +1241,14 @@ func TestCmdStory_JourneyLLMDryRun(t *testing.T) {
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
-		if err := cmdStory([]string{"-o", outDir, "-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", path}); err != nil {
+		if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", "-o", outDir, path}); err != nil {
 			t.Fatalf("cmdStory -journey -llm-dry-run: %v", err)
 		}
 	})
 	if !strings.Contains(out, "dry run") {
 		t.Errorf("dry-run output missing the size estimate line: %q", out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idA+".md")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false))); err == nil {
 		t.Error("-llm-dry-run should return before writing the journey .md")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
@@ -1249,7 +1266,7 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 
 	var cmdErr error
 	stderr := captureStderr(t, func() {
-		cmdErr = cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
+		cmdErr = cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", outDir, path})
 	})
 	if cmdErr != nil {
 		t.Fatalf("cmdStory should not fail when the LLM endpoint is unreachable: %v", cmdErr)
@@ -1259,7 +1276,7 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 	}
 
 	base := "compare-" + idA + "-vs-" + idB
-	mdData, err := os.ReadFile(filepath.Join(outDir, "stories", base+".md"))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "compares", base+".md"))
 	if err != nil {
 		t.Fatalf("comparison .md should still be written: %v", err)
 	}
@@ -1281,20 +1298,20 @@ func TestCmdStory_HTMLFlagParity(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
 	if err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-journey", idA, "-html", path})
+		return cmdAnalyze([]string{"-journey", idA, "-html", "-o", outDir, path})
 	}); err != nil {
 		t.Fatalf("vmr story -journey -html: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "journey-"+idA+".html")); err != nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(idA, false), ".md")+".html")); err != nil {
 		t.Errorf("journey dashboard not written: %v", err)
 	}
 
 	if err := captureStdoutErr(t, func() error {
-		return cmdStory([]string{"-o", outDir, "-compare", idA + "," + idB, "-html", "-redact", path})
+		return cmdAnalyze([]string{"-compare", idA + "," + idB, "-html", "-redact", "-o", outDir, path})
 	}); err != nil {
 		t.Fatalf("vmr story -compare -html -redact: %v", err)
 	}
-	htmlData, err := os.ReadFile(filepath.Join(outDir, "stories", "compare-"+idA+"-vs-"+idB+".html"))
+	htmlData, err := os.ReadFile(filepath.Join(outDir, "compares", "compare-"+idA+"-vs-"+idB+".html"))
 	if err != nil {
 		t.Fatalf("compare dashboard not written: %v", err)
 	}
@@ -1302,11 +1319,11 @@ func TestCmdStory_HTMLFlagParity(t *testing.T) {
 		t.Error("redacted compare dashboard links to the un-redacted per-journey report")
 	}
 
-	if err := cmdStory([]string{"-o", outDir, "-redact", "-journey", idA, path}); err == nil ||
+	if err := cmdAnalyze([]string{"-redact", "-journey", idA, "-o", outDir, path}); err == nil ||
 		!strings.Contains(err.Error(), "-html") {
 		t.Errorf("-redact without -html should be rejected, got %v", err)
 	}
-	if err := cmdStory([]string{"-o", outDir, "-html", path}); err == nil ||
+	if err := cmdAnalyze([]string{"-html", "-o", outDir, path}); err == nil ||
 		!strings.Contains(err.Error(), "-journey") {
 		t.Errorf("bare -html should be rejected mentioning -journey/-compare, got %v", err)
 	}
@@ -1334,26 +1351,26 @@ func TestCmdStory_BatchRendersIncludeCost(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	if err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-o", outDir, "-story-only", "-render-all", path})
+		return cmdAnalyze([]string{"-o", outDir, "-journey-only", "-render-all", path})
 	}); err != nil {
 		t.Fatalf("cmdAnalyze batch render: %v", err)
 	}
 
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
-		t.Fatalf("read stories dir: %v", err)
+		t.Fatalf("read journeys/details dir: %v", err)
 	}
 	var mdPath, jsonPath string
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
-			mdPath = filepath.Join(outDir, "stories", e.Name())
+		if strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".md") {
+			mdPath = filepath.Join(outDir, "journeys", "details", e.Name())
 		}
-		if strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".json") {
-			jsonPath = filepath.Join(outDir, "stories", e.Name())
+		if strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".json") {
+			jsonPath = filepath.Join(outDir, "journeys", "details", e.Name())
 		}
 	}
 	if mdPath == "" || jsonPath == "" {
-		t.Fatalf("expected journey .md and .json in stories/, got: %v", entries)
+		t.Fatalf("expected journey .md and .json in journeys/details, got: %v", entries)
 	}
 
 	mdContent, err := os.ReadFile(mdPath)

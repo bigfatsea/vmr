@@ -426,22 +426,22 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	}
 	outDir := filepath.Join(dir, "out")
 
-	if err := cmdReport([]string{"-o", outDir, "-details", auditPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", "-o", outDir, "-details", auditPath}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", "vmr-requests.json", "vmr-requests-failed.jsonl", "vmr-requests-failed.md"} {
+	for _, name := range []string{"vmr-report.json", "vmr-report.md", filepath.Join("requests", "index.json"), filepath.Join("requests", "failed.jsonl"), filepath.Join("requests", "failed.md")} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("expected %s to be written: %v", name, err)
 		}
 	}
-	if fi, err := os.Stat(filepath.Join(outDir, "details")); err != nil || !fi.IsDir() {
-		t.Errorf("expected details/ directory to be written: %v", err)
+	if fi, err := os.Stat(filepath.Join(outDir, "requests", "details")); err != nil || !fi.IsDir() {
+		t.Errorf("expected requests/details/ directory to be written: %v", err)
 	}
 }
 
 // TestCmdReport_DetailsOffByDefault locks in P3.3's default flip: a plain
-// `vmr report` run (no -details, no report.yaml) must not materialize
-// details/ at all, while vmr-requests.json still carries a non-empty "req"
+// `vmr analyze -macro-only` run (no -details, no report.yaml) must not materialize
+// details/ at all, while requests/index.json still carries a non-empty "req"
 // (and, once P4/P5 wire a consumer, a computable detail filename) for
 // every row — the index never needs the file to exist to link to it.
 func TestCmdReport_DetailsOffByDefault(t *testing.T) {
@@ -453,23 +453,23 @@ func TestCmdReport_DetailsOffByDefault(t *testing.T) {
 	}
 	outDir := filepath.Join(dir, "out")
 
-	if err := cmdReport([]string{"-o", outDir, auditPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", "-o", outDir, auditPath}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "details")); err == nil {
-		t.Error("details/ should not exist when -details wasn't passed")
+	if _, err := os.Stat(filepath.Join(outDir, "requests", "details")); err == nil {
+		t.Error("requests/details/ should not exist when -details wasn't passed")
 	}
-	data, err := os.ReadFile(filepath.Join(outDir, "vmr-requests.json"))
+	data, err := os.ReadFile(filepath.Join(outDir, "requests", "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), `"req":`) {
-		t.Error("vmr-requests.json rows should still carry a \"req\" coordinate with -details off")
+		t.Error("requests/index.json rows should still carry a \"req\" coordinate with -details off")
 	}
 }
 
 // TestCmdReport_ReportYamlDefaultsOutputAndDetails covers report.yaml's
-// output/details fields feeding cmdReport's -o/-details when the flags
+// output/details fields feeding cmdAnalyze's -o/-details when the flags
 // themselves aren't passed — the same "-flag > report.yaml > built-in
 // default" merge order resolveLanguage already established for -lang.
 func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
@@ -491,21 +491,21 @@ func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cmdReport([]string{auditPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", auditPath}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "myout", "vmr-report.json")); err != nil {
 		t.Errorf("expected report.yaml's output dir 'myout' to be used: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "myout", "details")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "myout", "requests", "details")); err == nil {
 		t.Error("report.yaml's details: false should have suppressed details/ export")
 	}
 
 	// An explicit -details=true must still win over report.yaml's false.
-	if err := cmdReport([]string{"-o", filepath.Join(dir, "myout2"), "-details=true", auditPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+	if err := cmdAnalyze([]string{"-macro-only", "-o", filepath.Join(dir, "myout2"), "-details=true", auditPath}); err != nil {
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	if fi, err := os.Stat(filepath.Join(dir, "myout2", "details")); err != nil || !fi.IsDir() {
+	if fi, err := os.Stat(filepath.Join(dir, "myout2", "requests", "details")); err != nil || !fi.IsDir() {
 		t.Errorf("explicit -details=true should override report.yaml's details: false: %v", err)
 	}
 }
@@ -514,14 +514,14 @@ func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 // not an empty-but-successful report.
 func TestCmdReport_NoMatches(t *testing.T) {
 	dir := t.TempDir()
-	if err := cmdReport([]string{filepath.Join(dir, "no-such-*.jsonl")}); err == nil {
-		t.Error("cmdReport with a non-matching glob should return an error")
+	if err := cmdAnalyze([]string{"-macro-only", filepath.Join(dir, "no-such-*.jsonl")}); err == nil {
+		t.Error("cmdAnalyze with a non-matching glob should return an error")
 	}
 }
 
 func TestCmdReport_NoInputFiles(t *testing.T) {
-	if err := cmdReport(nil); err == nil {
-		t.Error("cmdReport with no input files should return an error")
+	if err := cmdAnalyze([]string{"-macro-only"}); err == nil {
+		t.Error("cmdAnalyze with no input files should return an error")
 	}
 }
 

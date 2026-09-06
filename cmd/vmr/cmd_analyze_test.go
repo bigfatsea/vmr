@@ -13,8 +13,8 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
-	"vmr/internal/report"
 	story "vmr/internal/journey"
+	"vmr/internal/report"
 )
 
 // TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot covers P6.5's actual
@@ -38,8 +38,8 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"vmr-report.md", "vmr-report.json", "vmr-requests.md",
-		filepath.Join("stories", "vmr-stories.md"), filepath.Join("stories", "vmr-stories.json"),
+		"vmr-report.md", "vmr-report.json", filepath.Join("requests", "index.json"),
+		filepath.Join("journeys", "index.md"), filepath.Join("journeys", "index.json"),
 	} {
 		if _, err := os.Stat(filepath.Join(outDir, want)); err != nil {
 			t.Errorf("missing %s: %v", want, err)
@@ -52,18 +52,18 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 	// marker, so it classifies as task and gets rendered by default), not
 	// just listed it — otherwise the requests-index -> journey edge
 	// (P6.2c) has nothing to link to.
-	entries, err := os.ReadDir(filepath.Join(outDir, "stories"))
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
-		t.Fatalf("ReadDir(stories): %v", err)
+		t.Fatalf("ReadDir(journeys/details): %v", err)
 	}
 	var sawJourney bool
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".md") {
 			sawJourney = true
 		}
 	}
 	if !sawJourney {
-		t.Error("no journey-*.md rendered — analyze's default suite should render category=task candidates")
+		t.Error("no j-*.md rendered — analyze's default suite should render category=task candidates")
 	}
 }
 
@@ -91,8 +91,8 @@ func TestCmdAnalyze_ReportLinksStoriesOnFirstCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), "stories/vmr-stories.md") {
-		t.Error("vmr-report.md doesn't link stories/vmr-stories.md after a single analyze call — story must run before report")
+	if !strings.Contains(string(data), "journeys/index.md") {
+		t.Error("vmr-report.md doesn't link journeys/index.md after a single analyze call — story must run before report")
 	}
 }
 
@@ -130,7 +130,7 @@ func TestCmdAnalyze_ShareSameOutputDefault(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "reports", "vmr-report.md")); err != nil {
 		t.Errorf("report half didn't land in default ./reports: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "reports", "stories", "vmr-stories.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "reports", "journeys", "index.md")); err != nil {
 		t.Errorf("story half didn't land in the SAME default ./reports: %v", err)
 	}
 }
@@ -139,13 +139,16 @@ func TestCmdAnalyze_ShareSameOutputDefault(t *testing.T) {
 // by the P9.2 scope tests below.
 func journeyFileNames(t *testing.T, dir string) []string {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(filepath.Join(dir, "details"))
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	var out []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasPrefix(e.Name(), "journey-") && strings.HasSuffix(e.Name(), ".md") {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "j-") && strings.HasSuffix(e.Name(), ".md") {
 			out = append(out, e.Name())
 		}
 	}
@@ -183,7 +186,7 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "stories", "vmr-stories.json"))
+	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 2 {
 		t.Fatalf("index should list both candidates regardless of render scope, got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
@@ -200,7 +203,7 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 		t.Fatalf("expected one task and one heartbeat candidate in the index, got: %+v", idx.Journeys)
 	}
 
-	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	got := journeyFileNames(t, filepath.Join(outDir, "journeys"))
 	if len(got) != 1 {
 		t.Fatalf("default suite should render exactly the 1 task candidate, got %d: %v", len(got), got)
 	}
@@ -210,7 +213,7 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir2, "-render-all", path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -render-all: %v", err)
 	}
-	got2 := journeyFileNames(t, filepath.Join(outDir2, "stories"))
+	got2 := journeyFileNames(t, filepath.Join(outDir2, "journeys"))
 	if len(got2) != 2 {
 		t.Fatalf("-render-all should render both candidates, got %d: %v", len(got2), got2)
 	}
@@ -251,12 +254,12 @@ func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
 		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "stories", "vmr-stories.json"))
+	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 3 {
 		t.Fatalf("index should list all three candidates, got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
 
-	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	got := journeyFileNames(t, filepath.Join(outDir, "journeys"))
 	if len(got) != 2 {
 		t.Fatalf("default suite should render the cron and subagent candidates (2), got %d: %v", len(got), got)
 	}
@@ -286,7 +289,7 @@ func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
 // first two count as compliant with "batch mode does not materialize".
 func detailFileCount(t *testing.T, dir string) int {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(dir, "details"))
+	entries, err := os.ReadDir(filepath.Join(dir, "requests", "details"))
 	if os.IsNotExist(err) {
 		return 0
 	}
@@ -318,11 +321,11 @@ func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 	if n := detailFileCount(t, outDir); n != 0 {
 		t.Errorf("default suite materialized %d detail file(s), want 0 (batch mode should only reference, not generate — P13.1)", n)
 	}
-	got := journeyFileNames(t, filepath.Join(outDir, "stories"))
+	got := journeyFileNames(t, filepath.Join(outDir, "journeys"))
 	if len(got) != 1 {
 		t.Fatalf("default suite should still render the 1 task candidate's journey report, got %d: %v", len(got), got)
 	}
-	md, err := os.ReadFile(filepath.Join(outDir, "stories", got[0]))
+	md, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", got[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,8 +349,8 @@ func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 	if n := detailFileCount(t, outDir2); n == 0 {
 		t.Error("-render-all should materialize detail files, got 0")
 	}
-	got2 := journeyFileNames(t, filepath.Join(outDir2, "stories"))
-	md2, err := os.ReadFile(filepath.Join(outDir2, "stories", got2[0]))
+	got2 := journeyFileNames(t, filepath.Join(outDir2, "journeys"))
+	md2, err := os.ReadFile(filepath.Join(outDir2, "journeys", "details", got2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,10 +444,10 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	}
 	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
 
-	// Step 1b: those pre-existing journey-*.md carry inline coordinates, not
+	// Step 1b: those pre-existing j-*.md carry inline coordinates, not
 	// links (default suite, 12-B).
-	preGot := journeyFileNames(t, filepath.Join(outDir, "stories"))
-	preMD, err := os.ReadFile(filepath.Join(outDir, "stories", preGot[0]))
+	preGot := journeyFileNames(t, filepath.Join(outDir, "journeys"))
+	preMD, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", preGot[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,9 +455,9 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 		t.Fatalf("precondition failed: default-suite journey report already has ../details/ links")
 	}
 
-	// Step 2: -compare names two candidates whose journey-*.md ALREADY
+	// Step 2: -compare names two candidates whose j-*.md ALREADY
 	// exists from step 1. Their details/ must still get materialized now,
-	// AND their journey-*.md must be re-rendered with real links (not left
+	// AND their j-*.md must be re-rendered with real links (not left
 	// stale on coordinates) — ensureJourneyFile no longer early-returns.
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
@@ -462,9 +465,9 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
 	if n := detailFileCount(t, outDir); n == 0 {
-		t.Error("-compare left both named journeys' details/ empty even though their journey-*.md pre-existed (F-01 regression)")
+		t.Error("-compare left both named journeys' details/ empty even though their j-*.md pre-existed (F-01 regression)")
 	}
-	postMD, err := os.ReadFile(filepath.Join(outDir, "stories", preGot[0]))
+	postMD, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", preGot[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +492,7 @@ func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, "-journey", "*", path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -journey '*': %v", err)
 	}
-	if got := journeyFileNames(t, filepath.Join(outDir, "stories")); len(got) != 1 {
+	if got := journeyFileNames(t, filepath.Join(outDir, "journeys")); len(got) != 1 {
 		t.Fatalf("want exactly 1 rendered journey, got %d: %v", len(got), got)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.md")); !os.IsNotExist(err) {
@@ -497,25 +500,25 @@ func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_CorpusSelectorRunsStoryHalfOnly mirrors the -journey case
-// for -corpus.
-func TestCmdAnalyze_CorpusSelectorRunsStoryHalfOnly(t *testing.T) {
+// TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly mirrors the -journey case
+// for -benchmark.
+func TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "single candidate for -corpus selector test")
+	u1 := storyMsg("user", "single candidate for -benchmark selector test")
 	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
 	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
 	path := writeStoryJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
-	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, "-corpus", path}) }); err != nil {
-		t.Fatalf("cmdAnalyze -corpus: %v", err)
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, "-benchmark", path}) }); err != nil {
+		t.Fatalf("cmdAnalyze -benchmark: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories", "vmr-story-corpus.md")); err != nil {
-		t.Errorf("expected vmr-story-corpus.md: %v", err)
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "benchmarks.md")); err != nil {
+		t.Errorf("expected benchmarks.md: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.md")); !os.IsNotExist(err) {
-		t.Errorf("-corpus should not also run the report half; vmr-report.md stat = %v", err)
+		t.Errorf("-benchmark should not also run the report half; vmr-report.md stat = %v", err)
 	}
 }
 
@@ -529,7 +532,7 @@ func TestCmdAnalyze_SelectorsAreMutuallyExclusive(t *testing.T) {
 	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-o", outDir, "-journey", "*", "-corpus", path})
+		return cmdAnalyze([]string{"-o", outDir, "-journey", "*", "-benchmark", path})
 	})
 	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Fatalf("want a mutually-exclusive error, got: %v", err)
@@ -583,7 +586,7 @@ func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
-	compareFiles, err := filepath.Glob(filepath.Join(outDir, "stories", "compare-*.md"))
+	compareFiles, err := filepath.Glob(filepath.Join(outDir, "compares", "compare-*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +632,7 @@ func TestCmdAnalyze_CompareWildcard(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("cmdAnalyze -compare (wildcard): %v", err)
 	}
-	compareFiles, err := filepath.Glob(filepath.Join(outDir, "stories", "compare-*.md"))
+	compareFiles, err := filepath.Glob(filepath.Join(outDir, "compares", "compare-*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,7 +667,7 @@ func TestCmdAnalyze_CompareHTML(t *testing.T) {
 		if err := captureStdoutErr(t, func() error { return cmdAnalyze(args) }); err != nil {
 			t.Fatalf("cmdAnalyze %v: %v", args, err)
 		}
-		hs, _ := filepath.Glob(filepath.Join(outDir, "stories", "compare-*.html"))
+		hs, _ := filepath.Glob(filepath.Join(outDir, "compares", "compare-*.html"))
 		if len(hs) != 1 {
 			t.Fatalf("want exactly one compare-*.html, got %v", hs)
 		}
@@ -784,7 +787,7 @@ func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 		t.Fatalf("cmdAnalyze -llm-key: %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "stories", "vmr-stories.json"))
+	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 1 {
 		t.Fatalf("story half: want 1 candidate (self-traffic excluded), got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
@@ -800,40 +803,4 @@ func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 	if rep.Meta.SelfTrafficExcluded != 2 {
 		t.Errorf("report half: meta.self_traffic_excluded = %d, want 2 (the self-analysis pair)", rep.Meta.SelfTrafficExcluded)
 	}
-}
-
-// TestCmdReportCmdStory_PrintDeprecationHint covers P9.3: both standalone
-// commands keep producing identical output to before, but now also print a
-// one-line stderr migration hint naming `vmr analyze`.
-func TestCmdReportCmdStory_PrintDeprecationHint(t *testing.T) {
-	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "deprecation hint fixture")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
-
-	t.Run("report", func(t *testing.T) {
-		outDir := filepath.Join(t.TempDir(), "out")
-		stderr := captureStderr(t, func() {
-			if err := cmdReport([]string{"-o", outDir, path}); err != nil {
-				t.Fatalf("cmdReport: %v", err)
-			}
-		})
-		if !strings.Contains(stderr, "vmr analyze") {
-			t.Errorf("expected a migration hint naming vmr analyze on stderr, got: %q", stderr)
-		}
-	})
-
-	t.Run("story", func(t *testing.T) {
-		outDir := filepath.Join(t.TempDir(), "out")
-		stderr := captureStderr(t, func() {
-			if err := cmdStory([]string{"-o", outDir, path}); err != nil {
-				t.Fatalf("cmdStory: %v", err)
-			}
-		})
-		if !strings.Contains(stderr, "vmr analyze") {
-			t.Errorf("expected a migration hint naming vmr analyze on stderr, got: %q", stderr)
-		}
-	})
 }
