@@ -58,8 +58,8 @@ generated_at: "2026-08-09"
 # moves every alias's rate with it, so nothing here goes stale on its own.
 # Exactly one hop (a target that is itself an alias is a load-time error, see
 # internal/pricing.Table.ValidateAliases), and consulted only at resolution
-# step ③: a provider that IS the vendor, or that has an exact supplement row
-# of its own, still wins.
+# step ③: a provider that IS the vendor, or that has an exact
+# `providers[].pricing.rates` row of its own, still wins.
 #
 # standard_price_generated.yaml is pure machine prices and writes NO aliases.
 # This file is the single source of truth for all built-in aliases.

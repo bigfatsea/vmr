@@ -14,11 +14,12 @@ import (
 // reported is priced from its real value; a missing side falls back to the
 // degraded estimate (In charged entirely to Fresh, Out max'd with the
 // placeholder the usage object may still carry). estCost prices only the
-// degraded-side components (the same per-side split ChargeResponse's cost
-// branch records into EstimatedCost) — 0 when both sides were sniffed, the
-// full c when both degraded, and just the un-sniffed side's price when one
-// side is real. It feeds EndpointRow.CostEstimateEst / WindowEstimatedPct,
-// the operator's calibration signal: a request with real input usage and a
+// degraded-side components (the same per-side split — in OK, in degraded,
+// out OK, out degraded — that pricing.Rate.Cost is then called against for
+// the partial-estimate value) — 0 when both sides were sniffed, the full c
+// when both degraded, and just the un-sniffed side's price when one side is
+// real. It feeds EndpointRow.CostEstimateEst / WindowEstimatedPct, the
+// operator's calibration signal: a request with real input usage and a
 // degraded output side is ~1% estimated, not 100%.
 func costFor(pr pricing.Rate, rc *rec2) (c, estCost float64) {
 	raw, _ := quota.TokenCountersSides(quota.TokenUsage{

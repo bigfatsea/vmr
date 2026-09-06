@@ -369,7 +369,9 @@ type Limit struct {
 // lives here rather than as a per-model price table: a Credits-style plan
 // whose account discounts cache reads (or prices output higher) uniformly
 // across all its models needs one shared ratio, not a per-model rate table
-// (that's what metric: cost's pricing layer is for instead).
+// (a per-model, per-component exact rate is a `vmr report`/`vmr analyze`
+// concern, not a routing-control one — see providers[].pricing.rates for
+// the offline $ estimate side).
 //
 // The zero value is {0,0,0,0} — NOT the "1.0 across the board" default this
 // type is documented to have. config.validate() (or router.BuildSnapshot,

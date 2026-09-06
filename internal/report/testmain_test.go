@@ -16,8 +16,7 @@ import (
 // are about bucketing logic, not about the host machine's real timezone, so
 // they must not depend on whatever timezone happens to run `go test`.
 // Individual tests that specifically want to prove a DisplayZone conversion
-// took place (e.g. TestPricingRateMatchesConvertsToDisplayZone) still
-// override it locally with their own defer-restore.
+// took place still override it locally with their own defer-restore.
 func TestMain(m *testing.M) {
 	fmtutil.DisplayZone = time.UTC
 	os.Exit(m.Run())

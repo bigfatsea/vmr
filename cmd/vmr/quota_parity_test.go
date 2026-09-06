@@ -72,8 +72,8 @@ func (a parityAttempt) forwarded() bool {
 
 // parityRequest is one synthetic client request and the attempts it took.
 //
-// respBody/estTokens exist for the tokens and cost metrics, which — unlike
-// requests — depend on what came BACK. respBody is deliberately typed as a
+// respBody/estTokens exist for the tokens metric, which — unlike
+// requests — depends on what came BACK. respBody is deliberately typed as a
 // string (an SSE stream, the shape audit.EncodeBody stores for any non-JSON
 // body) rather than a JSON object: a JSON object round-trips through
 // map[string]any on the way back out of the audit file and re-marshals with
@@ -345,7 +345,7 @@ func TestQuotaParity_RequestsMetric_NonIntegerMultiplier(t *testing.T) {
 	}
 }
 
-// sseWithUsage/sseNoUsage are the two response shapes a tokens/cost account's
+// sseWithUsage/sseNoUsage are the two response shapes a tokens account's
 // charge can come from. Both are SSE strings on purpose — see parityRequest's
 // respBody doc comment for why a JSON object would make the degraded byte
 // count unreproducible.
@@ -388,8 +388,7 @@ func responsesUsageJSON(in, out int) string {
 // charges for it (it exits before forwardSuccess).
 const softblockResp = `{"error":{"type":"content_policy"}}`
 
-// tokensParityFixture is the shared corpus for the tokens and cost parity
-// tests: a MIXED window — some responses carry a usage object (charged
+// tokensParityFixture is the shared corpus for the tokens parity tests: a MIXED window — some responses carry a usage object (charged
 // exactly), some don't (charged as a degraded byte estimate) — plus traffic
 // the router never charges at all, now expanded across all three protocols
 // plus the softblock case.
