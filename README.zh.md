@@ -5,7 +5,7 @@
 
 **vmr** 是一个单二进制的、给无人值守 Agent 用的透明路由器与黑匣子。一个稳定的虚拟模型名字（`coding`、`claude`、`agent`）把供应商、Key、故障切换规则全部藏在身后——把任意 OpenAI/Anthropic 兼容客户端的 `base_url` 指向 vmr 即可，**无需任何 SDK 修改或代码埋点**。
 
-正是这份字节级透传——从不做协议翻译——让这份记录真正可信：vmr 记下来的，从来不是它自己先改写过的东西。每一条请求都会落成一条 `details/` 审计记录、一段 Agent 执行叙事（`vmr story`）、一份跨运行行为剖面对比（`vmr story -compare`），或一次精确的 1-Click 重放（`vmr replay`）。凌晨三点发生的一次故障切换、一次悄无声息的内容拦截，事后你是从日志里看到的，而不是面对一个已经死掉的会话，第二天早上自己都解释不清发生了什么。
+正是这份字节级透传——从不做协议翻译——让这份记录真正可信：vmr 记下来的，从来不是它自己先改写过的东西。每一条请求都会落成一条 `details/` 审计记录、一段 Agent 执行叙事（`vmr analyze -journey`）、一份跨运行行为剖面对比（`vmr analyze -compare id1,id2`），或一次精确的 1-Click 重放（`vmr replay`）。凌晨三点发生的一次故障切换、一次悄无声息的内容拦截，事后你是从日志里看到的，而不是面对一个已经死掉的会话，第二天早上自己都解释不清发生了什么。
 
 [English](README.md) | 简体中文
 
@@ -18,13 +18,13 @@
                                                   │
                        ┌──────────────────────────┼──────────────────────────┐
                        ▼                          ▼                          ▼
-             [ 1-Click 故障重发 ]        [ vmr report / details ]    [ vmr story / compare ]
+             [ 1-Click 故障重发 ]        [ vmr analyze / details ]  [ journey / compare ]
 ```
 
 ## 现场视角
 
 ### 1. 运行时 Failover 现场 (`details/*.md`)
-真实来自内置示例 [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) —— 自己跑一遍 `./vmr report -o /tmp/out examples/sample-audit.jsonl` 对比即可。主端点悄悄内容拦截了请求，vmr 把同一条 payload 换到备用端点重试，客户端从头到尾只看到一个正常的 200 OK：
+真实来自内置示例 [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) —— 自己跑一遍 `./vmr analyze -details -o /tmp/out examples/sample-audit.jsonl` 对比即可。主端点悄悄内容拦截了请求，vmr 把同一条 payload 换到备用端点重试，客户端从头到尾只看到一个正常的 200 OK：
 
 ```
 ### Attempt 1/2 · openai-completions:coder-primary:coder-large · ❌ HTTP 403
@@ -33,7 +33,7 @@
 ### Attempt 2/2 · openai-completions:coder-backup:coder-large-mini · ✅ HTTP 200（耗时 2.5s）
 ```
 
-### 2. Agent 任务执行叙事与信息丢失 (`vmr story`)
+### 2. Agent 任务执行叙事与信息丢失 (`vmr analyze -journey <id>`)
 一次真实的多工具 Agent 运行，还原成任务、Step 与上下文压缩截断边界后长这样：
 
 ```
@@ -43,7 +43,7 @@ Task 1: Search codebase and outline implementation
   丢弃的实体: [internal/core/router.go, https://docs.example.com/api]
 ```
 
-### 3. 分叉点检测与 LLM 因果分析 (`vmr story -compare`)
+### 3. 分叉点检测与 LLM 因果分析 (`vmr analyze -compare id1,id2`)
 对比同一任务的两次运行（例如 OpenClaw vs Lobster、或 DeepSeek vs Claude），精确定位从哪一步开始选了不同的路径：
 
 ```
@@ -70,9 +70,9 @@ Task 1: Search codebase and outline implementation
 - **两层真实字节记录**：无伪造记录客户端↔VMR、VMR↔上游双层原始字节。
 - **1-Click 故障重试 (`vmr replay`)**：基于历史日志字节，1-Click 无损重发快速复现线上故障。
 - **统一分析入口 (`vmr analyze`)**：一条命令、一个输出目录——默认一次调用产出完整可导航套件（聚合报表 + 任务 journey），或用 `-journey`/`-compare`/`-benchmark` 只变焦进某一个视图。
-- **聚合统计报告 (`vmr report`)**：自动归组为会话 → 任务 → 轮次，标注增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费。
-- **Agent 任务叙事 (`vmr story`)**：把单个任务的完整执行过程还原成逐 Step 的故事——进了什么上下文、模型拿它做了什么、哪一次压缩事件悄悄丢了信息。
-- **行为剖面与分叉点对比 (`vmr story -compare`)**：自动对比 9 项行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
+- **聚合统计报告 (`vmr analyze`)**：自动归组为会话 → 任务 → 轮次，标注增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费。
+- **Agent 任务叙事 (`vmr analyze -journey <id>`)**：把单个任务的完整执行过程还原成逐 Step 的故事——进了什么上下文、模型拿它做了什么、哪一次压缩事件悄悄丢了信息。
+- **行为剖面与分叉点对比 (`vmr analyze -compare id1,id2`)**：自动对比 9 项行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
 
 ## 快速开始
 
@@ -158,7 +158,7 @@ curl http://127.0.0.1:8800/status
 ./vmr analyze -c config.yaml   # 一次调用、一个输出目录：聚合报表 + 每个任务 journey，互相链接
 ```
 
-`-journey <id>`/`-compare id1,id2`/`-corpus` 可以只变焦进单个任务叙事、一次成对行为对比，或语料级统计，而不是默认的完整套件。
+`-journey <id>`/`-compare id1,id2`/`-benchmark` 可以只变焦进单个任务叙事、一次成对行为对比，或语料级统计，而不是默认的完整套件。
 
 更多细节见 **[用户指南](docs/UserGuide.zh.md)**。
 
@@ -169,12 +169,12 @@ curl http://127.0.0.1:8800/status
 | **架构哲学** | 将所有 API 翻译统一为 OpenAI 格式 | 字节级透传（原生多入口直通） |
 | **部署成本** | 需配置数据库、Web UI 与依赖 | 单二进制、零数据库、零代码埋点 |
 | **审计追溯** | 元数据 / 摘要化 JSON | 双层原始字节记录 + 1-Click `vmr replay` 重放 |
-| **Agent 归因** | 扁平的 HTTP 请求日志 | 任务/Step 叙事还原 (`vmr story`) 与分叉点对比 |
+| **Agent 归因** | 扁平的 HTTP 请求日志 | 任务/Step 叙事还原 (`vmr analyze -journey`) 与分叉点对比 |
 
 ## 延伸阅读
 
-- **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr report`、完整 CLI 参考。
-- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Story](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加两篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
+- **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr analyze`、完整 CLI 参考。
+- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Journey](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加两篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
 
 ## 开发
 

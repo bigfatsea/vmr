@@ -5,7 +5,7 @@
 
 **vmr** is a single-binary router and flight recorder for AI agents that run unattended. One stable virtual model name (`coding`, `claude`, `agent`) hides every provider, key, and failover rule behind it — point any OpenAI/Anthropic-compatible client's `base_url` at vmr and you're done, **zero SDK modifications or code instrumentation required**.
 
-That same byte-faithfulness — no protocol translation, ever — is what makes the recording trustworthy: nothing vmr logs is something vmr itself rewrote first. Every request becomes a `details/` audit entry, an agent execution narrative (`vmr story`), a cross-run divergence diff (`vmr story -compare`), or an exact 1-click replay (`vmr replay`). When a 3 AM failover or a silent content-block happens, you find out from the log afterward, not from a dead session you have to explain to yourself the next morning.
+That same byte-faithfulness — no protocol translation, ever — is what makes the recording trustworthy: nothing vmr logs is something vmr itself rewrote first. Every request becomes a `details/` audit entry, an agent execution narrative (`vmr analyze -journey`), a cross-run divergence diff (`vmr analyze -compare id1,id2`), or an exact 1-click replay (`vmr replay`). When a 3 AM failover or a silent content-block happens, you find out from the log afterward, not from a dead session you have to explain to yourself the next morning.
 
 English | [简体中文](README.zh.md)
 
@@ -18,13 +18,13 @@ English | [简体中文](README.zh.md)
                                                       │
                        ┌──────────────────────────────┼──────────────────────────────┐
                        ▼                              ▼                              ▼
-             [ 1-Click Replay ]             [ vmr report / details ]        [ vmr story / compare ]
+             [ 1-Click Replay ]             [ vmr analyze / details ]       [ journey / compare ]
 ```
 
 ## See It in Action
 
 ### 1. In-Flight Failover Evidence (`details/*.md`)
-Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) — run `./vmr report -o /tmp/out examples/sample-audit.jsonl` and compare. The primary endpoint silently content-blocks the request; vmr retries the same payload on the backup endpoint, so the client only sees a 200 OK:
+Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) — run `./vmr analyze -details -o /tmp/out examples/sample-audit.jsonl` and compare. The primary endpoint silently content-blocks the request; vmr retries the same payload on the backup endpoint, so the client only sees a 200 OK:
 
 ```
 ### Attempt 1/2 · openai-completions:coder-primary:coder-large · ❌ HTTP 403
@@ -33,7 +33,7 @@ Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-
 ### Attempt 2/2 · openai-completions:coder-backup:coder-large-mini · ✅ HTTP 200 (2.5s)
 ```
 
-### 2. Agent Execution Narrative & Context Loss (`vmr story`)
+### 2. Agent Execution Narrative & Context Loss (`vmr analyze -journey <id>`)
 What a real multi-tool agent run looks like reconstructed into tasks, steps, and context-compaction boundaries:
 
 ```
@@ -43,7 +43,7 @@ Task 1: Search codebase and outline implementation
   Dropped Entities: [internal/core/router.go, https://docs.example.com/api]
 ```
 
-### 3. Divergence Point & LLM Cause Analysis (`vmr story -compare`)
+### 3. Divergence Point & LLM Cause Analysis (`vmr analyze -compare id1,id2`)
 Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Claude) pinpoints exactly where and why they parted ways:
 
 ```
@@ -66,13 +66,13 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes vendor quirk repairs (MiniMax `<think>` stripping, soft-block empty 200 OK detection).
 - **Measured, Not Assumed**: Load-tested to 150 req/s — p95 stays under 10ms for every non-image scenario; the only real per-request cost is optional image downscaling. See [`loadtest/`](loadtest/).
 
-### Pillar B: Post-Flight Audit, Story & Forensic Replay
+### Pillar B: Post-Flight Audit, Journeys & Forensic Replay
 - **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency.
 - **1-Click Request Replay (`vmr replay`)**: Re-issue any failed request using exact historical byte payloads to reproduce bugs instantly.
 - **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-benchmark` to zoom into exactly one view.
-- **Aggregate Reports (`vmr report`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
-- **Agent Task Narrative (`vmr story`)**: Reconstructs one task's full execution into a Step-by-step story — what context went in, what the model did with it, where a compaction event silently dropped information.
-- **Behavioral Profiling & Divergence Detection (`vmr story -compare`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
+- **Aggregate Report (`vmr analyze`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
+- **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a Step-by-step story — what context went in, what the model did with it, where a compaction event silently dropped information.
+- **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
 
 ## Quick Start
 
@@ -158,7 +158,7 @@ curl http://127.0.0.1:8800/status
 ./vmr analyze -c config.yaml   # one call, one output dir: aggregate report + every task journey, cross-linked
 ```
 
-`-journey <id>`/`-compare id1,id2`/`-corpus` zoom into a single task narrative, a pairwise behavior diff, or corpus-level statistics instead of the default full suite.
+`-journey <id>`/`-compare id1,id2`/`-benchmark` zoom into a single task narrative, a pairwise behavior diff, or corpus-level statistics instead of the default full suite.
 
 Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 
@@ -169,12 +169,12 @@ Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 | **Architecture** | Translates everything to OpenAI format | Byte-faithful passthrough (native 3-protocol ingress) |
 | **Setup & Dependencies** | Complex setup, PostgreSQL DB, Web UI | Single binary, zero DB, zero code changes |
 | **Audit Logging** | Metadata / Summarized JSON | Two-layer raw byte audit + 1-click `vmr replay` |
-| **Agent Forensics** | Flat request logs | Task/Step narratives (`vmr story`) & Divergence Diff |
+| **Agent Forensics** | Flat request logs | Task/Step narratives (`vmr analyze -journey`) & Divergence Diff |
 
 ## Learn More
 
-- **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr report`, complete CLI reference.
-- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Story](docs/VirtualModelRouter_Design_v4_Analytics.md), plus two topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md) and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
+- **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr analyze`, complete CLI reference.
+- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Journeys](docs/VirtualModelRouter_Design_v4_Analytics.md), plus two topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md) and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
 
 ## Development
 
