@@ -16,6 +16,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -89,6 +90,7 @@ type analyzeRun struct {
 	cfg           *config.Config
 	cfgErr        error
 	showUngrouped bool
+	noCache       bool
 }
 
 // validateAnalyzeModeFlags checks the mutual-exclusion rules across
@@ -145,58 +147,40 @@ func validateAnalyzeModeFlags(journeyArg, compareArg string, benchmarkFlag, rend
 
 func cmdAnalyze(args []string) error {
 	fs := flag.NewFlagSet("analyze", flag.ExitOnError)
-	// Shared flags — one definition each, used by both halves.
-	configPath := fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from")
-	outDirFlag := fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)")
-	langFlag := fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml")
-	reportConfigPath := fs.String("report-config", "", "vmr analyze's sidecar config yaml; absent => auto-load ./report.yaml if present")
-	includeSelfTraffic := fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from either half's totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)")
-	// Zoom selectors — mutually exclusive; none of them means the default suite.
-	journeyArg := fs.String("journey", "", "zoom into this journey: an id or id-prefix, a comma-separated list of ids/prefixes/globs, and/or a shell-style glob (*, ?, [...]) matched against the full id. A selector resolving to exactly one journey renders as before (and alone supports -llm-addr); more than one batches like -render-all. Mutually exclusive with -compare/-benchmark; only this half runs (no macro report)")
-	compareArg := fs.String("compare", "", "zoom into a pairwise comparison: -compare id1,id2 (each an id, id-prefix, or shell glob; first candidate matching each side wins). Mutually exclusive with -journey/-benchmark; only this half runs (no macro report)")
-	benchmarkFlag := fs.Bool("benchmark", false, "zoom into benchmark-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey. Mutually exclusive with -journey/-compare; only this half runs (no macro report)")
-	// Default-suite-only scope knob (P9.2) — meaningless (rejected) with a selector above.
-	renderAllFlag := fs.Bool("render-all", false, "default suite only: materialize every non-partial candidate journey, including the heartbeat/poll ones (default: those low-signal heartbeat candidates are the only ones excluded; render one on demand with -journey <id>)")
-	macroOnlyFlag := fs.Bool("macro-only", false, "default suite only: run just the macro report half — no candidate scan, no journey rendering, no journeys/ output. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-list-only/-journey-only")
-	renderOnlyFlag := fs.Bool("render-only", false, "re-render all resident human-readable Markdown products from existing on-disk JSON without re-aggregating audit logs")
-	listOnlyFlag := fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them — writes journeys/index.{md,json} listing every candidate, but no j-*.md. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-macro-only/-journey-only/-details")
-	journeyOnlyFlag := fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.{json,md}/macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only")
-	// story-half flags.
-	detailsFlag := fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)")
-	currencyFlag := fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY")
-	includePartialFlag := fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)")
-	showUngrouped := fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records")
-	llmAddrFlag := fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -journey's or -compare's report (not supported with -benchmark or the default suite). Never auto-started. Default: report.yaml's llm_addr")
-	llmModelFlag := fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model")
-	llmKeyFlag := fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key")
-	llmCacheDirFlag := fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever")
-	llmDryRun := fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything")
+	fl := bindAnalyzeCLIFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if *renderOnlyFlag {
-		if *journeyArg != "" || *compareArg != "" || *benchmarkFlag || *renderAllFlag || *macroOnlyFlag || *listOnlyFlag || *journeyOnlyFlag || flagPassed(fs, "details") || flagPassed(fs, "include-partial") || *llmAddrFlag != "" || *llmModelFlag != "" || *llmDryRun {
+	if *fl.renderOnlyFlag {
+		if *fl.journeyArg != "" || *fl.compareArg != "" || *fl.benchmarkFlag || *fl.renderAllFlag || *fl.macroOnlyFlag || *fl.listOnlyFlag || *fl.journeyOnlyFlag || flagPassed(fs, "details") || flagPassed(fs, "include-partial") || *fl.llmAddrFlag != "" || *fl.llmModelFlag != "" || *fl.llmDryRun {
 			return fmt.Errorf("-render-only re-renders existing products from disk — mutually exclusive with log aggregation flags")
 		}
-		rc := resolveReportConfig(*reportConfigPath, os.Stdout)
-		outDir := resolveString(*outDirFlag, rc.Output, "reports")
-		return runRenderOnly(outDir, *langFlag, flagPassed(fs, "lang"))
+		rc := resolveReportConfig(*fl.reportConfigPath, os.Stdout)
+		outDir := resolveString(*fl.outDirFlag, rc.Output, "reports")
+		if !*fl.noCache && tryRenderOnlyL3Cache(outDir, *fl.langFlag, flagPassed(fs, "lang")) {
+			return nil
+		}
+		if err := runRenderOnly(outDir, *fl.langFlag, flagPassed(fs, "lang")); err != nil {
+			return err
+		}
+		recordRenderOnlyL3Cache(outDir)
+		return nil
 	}
 
-	hasSelector, err := validateAnalyzeModeFlags(*journeyArg, *compareArg, *benchmarkFlag, *renderAllFlag, *macroOnlyFlag, *listOnlyFlag, *journeyOnlyFlag, flagPassed(fs, "details"))
+	hasSelector, err := validateAnalyzeModeFlags(*fl.journeyArg, *fl.compareArg, *fl.benchmarkFlag, *fl.renderAllFlag, *fl.macroOnlyFlag, *fl.listOnlyFlag, *fl.journeyOnlyFlag, flagPassed(fs, "details"))
 	if err != nil {
 		return err
 	}
 
-	rc := resolveReportConfig(*reportConfigPath, os.Stdout)
-	lang, err := resolveLanguage(*langFlag, rc, os.Stdout)
+	rc := resolveReportConfig(*fl.reportConfigPath, os.Stdout)
+	lang, err := resolveLanguage(*fl.langFlag, rc, os.Stdout)
 	if err != nil {
 		return err
 	}
-	outDir := resolveString(*outDirFlag, rc.Output, "reports")
-	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *llmAddrFlag, rc.LLMAddr, "")
-	llmModel := resolveString(*llmModelFlag, rc.LLMModel, "")
+	outDir := resolveString(*fl.outDirFlag, rc.Output, "reports")
+	llmAddr := resolveStringExplicit(flagPassed(fs, "llm-addr"), *fl.llmAddrFlag, rc.LLMAddr, "")
+	llmModel := resolveString(*fl.llmModelFlag, rc.LLMModel, "")
 	// llmKey is resolved (and used for self-traffic exclusion) on every
 	// path, including -benchmark and the default suite — it identifies PAST
 	// self-analysis traffic to exclude, independent of whether THIS run
@@ -205,8 +189,8 @@ func cmdAnalyze(args []string) error {
 	// -llm-key/-llm-dry-run is set) and is only relevant to -journey/
 	// -compare, the only branches that consume its result — see
 	// dispatchAnalyze's resolveLLMOpts closure.
-	llmKey := resolveString(*llmKeyFlag, rc.LLMKey, "")
-	llmCacheDir := resolveString(*llmCacheDirFlag, rc.LLMCacheDir, "")
+	llmKey := resolveString(*fl.llmKeyFlag, rc.LLMKey, "")
+	llmCacheDir := resolveString(*fl.llmCacheDirFlag, rc.LLMCacheDir, "")
 	// -llm-addr fires one LLM call per journey, which makes no sense against a batch —
 	// -benchmark or the default suite (this entry's equivalent of -render-all).
 	// -compare/a single-match -journey are the only two shapes that support it.
@@ -215,45 +199,46 @@ func cmdAnalyze(args []string) error {
 	// for this run, so it must pass here; a report.yaml llm_addr with no flag
 	// stays silently ignored on these batch shapes (never consulted downstream).
 	llmAddrExplicit := flagPassed(fs, "llm-addr")
-	if llmAddrExplicit && llmAddr != "" && (*benchmarkFlag || !hasSelector) {
+	if llmAddrExplicit && llmAddr != "" && (*fl.benchmarkFlag || !hasSelector) {
 		return fmt.Errorf("-llm-addr is not supported with -benchmark or the default suite (would fire one LLM call per journey) — use -journey to interpret one at a time, or -compare for a pairwise interpretation")
 	}
 
-	paths, err := resolveInputPaths(fs, *configPath)
+	paths, err := resolveInputPaths(fs, *fl.configPath)
 	if err != nil {
 		return err
 	}
 
 	return dispatchAnalyze(&analyzeRun{
 		paths:              paths,
-		configPath:         *configPath,
+		configPath:         *fl.configPath,
 		outDir:             outDir,
 		lang:               lang,
-		includePartial:     resolveBool(flagPassed(fs, "include-partial"), *includePartialFlag, rc.IncludePartial),
-		includeSelfTraffic: *includeSelfTraffic,
+		includePartial:     resolveBool(flagPassed(fs, "include-partial"), *fl.includePartialFlag, rc.IncludePartial),
+		includeSelfTraffic: *fl.includeSelfTraffic,
+		noCache:            *fl.noCache,
 		llmKey:             llmKey,
 		llmAddrExplicit:    llmAddrExplicit,
 		resolveLLMOpts: func() (llmCLIOptions, error) {
-			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *llmDryRun)
+			llmOpts, err := resolveLLMOptions(llmAddr, llmModel, llmKey, *fl.llmDryRun)
 			if err != nil {
 				return llmCLIOptions{}, err
 			}
 			llmOpts.CacheDir = llmCacheDir
 			return llmOpts, nil
 		},
-		benchmarkFlag:      *benchmarkFlag,
-		compareArg:         *compareArg,
-		journeyArg:         *journeyArg,
-		renderAllFlag:      *renderAllFlag,
-		macroOnly:          *macroOnlyFlag,
-		listOnly:           *listOnlyFlag,
-		journeyOnly:        *journeyOnlyFlag,
-		detailsOn:          resolveBool(flagPassed(fs, "details"), *detailsFlag, rc.Details),
-		displayCCY:         resolveString(*currencyFlag, rc.Currency, ""),
+		benchmarkFlag:      *fl.benchmarkFlag,
+		compareArg:         *fl.compareArg,
+		journeyArg:         *fl.journeyArg,
+		renderAllFlag:      *fl.renderAllFlag,
+		macroOnly:          *fl.macroOnlyFlag,
+		listOnly:           *fl.listOnlyFlag,
+		journeyOnly:        *fl.journeyOnlyFlag,
+		detailsOn:          resolveBool(flagPassed(fs, "details"), *fl.detailsFlag, rc.Details),
+		displayCCY:         resolveString(*fl.currencyFlag, rc.Currency, ""),
 		exchangeRate:       rc.ExchangeRate,
 		selfTrafficTags:    rc.SelfTrafficClientTags,
 		reportConfigSource: rc.SourcePath,
-		showUngrouped:      *showUngrouped,
+		showUngrouped:      *fl.showUngrouped,
 	})
 }
 
@@ -272,6 +257,12 @@ func dispatchAnalyze(r *analyzeRun) error {
 	// does its own earlier load purely for the log_dir path fallback — a
 	// separate concern that never feeds the cost/quota basis.
 	r.cfg, r.cfgErr = config.Load(r.configPath)
+
+	mode := analyzeModeString(r)
+	targetL2, ok := computeTargetL2(r, mode)
+	if ok && tryL2Cache(r, targetL2, mode) {
+		return nil
+	}
 
 	if r.macroOnly {
 		return runMacroOnly(r)
@@ -326,7 +317,11 @@ func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
 	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
 		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 	}
-	return commitManifest(r, rep)
+	if err := commitManifest(r, rep); err != nil {
+		return err
+	}
+	recordPostAnalyzeCache(r)
+	return nil
 }
 
 // commitManifest is the snapshot's admission token (§3.4): built after
@@ -473,4 +468,202 @@ func runReportHalf(r *analyzeRun) (*report.Report2, error) {
 		return nil, fmt.Errorf("analyze (report half): %w", err)
 	}
 	return rep, nil
+}
+
+type analyzeCLIFlags struct {
+	configPath         *string
+	outDirFlag         *string
+	langFlag           *string
+	reportConfigPath   *string
+	includeSelfTraffic *bool
+	noCache            *bool
+	journeyArg         *string
+	compareArg         *string
+	benchmarkFlag      *bool
+	renderAllFlag      *bool
+	macroOnlyFlag      *bool
+	renderOnlyFlag     *bool
+	listOnlyFlag       *bool
+	journeyOnlyFlag    *bool
+	detailsFlag        *bool
+	currencyFlag       *string
+	includePartialFlag *bool
+	showUngrouped      *bool
+	llmAddrFlag        *string
+	llmModelFlag       *string
+	llmKeyFlag         *string
+	llmCacheDirFlag    *string
+	llmDryRun          *bool
+}
+
+func bindAnalyzeCLIFlags(fs *flag.FlagSet) *analyzeCLIFlags {
+	return &analyzeCLIFlags{
+		configPath:         fs.String("c", "config.yaml", "config file to resolve log_dir from (when no input files are given) and to resolve pricing from"),
+		outDirFlag:         fs.String("o", "", "output directory (default: ./reports, or report.yaml's output)"),
+		langFlag:           fs.String("lang", "", "output language: en|zh (default: report.yaml's language, or en) — overrides report.yaml"),
+		reportConfigPath:   fs.String("report-config", "", "vmr analyze's sidecar config yaml; absent => auto-load ./report.yaml if present"),
+		includeSelfTraffic: fs.Bool("include-self-traffic", false, "don't exclude vmr analyze's own -llm-addr self-analysis traffic from either half's totals (default: excluded — see report.yaml's llm_key/self_traffic_client_tags)"),
+		noCache:            fs.Bool("no-cache", false, "bypass L2/L3 product caches and force full re-aggregation and re-rendering"),
+		journeyArg:         fs.String("journey", "", "zoom into this journey: an id or id-prefix, a comma-separated list of ids/prefixes/globs, and/or a shell-style glob (*, ?, [...]) matched against the full id. A selector resolving to exactly one journey renders as before (and alone supports -llm-addr); more than one batches like -render-all. Mutually exclusive with -compare/-benchmark; only this half runs (no macro report)"),
+		compareArg:         fs.String("compare", "", "zoom into a pairwise comparison: -compare id1,id2 (each an id, id-prefix, or shell glob; first candidate matching each side wins). Mutually exclusive with -journey/-benchmark; only this half runs (no macro report)"),
+		benchmarkFlag:      fs.Bool("benchmark", false, "zoom into benchmark-level statistics (metric distributions, Finding hit rates, correlations) across every non-partial candidate journey. Mutually exclusive with -journey/-compare; only this half runs (no macro report)"),
+		renderAllFlag:      fs.Bool("render-all", false, "default suite only: materialize every non-partial candidate journey, including the heartbeat/poll ones (default: those low-signal heartbeat candidates are the only ones excluded; render one on demand with -journey <id>)"),
+		macroOnlyFlag:      fs.Bool("macro-only", false, "default suite only: run just the macro report half — no candidate scan, no journey rendering, no journeys/ output. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-list-only/-journey-only"),
+		renderOnlyFlag:     fs.Bool("render-only", false, "re-render all resident human-readable Markdown products from existing on-disk JSON without re-aggregating audit logs"),
+		listOnlyFlag:       fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them — writes journeys/index.{md,json} listing every candidate, but no j-*.md. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-macro-only/-journey-only/-details"),
+		journeyOnlyFlag:    fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.{json,md}/macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only"),
+		detailsFlag:        fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)"),
+		currencyFlag:       fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY"),
+		includePartialFlag: fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)"),
+		showUngrouped:      fs.Bool("show-ungrouped", false, "print the source location of the first few ungrouped records"),
+		llmAddrFlag:        fs.String("llm-addr", "", "host:port of an already-running VMR instance — enables the optional LLM interpretation section on -journey's or -compare's report (not supported with -benchmark or the default suite). Never auto-started. Default: report.yaml's llm_addr"),
+		llmModelFlag:       fs.String("llm-model", "", "that VMR instance's virtual model name (e.g. \"agent\"), sent verbatim — required with -llm-addr unless -llm-dry-run. Default: report.yaml's llm_model"),
+		llmKeyFlag:         fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key"),
+		llmCacheDirFlag:    fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever"),
+		llmDryRun:          fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything"),
+	}
+}
+
+func analyzeModeString(r *analyzeRun) string {
+	switch {
+	case r.macroOnly:
+		return "macro-only"
+	case r.listOnly:
+		return "list-only"
+	case r.benchmarkFlag:
+		return "benchmark"
+	case r.compareArg != "":
+		return "compare:" + r.compareArg
+	case r.journeyArg != "":
+		return "journey:" + r.journeyArg
+	case r.journeyOnly:
+		return "journey-only"
+	default:
+		return "default"
+	}
+}
+
+func computeTargetL2(r *analyzeRun, mode string) ([32]byte, bool) {
+	inHashes, err := report.ComputeInputHashes(r.paths)
+	if err != nil || len(inHashes) == 0 {
+		return [32]byte{}, false
+	}
+	pricingFP := resolvePricingFingerprint(r.cfg, r.exchangeRate)
+	paramsFP := report.ComputeAnalysisParamsFingerprint(report.AnalysisParams{
+		Lang:               r.lang.String(),
+		TaskProfile:        resolveTaskProfile().Name(),
+		IncludePartial:     r.includePartial,
+		IncludeSelfTraffic: r.includeSelfTraffic,
+		SelfTrafficTags:    r.selfTrafficTags,
+		DisplayCCY:         r.displayCCY,
+		RenderAll:          r.renderAllFlag,
+		Details:            r.detailsOn,
+		Mode:               mode,
+	})
+	return report.ComputeL2Digest(inHashes, pricingFP, report.ManifestFormat, paramsFP), true
+}
+
+func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
+	if r.noCache {
+		return false
+	}
+	rec, hit := report.CheckL2Cache(r.outDir, targetL2)
+	if !hit {
+		return false
+	}
+	vmFP, err := report.ComputeVMFingerprintFromManifest(r.outDir)
+	if err != nil {
+		return false
+	}
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.lang.String())
+	l3Hit := report.CheckL3Cache(r.outDir, targetL3, mode)
+	if !l3Hit {
+		if err := renderAllFromDisk(r.outDir, r.lang); err != nil {
+			return false
+		}
+		rec.VMFingerprint = hex.EncodeToString(vmFP[:])
+		rec.L3Digest = hex.EncodeToString(targetL3[:])
+		rec.RendererVersion = report.RendererVersion
+		_ = report.SaveCacheRecord(r.outDir, rec)
+	}
+
+	if err := dashboard.WriteSkeletons(r.outDir); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed (pages may be stale until next analyze): %v\n", err)
+	}
+	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
+		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
+	}
+	return true
+}
+
+func recordPostAnalyzeCache(r *analyzeRun) {
+	mode := analyzeModeString(r)
+	targetL2, ok := computeTargetL2(r, mode)
+	if !ok {
+		return
+	}
+	vmFP, err := report.ComputeVMFingerprintFromManifest(r.outDir)
+	if err != nil {
+		return
+	}
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.lang.String())
+	rec := &report.CacheRecord{
+		L2Digest:        hex.EncodeToString(targetL2[:]),
+		VMFingerprint:   hex.EncodeToString(vmFP[:]),
+		L3Digest:        hex.EncodeToString(targetL3[:]),
+		FormatVersion:   report.ManifestFormat,
+		RendererVersion: report.RendererVersion,
+	}
+	_ = report.SaveCacheRecord(r.outDir, rec)
+}
+
+func tryRenderOnlyL3Cache(outDir string, requestedLang string, langPassed bool) bool {
+	m, err := report.ValidateManifest(outDir)
+	if err != nil {
+		return false
+	}
+	manifestLang, err := i18n.Parse(m.Lang)
+	if err != nil {
+		manifestLang = i18n.EN
+	}
+	if langPassed {
+		reqLang, err := i18n.Parse(requestedLang)
+		if err != nil || reqLang != manifestLang {
+			return false
+		}
+	}
+	vmFP, err := report.ComputeVMFingerprintFromManifest(outDir)
+	if err != nil {
+		return false
+	}
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, manifestLang.String())
+	if !report.CheckL3Cache(outDir, targetL3, "default") {
+		return false
+	}
+	_ = dashboard.WriteSkeletons(outDir)
+	return true
+}
+
+func recordRenderOnlyL3Cache(outDir string) {
+	m, err := report.ValidateManifest(outDir)
+	if err != nil {
+		return
+	}
+	manifestLang, err := i18n.Parse(m.Lang)
+	if err != nil {
+		manifestLang = i18n.EN
+	}
+	vmFP, err := report.ComputeVMFingerprintFromManifest(outDir)
+	if err != nil {
+		return
+	}
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, manifestLang.String())
+	rec, _ := report.LoadCacheRecord(outDir)
+	if rec == nil {
+		rec = &report.CacheRecord{FormatVersion: report.ManifestFormat}
+	}
+	rec.VMFingerprint = hex.EncodeToString(vmFP[:])
+	rec.L3Digest = hex.EncodeToString(targetL3[:])
+	rec.RendererVersion = report.RendererVersion
+	_ = report.SaveCacheRecord(outDir, rec)
 }

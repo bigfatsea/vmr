@@ -116,6 +116,31 @@ func resolvePricingForAnalyze(cfg *config.Config, cfgErr error, configPath, disp
 	return resolver, ccy
 }
 
+// resolvePricingFingerprint resolves standard pricing and override policies to produce the configuration fingerprint (D8 / §7.2).
+func resolvePricingFingerprint(cfg *config.Config, extraRates map[string]float64) []byte {
+	standardGen := ""
+	if standard, err := pricing.LoadStandard(); err == nil && standard != nil {
+		standardGen = standard.GeneratedAt
+	}
+	rates := map[string]float64{}
+	var policies map[string]pricing.ProviderPolicy
+	if cfg != nil {
+		if t, err := cfg.PricingTable(); err == nil && t != nil && t.GeneratedAt != "" {
+			standardGen = t.GeneratedAt
+		}
+		if cfg.ExchangeRate != nil {
+			for k, v := range cfg.ExchangeRate {
+				rates[k] = v
+			}
+		}
+		policies = cfg.ProviderPricingPolicies
+	}
+	for k, v := range extraRates {
+		rates[k] = v
+	}
+	return report.ComputePricingFingerprint(standardGen, rates, policies)
+}
+
 // allPathsOutsideDir reports whether EVERY entry in paths resolves
 // outside dir — used to flag "the live quota counter's log_dir doesn't
 // contain a single one of the audit logs this report is analyzing", the
