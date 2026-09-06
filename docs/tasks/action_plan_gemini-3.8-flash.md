@@ -33,8 +33,8 @@
 | **Group 1C** (Journey 自包含) | `feat/p1-g1c-journey-selfcontain` | 52810 | **DONE (已合并)** | `internal/journey/structure.go`<br>`internal/journey/journey.go`<br>`internal/journey/corpus.go`<br>`internal/journey/candidates.go`<br>`internal/journey/storyindex.go`<br>`internal/journey/render_md.go`<br>`internal/journey/*_test.go` | `go test -v -race ./internal/journey/...` |
 | **Group 1B** (请求拓扑与明细) | `feat/p1-g1b-requests` | 57016 | **DONE (已合并)** | `internal/reqdetail/*`<br>`internal/report/requests.go`<br>`internal/report/requests_failed.go`<br>`internal/report/detail.go`<br>`internal/report/*_test.go` | `go test -v -race ./internal/reqdetail/...`<br>`go test -v -race ./internal/report/...` |
 | **Group 1D** (对比索引与 CLI) | `feat/p1-g1d-compares-cli` | 61207 | RE-DISPATCH（进行中） | `cmd/vmr/cmd_analyze.go`<br>`cmd/vmr/cmd_story.go`<br>`cmd/vmr/cmd_report.go`<br>`cmd/vmr/cmd_story_batch.go`<br>`cmd/vmr/cmd_story_setup.go`<br>`cmd/vmr/cmd_report_stories_link.go`<br>`cmd/vmr/compares_index.go` (新建)<br>`cmd/vmr/main.go`<br>`cmd/vmr/*_test.go` | `go build ./...`<br>`go test -v -race ./cmd/vmr/...` |
-| **Group 2A** (看板骨架资产包) | `feat/p2-g2a-dashboard` | 派发后回填 | IN PROGRESS | `internal/dashboard/**` (全新建) | `go build ./...`<br>`go test -v -race ./internal/dashboard/...` |
-| **Group 2C** (/reports/ 托管与配置) | `feat/p2-g2c-server-hosting` | 派发后回填 | IN PROGRESS | `internal/server/reports*.go` (新建)<br>`internal/server/server.go`<br>`internal/config/{config,config_validate}.go` + tests<br>`config.example*.yaml`<br>`internal/archtest/import_boundaries_test.go` | `go test -v -race ./internal/server/... ./internal/config/...` |
+| **Group 2A** (看板骨架资产包) | `feat/p2-g2a-dashboard` | 61591 | **DONE (已合并)** | `internal/dashboard/**` (全新建) | `go build ./...`<br>`go test -v -race ./internal/dashboard/...` |
+| **Group 2C** (/reports/ 托管与配置) | `feat/p2-g2c-server-hosting` | 61590 | **DONE (已合并)** | `internal/server/reports*.go` (新建)<br>`internal/server/server.go`<br>`internal/config/{config,config_validate}.go` + tests<br>`config.example*.yaml`<br>`internal/archtest/import_boundaries_test.go` | `go test -v -race ./internal/server/... ./internal/config/...` |
 
 ---
 

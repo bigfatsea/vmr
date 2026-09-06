@@ -112,6 +112,7 @@
 
 ### 1.4 包边界与依赖
 
+- **`internal/server` 对 `chatmsg` 的传递依赖是既有豁免**（2026-09，/reports 托管落地时收方）：`archtest` 对 server 的禁 import 清单列 report/journey/ctxgraph/taskseg/reqdetail，**不列 chatmsg**——server 依赖 router，而 router（quota 计量、usage 解析）与 respnorm 合法消费 chatmsg，`go list -deps` 意义上的传递依赖必然成立。两半区契约守的是「server 不得直接消费分析半区的包」，不是依赖闭包纯洁性；把 chatmsg 从 router 剥离是另一个量级的改动且无消费者受益。
 - **`imgprep.ImageInfo` → `audit.ImageInfo` 的字段拷贝**：换 `imgprep` 不依赖 `audit`，保住公共工具包零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
 - **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/journey/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
