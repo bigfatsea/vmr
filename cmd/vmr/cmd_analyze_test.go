@@ -14,7 +14,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
 	"vmr/internal/report"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 )
 
 // TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot covers P6.5's actual
@@ -168,7 +168,7 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 	taskR2 := storyRec(at(1), []any{sys, taskU1, storyMsg("assistant", "done")}, storySSE("完成"))
 
 	// [OpenClaw heartbeat poll] is the literal title-marker classifyJourney
-	// checks for (internal/story/candidates.go) — resolveTaskProfile()
+	// checks for (internal/journey/candidates.go) — resolveTaskProfile()
 	// defaults to OpenClawAware, and P7.2's bracket-stripping regexes only
 	// touch timestamp/message_id markers, not this one, so it survives into
 	// the derived title unchanged.
@@ -229,7 +229,7 @@ func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
 	sys := storyMsg("system", "sys")
 
 	// [cron:job-id ...] and "... [Subagent Context] ..." are the literal
-	// title markers classifyJourney (internal/story/candidates.go) checks
+	// title markers classifyJourney (internal/journey/candidates.go) checks
 	// for — resolveTaskProfile() defaults to OpenClawAware, whose
 	// bracket-stripping regexes don't touch either marker.
 	cronU1 := storyMsg("user", "[cron:daily-report 0 9 * * *] generate the report")

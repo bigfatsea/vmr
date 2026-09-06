@@ -25,7 +25,7 @@ import (
 
 // crossCheckFixture builds an s231-style two-Lineage source file: five
 // Append records, then one Contract record (history collapses, opening
-// instruction survives) — the same shape internal/story/stitch_test.go's
+// instruction survives) — the same shape internal/journey/stitch_test.go's
 // s231StyleFixture uses to force a Stitch. Returns the file path.
 func crossCheckFixture(t *testing.T) string {
 	t.Helper()
@@ -45,7 +45,7 @@ func crossCheckFixture(t *testing.T) string {
 	// Contract: history collapses to [sys v2, u1, step reply 3, tool output 3]
 	// — 3 shared distinct keys, clearing stitchMinAbsOverlap, with its OWN
 	// new system prompt (same shape TestSystemPromptEras_StitchBoundaryChange
-	// in internal/story exercises).
+	// in internal/journey exercises).
 	recs = append(recs, storyRec(at(30), []any{storyMsg("system", "sys v2"), u1,
 		storyMsg("assistant", "step reply 3"), storyMsg("tool", "tool output 3"),
 		storyMsg("assistant", "post-break reply")}, storySSE("continuing")))

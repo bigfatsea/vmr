@@ -1,6 +1,6 @@
 // Ver 2026-09-01, by Sonnet 5
 
-// Pairs with internal/story/render_indicators.go — one Journey's behavior
+// Pairs with internal/journey/render_indicators.go — one Journey's behavior
 // indicators section in Markdown (问题 9).
 package i18n
 

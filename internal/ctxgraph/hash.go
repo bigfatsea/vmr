@@ -27,7 +27,7 @@ import (
 // key order in the original request body).
 type Hash [16]byte
 
-// String renders h as a lowercase hex string — internal/story uses this for
+// String renders h as a lowercase hex string — internal/journey uses this for
 // a Journey id's trailing disambiguator (RootHash().String()[:idCodeLen]),
 // so it needs to be filename/URL-safe, not just human-readable.
 func (h Hash) String() string {

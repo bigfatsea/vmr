@@ -18,7 +18,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 )
 
 func writeStoryJSONL(t *testing.T, recs []audit.Record) string {
@@ -63,7 +63,7 @@ func storyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 }
 
 // TestCmdStory_ListAndRender exercises the `vmr story` CLI end to end — a
-// path flagged as untested: internal/story's own
+// path flagged as untested: internal/journey's own
 // tests cover Build/RenderMarkdown directly, but nothing exercised
 // cmd_story.go's flag parsing, candidate listing (batched PreviewTitles),
 // or the -journey render-to-file path. Two records sharing the same opening

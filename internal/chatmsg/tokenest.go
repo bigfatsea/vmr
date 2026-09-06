@@ -12,7 +12,7 @@ import (
 // otherwise (see EstimateRequestBodyTokens for why body estimates share one
 // implementation). One shared function because two copies already drifted:
 // internal/report priced unsniffed records from a byte estimate while
-// internal/story skipped them entirely, and the divergence was invisible —
+// internal/journey skipped them entirely, and the divergence was invisible —
 // both halves priced through pricing.Rate.Cost (the shared formula) but fed
 // it different BASES, which is exactly the failure mode the "an analytics
 // number reproducing another must be pinned, not commented" rule is about.

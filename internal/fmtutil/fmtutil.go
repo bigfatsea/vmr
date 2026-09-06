@@ -67,7 +67,7 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // FmtPercent renders a 0..1 fraction as a percentage string ("42.3%").
 // decimals follows FmtSeconds' convention (trade precision for width): 1
 // for `vmr report`'s dense per-cell metrics tables, 0 for `vmr story`'s
-// narrative text. Before this, internal/report and internal/story each
+// narrative text. Before this, internal/report and internal/journey each
 // carried their own independently-written pctStr with this same
 // multiply-and-format line — one at 1 decimal, one at 0 — and a comment in
 // story claiming the two "matched" report's, which had already gone stale.
@@ -81,7 +81,7 @@ func FmtPercent(f float64, decimals int) string {
 // (K/M/B suffix, no space, no unit letter below 1000) — `vmr report`'s
 // per-cell metrics tables and `vmr story`'s narrative tables both want this
 // same compact bare-number shape. Before this, internal/report/metrics.go
-// and internal/story/render_md.go each carried their own independently
+// and internal/journey/render_md.go each carried their own independently
 // written fmtTokens with this same threshold logic, drifted apart only by
 // decimal-place count and B being report-only (report's corpus-wide totals
 // can reach billions; a single story Journey never does) — accidental

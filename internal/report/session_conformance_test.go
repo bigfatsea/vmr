@@ -20,7 +20,7 @@
 // TestConformance_F6AnchorGluedLineageSplitMatchesCtxgraph).
 //
 // File placement note: the design doc originally named this file
-// internal/story/conformance_test.go, but internal/story is forbidden from
+// internal/journey/conformance_test.go, but internal/journey is forbidden from
 // depending on internal/report (see internal/archtest's import boundary
 // rule) — this comparison needs BOTH AnalyzeSessions (report) and Scan
 // (ctxgraph), so it can only live here, in internal/report, as a _test.go

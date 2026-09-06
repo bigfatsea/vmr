@@ -70,7 +70,7 @@ func TestFmtSeconds(t *testing.T) {
 }
 
 // TestFmtPercent locks the decimals parameter both internal/report's and
-// internal/story's own pctStr now alias — 1 decimal for report's dense
+// internal/journey's own pctStr now alias — 1 decimal for report's dense
 // tables, 0 for story's narrative text — so a future edit to one of those
 // aliases can't silently re-diverge them from this shared definition.
 func TestFmtPercent(t *testing.T) {
@@ -87,7 +87,7 @@ func TestFmtPercent(t *testing.T) {
 }
 
 // TestFmtTokens locks the K/M/B thresholds and rounding for the dense
-// table-cell format — B5 converged internal/report's and internal/story's
+// table-cell format — B5 converged internal/report's and internal/journey's
 // independently-written fmtTokens onto this function; these cases pin the
 // exact boundary/rounding behavior neither package's own tests exercised
 // directly (only indirectly, through full-report/story golden output).

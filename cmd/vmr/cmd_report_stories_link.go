@@ -15,7 +15,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/report"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 )
 
 // loadStoriesLink reads {outDir}/stories/vmr-stories.json if present and

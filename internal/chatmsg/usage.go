@@ -71,7 +71,7 @@ func ResetUnrecognizedShapeCounts() {
 // of this value (quota charging, report/story cache-efficiency metrics)
 // needs a non-negative token count. This was independently hand-written at
 // four call sites (internal/router/quota.go's tokenCharge,
-// internal/report/{cost,sticky}.go, internal/story/render_md.go) before
+// internal/report/{cost,sticky}.go, internal/journey/render_md.go) before
 // being collected here — the one formula this type's doc comment already
 // specifies, now backed by one implementation instead of four.
 func (u Usage) Fresh() int64 {

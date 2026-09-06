@@ -13,7 +13,7 @@
 // calls the same functions cmd_report.go/cmd_story.go already exposed
 // (runReport, setupStoryRun + renderJourney/renderJourneys/renderAllJourneys/
 // compareJourneys/corpusStats) — "pure CLI-layer routing", per the
-// ActionPlan's own constraint. `internal/report`/`internal/story` are not
+// ActionPlan's own constraint. `internal/report`/`internal/journey` are not
 // touched by this file at all.
 package main
 
@@ -27,7 +27,7 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 )
 
 // renderableCandidates filters su.cands down to the non-noise rows

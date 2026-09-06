@@ -18,7 +18,7 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 	"vmr/internal/taskseg"
 )
 

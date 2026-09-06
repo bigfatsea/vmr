@@ -184,7 +184,7 @@ const (
 
 // LineageIndex maps Lineage.Idx to *Lineage for ChainFrom lookups. Build
 // once per Graph and reuse — a fresh map per lookup would be wasteful when
-// resolving many chains (e.g. internal/story.ListCandidates over every
+// resolving many chains (e.g. internal/journey.ListCandidates over every
 // candidate).
 func LineageIndex(g *Graph) map[int]*Lineage {
 	idx := make(map[int]*Lineage, len(g.Lineages))
@@ -199,7 +199,7 @@ func LineageIndex(g *Graph) map[int]*Lineage {
 // is always the last element. A lineage with no stitched predecessor (the
 // common case) returns the single-element chain []*Lineage{l} — Step 1's
 // "one lineage, one Journey" behavior is the degenerate case of this, not a
-// separate code path (internal/story.Build wraps a lone Lineage in a
+// separate code path (internal/journey.Build wraps a lone Lineage in a
 // 1-element chain for exactly this reason).
 func ChainFrom(l *Lineage, byIdx map[int]*Lineage) []*Lineage {
 	chain := []*Lineage{l}
@@ -219,7 +219,7 @@ func ChainFrom(l *Lineage, byIdx map[int]*Lineage) []*Lineage {
 }
 
 // StitchedSuccessorSet returns the set of lineage indices that have at
-// least one OTHER lineage stitched onto them. internal/story.ListCandidates
+// least one OTHER lineage stitched onto them. internal/journey.ListCandidates
 // uses this to only offer chain TAILS as candidates — a lineage in this set
 // is not its own candidate; its content is still reachable via whichever
 // successor(s) claim it through ChainFrom.

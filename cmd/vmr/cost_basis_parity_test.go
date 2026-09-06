@@ -7,7 +7,7 @@
 // like a right one." That is exactly what had happened: both halves priced
 // through pricing.Rate.Cost, but internal/report priced records whose
 // upstream reported no usage (from a byte-count estimate) while
-// internal/story skipped them, so the same traffic produced two different
+// internal/journey skipped them, so the same traffic produced two different
 // totals with nothing in either product saying so.
 //
 // This lives in cmd/vmr because it is the only package allowed to drive
@@ -23,7 +23,7 @@ import (
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
 	"vmr/internal/report"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 	"vmr/internal/taskseg"
 )
 

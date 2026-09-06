@@ -114,7 +114,7 @@
 
 - **`imgprep.ImageInfo` → `audit.ImageInfo` 的字段拷贝**：换 `imgprep` 不依赖 `audit`，保住公共工具包零依赖边界。
 - **`chatmsg.ReassembleSSE` 与 `respnorm` 的 SSE 状态机保持分离**：前者面向离线完整语义提取，后者面向在线字节级保真转发，关注点不同。
-- **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/story/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
+- **`ctxgraph.Manifest.MsgIdx` 没有生产消费者，但不是死数据**：`ctxgraph` 不导出任何哈希函数，`MsgIdx` 是包外把 `Keys[i]` 对回 `chatmsg.Messages` 元素的**唯一通道**——`internal/journey/structure_test.go` 靠它验证"内容寻址坐标确实解析到所声称的内容"这条不变量。删掉它等于让该不变量无法从包外验证，还要让全部用户白付一次全语料重解析。与 `health.Registry.Available` 同类：「无生产调用方」不等于「可删」。
 - **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：同一份文本要进 Markdown 与 HTML 两种产物，而 HTML 侧的转义早已由 `story/mdlite.go` 在渲染时全量完成（`<script>` 从来进不去）。真正没人管的是 Markdown **结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`（含无空格形态）、主题分隔线 `---`）——而它在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **`core.StickyBackstopTTL` 不迁回 `internal/sticky`**：迁回制造一条 `config` → `sticky` 的新依赖边，仅用于读一个常量；不做这个校验则 `sticky_ttl` 超过 backstop 的配置会「看起来被接受、实际静默失效」。
@@ -143,7 +143,7 @@
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
 - **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；HTML 看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
-- **`internal/story/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §2.51。
+- **`internal/journey/mdlite.go` 只覆盖 `-compare -html` 的 LLM 解读段实际会用到的 Markdown 子集**（ATX 标题、段落、无序列表、GFM 竖线表格、`**粗体**`、`` `行内代码` ``——全部先转义）：`-compare` 的 LLM 提示词明确要求「结论句 + 候选根因表 + 三个三级小节」，围绕这个形状裁剪。有序列表与围栏代码块落进段落分支（已转义、无注入、不丢字符）。不引 CommonMark 解析器。已知瑕疵见 §2.51。
 - **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
 - **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
 - **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗候选预过滤出局，最强者仅作诊断兜底**：旧规则豁免同桶候选的理由是“用户可以走开几天再回来接同一个 anchor”——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。2026-09 收敛为**淘汰优先于排序**（与 `strategy` 包 `Condition`/`Dimension` 分离同型）：超窗候选不参与赢家竞争，避免「高分超窗者先赢再降级」遮蔽窗内合法前驱；仅当过滤后无任何窗内候选时，最强超窗者作为降级 `AmbiguousMatch` 边保留供人查看——真的走开三天回来接着聊的人不会消失进 `NoPredecessorFound`。
@@ -216,7 +216,7 @@
 
 #### 2.69 [低，登记待触发] `searchableTranscript` 大语料下 O(N²) 全量物化
 
-- **现状**：`internal/story/llm_findings.go` 的 `searchableTranscript` 为每次锚点校验把 Journey 的转录本整体拼接成字符串。校验次数 × 转录本长度是乘积关系，大语料下是分析半区唯一的复杂度悬崖。
+- **现状**：`internal/journey/llm_findings.go` 的 `searchableTranscript` 为每次锚点校验把 Journey 的转录本整体拼接成字符串。校验次数 × 转录本长度是乘积关系，大语料下是分析半区唯一的复杂度悬崖。
 - **可能方案**：校验改在已分片文本上逐段 `Contains`（锚点语义不变），或对超长 Journey 截断校验域并明示。
 - **触发条件**：`vmr analyze -llm` 在真实大语料上出现可感知的耗时占比（当前无实测瓶颈）。
 
@@ -225,7 +225,7 @@
 
 #### 2.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 corpus 均值
 
-- **现状**：`internal/story/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -corpus` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
+- **现状**：`internal/journey/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -corpus` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
 - **当前缓解**：`-corpus` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」（2026-08-31）。只是免责，没动根因。
 - **可能方案**：对单间隙设上限（如 > 1h 归 idle/unknown 而非 agent 执行）。需改指标语义 + 更新 Analytics 设计文档的时间拆分定义 + 差分测试。
 - **触发条件**：脚注被证明不够（读者仍据 Mean 下结论），或要把 `NetWorkingMS` / `ModelToToolRatio` 当硬指标用。
@@ -262,7 +262,7 @@
 
 #### 2.64 [低] 「上下文有效利用率」在语料级呈现双峰退化
 
-- **现状**：`internal/story/metrics.go` 计算的「上下文有效利用率」（Context Utilization）在实际语料（111 个样本）中高度双峰退化：约 21% 样本值为 0（无工具调用或单轮任务），约 32% 样本值为 1.0（全工具结果均被后续轮次不同程度引用），中间值稀疏。导致语料统计中的「均值 70% / 中位数 95%」缺乏统计区分度，HTML 看板的「100%」亦难以提供有效洞察。
+- **现状**：`internal/journey/metrics.go` 计算的「上下文有效利用率」（Context Utilization）在实际语料（111 个样本）中高度双峰退化：约 21% 样本值为 0（无工具调用或单轮任务），约 32% 样本值为 1.0（全工具结果均被后续轮次不同程度引用），中间值稀疏。导致语料统计中的「均值 70% / 中位数 95%」缺乏统计区分度，HTML 看板的「100%」亦难以提供有效洞察。
 - **当前缓解**：`vmr analyze -corpus` 统计时需结合分布形状（P10/P50/P90 及两端样本数）共同解读；暂不重定义指标语义以维护 v1-complete 稳定性。
 - **可能方案**：细化有效引用粒度（如按实体引用率加权或按 token 深度衰减）或按任务类别（含/不含工具调用）分桶展示。
 - **触发条件**：后续版本计划重构行为指标语义时统一评估。
@@ -294,7 +294,7 @@
 
 #### 2.18 [中] Phase 1b 六个 LLM 语义判别器尚未完成完整黄金样本校准
 
-- **现状**：`internal/story/llm_findings.go` 六个判别器已实现、单测覆盖、且用 `_eval/calibrate_p1b.go` 对真实生产日志跑过真实模型验证（6 个真实 Journey 上机械核验 Evidence Anchor 有效率 100%，人工抽查合理）。但不是正式合入门禁——那需 30~50 个 Journey、每模块 ≥6 正/负例的系统性黄金样本集 + 人工标注 Ground Truth 算真实 Precision/Recall。
+- **现状**：`internal/journey/llm_findings.go` 六个判别器已实现、单测覆盖、且用 `_eval/calibrate_p1b.go` 对真实生产日志跑过真实模型验证（6 个真实 Journey 上机械核验 Evidence Anchor 有效率 100%，人工抽查合理）。但不是正式合入门禁——那需 30~50 个 Journey、每模块 ≥6 正/负例的系统性黄金样本集 + 人工标注 Ground Truth 算真实 Precision/Recall。
 - **为什么待定**：黄金样本挑选与人工标注是需实际投入时间的判断性工作，无法自动化；当前抽样规模下无需立即处理的误报模式，不构成阻塞。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力时间，不在代码**。
 
 
@@ -302,12 +302,12 @@
 
 #### 2.59 [低] `vmr analyze -compare` 两侧 system prompt / 初始指令逐字一致时未合并
 
-- **现状**：`internal/story/render_compare.go` 的 `renderSysPrompt` / `renderInitialInstruction` 无条件各渲 A、B 两份节选（`renderExcerpt` 调两次）。两侧同源（`Changes` 均为 0、节选逐字相同）时，同一段 system prompt 正文在 compare md 里贴两遍，实测占单份 compare 全文约 65%。
+- **现状**：`internal/journey/render_compare.go` 的 `renderSysPrompt` / `renderInitialInstruction` 无条件各渲 A、B 两份节选（`renderExcerpt` 调两次）。两侧同源（`Changes` 均为 0、节选逐字相同）时，同一段 system prompt 正文在 compare md 里贴两遍，实测占单份 compare 全文约 65%。
 - **可能方案**：只做精确相等合并（`sp.A.Excerpt == sp.B.Excerpt` / `f.A.Text == f.B.Text`）——渲一份，标注「两侧此节选一致（截断前缀，不代表完整文本逐字相同）」，A/B 的 tokens+Changes 对比行保留。相似度阈值合并不做（阈值主观）。
 - **触发条件**：界限清楚、随时可做；改动会给两个函数各加一个分支，注意 `archtest` per-function 行预算。
 
 
-#### 2.51 [低] `internal/story/mdlite.go` 行内代码里的 `**` 会在 `<code>` 内注入 `<strong>`
+#### 2.51 [低] `internal/journey/mdlite.go` 行内代码里的 `**` 会在 `<code>` 内注入 `<strong>`
 
 - **现状**：`mdInline` 先 `mdWrap` 处理 `` ` ``、再处理 `**`；若 `-compare -html` 的 LLM 解读段在行内代码里输出 `**`（如 `` `glob/**` ``），第二遍会在已生成的 `<code>` 内注入 `<strong>`。纯展示层轻微瑕疵——`html.EscapeString` 最前置，无 XSS。
 - **为什么待定**：真观察到 LLM 频繁触发再微调解析状态机；`mdlite` 只覆盖解读段实际用到的 Markdown 子集这一取舍见 §1.5。

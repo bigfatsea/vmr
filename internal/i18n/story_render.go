@@ -1,7 +1,7 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/story/render_md.go (journey-*.md) and the three
-// fallback title strings in internal/story/journey.go (toolLoopTitle,
+// Pairs with internal/journey/render_md.go (journey-*.md) and the three
+// fallback title strings in internal/journey/journey.go (toolLoopTitle,
 // stitchTaskTitle, deriveTitle's placeholder) — Journey/Task titles are
 // mostly a verbatim quote of the user's own message and so aren't localized
 // (see the design doc's "structured vs narrative field" boundary), but the

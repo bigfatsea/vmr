@@ -1,6 +1,6 @@
 // Ver 2026-08-28, by Sonnet 5
 
-// Pairs with internal/story/render_compare_html.go — the single-page HTML
+// Pairs with internal/journey/render_compare_html.go — the single-page HTML
 // comparison dashboard (`vmr analyze -compare a,b -html`). Fixed UI
 // strings only.
 package i18n

@@ -42,7 +42,7 @@ func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
 // structured triple can in principle carry either, so both must resolve
 // (a prior version of this function only handled "/", silently returning
 // ("","","") for a ":"-joined Endpoint whose structured fields were empty,
-// disagreeing with internal/story/modelusage.go's stepUpstream on the same
+// disagreeing with internal/journey/modelusage.go's stepUpstream on the same
 // record).
 func TestAttemptUpstreamFallback(t *testing.T) {
 	for _, tc := range []struct {

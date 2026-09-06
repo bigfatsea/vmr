@@ -17,9 +17,9 @@ package chatmsg
 // on that traffic exact-string pairing measures 0% while normalized pairing
 // measures 100% (story_report_architecture_opus-5.md §5, verified on five
 // real log files). This checker deliberately does NOT normalize — it is the
-// strict form, used by internal/story's F9 regression test over synthetic
+// strict form, used by internal/journey's F9 regression test over synthetic
 // fixtures. A caller pairing REAL client traffic wants the two-pass form
-// (exact, then underscore-stripped) internal/story's toolResultsFor
+// (exact, then underscore-stripped) internal/journey's toolResultsFor
 // implements.
 type PairingReport struct {
 	Calls         int      // total tool_call / tool_use blocks found

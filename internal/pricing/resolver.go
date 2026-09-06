@@ -95,7 +95,7 @@ func (r *Resolver) RateFor(provider, model string) (Rate, bool) {
 
 // RateForEndpoint resolves the Rate for a "protocol:provider:model" audit-log
 // endpoint label (core.EndpointLabel's format) — the shape both
-// internal/report (per audit record) and internal/story (per journey step)
+// internal/report (per audit record) and internal/journey (per journey step)
 // hold, so neither has to carry its own label split alongside a RateFor
 // call. Strict ":"-delimited SplitN(…, 3): the model segment may itself
 // contain ":" or "/" (e.g. "z-ai/glm-5.2") and is passed through whole.

@@ -58,7 +58,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
 | `tokenutil` | Fast zero-allocation token estimation: `Estimate`, `EstimateText`, `Analyze`, `EstimateFromStats` |
 | `jsonscan` | JSON byte-range scan/splice engine: low-level structural byte scanning (`TopLevelValues`, `WalkArrayElements`, `Skip*` primitives) and zero-allocation byte-splice rewrites (`RewriteModel`, `RewriteStream`, `RewriteRoles`, `RewriteInputRoles`). Fuzz-tested. Zero internal dependencies |
-| `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, `i18n/story_*.go` next to `internal/story`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
+| `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/section_*.go`, `i18n/story_*.go` next to `internal/journey`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
 
 Routing half:

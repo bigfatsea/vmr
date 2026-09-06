@@ -1,9 +1,9 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/story/render_compare.go (compare-*.md) and the 14
-// behavior-profile metric labels internal/story/compare.go's Compare
+// Pairs with internal/journey/render_compare.go (compare-*.md) and the 14
+// behavior-profile metric labels internal/journey/compare.go's Compare
 // produces. MetricLabel takes the metric code as a plain string (not
-// story.MetricCode) — internal/i18n must not import internal/story (it
+// story.MetricCode) — internal/i18n must not import internal/journey (it
 // would invert the dependency direction the design doc and archtest
 // require: story depends on i18n, never the reverse); MetricCode's
 // underlying type is already a plain string, so callers pass

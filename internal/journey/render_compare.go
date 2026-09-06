@@ -1,0 +1,444 @@
+// Ver 2026-08-01, by Sonnet 5
+
+package journey
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
+)
+
+// RenderComparisonMarkdown renders cmp as a self-contained Markdown
+// document in lang: a header identifying both Journeys, a metric-by-metric
+// diff table with notable rows starred, and a tool-usage side-by-side.
+// Purely a view over already-computed Comparison data — same fact-layer-
+// renderer convention as RenderMarkdown (no judgment calls happen here).
+// cmp.Rows[].Label is already localized (Compare(a, b, lang) computed it
+// with the same lang the caller passes here) — this function reads it
+// directly rather than looking it up a second time.
+func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
+	var b strings.Builder
+	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
+	t := i18n.Compare(lang)
+
+	w("%s", t.Title)
+	renderComparisonSummaryCard(w, cmp, t)
+	w("%s", t.SideBlock("A", cmp.A.ID, escapeHTML(cmp.A.Title), cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
+	w("%s", t.SideBlock("B", cmp.B.ID, escapeHTML(cmp.B.Title), cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
+	if cmp.Extras != nil {
+		renderInitialInstruction(w, cmp.Extras.InitialInstruction, t)
+	}
+
+	w("%s", t.ProfileTitle)
+	w("%s", t.ProfileTableHeader)
+	for _, r := range cmp.Rows {
+		mark := ""
+		if r.Notable {
+			mark = " ⚠️"
+		}
+		w("| %s%s | %s | %s | %s |\n", r.Label, mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew))
+	}
+	w("%s", t.NotableFootnote(notableRelThreshold*100))
+
+	if cmp.Extras != nil {
+		renderDurationAndFinalContext(w, cmp.Extras, t)
+	}
+
+	if len(cmp.Tools) > 0 {
+		w("%s", t.ToolsTitle)
+		w("%s", t.ToolsTableHeader)
+		for _, tl := range cmp.Tools {
+			w("| %s | %d | %d |\n", tl.Name, tl.ACalls, tl.BCalls)
+		}
+		w("\n")
+	}
+
+	if cmp.Extras != nil {
+		renderDivergence(w, cmp.Extras.Divergence, t)
+		renderEndpoints(w, cmp.Extras.Endpoints, t)
+		renderCache(w, cmp.Extras.Cache, t)
+		renderSysPrompt(w, cmp.Extras.SysPrompt, t)
+		renderDeliverable(w, cmp.Extras.Deliverable, t)
+		renderCost(w, cmp.Extras.Cost, t)
+		renderSources(w, cmp.Extras.Sources, t)
+	}
+
+	return b.String()
+}
+
+// renderSources renders the evidence-provenance section — the source audit
+// file paths both Journeys were built from, so a reader can independently
+// re-open the exact records every number above came from. Placed last,
+// after every fact-layer section: this is a
+// verification aid, not something that should compete for attention with the
+// report's actual findings. Empty (no Sources set, e.g. a caller that built
+// Extras without plumbing the resolved input paths through) renders nothing.
+func renderSources(w func(string, ...any), sources []string, t i18n.CompareText) {
+	if len(sources) == 0 {
+		return
+	}
+	w("%s", t.SourcesTitle)
+	w("%s", t.SourcesIntro)
+	for _, s := range sources {
+		w("- `%s`\n", s)
+	}
+	w("\n")
+}
+
+// renderDurationAndFinalContext renders three facts that come for free from
+// data this package already has: wall-clock duration (captioned per design
+// doc F10 — never presented as an efficiency number on its own), termination
+// mode (the closest VMR-visible proxy to "did something like loop detection
+// cut this off"), and each side's final-round context composition (free:
+// ContextPoint is Metrics.ContextCurve's own element type, just its last
+// entry).
+func renderDurationAndFinalContext(w func(string, ...any), ex *ComparisonExtras, t i18n.CompareText) {
+	d := ex.Duration
+	w("%s", t.WallClockLine(fmtutil.FmtSeconds(d.AWall, 1), fmtutil.FmtSeconds(d.BWall, 1)))
+	w("%s", t.TerminationLine(emptyDash(d.ATermination, t), emptyDash(d.BTermination, t)))
+
+	fc := ex.FinalContext
+	// Either side being empty (Seq == 0, ComputeComparisonExtras' zero value
+	// for a Journey whose Metrics.ContextCurve came back empty) skips the
+	// whole table — a real Journey always has at least one Step so this
+	// shouldn't fire in practice, but `||` (not `&&`) is what actually
+	// guarantees no empty-side row ever renders if it ever does.
+	if fc.A.Seq == 0 || fc.B.Seq == 0 {
+		return
+	}
+	w("%s", t.FinalContextTitle)
+	w("%s", t.FinalContextHeader(fc.A.Seq, fc.B.Seq))
+	rl := t.FinalContextRowLabels
+	w("| %s | %s | %s |\n", rl[0], fmtutil.FmtTokens(fc.A.SystemTokens), fmtutil.FmtTokens(fc.B.SystemTokens))
+	w("| %s | %s | %s |\n", rl[1], fmtutil.FmtTokens(fc.A.UserTokens), fmtutil.FmtTokens(fc.B.UserTokens))
+	w("| %s | %s | %s |\n", rl[2], fmtutil.FmtTokens(fc.A.AssistantTokens), fmtutil.FmtTokens(fc.B.AssistantTokens))
+	w("| %s | %s | %s |\n\n", rl[3], fmtutil.FmtTokens(fc.A.ToolTokens), fmtutil.FmtTokens(fc.B.ToolTokens))
+}
+
+func emptyDash(s string, t i18n.CompareText) string {
+	if s == "" {
+		return t.EmptyDash
+	}
+	return s
+}
+
+func renderComparisonSummaryCard(w func(string, ...any), cmp Comparison, t i18n.CompareText) {
+	var items []string
+	var notableTop []string
+	for _, r := range cmp.Rows {
+		if r.Notable {
+			notableTop = append(notableTop, fmt.Sprintf("%s: %s → %s (%s)", r.Label, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew)))
+			if len(notableTop) >= 3 {
+				break
+			}
+		}
+	}
+	if len(notableTop) > 0 && t.SummaryNotableTop != nil {
+		items = append(items, t.SummaryNotableTop(strings.Join(notableTop, "; ")))
+	}
+	if cmp.Extras != nil {
+		if cmp.Extras.Divergence.Found && t.SummaryDivergence != nil {
+			items = append(items, t.SummaryDivergence(cmp.Extras.Divergence.Index+1, cmp.Extras.Divergence.AStepSeq, cmp.Extras.Divergence.BStepSeq))
+		}
+		if cmp.Extras.Endpoints.Same {
+			items = append(items, t.SummaryEndpointsSame)
+		} else {
+			items = append(items, t.SummaryEndpointsDiff)
+		}
+		if (cmp.Extras.Duration.ATermination != "" || cmp.Extras.Duration.BTermination != "") && t.SummaryTermination != nil {
+			items = append(items, t.SummaryTermination(emptyDash(cmp.Extras.Duration.ATermination, t), emptyDash(cmp.Extras.Duration.BTermination, t)))
+		}
+	}
+	if len(items) > 0 && t.SummaryCard != nil {
+		w("%s", t.SummaryCard(items))
+	}
+}
+
+// simpleLineDiff generates a compact unified diff string between a and b
+// using longest-common-subsequence (LCS) dynamic programming, preventing
+// line insertions/deletions from triggering cascade mismatches.
+func simpleLineDiff(a, b string) (diff string, diffCount int) {
+	aLines := strings.Split(a, "\n")
+	bLines := strings.Split(b, "\n")
+	n, m := len(aLines), len(bLines)
+
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < m; j++ {
+			if aLines[i] == bLines[j] {
+				dp[i+1][j+1] = dp[i][j] + 1
+			} else if dp[i+1][j] >= dp[i][j+1] {
+				dp[i+1][j+1] = dp[i+1][j]
+			} else {
+				dp[i+1][j+1] = dp[i][j+1]
+			}
+		}
+	}
+
+	type diffLine struct {
+		op   byte
+		line string
+	}
+	var ops []diffLine
+	i, j := n, m
+	for i > 0 || j > 0 {
+		if i > 0 && j > 0 && aLines[i-1] == bLines[j-1] {
+			ops = append(ops, diffLine{' ', aLines[i-1]})
+			i--
+			j--
+		} else if j > 0 && (i == 0 || dp[i][j-1] >= dp[i-1][j]) {
+			ops = append(ops, diffLine{'+', bLines[j-1]})
+			j--
+		} else if i > 0 && (j == 0 || dp[i][j-1] < dp[i-1][j]) {
+			ops = append(ops, diffLine{'-', aLines[i-1]})
+			i--
+		}
+	}
+
+	for k := 0; k < len(ops)/2; k++ {
+		opp := len(ops) - 1 - k
+		ops[k], ops[opp] = ops[opp], ops[k]
+	}
+
+	var out strings.Builder
+	out.WriteString("--- A\n+++ B\n")
+	for _, op := range ops {
+		if op.op == ' ' {
+			continue
+		}
+		diffCount++
+		out.WriteString(fmt.Sprintf("%c %s\n", op.op, op.line))
+	}
+	return out.String(), diffCount
+}
+
+// renderDivergence renders 6a/6b: the first Step position (in the two
+// Journeys' shared aligned prefix) where their tool-use structure first
+// differs — a structural fact only, never a root-cause claim (see
+// DivergencePoint's own doc comment). Placed first among the Extras
+// sections: per the plan review, this is the highest-ROI single addition
+// to -compare, so it belongs above the endpoint/cache/sys-prompt facts a
+// reader would otherwise have to piece the same conclusion together from.
+func renderDivergence(w func(string, ...any), d DivergencePoint, t i18n.CompareText) {
+	w("%s", t.DivergenceTitle)
+	if !d.Found {
+		w("%s", t.DivergenceNone)
+		return
+	}
+	switch d.Severity {
+	case DivergenceHeavy:
+		w("%s", t.DivergenceHeavy(d.Index, escapeHTML(d.TaskTitle), d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", "), strings.Join(d.BTools, ", ")))
+	case DivergenceLight:
+		w("%s", t.DivergenceLight(d.Index, escapeHTML(d.TaskTitle), d.AStepSeq, d.BStepSeq, strings.Join(d.ATools, ", ")))
+	}
+	w("%s", t.DivergenceFootnote)
+}
+
+// renderEndpoints renders the model/endpoint identity check, generalized
+// to not assume the two sides necessarily match.
+func renderEndpoints(w func(string, ...any), ep EndpointsFact, t i18n.CompareText) {
+	w("%s", t.EndpointsTitle)
+	w("%s", t.EndpointSide("A", endpointList(ep.A, t)))
+	w("%s", t.EndpointSide("B", endpointList(ep.B, t)))
+	w("\n")
+	if ep.Same {
+		w("%s", t.EndpointsSame)
+	} else {
+		w("%s", t.EndpointsDiff)
+	}
+}
+
+func endpointList(eps []string, t i18n.CompareText) string {
+	if len(eps) == 0 {
+		return t.NoEndpoints
+	}
+	return "`" + strings.Join(eps, "`, `") + "`"
+}
+
+// renderCache renders the per-step prompt-cache hit-ratio summary — the
+// same "18%→97% vs 82%→99%" style observation, computed the same way for
+// whatever numbers this pair of Journeys actually has.
+func renderCache(w func(string, ...any), c CacheFact, t i18n.CompareText) {
+	w("%s", t.CacheTitle)
+	if len(c.A.Series) == 0 && len(c.B.Series) == 0 {
+		w("%s", t.CacheNoData)
+		return
+	}
+	w("%s", t.CacheTableHeader)
+	w("| A | %s | %s | %s | %s |\n", pctStr(c.A.FirstRatio), pctStr(c.A.SteadyMean), pctStr(c.A.Min), pctStr(c.A.Max))
+	w("| B | %s | %s | %s | %s |\n\n", pctStr(c.B.FirstRatio), pctStr(c.B.SteadyMean), pctStr(c.B.Min), pctStr(c.B.Max))
+	w("%s", t.CacheCurveSummary)
+	w("A: %s\n\n", cacheCurveLine(c.A.Series, t))
+	w("B: %s\n\n", cacheCurveLine(c.B.Series, t))
+	w("</details>\n\n")
+}
+
+func cacheCurveLine(series []CachePoint, t i18n.CompareText) string {
+	if len(series) == 0 {
+		return t.CacheCurveNoData
+	}
+	parts := make([]string, len(series))
+	for i, p := range series {
+		parts[i] = fmt.Sprintf("R%d %s", p.Seq, pctStr(p.Ratio))
+	}
+	return strings.Join(parts, " → ")
+}
+
+// renderSysPrompt renders each side's effective system-prompt size/stability
+// plus a bounded, explicitly-labeled excerpt — the excerpt is raw evidence
+// for a human (or, if -llm-addr is given, the LLM interpretation layer) to
+// read; this renderer does not attempt to parse it for tool names or loaded
+// context files (see the plan doc's rejection of that as a rule-layer job).
+func renderSysPrompt(w func(string, ...any), sp SysPromptFact, t i18n.CompareText) {
+	w("%s", t.SysPromptTitle)
+	w("%s", t.SysPromptTableHeader)
+	w("| A | %s | %d |\n", fmtutil.FmtTokens(sp.A.Tokens), sp.A.Changes)
+	w("| B | %s | %d |\n\n", fmtutil.FmtTokens(sp.B.Tokens), sp.B.Changes)
+	if sp.A.Excerpt == sp.B.Excerpt && sp.A.Excerpt != "" {
+		w("%s", t.SysPromptIdentical(fmtutil.FmtTokens(sp.A.Tokens)))
+	} else if sp.A.Excerpt != "" && sp.B.Excerpt != "" {
+		diff, count := simpleLineDiff(sp.A.Excerpt, sp.B.Excerpt)
+		w("<details><summary>%s</summary>\n\n````diff\n%s````\n</details>\n\n", t.SysPromptDiffSummary(count), diff)
+	} else {
+		renderExcerpt(w, t.SysPromptExcerptLabel("A"), sp.A.Excerpt, sp.A.Truncated, t)
+		renderExcerpt(w, t.SysPromptExcerptLabel("B"), sp.B.Excerpt, sp.B.Truncated, t)
+	}
+}
+
+// renderInitialInstruction renders both sides' opening user instruction, in
+// full (bounded — compare.go's initialInstructionExcerptChars), folded
+// underneath the short summary SideBlock already showed. Silent when
+// neither side found one (the defensive Found=false case — shouldn't
+// happen in practice, see InitialInstructionStats' doc comment).
+func renderInitialInstruction(w func(string, ...any), f InitialInstructionFact, t i18n.CompareText) {
+	if !f.A.Found && !f.B.Found {
+		return
+	}
+	w("%s", t.InitialInstructionTitle)
+	renderExcerpt(w, t.InitialInstructionExcerptLabel("A"), f.A.Text, f.A.Truncated, t)
+	renderExcerpt(w, t.InitialInstructionExcerptLabel("B"), f.B.Text, f.B.Truncated, t)
+}
+
+// renderDeliverable renders the final-write-shaped tool call each side
+// produced, if any — the "result difference" dimension (design doc's four-
+// dimension breakdown in the plan doc's review banner), not just process
+// metrics. Skipped whole when neither side produced one: plenty of task
+// pairs never write a single-file deliverable, and an "A none / B none"
+// section is noise, not a finding (F-6).
+func renderDeliverable(w func(string, ...any), d DeliverableFact, t i18n.CompareText) {
+	if !d.A.Found && !d.B.Found {
+		return
+	}
+	w("%s", t.DeliverableTitle)
+	renderDeliverableSide(w, "A", d.A, t)
+	renderDeliverableSide(w, "B", d.B, t)
+}
+
+// renderCost renders each side's estimated spend — the same CostPair the HTML
+// dashboard's tale-of-the-tape and facts strip already carry, kept off the
+// Markdown until now (口径对齐: .md now matches JSON/HTML). A "$X vs —" split
+// (exactly one side priced) draws a footnote so the blank isn't read as
+// "free" (F-3).
+func renderCost(w func(string, ...any), cp CostPair, t i18n.CompareText) {
+	w("%s", t.CostTitle)
+	if !cp.A.Resolved && !cp.B.Resolved {
+		w("%s", t.CostUnresolved)
+		return
+	}
+	w("%s", t.CostLine(totMoney(cp.A), totMoney(cp.B)))
+	if cp.A.Resolved != cp.B.Resolved {
+		side := "A"
+		if cp.A.Resolved {
+			side = "B"
+		}
+		w("%s", t.CostOneSideNote(side))
+	}
+}
+
+func renderDeliverableSide(w func(string, ...any), label string, s DeliverableStats, t i18n.CompareText) {
+	if !s.Found {
+		w("%s", t.DeliverableNotFound(label))
+		return
+	}
+	w("%s", t.DeliverableFound(label, s.StepSeq, s.ToolName))
+	renderExcerpt(w, t.DeliverableExcerptLabel(label), s.Excerpt, s.Truncated, t)
+}
+
+func renderExcerpt(w func(string, ...any), summary, text string, truncated bool, t i18n.CompareText) {
+	if text == "" {
+		return
+	}
+	note := ""
+	if truncated {
+		note = t.ExcerptTruncatedNote
+	}
+	w("<details><summary>%s%s</summary>\n\n````\n%s\n````\n</details>\n\n", summary, note, text)
+}
+
+// formatMetric renders one MetricDiff side's raw float64 per its Kind.
+func formatMetric(kind MetricKind, v float64) string {
+	switch kind {
+	case KindMillis:
+		return fmtutil.FmtSeconds(time.Duration(v)*time.Millisecond, 1)
+	case KindTokens:
+		return fmtutil.FmtTokens(int64(v))
+	case KindRatio:
+		return pctStr(v)
+	case KindMultiple:
+		return fmt.Sprintf("%.2f×", v)
+	default: // KindCount
+		return fmt.Sprintf("%d", int64(v))
+	}
+}
+
+// formatDelta renders the A→B change as direction plus rough magnitude —
+// "156×" / "0.02×" / "+40%" / newLabel / "-100%" / "—". A symmetric
+// relative percentage (the earlier formatDeltaRel) collapsed every large
+// "B ≫ A" gap toward ±100%: 1.6× and 156× both printed "+99%", so the
+// column the compare view exists to fill couldn't tell them apart (问题 6
+// / R5-1). newLabel is the localized "from nothing" word (a==0, b>0).
+// MetricDiff.DeltaRel — the machine-readable field — is unchanged; this is
+// display only.
+func formatDelta(a, b float64, newLabel string) string {
+	switch {
+	case a == 0 && b == 0:
+		return "—"
+	case a == 0:
+		return newLabel
+	case b == 0:
+		return "-100%"
+	}
+	r := b / a
+	switch {
+	case r >= 100:
+		return fmt.Sprintf("%.0f×", r)
+	case r >= 2:
+		return fmt.Sprintf("%.1f×", r)
+	case r > 0 && r <= 0.1:
+		return fmt.Sprintf("%.2f×", r)
+	case r > 0 && r <= 0.5:
+		return fmt.Sprintf("%.1f×", r)
+	default:
+		return fmt.Sprintf("%+.0f%%", (b-a)/a*100)
+	}
+}
+
+// formatDeltaRel renders a signed relative change as a percentage —
+// "+42%"/"-15%"/"0%". Still used by the corpus report's cache-hit vs
+// no-hit median table (render_corpus.go), where both sides are medians of
+// milliseconds and never 0, so the ±100% compression formatDelta was built
+// to avoid doesn't bite.
+func formatDeltaRel(rel float64) string {
+	sign := "+"
+	if rel < 0 {
+		sign = "-"
+		rel = -rel
+	}
+	return fmt.Sprintf("%s%.0f%%", sign, rel*100)
+}

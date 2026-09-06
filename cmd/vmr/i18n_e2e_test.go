@@ -3,7 +3,7 @@
 // End-to-end tests for the multi-language report/story design (see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section):
 // drives cmdReport/cmdStory exactly as the CLI does (flag parsing included), not
-// internal/report's or internal/story's package-level API directly — the
+// internal/report's or internal/journey's package-level API directly — the
 // thing being tested is the whole -lang/report.yaml wiring through cmd/vmr,
 // which no single package's own tests can see end to end.
 package main

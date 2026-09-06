@@ -1,6 +1,6 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Pairs with internal/story/render_spine.go — the decision-spine layer
+// Pairs with internal/journey/render_spine.go — the decision-spine layer
 // (a 3-second overview card, a compact per-Task action
 // list, per-Step role tags, an optional tool-call timeline) added on top
 // of render_md.go's existing fact-layer renderer. All of it is pure

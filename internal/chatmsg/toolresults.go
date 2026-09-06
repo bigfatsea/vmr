@@ -3,7 +3,7 @@
 // ToolResultList is CheckToolPairing's content-carrying counterpart:
 // CheckToolPairing only proves every tool_call/tool_use id has a matching
 // result (F9's causal-pairing invariant), it doesn't hand back the result's
-// own content or error status. Several internal/story Finding detectors
+// own content or error status. Several internal/journey Finding detectors
 // (Phase 2's precise-retry/unused-result/context-poisoning candidates) need
 // exactly that — which tool_call's result errored, what it actually said —
 // and the only place that existed before this was Event.Msg.Text, a whole

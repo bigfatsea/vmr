@@ -47,7 +47,7 @@ const NewUserWindow = 8
 
 // ErrorResultMarker is the literal text RenderPart embeds for an Anthropic
 // tool_result content block whose `is_error` field is true. Exported so
-// downstream consumers (internal/story) that scan rendered message text for
+// downstream consumers (internal/journey) that scan rendered message text for
 // the marker reference this single source of truth instead of keeping an
 // unguarded hardcoded copy that silently desynchronizes the moment the
 // wording changes. The marker has no leading separator — callers compose

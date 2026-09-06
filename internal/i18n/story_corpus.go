@@ -1,6 +1,6 @@
 // Ver 2026-08-16 18:30, by Gemini 3.7 Flash
 
-// Pairs with internal/story/render_corpus.go (the corpus layer's vmr-story-corpus.md).
+// Pairs with internal/journey/render_corpus.go (the corpus layer's vmr-story-corpus.md).
 package i18n
 
 import "strconv"

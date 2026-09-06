@@ -29,7 +29,7 @@ func TestExtractEntities(t *testing.T) {
 
 func TestExtractEntities_ExtendedPatterns(t *testing.T) {
 	t.Parallel()
-	text := "We checked /etc/hosts, ./cmd/vmr, internal/story/, ExtractEntities, exact_repeat_tool_call, and ran go test ./..."
+	text := "We checked /etc/hosts, ./cmd/vmr, internal/journey/, ExtractEntities, exact_repeat_tool_call, and ran go test ./..."
 	got := ExtractEntities(text)
 
 	contains := func(list []string, target string) bool {
@@ -44,7 +44,7 @@ func TestExtractEntities_ExtendedPatterns(t *testing.T) {
 	expected := []string{
 		"/etc/hosts",
 		"./cmd/vmr",
-		"internal/story/",
+		"internal/journey/",
 		"ExtractEntities",
 		"exact_repeat_tool_call",
 		"go test",

@@ -12,11 +12,11 @@ import (
 // "Journey" in the design doc's sense — a Lineage is deliberately just the
 // structural, zero-inference unit; stitching lineages back together across
 // a Contract/Fork break (this package's stitch.go) is a
-// separate, later pass over the whole Graph, and internal/story.Journey is
+// separate, later pass over the whole Graph, and internal/journey.Journey is
 // what actually chains stitched lineages into one narrative.
 type Lineage struct {
 	// Idx is this package's own bookkeeping order (assignment order within
-	// Scan), not a stable cross-run identifier — internal/story derives its
+	// Scan), not a stable cross-run identifier — internal/journey derives its
 	// user-facing, content-addressed Journey id from RootHash().
 	Idx       int
 	SessKey   string
@@ -33,7 +33,7 @@ type Lineage struct {
 	// lineage (nothing preceded it) — that is NOT the same as "definitely a
 	// fresh conversation": the corpus's input window itself can truncate a
 	// lineage's true head (default: skip such journeys, see
-	// internal/story).
+	// internal/journey).
 	BrokeFrom *BreakInfo
 
 	// Stitch is nil until StitchGraph (stitch.go) runs — a separate pass
@@ -58,7 +58,7 @@ type BreakInfo struct {
 // RootHash identifies this lineage by hashing its ENTIRE first manifest
 // (system hash + every message key, in order) — content-addressed, so the
 // same lineage gets the same id across runs regardless of which other
-// files were also loaded. internal/story's Journey id
+// files were also loaded. internal/journey's Journey id
 // leads with client tag + start/end timestamps for sortability and only
 // uses a short prefix of this hash as a trailing disambiguator — RootHash
 // itself stays the full-strength identity check.
@@ -97,7 +97,7 @@ func (l *Lineage) RootHash() Hash {
 	return out
 }
 
-// lineageIDCodeLen mirrors internal/story's idCodeLen (deriveID) — same
+// lineageIDCodeLen mirrors internal/journey's idCodeLen (deriveID) — same
 // 8-hex-char prefix convention, kept as an independent constant here since
 // ctxgraph is a leaf package and must not depend on story for it.
 const lineageIDCodeLen = 8
@@ -117,7 +117,7 @@ const lineageIDCodeLen = 8
 // (same system prompt, same first user message) hash the same. That is
 // not hypothetical: a real corpus scan (1638 Lineages) found 4 such
 // collisions, all recurring cron/heartbeat jobs firing a fixed message
-// template. internal/story's own deriveID already defends against exactly
+// template. internal/journey's own deriveID already defends against exactly
 // this by folding in client+start+end alongside a RootHash-derived code
 // (see its own doc comment); a caller here that used RootHash bare would
 // have been relying on a guarantee RootHash never claimed to make. Folding

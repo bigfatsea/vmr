@@ -1,6 +1,6 @@
 // Ver 2026-08-12 23:40, by Opus 5
 
-// Pairs with internal/story/render_modelusage.go — one Journey's upstream
+// Pairs with internal/journey/render_modelusage.go — one Journey's upstream
 // model usage/switches.
 package i18n
 

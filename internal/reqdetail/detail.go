@@ -43,7 +43,7 @@ const toolArgsInlineThreshold = 600
 
 // FileName is the deterministic filename for a detail page:
 // {ts}_{virtual}_{real}_{outcome}_{hash8}.md. ts renders in the record's
-// own timezone offset (never fmtutil.DisplayZone — see internal/story's
+// own timezone offset (never fmtutil.DisplayZone — see internal/journey's
 // journey.go deriveID for the existing precedent of this same exception),
 // so the name is identical no matter which machine/timezone generates it.
 // hash8 (ctxgraph.ReqHash8(req)) is what actually guarantees uniqueness;
@@ -188,7 +188,7 @@ func callsCell(calls []string) string {
 // affects anyone else's prev link). m is rec's own Manifest when it
 // exists. prev is the immediately preceding Manifest in the SAME
 // ctxgraph.Lineage (nil for a lineage's first record, or when m is nil) —
-// NOT internal/story's stitched-chain predecessor; that distinction is a
+// NOT internal/journey's stitched-chain predecessor; that distinction is a
 // mid-tier concern this leaf does not know about.
 // linkEvidence, when true, switches the system prompt and declared tool
 // set from inline rendering to a link into ../evidence/ — see

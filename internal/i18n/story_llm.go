@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/story/llm.go (the -compare LLM interpretation layer).
+// Pairs with internal/journey/llm.go (the -compare LLM interpretation layer).
 // The system prompt instructs the model which language to answer in, so the
 // report's language and the interpretation's language always match.
 package i18n
@@ -174,7 +174,7 @@ func LLM(lang Lang) LLMText {
 }
 
 // llmSystemPromptZH is the Chinese system prompt (unchanged in meaning from
-// its previous version — see internal/story/llm.go's own history for why
+// its previous version — see internal/journey/llm.go's own history for why
 // each of its six numbered rules exists).
 const llmSystemPromptZH = `你是一个 Agent 任务执行对比分析助手。你会收到两个 Agent Journey（同一任务的两次不同执行）的结构化对比数据（JSON），包括已经算好的行为剖面指标、工具调用分布、端点/缓存/system prompt 规模等规则事实，以及两段有边界的原文节选（system prompt 节选、可能的最终交付物节选）和逐轮工具调用索引。
 
@@ -202,7 +202,7 @@ Follow these rules strictly:
 // llmSingleJourneySystemPromptZH is the single-Journey LLM layer's system prompt — llm_single.go's
 // SingleJourneyEvidencePack pairs Metrics + the rule-derived Findings list
 // (already a "candidate/suspect list, not a verdict" — see
-// internal/story/findings.go) + a per-turn tool index. The prompt's job is
+// internal/journey/findings.go) + a per-turn tool index. The prompt's job is
 // synthesis/prioritization across what's already there, never inventing a
 // new Finding the rule layer didn't already produce.
 const llmSingleJourneySystemPromptZH = `你是一个 Agent 任务执行复盘助手。你会收到一个 Agent Journey 的结构化数据（JSON），包括已经算好的行为剖面指标、一份规则派生的"疑似问题"候选清单（每条已经带 Code/定位 Step/证据/建议，是候选而不是判决）、以及逐轮工具调用索引。

@@ -39,7 +39,7 @@ var forbiddenImports = map[string][]string{
 		// made the symmetric claim in that comment true by luck rather than
 		// by test — the exact "documented tripwire nobody sees trip" shape
 		// this package exists to eliminate.
-		"vmr/internal/story",
+		"vmr/internal/journey",
 	},
 	"vmr/internal/ctxgraph": {
 		"vmr/internal/router",
@@ -53,7 +53,7 @@ var forbiddenImports = map[string][]string{
 		// real import cycle, not just a layering preference.
 		"vmr/internal/taskseg",
 	},
-	// internal/story (the `vmr story` narrative renderer) sits on top of
+	// internal/journey (the `vmr story` narrative renderer) sits on top of
 	// ctxgraph, never on report — the same reasoning as ctxgraph's own
 	// rule. report's session/task grouping already consumes ctxgraph
 	// directly (session.go's Lineage/Classify use) and shares its
@@ -67,7 +67,7 @@ var forbiddenImports = map[string][]string{
 	// report.Build already does, and pricing is a near-leaf (its only
 	// internal dependency is core). config stays out — the resolver is built
 	// in cmd/vmr and threaded in, same as the report half.
-	"vmr/internal/story": {
+	"vmr/internal/journey": {
 		"vmr/internal/router",
 		"vmr/internal/server",
 		"vmr/internal/report",
@@ -113,7 +113,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/quota",
 		"vmr/internal/pricing",
 		"vmr/internal/report",
-		"vmr/internal/story",
+		"vmr/internal/journey",
 		"vmr/internal/ctxgraph",
 		"vmr/internal/audit",
 	},
@@ -121,7 +121,7 @@ var forbiddenImports = map[string][]string{
 	// batch, the session/task-segmentation primitives built on it —
 	// real-instruction indexing, new-task detection, task titling) is the
 	// shared leaf both report's session.go and story's journey.go depend on
-	// — B2 merged what used to be story's own private internal/story/profile
+	// — B2 merged what used to be story's own private internal/journey/profile
 	// package with a byte-identical copy report carried in session.go, B3
 	// converged the two packages' independent session/task-boundary
 	// algorithms the same way. Neither consumer may depend back on it, or
@@ -140,7 +140,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 		"vmr/internal/config",
 		"vmr/internal/report",
-		"vmr/internal/story",
+		"vmr/internal/journey",
 		"vmr/internal/adapter",
 		"vmr/internal/pricing",
 		"vmr/internal/quota",
@@ -159,7 +159,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 		"vmr/internal/config",
 		"vmr/internal/report",
-		"vmr/internal/story",
+		"vmr/internal/journey",
 		"vmr/internal/ctxgraph",
 		"vmr/internal/taskseg",
 	},
@@ -171,7 +171,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/server",
 		"vmr/internal/config",
 		"vmr/internal/report",
-		"vmr/internal/story",
+		"vmr/internal/journey",
 	},
 }
 

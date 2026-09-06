@@ -46,7 +46,7 @@ type Manifest struct {
 	// network/4xx/5xx errors) — cost attribution keys off this field, not
 	// Endpoint, so an unserved request is never priced and a canceled
 	// stream that DID commit a 2xx still is, on the same basis report
-	// prices it (see internal/story/cost.go). "" (not "-") because unlike
+	// prices it (see internal/journey/cost.go). "" (not "-") because unlike
 	// Endpoint this is a pricing-basis field, never rendered as a label.
 	ServedEndpoint string        `json:"served_endpoint,omitempty"`
 	Stream         bool          `json:"stream,omitempty"`
@@ -75,7 +75,7 @@ type Manifest struct {
 	//
 	// They exist so a journey's $ line and the macro report's $ column price
 	// the same records: internal/report has always priced these estimated
-	// records (and says so in its §2 footnote), internal/story silently
+	// records (and says so in its §2 footnote), internal/journey silently
 	// skipped them, and nothing said the two totals were on different bases.
 	// 0 on a manifest from a pre-v4 parse cache.
 	EstIn  int64 `json:"est_in,omitempty"`
@@ -91,7 +91,7 @@ type Manifest struct {
 	Bytes int `json:"bytes,omitempty"`
 
 	// ClientKeyTag is audit.Record.ClientKeyTag, copied verbatim — "" when
-	// auth was disabled or no key matched. internal/story's Journey id
+	// auth was disabled or no key matched. internal/journey's Journey id
 	// embeds the root manifest's tag so a directory listing groups (and
 	// sorts within) one client at a time.
 	ClientKeyTag string `json:"client_key_tag,omitempty"`

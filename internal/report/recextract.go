@@ -238,7 +238,7 @@ func workloadClassOf(ri *ReqInfo) string {
 // is — not either neighboring session's own token counts, which stay
 // whatever they legitimately were (see TestContextGrowthDoesNotCrossContractBreak).
 // Entity loss reuses chatmsg.ExtractEntities, the same rough file-path/URL
-// scan internal/story's own CompactionInfo uses (sunk to chatmsg so both
+// scan internal/journey's own CompactionInfo uses (sunk to chatmsg so both
 // packages share one implementation).
 // IMPORTANT — caller contract: this function reads c.firstText and c.respText
 // on every compaction ReqInfo in sess.Compactions, so callers must populate

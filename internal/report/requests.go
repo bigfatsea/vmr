@@ -37,7 +37,7 @@ import (
 // RequestsIndex is vmr-requests.json's whole shape: one row per request.
 // The parse cache used to live here too, as a "files" section (see
 // ctxgraph.FileCache/ScanCached) — it's since moved to its own
-// content-hash-sharded directory shared with internal/story
+// content-hash-sharded directory shared with internal/journey
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.parse-cache), so this
 // index stays purely human-scale.
 // vmr-requests-failed.jsonl stays a plain flat JSONL — it's a filtered

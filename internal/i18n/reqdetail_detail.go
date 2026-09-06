@@ -1,7 +1,7 @@
 // Ver 2026-08-20 00:00, by Sonnet 5
 
 // Pairs with internal/reqdetail/detail.go (the per-request details/*.md
-// pages shared by internal/report and internal/story).
+// pages shared by internal/report and internal/journey).
 package i18n
 
 import "strconv"

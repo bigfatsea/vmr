@@ -27,7 +27,7 @@ import (
 // v3 (2026-08): Manifest gains Bytes (decompressed JSON line length), used
 // by cmd/vmr's byte-budget batching.
 // v4 (2026-08): Manifest gains EstIn/EstOut (degraded token estimate for
-// records whose upstream reported no usage), so internal/story prices the
+// records whose upstream reported no usage), so internal/journey prices the
 // same records internal/report has always priced.
 // v5 (2026-09): Manifest gains ServedEndpoint (the endpoint that actually
 // committed a < 400 response, per report's endpointInfo rule) — cost
@@ -88,7 +88,7 @@ type CachedFile struct {
 // just means ScanCached falls back to parsing that one file fresh, exactly
 // as Scan always has. Persisted as one file per entry under a shared
 // .parse-cache/ directory — see LoadCacheDir/SaveCacheDir — so
-// internal/story and internal/report (and any other caller sharing the
+// internal/journey and internal/report (and any other caller sharing the
 // same output directory) read and write the exact same on-disk cache
 // instead of each keeping an independent copy.
 type FileCache struct {

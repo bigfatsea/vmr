@@ -8,7 +8,7 @@ import (
 
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	"vmr/internal/story"
+	story "vmr/internal/journey"
 	"vmr/internal/taskseg"
 )
 

@@ -2,9 +2,9 @@
 
 # Virtual Model Router (vmr) — 设计方案 · Part 2：报表与叙事（Analytics）
 
-本文档描述 vmr 审计日志的两个离线消费方：聚合报表 `vmr report`（`internal/report`）与 Agent 任务叙事重建 `vmr story`（`internal/story` + 支撑层 `internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg`）。读完即可维护与二次开发这一侧。使用文档见 `README.md`/`README.zh.md`、`docs/UserGuide.md`/`UserGuide.zh.md`。
+本文档描述 vmr 审计日志的两个离线消费方：聚合报表 `vmr report`（`internal/report`）与 Agent 任务叙事重建 `vmr story`（`internal/journey` + 支撑层 `internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg`）。读完即可维护与二次开发这一侧。使用文档见 `README.md`/`README.zh.md`、`docs/UserGuide.md`/`UserGuide.zh.md`。
 
-**这是 v4 版设计文档的 Part 2**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。（v4 另有两篇专题：额度感知路由 `docs/VirtualModelRouter_Design_v4_Quota.md`，战略与竞品 `docs/VirtualModelRouter_Design_v4_Strategy.md`。前者与本文档有一处实质接口：`vmr report` 的 §2.5 额度对照表是它那份 `vmr-quota.json` 的离线读者，读取契约与口径一致性纪律以那篇为准。）两份主文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1"记录结构"一节定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
+**这是 v4 版设计文档的 Part 2**：路由核心（虚拟模型、协议透传、Adapter、调度与健康、审计日志格式本身等）见姊妹文档 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）。（v4 另有两篇专题：额度感知路由 `docs/VirtualModelRouter_Design_v4_Quota.md`，战略与竞品 `docs/VirtualModelRouter_Design_v4_Strategy.md`。前者与本文档有一处实质接口：`vmr report` 的 §2.5 额度对照表是它那份 `vmr-quota.json` 的离线读者，读取契约与口径一致性纪律以那篇为准。）两份主文档只通过审计日志的 JSONL 格式耦合——本文档描述的一切都是**离线、只读**地消费 Part 1"记录结构"一节定义的 `audit.Record`，不影响、也不参与任何实时路由决策；`internal/report`/`internal/journey`/`internal/ctxgraph`/`internal/taskseg`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里，这条边界由 `internal/archtest` 的可执行检查强制。
 
 ---
 
@@ -40,7 +40,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 `vmr report`/`vmr story` 的展示层与聚合层反过来：任何把一个已持久化的 `time.Time` 格式化给人看、用它算聚合分桶 key（`vmr-report.md` 的按日期/按小时统计、`vmr-requests.md`/`vmr story` 的每一处时间戳），或者嵌进文件名（per-request `details/*.md`、报告/日志输出路径）的地方，一律先 `.In(fmtutil.DisplayZone)`（= `time.Local`，即运行 `vmr report`/`vmr story` 这台机器的系统默认时区）再格式化——不信任记录自带的原始偏移量，也不硬编码某个固定时区。这样同一批数据不管在哪台机器上生成报告，`vmr-requests.md`/`vmr-report.md`/`vmr story` 三者对同一条记录显示的时间永远彼此一致，且等于"当下看报告"这台机器的本地时间，而不是"当初写日志"那台机器的时区。
 
-`internal/story/journey.go` 的 `deriveID` 是唯一不走这条规则的地方：它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换，即写入那一刻服务器自身的本地偏移量）格式化。这个 id 同时是 `journey-<id>.md`/`compare-*.md` 的文件名，要同时满足①同一份审计数据不管在哪台机器上跑都算出同一个 id 字符串（`-journey`/`-compare` 精确匹配）②文件名里的时间是人一眼能看懂的本地墙钟时间。因为这个偏移量是数据本身的属性、不随读取者变化，两个诉求同时满足——走 `DisplayZone` 会引入①想避免的不稳定性，强制 `UTC` 会导致②的可读性问题。
+`internal/journey/journey.go` 的 `deriveID` 是唯一不走这条规则的地方：它直接用 manifest 自带的 `time.Time`（未经 `.In()`/`.UTC()` 转换，即写入那一刻服务器自身的本地偏移量）格式化。这个 id 同时是 `journey-<id>.md`/`compare-*.md` 的文件名，要同时满足①同一份审计数据不管在哪台机器上跑都算出同一个 id 字符串（`-journey`/`-compare` 精确匹配）②文件名里的时间是人一眼能看懂的本地墙钟时间。因为这个偏移量是数据本身的属性、不随读取者变化，两个诉求同时满足——走 `DisplayZone` 会引入①想避免的不稳定性，强制 `UTC` 会导致②的可读性问题。
 
 ---
 
@@ -86,7 +86,7 @@ vmr report [-c config.yaml] [-o dir] [-details] <file|glob>...
 
 **§2 的口径是"按量计费等价成本"**（pay-as-you-go equivalent，见 Quota 设计文档"简化：砍什么、留什么"一节的⑧）：这些流量若按定价体系里可解析到的公开价（渠道自定价或第一方列表价）逐 Token 计费要花多少。不是实付金额——包月账号边际成本是 0，经转售商/代理的实际单价只有用户知道；要实付价就配 `providers[].pricing.rates`。标题、免责声明、`§0` 摘要列都按这个口径措辞。
 
-**四张表都带合计行，并把"合计里没有什么"说出来**（`costTotalOf`/`renderCostBy*`）。一个静默省略未定价行的合计，是一个精确的、系统性偏低的、读起来完全正常的数字——这正是这一整套披露机制要防的事。三类旁注：**未定价**（N/M 行的端点解析不出费率，成本未知而非 0）｜**降级估算占比**（上游没返回 usage、按字节数推算 Token 后计价的那部分金额，`EndpointRow.CostEstimateEst` 汇总）｜**费率缺分量**（`EndpointRow.CostRateIncomplete`：`pricing.Rate.Cost` 把 nil 分量按 0 计价——一个防御性下限，不是文档化的降级路径——所以这些端点的金额是系统性偏低的下界；厂商不公布 `cache_read` 而账号缓存命中率 90% 时，九成输入 Token 是没计价的）。**未定价的剔除规则（从未成功送达的行不计入未定价分母——那不是定价缺口）仅适用于 endpoint 表**：该表有 attempt 粒度的 `Forwarded` 信号，一个从未送达的端点单独成行会直接制造"为什么没有它的价格"的错觉；model 和 client 表聚合层级不同、没有 attempt 粒度的送达信号，如实列出所有有流量的行（即使其请求全失败）保留了完整性，两个口径的差异是刻意的。`§0` 摘要的成本列在完全没解析出定价时显示"未定价"而**不是 0**——`0` 读起来是"这些流量免费"，正是 `internal/pricing` 整个包在防的 unknown/zero 混淆。展示币种可以和账号实际计费的币种不同——`-currency`（或 `report.yaml` 的 `currency`/`exchange_rate`）在 `buildPricing` 里对 `pricing.Resolver` 套一层 `WithDisplayFactor`，只重新标定最终显示的数字，从不改动实际解析/计费逻辑；解析不出对应汇率时降级为显示原始计费币种并打印一行警告，不会中断报告生成，同样是"定价问题只丢 `$` 列精度，绝不丢整份报告"的既定哲学。**成本基数在两个半区之间是同一个**：`internal/report` 与 `internal/story` 都通过 `pricing.Rate.Cost` 计价（同一个**公式**），但公式的**基数**——哪些记录进入这个和——曾经各选各的：report 把上游没返回 usage 的记录按字节数估算计价并计入总额（`§2` 脚注一直写着），story 直接跳过该 step，于是同一批记录两个产物给出不同金额，而两边都不说自己漏了什么。现已统一：降级估算下沉为一份实现（`chatmsg.BodyRaw`/`EstimateRequestBodyTokens`/`EstimateResponseBodyTokens`，放在 `chatmsg` 而不是 `reqdetail`，因为 `reqdetail` import `ctxgraph`、方向上到不了 manifest 构建），`ctxgraph.Manifest` 带上 `EstIn`/`EstOut`（parse cache v3→v4），`story.ComputeJourneyCost` 按同一基数计价并用 `EstimatedSteps` 披露降级占比；端点归属也一并对齐（`outcome == "error"` 的记录两边都不计——report 侧本就要求"某次 attempt 拿到过 2xx"）。这条等价关系由 `cmd/vmr/cost_basis_parity_test.go` 差分测试钉住，理由与 `quota_parity_test.go` 相同，也同样只能放在能同时看见两个产物的组合根。
+**四张表都带合计行，并把"合计里没有什么"说出来**（`costTotalOf`/`renderCostBy*`）。一个静默省略未定价行的合计，是一个精确的、系统性偏低的、读起来完全正常的数字——这正是这一整套披露机制要防的事。三类旁注：**未定价**（N/M 行的端点解析不出费率，成本未知而非 0）｜**降级估算占比**（上游没返回 usage、按字节数推算 Token 后计价的那部分金额，`EndpointRow.CostEstimateEst` 汇总）｜**费率缺分量**（`EndpointRow.CostRateIncomplete`：`pricing.Rate.Cost` 把 nil 分量按 0 计价——一个防御性下限，不是文档化的降级路径——所以这些端点的金额是系统性偏低的下界；厂商不公布 `cache_read` 而账号缓存命中率 90% 时，九成输入 Token 是没计价的）。**未定价的剔除规则（从未成功送达的行不计入未定价分母——那不是定价缺口）仅适用于 endpoint 表**：该表有 attempt 粒度的 `Forwarded` 信号，一个从未送达的端点单独成行会直接制造"为什么没有它的价格"的错觉；model 和 client 表聚合层级不同、没有 attempt 粒度的送达信号，如实列出所有有流量的行（即使其请求全失败）保留了完整性，两个口径的差异是刻意的。`§0` 摘要的成本列在完全没解析出定价时显示"未定价"而**不是 0**——`0` 读起来是"这些流量免费"，正是 `internal/pricing` 整个包在防的 unknown/zero 混淆。展示币种可以和账号实际计费的币种不同——`-currency`（或 `report.yaml` 的 `currency`/`exchange_rate`）在 `buildPricing` 里对 `pricing.Resolver` 套一层 `WithDisplayFactor`，只重新标定最终显示的数字，从不改动实际解析/计费逻辑；解析不出对应汇率时降级为显示原始计费币种并打印一行警告，不会中断报告生成，同样是"定价问题只丢 `$` 列精度，绝不丢整份报告"的既定哲学。**成本基数在两个半区之间是同一个**：`internal/report` 与 `internal/journey` 都通过 `pricing.Rate.Cost` 计价（同一个**公式**），但公式的**基数**——哪些记录进入这个和——曾经各选各的：report 把上游没返回 usage 的记录按字节数估算计价并计入总额（`§2` 脚注一直写着），story 直接跳过该 step，于是同一批记录两个产物给出不同金额，而两边都不说自己漏了什么。现已统一：降级估算下沉为一份实现（`chatmsg.BodyRaw`/`EstimateRequestBodyTokens`/`EstimateResponseBodyTokens`，放在 `chatmsg` 而不是 `reqdetail`，因为 `reqdetail` import `ctxgraph`、方向上到不了 manifest 构建），`ctxgraph.Manifest` 带上 `EstIn`/`EstOut`（parse cache v3→v4），`story.ComputeJourneyCost` 按同一基数计价并用 `EstimatedSteps` 披露降级占比；端点归属也一并对齐（`outcome == "error"` 的记录两边都不计——report 侧本就要求"某次 attempt 拿到过 2xx"）。这条等价关系由 `cmd/vmr/cost_basis_parity_test.go` 差分测试钉住，理由与 `quota_parity_test.go` 相同，也同样只能放在能同时看见两个产物的组合根。
 
 **已知缺口**：溯源目前只做到聚合级——`report.Pricing` 摘要只给"本次用了哪些定价来源"的总数，单行 `$` 数字看不出它具体走的是标准表还是账号覆盖；真要做需要在 `pricing.Resolve` 的返回值里带上来源标记并一路穿到 `report` 的行结构里，不是小改动，暂缓到额度看板（`section_quota.go`）那批一并考虑，详见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。
 
@@ -139,7 +139,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 
 ### 3.1 `internal/ctxgraph`：内容寻址层
 
-不含任何 Agent 特化知识——纯粹基于消息哈希与结构比较，不做模板匹配。依赖 `{audit, core, chatmsg}`，被 `internal/report`/`internal/story` 共同依赖，自身不依赖两者（`internal/archtest` 强制）。
+不含任何 Agent 特化知识——纯粹基于消息哈希与结构比较，不做模板匹配。依赖 `{audit, core, chatmsg}`，被 `internal/report`/`internal/journey` 共同依赖，自身不依赖两者（`internal/archtest` 强制）。
 
 - **`Manifest`**（`manifest.go`）：一次请求的内容寻址快照——每条非前导 system 消息的哈希（`Keys []Hash`）、前导 system 块整体哈希（`SysHash`/`HasSys`/`LeadSys`）、`SessKey`（`metadata.user_id` 优先，否则 `"anchor:" + Keys[0]`）、`TS`/`Model`/`Usage` 等请求元数据。`Hash` 是消息规范化 JSON 编码的 md5（`encoding/json` 排序 map key，跨请求同一条消息哈希一致）。
 - **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描），或由其流式孪生 `ForEachRecord` 逐条喂给回调、用完即弃（详情页渲染、LLM anchor 校验等「读一次」场景）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。**回捞结果不得被长寿命结构持有**：`story.Step` 只保存 `buildFrom` 从记录里提取好的事实（token 构成、attempt 的 provider/model、本步 delta 的 tool result、system 块字符数），不保存 `*audit.Record` 本身——否则 O(N²) 的原始字节（每轮重发全历史）会被钉在对象图里，把「按需回捞」变成「回捞后缓存」。`Manifest` 另带 `Bytes`（解压 JSON 行长），供 `cmd/vmr` 按字节预算分批构建时把每批的回捞工作集卡在数百 MB。
@@ -168,7 +168,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 
 `openai-responses` 的会话结构也由这层归一化，三方不需单独适配：`Messages` 把顶层 `instructions` 当 anthropic `system` 同类、顶层 `input`（数组或裸字符串）当 `messages` 同类，`input` 数组里无 `role` 的 Item（`function_call`/`function_call_output`/`reasoning`）映射到最接近的角色（assistant/tool/assistant）。`RawArray` 返回 `messages`/`input` 中实际存在的那个数组，供 `ctxgraph.BuildManifest` 等按位置回取原始 JSON 编码，替代五处硬编码的 `body["messages"].([]any)`。响应侧 `FinalMessage`/`ReassembleSSE` 通过共享的 `responsesFinalMessage` 解析 Responses 的 `output[]`（非流式）与 `response.completed` 事件里嵌套的 `response.output[]`（流式）。**只信任 `response.completed` 终态事件，不逐个解析 delta**——Responses 的分片事件字段名还没有真实流量验证过，猜错字段名会静默拼错内容，比"暂时没有数据"更差。
 
-### 3.4 `internal/story`：Journey 视图
+### 3.4 `internal/journey`：Journey 视图
 
 ```
 vmr story [-c config.yaml] [-o dir] [-journey <selector> | -render-all | -compare <id1,id2> | -corpus]
@@ -222,7 +222,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **Markdown 渲染**（`render_md.go`）：单文件自包含，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700——正文含完整对话内容。每个 Step 的"→ detail"指针与 system-prompt 证据指针：单 `-journey` / `-compare` / `-render-all` 路径渲染成指向 `details/*.md` / `evidence/*.md` 的链接；默认批量套件（不物化）渲染成行内 `文件:行` 坐标（`Manifest.Req`），不产生死链接。概览卡在定价可解析时（单 `-journey`/`-compare` 才穿 `*pricing.Resolver`，默认批量套件不穿）多一行成本估算——与 `journey-<id>.json` 的 `cost`、HTML 看板 damage 行同源（`ComputeJourneyCost`），并标注"按标价估算，非实际账单"。
 
-**HTML 单页看板 + 脱敏**（`-journey <id> -html` / `-compare a,b -html`，2026-08）：另写一份单文件自包含 `.html`（内联 CSS + 一小段 `IntersectionObserver` 滚动高亮 JS，零外部请求、theme-aware、0600）——**不是 Markdown 的转写，是一份为分享重新设计的看板**。Journey 看板一屏滚动分四块：判定条（id/时间/结局）· 结构时间轴（Task→Step 骨架，每步一行带模型/工具 chip/failover 徽章/转换标记/Finding 旗标，逐行链回 `details/*.md`）· 指标 grid + 一条内联 SVG sparkline · Findings（规则层 + LLM 层）。Compare 看板三块：两侧头 + 双侧初始指令 · 分岔点大字标出 + 逐指标 A/B 差异表 + endpoint/cache/sysprompt/duration/deliverable/cost 事实（deliverable 两侧都没有则整行跳过；cost 只有一侧解析出定价时加一行"另一侧定价未收录"脚注，空白不等于免费）· LLM 解读段落（`res.Text` 经 `internal/story/mdlite.go` 极简 md→html 渲染）。数据源是 Markdown 渲染器走的同一个 `*story.Journey`/`Metrics`/`[]Finding`，不重解析。`-redact`（需 `-html`）把正文替换为 `‹text: N chars›` 占位、去掉逐步详单链接、Findings 只留代码 + Step 锚、compaction 实体名降级为计数，compare 下另整块去掉 LLM 段；结构/指标/角色/token 数/工具名/时间/compaction 标记均保留。渲染器 `render_html.go` + `render_html_dashboard.go` + `render_html_assets.go` + `render_compare_html.go`，chrome `i18n/story_html.go` + `story_compare_html.go`。仅 `-journey` 单命中 / `-compare` 时出，默认套件不出 HTML。
+**HTML 单页看板 + 脱敏**（`-journey <id> -html` / `-compare a,b -html`，2026-08）：另写一份单文件自包含 `.html`（内联 CSS + 一小段 `IntersectionObserver` 滚动高亮 JS，零外部请求、theme-aware、0600）——**不是 Markdown 的转写，是一份为分享重新设计的看板**。Journey 看板一屏滚动分四块：判定条（id/时间/结局）· 结构时间轴（Task→Step 骨架，每步一行带模型/工具 chip/failover 徽章/转换标记/Finding 旗标，逐行链回 `details/*.md`）· 指标 grid + 一条内联 SVG sparkline · Findings（规则层 + LLM 层）。Compare 看板三块：两侧头 + 双侧初始指令 · 分岔点大字标出 + 逐指标 A/B 差异表 + endpoint/cache/sysprompt/duration/deliverable/cost 事实（deliverable 两侧都没有则整行跳过；cost 只有一侧解析出定价时加一行"另一侧定价未收录"脚注，空白不等于免费）· LLM 解读段落（`res.Text` 经 `internal/journey/mdlite.go` 极简 md→html 渲染）。数据源是 Markdown 渲染器走的同一个 `*story.Journey`/`Metrics`/`[]Finding`，不重解析。`-redact`（需 `-html`）把正文替换为 `‹text: N chars›` 占位、去掉逐步详单链接、Findings 只留代码 + Step 锚、compaction 实体名降级为计数，compare 下另整块去掉 LLM 段；结构/指标/角色/token 数/工具名/时间/compaction 标记均保留。渲染器 `render_html.go` + `render_html_dashboard.go` + `render_html_assets.go` + `render_compare_html.go`，chrome `i18n/story_html.go` + `story_compare_html.go`。仅 `-journey` 单命中 / `-compare` 时出，默认套件不出 HTML。
 
 ### 3.5 行为剖面：九项规则派生指标 + 模型使用/切换（`metrics.go`）
 
@@ -302,13 +302,13 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 每个缝合边界 Step 渲染一段信息损失摘要（`buildCompactionInfo`）：压缩前/后 token 数（取自记录的 `Usage`）、被吞掉的实体（在前驱最后一次请求里出现过、这一步没再提到）与存活的实体（两边都出现）——纯规则、零 LLM 成本，**不修复，只揭示**：不判断丢失是否重要，只把可核查的事实摆出来，供人复核。
 
-### 3.7 双 Journey 对比（`internal/story/compare.go`）
+### 3.7 双 Journey 对比（`internal/journey/compare.go`）
 
 两份已算好的行为剖面（`JourneySummary`）逐项做差，`Compare(a, b JourneySummary, lang)` 纯粹是对 §3.5 九项指标的再加工，零 LLM、不额外采集数据。按模型的 token 拆分是列表型数据，不进这套只吃标量的 diff 机制；`len(Metrics.ModelSwitches)`（切换次数）作为第 13 项标量登记（`MetricModelSwitchCount`）——它是**路由环境**变量，读作"这两个 Journey 的路由环境是否不同"，不能读成"Agent 行为不同"。每行差值配一个 `Notable` 布尔（相对变化 ≥ 30% 且绝对差值超过按指标类型定的噪声下限），不生成自由文本。每行带稳定标识 `Metric`（`MetricCode`）与展示用 `Label` 分离（§4.2）。渲染成 `compare-<a>-vs-<b>.md`（含"成本估算"小节，与同名 JSON 的 `extras.cost` 同源）+ 同名 JSON（断头 Journey 受 `-include-partial` 门控、文件名带 `-partial` 后缀）；`-html` 另写一份对照看板，见 §3.4 的 HTML 看板段。`-compare` 两侧 id 与 `-journey` 一样走 `journeyPatternMatches`（shell glob 或无 glob 字符时按 id 前缀），各取首个命中的候选。
 
 **`Comparison.Extras *ComparisonExtras`**（`ComputeComparisonExtras`，零 LLM 成本、从 `ctxgraph.Manifest`/`Step` 已有字段派生）：模型与端点核查（双侧 distinct `Manifest.Endpoint` 集合是否相同）｜Prompt 缓存命中率（逐轮 `CacheRead/In` 曲线 + 首轮/稳态/最值）｜System Prompt 规模与稳定性（最后一次 `SysChanged` 所在 Step 的 token 数、变更次数，以及一段有边界的原文节选，默认 20000 字符——按真实样本倒推的覆盖量级，"加载了哪些项目上下文文件"这类关键声明常落在第 1.5 万字符处）｜末轮上下文构成（= `Metrics.ContextCurve` 末项）｜总耗时 + 终止方式（墙钟总时长必须紧邻"净工作时长"展示并注明"不是效率指标"；双侧最后一个 Step 的 `Finish` 是最接近"是否被 loop detection 打断"的代理信号）｜**最终交付物对比**（若产出是通过一次"参数形状像文件写入"的工具调用落盘的，逆序取最后一次匹配、附内容节选，默认 6000 字符——VMR 唯一能直接看到"两边交付物本身差多少"而非"过程指标差多少"的证据；两侧都没有则整节跳过，不渲染"A 无 / B 无"）｜**成本估算**（`CostPair`，双侧各一个 `ComputeJourneyCost`，需 `*pricing.Resolver`——两侧都无定价时渲染"无可解析定价"，恰一侧有时另一侧显示 `—` 并加脚注避免被读成免费）｜`Sources []string`（本次对比实际读取的源审计文件路径，渲染成末尾"证据溯源"小节）。
 
-**LLM 解读层**（`internal/story/llm.go`，可选、可整体降级）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析只支持一种最简单的模式——手动指向一个已在跑的 VMR 实例（不做直连上游/健康检查/failover），只认 openai-completions 协议。证据包（`EvidencePack`）只含规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 逐轮"工具名+brief"索引，不塞完整 transcript。system prompt 强约束：数字只能引用给定证据；文本节选的解读必须标注是模型自己的阅读理解；"节选里没提到"不能被当成"确实不存在"断言；必须专门声明 VMR 看不到什么。落盘缓存（目录由 `-llm-cache-dir` / `report.yaml` 的 `llm_cache_dir` 显式指定，无隐式默认路径——见下文 `llm_cache_dir` 一段；key 含 `model` 与 `promptVersion` 防误命中）+ `-llm-dry-run`（只估算证据包大小）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json`。
+**LLM 解读层**（`internal/journey/llm.go`，可选、可整体降级）：`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]`。端点解析只支持一种最简单的模式——手动指向一个已在跑的 VMR 实例（不做直连上游/健康检查/failover），只认 openai-completions 协议。证据包（`EvidencePack`）只含规则事实 + 两段有边界的原文节选（system prompt、最终交付物）+ 逐轮"工具名+brief"索引，不塞完整 transcript。system prompt 强约束：数字只能引用给定证据；文本节选的解读必须标注是模型自己的阅读理解；"节选里没提到"不能被当成"确实不存在"断言；必须专门声明 VMR 看不到什么。落盘缓存（目录由 `-llm-cache-dir` / `report.yaml` 的 `llm_cache_dir` 显式指定，无隐式默认路径——见下文 `llm_cache_dir` 一段；key 含 `model` 与 `promptVersion` 防误命中）+ `-llm-dry-run`（只估算证据包大小）+ 任何失败只在 stderr 打警告、不影响 `.md`/`.json`。
 
 **分叉点检测（`computeDivergence`）**：两个 Journey 按位置对齐（`flattenWithTask` 展平成跨 Task 的 Step 序列，**不是**按 `Step.Seq`——两个独立 Journey 的 `Seq` 编号互不可比），逐位比较一个粗糙的结构签名（`toolSignature`：是否有 `tool_call` + 排序去重后的工具名集合），第一个不同的位置即候选分叉点。严重度：工具名集合不同（或一方有 tool_call 另一方没有）→ `DivergenceHeavy`；集合相同但参数不同 → `DivergenceLight`。产出是纯结构事实（`DivergencePoint`），渲染时紧跟免责声明"分叉点定位 ≠ 根因判定"——"为什么这个分叉更差"永远是解读层的可选推测。
 
@@ -343,7 +343,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 ### 4.1 `internal/i18n`：按来源文件组织的类型化文本
 
-新增的零依赖叶子包，只装类型化的双语文本，不装渲染逻辑、不装业务判断——`internal/report`/`internal/story` 都合法依赖它，它不依赖两者，也不依赖 `internal/config`（语言这类"报表/叙事产物的展示偏好"不属于路由部署配置，`report`/`story` 本来就经常在没有 `config.yaml` 的场景下运行——见 §4.4）。
+新增的零依赖叶子包，只装类型化的双语文本，不装渲染逻辑、不装业务判断——`internal/report`/`internal/journey` 都合法依赖它，它不依赖两者，也不依赖 `internal/config`（语言这类"报表/叙事产物的展示偏好"不属于路由部署配置，`report`/`story` 本来就经常在没有 `config.yaml` 的场景下运行——见 §4.4）。
 
 文本**不放在一个大文件里，也不放在消费它的 `report`/`story` 包里**，而是按"它服务哪个源文件"一一对应拆成多个小文件，延续 `internal/report` 里 `section_*.go` 已经验证过的组织原则：`internal/i18n/report_workload.go` 对应 `section_workload.go`，`story_render.go` 对应 `render_md.go`，以此类推。每个文件导出一个"取当前语言这一份文本"的函数，返回一个只在这个文件里定义的 struct，不做成横跨全部章节的巨型 `Catalog`：
 
@@ -446,7 +446,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 收敛前逐字节相同，调用时向 stderr 打印一行迁移提示，不强制任何人切换。三者在 `cmd/vmr` 内部
 共享同一套执行函数（`runReport`/`setupStoryRun` 及既有的 `renderJourney`/`renderAllJourneys`/
 `compareJourneys`/`corpusStats`），`cmdAnalyze` 本身只做 flag 解析与按选择器路由，不重新实现任何
-渲染或聚合逻辑——`internal/report`/`internal/story` 不因这次收敛发生任何改动，两个 internal 包
+渲染或聚合逻辑——`internal/report`/`internal/journey` 不因这次收敛发生任何改动，两个 internal 包
 依旧互不 import，`cmd/vmr` 依旧是唯一同时看到两半区的组合根。
 
 刻意没有做"一次扫描、一份缓存、一次建图"的深度合并：P3 之后两条命令共用同一个内容哈希分片的
@@ -464,7 +464,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 ### 4.5 LLM 解读层的语言联动
 
-关键约束：中文报告配中文解读，英文报告配英文解读。`internal/story/llm.go` 的 system prompt 因此拆成 `i18n.LLM(lang).SystemPrompt`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
+关键约束：中文报告配中文解读，英文报告配英文解读。`internal/journey/llm.go` 的 system prompt 因此拆成 `i18n.LLM(lang).SystemPrompt`，两个完整常量各自完整叙述规则，不做"共享骨架 + 局部替换"——这段文本是给 LLM 读的完整指令集，硬拆共享/差异部分只会让人更难核对两个语言版本的规则是否真的等价。`promptVersion` 缓存 key（`compare-llm-v2`）追加语言维度（`compare-llm-v2-en`/`compare-llm-v2-zh`）——两种语言各自独立缓存，语言切换自然触发重新调用而不会误命中另一语言的缓存结果。
 
 ### 4.7 扩展性
 

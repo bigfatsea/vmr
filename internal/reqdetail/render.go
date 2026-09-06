@@ -43,8 +43,8 @@ func codeFence(s string) string {
 // < > & get parsed as HTML, up to and including an unescaped <!-- that
 // silently swallows everything up to the next --> a renderer finds,
 // which real corpus content has actually triggered. Exported so
-// internal/story can call this exact implementation
-// instead of maintaining its own copy — see internal/story/render_md.go's
+// internal/journey can call this exact implementation
+// instead of maintaining its own copy — see internal/journey/render_md.go's
 // escapeHTML wrapper for why a second copy is the failure mode this
 // avoids. Content already inside a codeFence block never needs this:
 // CommonMark doesn't parse HTML inside a fenced code block, which is the
@@ -104,7 +104,7 @@ func renderFingerprint(lang i18n.Lang, linkEvidence bool, m, prev *ctxgraph.Mani
 // later column in it, not just eating content the way an unescaped "<!--"
 // does), and a literal newline breaks the one-line-per-row structure
 // GFM tables depend on. Exported for the same reason as EscapeHTML — see
-// its doc comment — internal/story's index table (storyindex.go) writes
+// its doc comment — internal/journey's index table (storyindex.go) writes
 // user-derived titles into table cells too.
 func EscapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")

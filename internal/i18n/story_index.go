@@ -1,6 +1,6 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Pairs with internal/story/storyindex.go (vmr-stories.md).
+// Pairs with internal/journey/storyindex.go (vmr-stories.md).
 package i18n
 
 import "strconv"

@@ -120,7 +120,7 @@ type ReqInfo struct {
 	manifest *ctxgraph.Manifest
 	// prevManifest is the manifest immediately preceding this record's own
 	// within its ctxgraph.Lineage (nil at a lineage's first manifest) —
-	// the same "prev" internal/story's Step.PrevManifest carries, so both
+	// the same "prev" internal/journey's Step.PrevManifest carries, so both
 	// commands hand reqdetail the identical (m, prev) pair and render the
 	// byte-identical page. Derived from the lineage directly, NOT from
 	// the attached-record chain: a compaction-tagged record excluded from
@@ -588,7 +588,7 @@ func group(a *SessionAnalysis, g *ctxgraph.Graph) {
 		// Compaction-tagged records keep their report-only, body-sniffed
 		// treatment (a.Compactions, excluded from session grouping) but
 		// still get their own manifest and lineage prev: detail rendering
-		// depends on both, and internal/story renders the same record with
+		// depends on both, and internal/journey renders the same record with
 		// the same pair — leaving these nil here used to make the two
 		// commands render DIFFERENT pages for the same record.
 		r.prevManifest = prevByLoc[loc]

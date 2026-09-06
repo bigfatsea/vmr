@@ -1,6 +1,6 @@
 // Ver 2026-08-28, by Sonnet 5
 
-// Pairs with internal/story/render_html.go + render_html_dashboard.go — the
+// Pairs with internal/journey/render_html.go + render_html_dashboard.go — the
 // single-page HTML journey dashboard (`vmr analyze -journey <id> -html`).
 // Fixed UI strings only; every number and every piece of conversation
 // content comes from the Journey itself (or, under -redact, a length

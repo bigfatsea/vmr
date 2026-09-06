@@ -6,7 +6,7 @@
 // batch size or machine timezone. This file is the report-side adapter
 // only: it owns the worker pool and the ReqInfo→(path,line,Manifest,prev
 // Manifest) translation, while the actual rendering and naming logic lives
-// in internal/reqdetail — the leaf both this package and internal/story
+// in internal/reqdetail — the leaf both this package and internal/journey
 // render detail pages through, so a page generated via either package's
 // code path is byte-identical (see reqdetail's package doc).
 package report
@@ -58,7 +58,7 @@ type detailJob struct {
 // manifestsFor resolves j's own and lineage-predecessor Manifest from its
 // ReqInfo, when it has one. info.manifest/info.prevManifest are correlated
 // during session analysis (group(), session.go) straight from ctxgraph's
-// lineage — the same prev internal/story's Step.PrevManifest carries, which
+// lineage — the same prev internal/journey's Step.PrevManifest carries, which
 // is what keeps the two commands' pages byte-identical. A Lineage's first
 // record has nil prevManifest; there is no Parent fallback — story's
 // Step.PrevManifest has none either, so adding one here would let the two
@@ -132,7 +132,7 @@ type DetailWriter struct {
 // internal/reqdetail's evidence.go) go into "evidence" next to dir's own
 // parent, i.e. dir's sibling — dir is always {outDir}/details (every
 // caller follows this convention), so this resolves to {outDir}/evidence,
-// matching internal/story's own future use of the same directory (P3.4's
+// matching internal/journey's own future use of the same directory (P3.4's
 // scope is `vmr report` only; the convention itself is package-agnostic).
 func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailWriter, error) {
 	// 0o700/0o600 throughout: detail files carry the same full conversation

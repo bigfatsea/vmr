@@ -213,7 +213,7 @@ func TestExtractUsage_ResponsesNestedUsage(t *testing.T) {
 // TestUsage_Fresh pins the one formula this type's own doc comment states
 // ("In - CacheRead - CacheWrite is the fresh portion") — previously
 // hand-written at four independent call sites (internal/router/quota.go,
-// internal/report/{cost,sticky}.go, internal/story/render_md.go) with no
+// internal/report/{cost,sticky}.go, internal/journey/render_md.go) with no
 // single test covering any of them directly; each site's own behavior was
 // only ever pinned indirectly through that package's higher-level tests.
 func TestUsage_Fresh(t *testing.T) {

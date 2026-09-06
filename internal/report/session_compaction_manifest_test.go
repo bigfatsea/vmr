@@ -18,7 +18,7 @@ import (
 // is one bucket (shared metadata.user_id) holding a single lineage whose
 // manifest sequence is [r1, compaction, r2] via pure Appends, so the
 // compaction's lineage-direct predecessor is r1's manifest and r2's is the
-// compaction's — exactly the (m, prev) internal/story's Step/PrevManifest
+// compaction's — exactly the (m, prev) internal/journey's Step/PrevManifest
 // pair would carry for the same records.
 func TestGroup_CompactionRecordGetsManifestAndPrevManifest(t *testing.T) {
 	zone := time.FixedZone("CST", 8*3600)

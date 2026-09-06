@@ -145,7 +145,7 @@ internal/server            HTTP 入口、鉴权、审计录制、六个端点（
 internal/audit             审计日志（JSONL 落盘）+ 共享的日志文件读取（OpenLogFile/ForEachLine，report/replay 共用）+ OutcomeFor（server/replay 共用的 outcome 判定）
   └─ housekeep.go  历史文件压缩（zstd）+ 按保留期清理
 
-internal/report, internal/story, internal/ctxgraph, internal/taskseg, internal/chatmsg
+internal/report, internal/journey, internal/ctxgraph, internal/taskseg, internal/chatmsg
                             `vmr report`/`vmr story` 的完整实现——见 Part 2（本节 §9.4 已指路），
                             这里只记它们在 import 图里的位置：均不被 internal/router、internal/server 依赖
                             （只读 internal/audit 的 Record 类型），internal/archtest 强制这条边界
@@ -643,7 +643,7 @@ Agent 场景里请求经常带截图/照片附件，但视觉理解通常不需�
 ### 9.4 统计分析工具 `vmr report` / `vmr story`
 
 审计 JSONL 的离线消费方——聚合报表（`vmr report`）与 Agent 任务叙事重建（`vmr story`）——完整设计见姊妹文档
-`docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。两者与本文档描述的路由核心只通过审计日志格式耦合（"记录结构"一节的 Record 结构是它们唯一的输入契约），不共享任何路由期状态，也不反向影响路由决策——`internal/report`/`internal/story`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里（`internal/archtest` 强制这条边界）。
+`docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。两者与本文档描述的路由核心只通过审计日志格式耦合（"记录结构"一节的 Record 结构是它们唯一的输入契约），不共享任何路由期状态，也不反向影响路由决策——`internal/report`/`internal/journey`/`internal/ctxgraph`/`internal/chatmsg` 均不出现在 `internal/router`/`internal/server` 的依赖图里（`internal/archtest` 强制这条边界）。
 
 ### 9.5 历史文件压缩与保留（`internal/audit/housekeep.go`）
 

@@ -261,7 +261,7 @@ func TestRenderPart_AnthropicDocument(t *testing.T) {
 // TestRenderPart_AnthropicToolResultErrorMarker pins the marker contract: an anthropic
 // tool_result content block whose `is_error` field is true must render a
 // line containing chatmsg.ErrorResultMarker. The marker is the single
-// source of truth for the literal text internal/story's metrics.go scans
+// source of truth for the literal text internal/journey's metrics.go scans
 // for; changing the wording here is what would otherwise silently
 // desynchronize seven downstream call sites without any test failing.
 func TestRenderPart_AnthropicToolResultErrorMarker(t *testing.T) {

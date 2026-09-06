@@ -1,7 +1,7 @@
 // Ver 2026-08-20 00:00, by Sonnet 5
 
 // Package reqdetail renders one audit record's detail page — the shared
-// microscopic-tier leaf both internal/report and internal/story sit on top
+// microscopic-tier leaf both internal/report and internal/journey sit on top
 // of (see docs/future-strategy/analyze_architecture_redesign_opus-5.md §1.1).
 // Honesty note on purity, in two tiers:
 //
@@ -91,7 +91,7 @@ func RealModel(rec *audit.Record) string {
 // of which era wrote the record. Deliberately not a private SplitN here: an
 // inlined "/"-only split would silently return ("", "", "") for a
 // colon-joined Endpoint whose structured fields happen to be empty,
-// disagreeing with internal/story's own upstream lookup
+// disagreeing with internal/journey's own upstream lookup
 // (modelusage.go's stepUpstream) on the same record for no reason other
 // than the two having separately hand-rolled the same parse.
 func AttemptUpstream(a audit.Attempt) (protocol, provider, model string) {

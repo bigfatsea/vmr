@@ -1,6 +1,6 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Pairs with internal/story/findings.go — the rule-derived, Step-level
+// Pairs with internal/journey/findings.go — the rule-derived, Step-level
 // "suspect list" findings (design doc's "候选/嫌疑清单，不是判决").
 // Findings text is localized in the target language (for both
 // journey-<id>.md and journey-<id>.json), while FindingCode

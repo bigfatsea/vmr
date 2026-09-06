@@ -4,7 +4,7 @@
 // and CLI commands — design doc's "规则粗筛的实体覆盖率": this deliberately
 // doesn't try to understand what a swallowed message MEANT, only to point at
 // concrete, checkable tokens so a human can judge for themselves whether
-// losing them mattered. Moved here from internal/story once internal/report
+// losing them mattered. Moved here from internal/journey once internal/report
 // also needed the same scan for its compaction section.
 package chatmsg
 
@@ -23,7 +23,7 @@ var (
 	// file paths with extension, e.g. main.go, README.md, internal/report/session.go
 	fileExtRe = regexp.MustCompile(`\b[\w][\w.\-\/]*\.[a-zA-Z][a-zA-Z0-9]{0,7}\b`)
 
-	// directory paths ending with slash, e.g. internal/story/ — requires at
+	// directory paths ending with slash, e.g. internal/journey/ — requires at
 	// least two path segments so a bare word before a slash in ordinary
 	// prose ("and/or", "yes/no") doesn't get mistaken for a directory.
 	dirPathRe = regexp.MustCompile(`\b[\w][\w.\-]*(?:\/[\w.\-]+)+\/`)
@@ -116,7 +116,7 @@ func collectEntitySpans(text string) []rawSpan {
 		}
 	}
 
-	// 4. Directory paths ending with slash (internal/story/)
+	// 4. Directory paths ending with slash (internal/journey/)
 	for _, idx := range dirPathRe.FindAllStringIndex(text, -1) {
 		val := trimPunctuation(text[idx[0]:idx[1]])
 		if len(val) >= 4 {

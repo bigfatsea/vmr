@@ -55,7 +55,7 @@ func selfTrafficExcludeTags(llmKey string, extra []string) map[string]bool {
 // manifest's ClientKeyTag is a self-traffic tag (P6.4) — filtered here in
 // cmd/vmr, not inside story.ListCandidates: self-traffic identification is
 // a deployment-time configuration fact, not a structural signal, so it
-// doesn't belong in internal/story's own "no new guessing" judgment.
+// doesn't belong in internal/journey's own "no new guessing" judgment.
 func filterSelfTrafficCandidates(cands []*ctxgraph.Lineage, llmKey string, extra []string) []*ctxgraph.Lineage {
 	excludeTags := selfTrafficExcludeTags(llmKey, extra)
 	if len(excludeTags) == 0 {
