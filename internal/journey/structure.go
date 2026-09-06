@@ -20,23 +20,34 @@
 package journey
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
 )
 
-// structureExcerptChars bounds every inlined free-text field in this file
-// (RespText, Reasoning, a tool call's Args) — reuses compare.go's existing
-// excerpt cap (initialInstructionExcerptChars, P1.3's decided bound) rather
-// than inventing a second one, so "how much inlined text is too much" has a
-// single answer in the codebase. Measured against real corpus data (P4's
-// execution record): on a 22-step/33-tool-call sample Journey, only 6/33
-// tool-call Args and 0/22 RespText excerpts actually hit this cap — 2000 is
-// not aggressive for this workload. If a future corpus shows otherwise,
-// split it into its own named constant with a comment explaining why it
-// differs; don't let it silently drift from this one.
-const structureExcerptChars = initialInstructionExcerptChars
+// maxBodyExcerptChars is the uniform 3000-character data-layer truncation cap
+// for tool-call arguments, tool-call results, and compaction predecessor excerpts (D18 / §3.6).
+// RespText/Reasoning stored under RespRef has no character limit.
+const maxBodyExcerptChars = 3000
+
+// structureExcerptChars is retained for backwards compatibility with existing references.
+const structureExcerptChars = maxBodyExcerptChars
+
+func hashText(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+type blobStore map[string]string
+
+func (b blobStore) put(text string) string {
+	h := hashText(text)
+	b[h] = text
+	return h
+}
 
 // EventRef is one message's structural identity within the Journey's
 // globally de-duped event stream — a REFERENCE, never its text: an ordinary
@@ -70,31 +81,21 @@ type EventRef struct {
 	Revises      *ctxgraph.Hash `json:"revises,omitempty"`
 }
 
-// ToolCallRef is one Step's tool call — its own arguments (this turn's
-// decision, inlined and bounded) plus whether a paired result was found and
-// whether that result was an error. The result's TEXT is deliberately NOT
-// carried here: a tool result is conversation-history content, not a
-// decision — it is what the client echoes back into the NEXT request, so it
-// already exists as that next Step's tool-role NewEvent (verified on a real
-// 33-tool-call sample Journey: exactly 33 tool-role NewEvents appear across
-// the Journey, one per matched call). Inlining it as well would store the
-// same blob under two addresses inside the same tree, which is exactly what
-// the architecture doc's blob/tree principle rules out. Matched/ID/Name are
-// paired ONLY via findings_toolresult.go's toolResultsFor (exact + id-
-// normalized matching — the same precise pairing the decision spine and the
-// three Finding detectors already trust, P1.1). The render-layer-only
-// positional fallback (positionalToolResults, render_spine_step.go) never
-// appears here — it is a guess, and a machine-readable structural contract
-// does not carry guesses (architecture doc §5.6). Matched=false means
-// toolResultsFor found no pairing for this call; ResultError is then false
-// (not a claim that a found result was error-free).
+// ToolResultRef is one tool call's paired result reference, confidence level,
+// and error status (D18 / §3.6).
+type ToolResultRef struct {
+	Ref     string `json:"ref"`
+	Match   string `json:"match"` // "exact" | "normalized" | "positional"
+	IsError bool   `json:"is_error,omitempty"`
+}
+
+// ToolCallRef is one Step's tool call — referencing its arguments in the bodies
+// blob table (args_ref), plus its paired result reference (result) if found (D18 / §3.6).
 type ToolCallRef struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Args          string `json:"args,omitempty"`
-	ArgsTruncated bool   `json:"args_truncated,omitempty"`
-	Matched       bool   `json:"matched"`
-	ResultError   bool   `json:"result_error,omitempty"`
+	ID      string         `json:"id"`
+	Name    string         `json:"name"`
+	ArgsRef string         `json:"args_ref,omitempty"`
+	Result  *ToolResultRef `json:"result,omitempty"`
 }
 
 // EditRef mirrors ctxgraph.Edit — the message-history transition
@@ -125,21 +126,14 @@ type StitchRef struct {
 	Confidence float64 `json:"confidence"`
 }
 
-// CompactionRef mirrors CompactionInfo minus PredecessorTextExcerpt — that
-// field is a bounded excerpt of the swallowed predecessor's own message
-// text (conversation-history content, per this file's inline/reference
-// boundary), while TokensBefore/After and the entity lists below are rule-
-// derived FACTS about that content (counts and name lists, not the content
-// itself), the same class of thing EditRef/StitchRef's classifications are.
-// Excluding the excerpt is a real, deliberate narrowing versus what fact-
-// layer shows today; if a future consumer needs the excerpt too, it should
-// be added here explicitly rather than assumed lost, since nothing else
-// carries it once P5.1 removes the rendering.
+// CompactionRef mirrors CompactionInfo, referencing the predecessor excerpt in
+// the bodies blob store (D18 / §3.6).
 type CompactionRef struct {
-	TokensBefore      int64    `json:"tokens_before"`
-	TokensAfter       int64    `json:"tokens_after"`
-	SwallowedEntities []string `json:"swallowed_entities,omitempty"`
-	SurvivedEntities  []string `json:"survived_entities,omitempty"`
+	TokensBefore          int64    `json:"tokens_before"`
+	TokensAfter           int64    `json:"tokens_after,omitempty"`
+	PredecessorExcerptRef string   `json:"predecessor_excerpt_ref,omitempty"`
+	SwallowedEntities     []string `json:"swallowed_entities,omitempty"`
+	SurvivedEntities      []string `json:"survived_entities,omitempty"`
 }
 
 // StepStructure is one Step's complete machine-readable shape: its own req
@@ -190,12 +184,9 @@ type StepStructure struct {
 	NoReply        bool   `json:"no_reply,omitempty"`
 	Finish         string `json:"finish,omitempty"`
 
-	RespText           string        `json:"resp_text,omitempty"`
-	RespTextTruncated  bool          `json:"resp_text_truncated,omitempty"`
-	Reasoning          string        `json:"reasoning,omitempty"`
-	ReasoningTruncated bool          `json:"reasoning_truncated,omitempty"`
-	ToolCalls          []ToolCallRef `json:"tool_calls,omitempty"`
-	NewEvents          []EventRef    `json:"new_events,omitempty"`
+	RespRef   string        `json:"resp_ref,omitempty"`
+	ToolCalls []ToolCallRef `json:"tool_calls,omitempty"`
+	NewEvents []EventRef    `json:"new_events,omitempty"`
 }
 
 // TaskStructure mirrors Task: a title plus its Steps' full structure.
@@ -205,28 +196,26 @@ type TaskStructure struct {
 }
 
 // JourneyStructure is journey-<id>.json's "structure" field — the complete
-// Task/Step/Event/ToolCall skeleton, absent any conversation-history
-// message body (see EventRef's doc comment). Concatenating every Step's
-// NewEvents in Task/Step order reproduces Journey.Events exactly —
-// journey.go's appendNewEvents writes to both step.NewEvents and j.Events
-// in the same loop — so this deliberately does NOT also carry a top-level
-// Events array; that would be the same data published twice.
+// Task/Step/Event/ToolCall skeleton plus self-contained bodies blob store (D18 / §3.6).
 type JourneyStructure struct {
-	Tasks []TaskStructure `json:"tasks"`
+	Tasks  []TaskStructure   `json:"tasks"`
+	Bodies map[string]string `json:"bodies,omitempty"`
 }
 
 // BuildStructure assembles j's already-computed Task/Step/Event data into
-// its published JSON shape. Purely a projection — no new facts are
-// computed here beyond the inline/reference boundary and the excerpt
-// truncation it applies to decision-content text fields.
+// its published JSON shape, populating the deduplicated bodies table (D18 / §3.6).
 func BuildStructure(j *Journey) JourneyStructure {
 	steps := journeySteps(j)
-	seq := 0 // steps' global index, kept in lockstep with the Task/Step walk below — journeySteps(j) has the same order, so this avoids re-searching it per Step
-	out := JourneyStructure{Tasks: make([]TaskStructure, 0, len(j.Tasks))}
+	bodies := make(blobStore)
+	seq := 0
+	out := JourneyStructure{
+		Tasks:  make([]TaskStructure, 0, len(j.Tasks)),
+		Bodies: bodies,
+	}
 	for _, task := range j.Tasks {
 		ts := TaskStructure{Title: task.Title, Steps: make([]StepStructure, 0, len(task.Steps))}
 		for _, s := range task.Steps {
-			ts.Steps = append(ts.Steps, buildStepStructure(steps, seq, s))
+			ts.Steps = append(ts.Steps, buildStepStructure(steps, seq, s, bodies))
 			seq++
 		}
 		out.Tasks = append(out.Tasks, ts)
@@ -234,25 +223,83 @@ func BuildStructure(j *Journey) JourneyStructure {
 	return out
 }
 
-// buildStepStructure builds one Step's StepStructure. steps/i are the full
-// Journey-order slice and s's index within it — toolResultsFor needs both
-// (it looks at steps[i+1] for the paired result), not just s itself.
-func buildStepStructure(steps []*Step, i int, s *Step) StepStructure {
-	respText, respTrunc := truncateText(s.RespText, structureExcerptChars)
-	reasoning, reasoningTrunc := truncateText(s.Reasoning, structureExcerptChars)
+type matchedToolResult struct {
+	result chatmsg.ToolResult
+	match  string // "exact" | "normalized" | "positional"
+}
 
-	ss := StepStructure{
-		Seq:                s.Seq,
-		DeltaStart:         s.DeltaStart,
-		SysChanged:         s.SysChanged,
-		HumanInitiated:     s.HumanInitiated,
-		NoReply:            s.NoReply,
-		Finish:             s.Finish,
-		RespText:           respText,
-		RespTextTruncated:  respTrunc,
-		Reasoning:          reasoning,
-		ReasoningTruncated: reasoningTrunc,
+func pairToolResults(steps []*Step, i int) map[string]matchedToolResult {
+	if i < 0 || i >= len(steps) || len(steps[i].ToolCalls) == 0 || i+1 >= len(steps) {
+		return nil
 	}
+	s := steps[i]
+	exactIDs := make(map[string]bool, len(s.ToolCalls))
+	normToOrig := make(map[string]string, len(s.ToolCalls))
+	for _, tc := range s.ToolCalls {
+		exactIDs[tc.ID] = true
+		normToOrig[chatmsg.NormalizeToolCallID(tc.ID)] = tc.ID
+	}
+
+	out := make(map[string]matchedToolResult, len(s.ToolCalls))
+	byID := make(map[string]chatmsg.ToolResult, len(s.ToolCalls))
+
+	// Pass 1: exact matches
+	for _, r := range steps[i+1].NewToolResults {
+		if exactIDs[r.CallID] {
+			if _, already := out[r.CallID]; !already {
+				out[r.CallID] = matchedToolResult{result: r, match: "exact"}
+				byID[r.CallID] = r
+			}
+		}
+	}
+
+	// Pass 2: normalized matches for unresolved calls
+	for _, r := range steps[i+1].NewToolResults {
+		if exactIDs[r.CallID] {
+			continue
+		}
+		norm := chatmsg.NormalizeToolCallID(r.CallID)
+		if orig, ok := normToOrig[norm]; ok {
+			if _, already := out[orig]; !already {
+				rNorm := r
+				rNorm.CallID = orig
+				out[orig] = matchedToolResult{result: rNorm, match: "normalized"}
+				byID[orig] = rNorm
+			}
+		}
+	}
+
+	// Pass 3: positional fallback for still-unresolved calls
+	posByID := positionalToolResults(steps, i, byID)
+	for callID, r := range posByID {
+		if _, ok := out[callID]; !ok {
+			out[callID] = matchedToolResult{result: r, match: "positional"}
+		}
+	}
+
+	return out
+}
+
+// buildStepStructure builds one Step's StepStructure.
+func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore) StepStructure {
+	ss := StepStructure{
+		Seq:            s.Seq,
+		DeltaStart:     s.DeltaStart,
+		SysChanged:     s.SysChanged,
+		HumanInitiated: s.HumanInitiated,
+		NoReply:        s.NoReply,
+		Finish:         s.Finish,
+	}
+
+	// RespText / Reasoning into bodies without character limit (D18 / §3.6)
+	respContent := s.RespText
+	if respContent == "" {
+		respContent = s.Reasoning
+	}
+	if respContent != "" {
+		ss.RespRef = bodies.put(respContent)
+	}
+
 	if s.Manifest != nil {
 		ss.Req = s.Manifest.Req
 		ss.TS = s.Manifest.TS
@@ -270,27 +317,38 @@ func buildStepStructure(steps []*Step, i int, s *Step) StepStructure {
 		ss.StitchEdge = &StitchRef{Kind: s.StitchEdge.Kind.String(), Score: s.StitchEdge.Score, Confidence: s.StitchEdge.Confidence}
 	}
 	if s.Compaction != nil {
+		var excerptRef string
+		if s.Compaction.PredecessorTextExcerpt != "" {
+			excerpt, _ := truncateText(s.Compaction.PredecessorTextExcerpt, maxBodyExcerptChars)
+			excerptRef = bodies.put(excerpt)
+		}
 		ss.Compaction = &CompactionRef{
-			TokensBefore:      s.Compaction.TokensBefore,
-			TokensAfter:       s.Compaction.TokensAfter,
-			SwallowedEntities: s.Compaction.SwallowedEntities,
-			SurvivedEntities:  s.Compaction.SurvivedEntities,
+			TokensBefore:          s.Compaction.TokensBefore,
+			TokensAfter:           s.Compaction.TokensAfter,
+			PredecessorExcerptRef: excerptRef,
+			SwallowedEntities:     s.Compaction.SwallowedEntities,
+			SurvivedEntities:      s.Compaction.SurvivedEntities,
 		}
 	}
 
 	if len(s.ToolCalls) > 0 {
-		matched := toolResultsFor(steps, i)
-		byID := make(map[string]chatmsg.ToolResult, len(matched))
-		for _, r := range matched {
-			byID[r.CallID] = r
-		}
+		paired := pairToolResults(steps, i)
 		ss.ToolCalls = make([]ToolCallRef, 0, len(s.ToolCalls))
 		for _, tc := range s.ToolCalls {
-			args, argsTrunc := truncateText(tc.Args, structureExcerptChars)
-			ref := ToolCallRef{ID: tc.ID, Name: tc.Name, Args: args, ArgsTruncated: argsTrunc}
-			if r, ok := byID[tc.ID]; ok {
-				ref.Matched = true
-				ref.ResultError = r.IsError
+			var argsRef string
+			if tc.Args != "" {
+				args, _ := truncateText(tc.Args, maxBodyExcerptChars)
+				argsRef = bodies.put(args)
+			}
+			ref := ToolCallRef{ID: tc.ID, Name: tc.Name, ArgsRef: argsRef}
+			if p, ok := paired[tc.ID]; ok {
+				resText, _ := truncateText(p.result.Text, maxBodyExcerptChars)
+				resRef := bodies.put(resText)
+				ref.Result = &ToolResultRef{
+					Ref:     resRef,
+					Match:   p.match,
+					IsError: p.result.IsError,
+				}
 			}
 			ss.ToolCalls = append(ss.ToolCalls, ref)
 		}

@@ -267,3 +267,32 @@ func TestRenderMarkdown_BreakWarning_Fork(t *testing.T) {
 		t.Errorf("rendered Markdown missing Fork warning:\n%s", md)
 	}
 }
+
+func TestRenderMarkdown_PartialBanner(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	r1 := mkRec(at(0), "", []any{msg("system", "sys"), msg("user", "test partial")}, sseText("working"))
+	path := writeJSONL(t, []audit.Record{r1})
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// Default: not partial
+	md := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, false, nil)
+	if strings.Contains(md, i18n.StoryHTML(i18n.EN).PartialBanner) {
+		t.Errorf("non-partial journey should not contain warning banner:\n%s", md)
+	}
+
+	// Flagged partial: banner must appear in EN
+	j.Partial = true
+	mdPartialEN := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), i18n.EN, false, false, nil)
+	if !strings.Contains(mdPartialEN, i18n.StoryHTML(i18n.EN).PartialBanner) {
+		t.Errorf("partial journey EN missing partial banner:\n%s", mdPartialEN)
+	}
+
+	// Flagged partial: banner must appear in ZH
+	mdPartialZH := RenderMarkdown(j, ComputeMetrics(j), ComputeFindings(j, i18n.ZH), i18n.ZH, false, false, nil)
+	if !strings.Contains(mdPartialZH, i18n.StoryHTML(i18n.ZH).PartialBanner) {
+		t.Errorf("partial journey ZH missing partial banner:\n%s", mdPartialZH)
+	}
+}

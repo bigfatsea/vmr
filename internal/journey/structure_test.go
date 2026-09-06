@@ -143,8 +143,14 @@ func TestBuildStructure_ToolCallRefHasNoResultText(t *testing.T) {
 		t.Fatalf("step 1: %d tool calls, want 1", len(step1.ToolCalls))
 	}
 	tc := step1.ToolCalls[0]
-	if !tc.Matched || tc.ResultError {
-		t.Errorf("step 1 tool call: Matched=%v ResultError=%v, want Matched=true ResultError=false", tc.Matched, tc.ResultError)
+	if tc.Result == nil || tc.Result.Match != "exact" || tc.Result.IsError {
+		t.Errorf("step 1 tool call: Result=%+v, want Match=exact IsError=false", tc.Result)
+	}
+	if tc.Result.Ref == "" || structure.Bodies[tc.Result.Ref] != "rate: 7.1" {
+		t.Errorf("step 1 tool call: result ref %q resolves to %q, want \"rate: 7.1\"", tc.Result.Ref, structure.Bodies[tc.Result.Ref])
+	}
+	if tc.ArgsRef == "" || structure.Bodies[tc.ArgsRef] != `{"pair":"USDCNY"}` {
+		t.Errorf("step 1 tool call: args ref %q resolves to %q, want `{\"pair\":\"USDCNY\"}`", tc.ArgsRef, structure.Bodies[tc.ArgsRef])
 	}
 	// ToolCallRef has no Result field at all — this is a compile-time
 	// guarantee (the struct literal above would fail to build if it did),
@@ -383,3 +389,320 @@ func buildJourneyWithArgsLen(t *testing.T, argsLen int) *Journey {
 	}
 	return j
 }
+
+// TestBuildStructure_BodiesIntegrity locks the D18 / §3.6 invariants:
+// 1. No dangling references: every *_ref resolves to a valid body in bodies table.
+// 2. No orphan blobs: every entry in bodies table is referenced by at least one *_ref.
+// 3. De-duplication: identical strings map to the exact same hash reference.
+func TestBuildStructure_BodiesIntegrity(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sameArgs := `{"query":"status"}`
+	sameResult := "all systems operational"
+
+	s1 := &Step{
+		Seq:      1,
+		RespText: "Step 1 initial plan",
+		ToolCalls: []chatmsg.ToolCall{
+			{ID: "call_1", Name: "fetch", Args: `{"url":"https://example.com"}`},
+		},
+		Manifest: mkManifest(at(0)),
+	}
+	s2 := &Step{
+		Seq:       2,
+		Reasoning: "thinking through step 2",
+		ToolCalls: []chatmsg.ToolCall{
+			{ID: "call_2", Name: "check", Args: sameArgs},
+			{ID: "call_3", Name: "check", Args: sameArgs}, // Identical args to call_2
+		},
+		NewToolResults: []chatmsg.ToolResult{
+			{CallID: "call_1", Text: "fetched body ok", IsError: false},
+		},
+		Manifest: mkManifest(at(1)),
+	}
+	s3 := &Step{
+		Seq: 3,
+		Compaction: &CompactionInfo{
+			TokensBefore:           15000,
+			TokensAfter:            3000,
+			PredecessorTextExcerpt: "summary of earlier dialogue",
+		},
+		NewToolResults: []chatmsg.ToolResult{
+			{CallID: "call_2", Text: sameResult, IsError: false},
+			{CallID: "call_3", Text: sameResult, IsError: false}, // Identical result to call_2
+		},
+		Manifest: mkManifest(at(2)),
+	}
+
+	j := &Journey{
+		ID: "j-test-bodies",
+		Tasks: []*Task{
+			{Title: "Task 1", Steps: []*Step{s1, s2}},
+			{Title: "Task 2", Steps: []*Step{s3}},
+		},
+	}
+
+	structure := BuildStructure(j)
+
+	if len(structure.Bodies) == 0 {
+		t.Fatal("expected non-empty Bodies map")
+	}
+
+	// 1. Check that call_2 and call_3 deduplicated their args ref
+	step2 := structure.Tasks[0].Steps[1]
+	if len(step2.ToolCalls) != 2 {
+		t.Fatalf("step 2 tool calls = %d, want 2", len(step2.ToolCalls))
+	}
+	if step2.ToolCalls[0].ArgsRef == "" || step2.ToolCalls[0].ArgsRef != step2.ToolCalls[1].ArgsRef {
+		t.Errorf("expected call_2 and call_3 to share identical ArgsRef, got %q and %q",
+			step2.ToolCalls[0].ArgsRef, step2.ToolCalls[1].ArgsRef)
+	}
+
+	// Check that call_2 and call_3 deduplicated their result ref
+	step3 := structure.Tasks[1].Steps[0]
+	if step3.Compaction == nil || step3.Compaction.PredecessorExcerptRef == "" {
+		t.Fatalf("expected step 3 to have compaction with predecessor excerpt ref")
+	}
+	if step2.ToolCalls[0].Result == nil || step2.ToolCalls[1].Result == nil {
+		t.Fatalf("expected step 2 tool calls to have paired results")
+	}
+	if step2.ToolCalls[0].Result.Ref == "" || step2.ToolCalls[0].Result.Ref != step2.ToolCalls[1].Result.Ref {
+		t.Errorf("expected call_2 and call_3 to share identical Result.Ref, got %q and %q",
+			step2.ToolCalls[0].Result.Ref, step2.ToolCalls[1].Result.Ref)
+	}
+
+	// 2. Assert no dangling references
+	referencedRefs := make(map[string]int)
+	recordRef := func(ref string, fieldName string) {
+		if ref == "" {
+			return
+		}
+		val, ok := structure.Bodies[ref]
+		if !ok {
+			t.Errorf("dangling reference: %s ref %q not found in Bodies table", fieldName, ref)
+		}
+		if val == "" {
+			t.Errorf("empty body stored for %s ref %q", fieldName, ref)
+		}
+		referencedRefs[ref]++
+	}
+
+	for _, task := range structure.Tasks {
+		for _, step := range task.Steps {
+			recordRef(step.RespRef, "RespRef")
+			if step.Compaction != nil {
+				recordRef(step.Compaction.PredecessorExcerptRef, "Compaction.PredecessorExcerptRef")
+			}
+			for _, tc := range step.ToolCalls {
+				recordRef(tc.ArgsRef, "ToolCall.ArgsRef")
+				if tc.Result != nil {
+					recordRef(tc.Result.Ref, "ToolCall.Result.Ref")
+				}
+			}
+		}
+	}
+
+	// 3. Assert no orphan blobs
+	for blobKey, blobVal := range structure.Bodies {
+		if count, ok := referencedRefs[blobKey]; !ok || count == 0 {
+			t.Errorf("orphan blob found in Bodies: key=%q val=%q has 0 references", blobKey, blobVal)
+		}
+	}
+
+	if len(referencedRefs) != len(structure.Bodies) {
+		t.Errorf("referenced ref count %d != bodies count %d", len(referencedRefs), len(structure.Bodies))
+	}
+}
+
+// TestBuildStructure_ThreeLevelToolPairing verifies exact, normalized,
+// and positional tool result pairing levels (D18 / §3.6).
+func TestBuildStructure_ThreeLevelToolPairing(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+
+	s1 := &Step{
+		Seq: 1,
+		ToolCalls: []chatmsg.ToolCall{
+			{ID: "call_exact_1", Name: "fetch", Args: "{}"},
+			{ID: "call_norm_2", Name: "read", Args: "{}"},
+			{ID: "call_pos_3", Name: "eval", Args: "{}"},
+		},
+		Manifest: mkManifest(at(0)),
+	}
+
+	// In s2:
+	// 1. exact match: ID matches "call_exact_1" verbatim
+	// 2. normalized match: ID "callnorm2" matches "call_norm_2" when underscores stripped
+	// 3. positional match: ID "call_random_unknown" positionally matches the 1 leftover call
+	// And s2 introduces an unmatched tool call "call_unmatched_4" that receives no answer in s3.
+	s2 := &Step{
+		Seq: 2,
+		ToolCalls: []chatmsg.ToolCall{
+			{ID: "call_unmatched_4", Name: "skip", Args: "{}"},
+		},
+		NewToolResults: []chatmsg.ToolResult{
+			{CallID: "call_exact_1", Text: "exact result", IsError: false},
+			{CallID: "callnorm2", Text: "norm result", IsError: true},
+			{CallID: "call_random_unknown", Text: "positional result", IsError: false},
+		},
+		Manifest: mkManifest(at(1)),
+	}
+
+	s3 := &Step{
+		Seq:      3,
+		Manifest: mkManifest(at(2)),
+	}
+
+	j := &Journey{
+		ID: "j-test-pairing",
+		Tasks: []*Task{
+			{Title: "Task", Steps: []*Step{s1, s2, s3}},
+		},
+	}
+
+	structure := BuildStructure(j)
+	step1 := structure.Tasks[0].Steps[0]
+	if len(step1.ToolCalls) != 3 {
+		t.Fatalf("step 1 tool calls = %d, want 3", len(step1.ToolCalls))
+	}
+
+	byID := make(map[string]ToolCallRef)
+	for _, tc := range step1.ToolCalls {
+		byID[tc.ID] = tc
+	}
+
+	// 1. Exact match
+	exactTC := byID["call_exact_1"]
+	if exactTC.Result == nil {
+		t.Fatal("call_exact_1 should be matched")
+	}
+	if exactTC.Result.Match != "exact" {
+		t.Errorf("call_exact_1 match = %q, want \"exact\"", exactTC.Result.Match)
+	}
+	if exactTC.Result.IsError {
+		t.Errorf("call_exact_1 IsError = true, want false")
+	}
+	if structure.Bodies[exactTC.Result.Ref] != "exact result" {
+		t.Errorf("call_exact_1 result text = %q, want \"exact result\"", structure.Bodies[exactTC.Result.Ref])
+	}
+
+	// 2. Normalized match
+	normTC := byID["call_norm_2"]
+	if normTC.Result == nil {
+		t.Fatal("call_norm_2 should be matched")
+	}
+	if normTC.Result.Match != "normalized" {
+		t.Errorf("call_norm_2 match = %q, want \"normalized\"", normTC.Result.Match)
+	}
+	if !normTC.Result.IsError {
+		t.Errorf("call_norm_2 IsError = false, want true")
+	}
+	if structure.Bodies[normTC.Result.Ref] != "norm result" {
+		t.Errorf("call_norm_2 result text = %q, want \"norm result\"", structure.Bodies[normTC.Result.Ref])
+	}
+
+	// 3. Positional match
+	posTC := byID["call_pos_3"]
+	if posTC.Result == nil {
+		t.Fatal("call_pos_3 should be matched")
+	}
+	if posTC.Result.Match != "positional" {
+		t.Errorf("call_pos_3 match = %q, want \"positional\"", posTC.Result.Match)
+	}
+	if structure.Bodies[posTC.Result.Ref] != "positional result" {
+		t.Errorf("call_pos_3 result text = %q, want \"positional result\"", structure.Bodies[posTC.Result.Ref])
+	}
+
+	// 4. Unmatched call in step 2
+	step2 := structure.Tasks[0].Steps[1]
+	if len(step2.ToolCalls) != 1 {
+		t.Fatalf("step 2 tool calls = %d, want 1", len(step2.ToolCalls))
+	}
+	unmatchedTC := step2.ToolCalls[0]
+	if unmatchedTC.Result != nil {
+		t.Errorf("call_unmatched_4 should have nil Result, got %+v", unmatchedTC.Result)
+	}
+}
+
+// TestBuildStructure_TruncationLimits verifies the uniform 3000 character limit
+// for tool args, tool results, and compaction predecessor excerpts, while RespText
+// remains completely untruncated (D18 / §3.6).
+func TestBuildStructure_TruncationLimits(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	long4000 := strings.Repeat("A", 4000)
+
+	s1 := &Step{
+		Seq:      1,
+		RespText: long4000,
+		ToolCalls: []chatmsg.ToolCall{
+			{ID: "c1", Name: "test", Args: long4000},
+		},
+		Manifest: mkManifest(at(0)),
+	}
+	s2 := &Step{
+		Seq: 2,
+		Compaction: &CompactionInfo{
+			TokensBefore:           5000,
+			PredecessorTextExcerpt: long4000,
+		},
+		NewToolResults: []chatmsg.ToolResult{
+			{CallID: "c1", Text: long4000},
+		},
+		Manifest: mkManifest(at(1)),
+	}
+
+	j := &Journey{
+		ID: "j-test-caps",
+		Tasks: []*Task{
+			{Title: "Task", Steps: []*Step{s1, s2}},
+		},
+	}
+
+	structure := BuildStructure(j)
+	step1 := structure.Tasks[0].Steps[0]
+	step2 := structure.Tasks[0].Steps[1]
+
+	// RespText must NOT be truncated
+	respBody := structure.Bodies[step1.RespRef]
+	if len(respBody) != 4000 {
+		t.Errorf("RespText length = %d, want 4000 (untruncated)", len(respBody))
+	}
+
+	// Tool call args must be truncated to 3000
+	argsBody := structure.Bodies[step1.ToolCalls[0].ArgsRef]
+	if len(argsBody) != maxBodyExcerptChars {
+		t.Errorf("Tool call args length = %d, want %d", len(argsBody), maxBodyExcerptChars)
+	}
+
+	// Tool result must be truncated to 3000
+	resultBody := structure.Bodies[step1.ToolCalls[0].Result.Ref]
+	if len(resultBody) != maxBodyExcerptChars {
+		t.Errorf("Tool result length = %d, want %d", len(resultBody), maxBodyExcerptChars)
+	}
+
+	// Compaction predecessor excerpt must be truncated to 3000
+	compactionBody := structure.Bodies[step2.Compaction.PredecessorExcerptRef]
+	if len(compactionBody) != maxBodyExcerptChars {
+		t.Errorf("Compaction excerpt length = %d, want %d", len(compactionBody), maxBodyExcerptChars)
+	}
+}
+
+// TestJourneyReportFile_Normalization tests D19 / §1.1 filename normalization.
+func TestJourneyReportFile_Normalization(t *testing.T) {
+	cases := []struct {
+		id      string
+		partial bool
+		want    string
+	}{
+		{"j-abc", false, "j-abc.md"},
+		{"j-abc", true, "j-abc.md"}, // No -partial suffix!
+		{"abc", false, "j-abc.md"},
+		{"abc", true, "j-abc.md"},
+	}
+
+	for _, tc := range cases {
+		got := JourneyReportFile(tc.id, tc.partial)
+		if got != tc.want {
+			t.Errorf("JourneyReportFile(%q, %v) = %q, want %q", tc.id, tc.partial, got, tc.want)
+		}
+	}
+}
+

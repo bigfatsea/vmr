@@ -45,7 +45,7 @@ func TestRenderComparisonHTML_Structure(t *testing.T) {
 		`<table class="abtbl"`, "deepseek-v4-pro", "MiniMax-M3",
 		"findings here",        // un-redacted deliverable excerpt present
 		"research SECRET-TASK", // divergence headline shows the task title un-redacted
-		`<a href="journey-`,    // side card links out to the per-journey report
+		`<a href="j-`,    // side card links out to the per-journey report
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("comparison dashboard missing %q", want)
@@ -121,9 +121,9 @@ func TestRenderComparisonHTML_RedactLeaksNothing(t *testing.T) {
 	if strings.Contains(out, `id="llm"`) {
 		t.Error("redact mode must drop the LLM section entirely")
 	}
-	// The sibling journey-<id>.md is un-redacted (0600, not for sharing) —
+	// The sibling j-<id>.md is un-redacted (0600, not for sharing) —
 	// redact mode keeps the filename as text but must not link to it.
-	if strings.Contains(out, `<a href="journey-`) {
+	if strings.Contains(out, `<a href="j-`) {
 		t.Error("redacted comparison dashboard links to the un-redacted per-journey report")
 	}
 	// metric numbers + structure survive
