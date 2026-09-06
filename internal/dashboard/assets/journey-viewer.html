@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-06, VMR Forensics Journey Viewer (§6.2: #data= param, manifest probe, candidate list with compare command) -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Forensics — Journey Viewer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0e14%22/><path d=%22M6 8l10 16 10-16%22 fill=%22none%22 stroke=%22%23ffb000%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/></svg>">
+  <style>
+    :root {
+      --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0;
+      --code: #eceef1; --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+        --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    }
+    [data-theme="dark"] { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+      --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    [data-theme="light"] { --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0; --code: #eceef1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+    a { color: var(--trace); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; word-break: break-all; }
+    header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; }
+    .topbar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .brand span.badge { background: var(--go); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
+    nav.nav-links a.active { font-weight: 700; color: var(--trace); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
+    button { cursor: pointer; }
+
+    .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
+    .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
+    .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.hidden { display: none; }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .jhead h1 { font-size: 18px; font-family: var(--sans); margin-bottom: 4px; word-break: break-word; }
+    .jmeta { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); margin-bottom: 14px; }
+    .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .stat-box { background: var(--panel-subtle); border: 1px solid var(--rule); border-radius: 4px; padding: 8px 12px; font-family: var(--mono); font-size: 11.5px; }
+    .stat-box strong { font-size: 16px; display: block; }
+    .verdict { border: 1px solid var(--rule); border-left: 5px solid var(--amber); background: var(--panel-subtle); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; }
+    .verdict.v-go { border-left-color: var(--go); }
+    .verdict.v-alert { border-left-color: var(--alert); }
+    .verdict .vlabel { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-dim); margin-bottom: 4px; }
+
+    /* Task/Step tree */
+    .task-block { border-left: 2px solid var(--rule); padding-left: 16px; margin-bottom: 16px; }
+    .task-title { font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-dim); margin-bottom: 8px; }
+    .task-title span { text-transform: none; color: var(--ink); font-family: var(--sans); letter-spacing: 0; font-weight: 400; }
+    .step { border: 1px solid var(--rule); border-left: 3px solid var(--rule); border-radius: 5px; padding: 10px 14px; margin-bottom: 8px; background: var(--panel); }
+    .step.flagged { border-left-color: var(--amber); }
+    .step.error { border-left-color: var(--alert); }
+    .step-top { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+    .step-seq { font-family: var(--mono); font-weight: 700; color: var(--trace); font-size: 12px; }
+    .step-ts { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .step-model { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .tool-chip { display: inline-block; font-family: var(--mono); font-size: 10.5px; background: var(--code); color: var(--ink); padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    .resp-text { font-size: 12.5px; color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; background: var(--panel-subtle); padding: 8px 10px; border-radius: 4px; margin-top: 6px; }
+    .findings-list { margin-top: 8px; }
+    .finding-item { padding: 6px 10px; border-left: 3px solid var(--amber); background: rgba(255,176,0,0.06); margin-bottom: 6px; font-size: 12px; border-radius: 0 3px 3px 0; }
+    .finding-item.critical { border-left-color: var(--alert); background: rgba(255,92,92,0.06); }
+    .finding-item code { margin-right: 6px; }
+    .section-title { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-dim); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 20px 0 12px; }
+
+    /* Candidate list */
+    .cand-list { display: flex; flex-direction: column; gap: 6px; }
+    .cand-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel-subtle); }
+    .cand-row input[type="checkbox"] { cursor: pointer; }
+    .cand-id { font-family: var(--mono); font-size: 11.5px; word-break: break-all; }
+    .cand-meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
+    .cmdline { font-family: var(--mono); font-size: 12px; background: var(--code); border: 1px dashed var(--rule); padding: 10px 12px; border-radius: 4px; margin-top: 10px; word-break: break-all; user-select: all; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 200; }
+    .modal-overlay.hidden { display: none; }
+    .modal-card { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 24px; width: 440px; max-width: 90vw; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span>VMR FORENSICS</span><span class="badge">Journey</span></div>
+      <nav class="nav-links">
+        <a href="macro-dashboard.html">Macro Dashboard</a>
+        <a href="request-browser.html">Request Browser</a>
+        <a href="journey-viewer.html" class="active">Journey Viewer</a>
+        <a href="journey-compare.html">Compare</a>
+        <a href="benchmarks.html">Benchmarks</a>
+        <a href="tool-waste.html">Tool Waste</a>
+      </nav>
+      <div class="top-actions">
+        <button id="btn-auth">🔑 Key</button>
+        <button id="btn-theme">🌓 Theme</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner-file" class="banner alert hidden">
+    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+  </div>
+  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span></div>
+  <div id="banner-missing" class="banner alert hidden">
+    <span>⚠️ 这不是一套完整的 analyze 产物（未找到 manifest.json 或 journey 切片）。</span>
+  </div>
+
+  <div class="container">
+    <!-- Candidate List (no #data= or failed to load) -->
+    <div id="candidates-view" class="hidden">
+      <div class="card">
+        <div class="section-title" style="border:none; margin-top:0;">Candidate Journeys (from <code>journeys/index.json</code>)</div>
+        <p style="font-size:12px; color:var(--ink-dim); margin-bottom:10px;">
+          勾选两条 Journey 以生成可复制的对比命令行（对比数据由 CLI 离线计算，页面不直接跳转）。
+        </p>
+        <div id="cand-list" class="cand-list"></div>
+        <div id="compare-cmd-box" class="hidden">
+          <div class="section-title" style="border:none;">Generated Compare Command</div>
+          <div class="cmdline" id="compare-cmd"></div>
+          <div style="margin-top:8px; text-align:right;">
+            <button id="btn-copy-cmd" class="primary" style="background:var(--trace); color:#fff; border:none;">📋 Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Journey Detail View -->
+    <div id="journey-view" class="hidden"></div>
+  </div>
+
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
+      <p style="color:var(--ink-dim); font-size:12.5px; margin-bottom:16px;">Data slices require auth when <code>api_keys</code> is configured. Stored in <code>localStorage['vmr_status_key']</code>.</p>
+      <input type="password" id="input-api-key" style="width:100%; margin-bottom:16px; padding:8px 10px;" placeholder="Bearer token…">
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save" style="background:var(--trace); color:#fff; border:none;">Save & Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    (async function() {
+      Theme.init();
+      const dom = {
+        bannerFile: document.getElementById('banner-file'),
+        bannerVersion: document.getElementById('banner-version'),
+        bannerVersionText: document.getElementById('banner-version-text'),
+        bannerMissing: document.getElementById('banner-missing'),
+        btnAuth: document.getElementById('btn-auth'),
+        btnTheme: document.getElementById('btn-theme'),
+        authModal: document.getElementById('auth-modal'),
+        inputApiKey: document.getElementById('input-api-key'),
+        btnAuthSave: document.getElementById('btn-auth-save'),
+        btnAuthCancel: document.getElementById('btn-auth-cancel'),
+        candidatesView: document.getElementById('candidates-view'),
+        candList: document.getElementById('cand-list'),
+        compareCmdBox: document.getElementById('compare-cmd-box'),
+        compareCmd: document.getElementById('compare-cmd'),
+        btnCopyCmd: document.getElementById('btn-copy-cmd'),
+        journeyView: document.getElementById('journey-view')
+      };
+
+      function updateAuthButton() {
+        const k = Auth.getKey();
+        dom.btnAuth.textContent = k ? `🔑 ***${k.slice(-4)}` : '🔑 Key';
+      }
+      updateAuthButton();
+      dom.btnAuth.onclick = () => { dom.inputApiKey.value = Auth.getKey(); dom.authModal.classList.remove('hidden'); };
+      dom.btnAuthCancel.onclick = () => dom.authModal.classList.add('hidden');
+      dom.btnAuthSave.onclick = () => { Auth.setKey(dom.inputApiKey.value); dom.authModal.classList.add('hidden'); updateAuthButton(); location.reload(); };
+      dom.btnTheme.onclick = () => {
+        const cur = Theme.getPreference();
+        Theme.setPreference(cur === 'auto' ? 'dark' : (cur === 'dark' ? 'light' : 'auto'));
+      };
+
+      let checked = [];
+      function updateCompareCmd() {
+        if (checked.length === 2) {
+          dom.compareCmd.textContent = `vmr analyze -compare ${checked[0]},${checked[1]}`;
+          dom.compareCmdBox.classList.remove('hidden');
+        } else {
+          dom.compareCmdBox.classList.add('hidden');
+        }
+      }
+      dom.btnCopyCmd.onclick = () => {
+        const txt = dom.compareCmd.textContent;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(txt).then(() => {
+            dom.btnCopyCmd.textContent = '✅ Copied';
+            setTimeout(() => dom.btnCopyCmd.textContent = '📋 Copy', 1500);
+          }).catch(() => {});
+        }
+      };
+
+      async function loadManifest() {
+        try {
+          const m = await fetchSlice('manifest.json');
+          const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
+          if (st === 'banner') {
+            dom.bannerVersionText.textContent = `⚠️ 期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${m.format}。请运行全量 vmr analyze。`;
+            dom.bannerVersion.classList.remove('hidden');
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return false; }
+          dom.bannerMissing.classList.remove('hidden');
+        }
+        return true;
+      }
+
+      // Load journey details if #data= given, else list candidates
+      const dataPath = getDataParam();
+      if (dataPath) {
+        dom.candidatesView.classList.add('hidden');
+        dom.journeyView.classList.remove('hidden');
+        try {
+          await loadManifest();
+          const j = await fetchSlice(dataPath);
+          renderJourney(j);
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.bannerMissing.classList.remove('hidden');
+          dom.journeyView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load journey data at <code>${dataPath}</code>. 回到候选列表: <a href="journey-viewer.html">journey-viewer.html</a></p></div>`;
+        }
+      } else {
+        // Probe journeys/index.json for candidates (§6.2)
+        dom.candidatesView.classList.remove('hidden');
+        dom.journeyView.classList.add('hidden');
+        try {
+          await loadManifest();
+          const idx = await fetchSlice('journeys/index.json');
+          const journeys = idx.journeys || [];
+          if (journeys.length === 0) {
+            dom.candList.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">No journeys listed. Run <code>vmr analyze</code> to generate analysis artifacts.</p>`;
+          } else {
+            dom.candList.innerHTML = journeys.map(j => `
+              <label class="cand-row">
+                <input type="checkbox" data-id="${j.ID || j.id}" onchange="window.__toggleCand(this)">
+                <span class="cand-id">${j.ID || j.id}</span>
+                <span class="cand-meta">${(j.Title || '').slice(0, 40)} · ${(j.Requests || j.requests || 0)} reqs</span>
+                <a href="journey-viewer.html#data=journeys/details/${j.ID || j.id}.json" style="margin-left:8px;">open →</a>
+              </label>
+            `).join('');
+            window.__toggleCand = (el) => {
+              const id = el.dataset.id;
+              if (el.checked) {
+                if (!checked.includes(id)) checked.push(id);
+              } else {
+                checked = checked.filter(x => x !== id);
+              }
+              updateCompareCmd();
+            };
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.candList.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">journeys/index.json 不可读取（可能从未跑过 <code>vmr analyze</code>，或正在以 file:// 模式访问）。生成产物后重试。</p>`;
+        }
+      }
+
+      function renderJourney(j) {
+        const metrics = j.Metrics || j.metrics || {};
+        const findings = j.Findings || j.findings || [];
+        const structure = j.Structure || j.structure || { tasks: [] };
+        const bodies = structure.bodies || {};
+        const cost = j.Cost || j.cost || null;
+
+        let findingsHtml = '';
+        if (findings.length > 0) {
+          findingsHtml = findings.map(f => `
+            <div class="finding-item ${f.Severity === 'critical' ? 'critical' : ''}">
+              <code>${f.Code || f.code}</code>${f.Title || f.title || f.Message || f.message || ''}
+            </div>
+          `).join('');
+        } else {
+          findingsHtml = `<p style="font-size:12px; color:var(--ink-dim);">No behavioral findings — clean journey.</p>`;
+        }
+
+        let tasksHtml = '';
+        (structure.tasks || []).forEach((task, ti) => {
+          const steps = task.steps || [];
+          const stepRows = steps.map(s => {
+            const usage = s.Usage || s.usage || {};
+            const endpoint = s.Endpoint || s.endpoint || '';
+            const seq = s.Seq || s.seq;
+            const tsDisplay = s.ts_display || (s.TS ? new Date(s.TS).toISOString() : '');
+            const toolChips = (s.ToolCalls || s.tool_calls || []).map(tc => {
+              const name = tc.Name || tc.name;
+              return `<span class="tool-chip" title="${(tc.Args || tc.args || '').slice(0, 200)}">${name}</span>`;
+            }).join('');
+            const respRef = s.RespRef || s.resp_ref;
+            const respText = respRef ? (bodies[respRef] || '') : '';
+            const flags = [];
+            if (s.StitchEdge || s.stitch_edge) flags.push('<span class="badge-pill badge-warn">stitch</span>');
+            if (s.Compaction || s.compaction) flags.push('<span class="badge-pill badge-warn">compaction</span>');
+            if (s.HumanInitiated || s.human_initiated) flags.push('<span class="badge-pill badge-ok">human</span>');
+
+            return `
+              <div class="step ${s.Compaction || s.compaction ? 'flagged' : ''}">
+                <div class="step-top">
+                  <span class="step-seq">Step ${seq}</span>
+                  <span class="step-ts">${tsDisplay}</span>
+                  <span class="step-model">${endpoint}</span>
+                  <span class="step-model">in ${FmtTokens(usage.In || usage.fresh || 0)} · out ${FmtTokens(usage.Out || 0)} · ${FmtDuration(s.DurMS || s.dur_ms || 0)}</span>
+                  ${flags.join(' ')}
+                </div>
+                ${toolChips ? `<div style="margin: 4px 0;">${toolChips}</div>` : ''}
+                ${respText ? `<div class="resp-text">${respText.slice(0, 1500)}${respText.length > 1500 ? '…' : ''}</div>` : ''}
+              </div>
+            `;
+          }).join('');
+
+          tasksHtml += `
+            <div class="task-block">
+              <div class="task-title">Task ${ti + 1} · <span>${task.Title || task.title || '(untitled)'}</span></div>
+              ${stepRows}
+            </div>
+          `;
+        });
+
+        const id = j.ID || j.id || dataPath;
+        dom.journeyView.innerHTML = `
+          <div class="card jhead">
+            <h1>${j.Title || j.title || id}</h1>
+            <div class="jmeta">${id} · ${(j.From || j.from || '')} → ${(j.To || j.to || '')} ${j.Partial || j.partial ? '· ⚠️ partial (head-truncated)' : ''}</div>
+            <div class="stat-row">
+              <div class="stat-box"><strong>${metrics.ModelMS ? FmtDuration(metrics.ModelMS) : '—'}</strong>Model Time</div>
+              <div class="stat-box"><strong>${metrics.AgentExecMS ? FmtDuration(metrics.AgentExecMS) : '—'}</strong>Agent Exec</div>
+              <div class="stat-box"><strong>${metrics.HumanIdleMS ? FmtDuration(metrics.HumanIdleMS) : '—'}</strong>Human Idle</div>
+              <div class="stat-box"><strong>${metrics.ToolCallCount || 0}</strong>Tool Calls</div>
+              <div class="stat-box"><strong>${FmtPercent(metrics.DuplicateActionRate || 0)}</strong>Duplicate Actions</div>
+              <div class="stat-box"><strong>${FmtPercent(metrics.PlanExecRatio || 0)}</strong>Plan/Exec Ratio</div>
+              ${cost && cost.Total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.Total)}</strong>Est. Cost (${cost.Currency || 'USD'})</div>` : ''}
+            </div>
+            <div class="verdict ${findings.length === 0 ? 'v-go' : ''}">
+              <div class="vlabel">Behavior Findings (${findings.length})</div>
+              <div class="findings-list">${findingsHtml}</div>
+            </div>
+            <div class="section-title">Timeline · Tasks & Steps</div>
+            ${tasksHtml || '<p style="color:var(--ink-dim);">No tasks/steps in structure.</p>'}
+          </div>
+        `;
+      }
+    })();
+  </script>
+</body>
+</html>

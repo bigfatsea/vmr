@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-06, VMR Forensics Journey Compare (§6.2: no #data= → probe compares/index.json) -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Forensics — Journey Compare</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0e14%22/><path d=%22M6 8l10 16 10-16%22 fill=%22none%22 stroke=%22%23ffb000%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/></svg>">
+  <style>
+    :root {
+      --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0;
+      --code: #eceef1; --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+        --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    }
+    [data-theme="dark"] { --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+      --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff; --code: #1a2030; }
+    [data-theme="light"] { --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0; --code: #eceef1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13.5px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+    a { color: var(--trace); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { font-family: var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; word-break: break-all; }
+    header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; }
+    .topbar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .brand span.badge { background: var(--alert); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
+    nav.nav-links a.active { font-weight: 700; color: var(--trace); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
+    button { cursor: pointer; }
+
+    .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
+    .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
+    .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.hidden { display: none; }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+    .section-title { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-dim); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 20px 0 12px; }
+
+    /* Tale of the tape */
+    .tape { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+    .tape-side { border: 1px solid var(--rule); border-radius: 5px; padding: 14px; }
+    .tape-side.a { border-top: 3px solid var(--trace); }
+    .tape-side.b { border-top: 3px solid var(--amber); }
+    .tape-side h3 { font-family: var(--sans); font-size: 14.5px; margin-bottom: 4px; word-break: break-word; }
+    .tape-side .meta { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); margin-bottom: 8px; word-break: break-all; }
+
+    /* Diff table */
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { padding: 7px 10px; border-bottom: 1px solid var(--rule); text-align: left; white-space: nowrap; }
+    th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); background: var(--panel-subtle); }
+    td.num { text-align: right; font-family: var(--mono); }
+    tr:hover td { background: var(--panel-subtle); }
+    .delta-worse { color: var(--alert); font-weight: 600; }
+    .delta-better { color: var(--go); font-weight: 600; }
+    .delta-same { color: var(--ink-dim); }
+
+    .cand-list { display: flex; flex-direction: column; gap: 6px; }
+    .cand-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel-subtle); font-family: var(--mono); font-size: 11.5px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 200; }
+    .modal-overlay.hidden { display: none; }
+    .modal-card { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 24px; width: 440px; max-width: 90vw; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand"><span>VMR FORENSICS</span><span class="badge">Compare</span></div>
+      <nav class="nav-links">
+        <a href="macro-dashboard.html">Macro Dashboard</a>
+        <a href="request-browser.html">Request Browser</a>
+        <a href="journey-viewer.html">Journey Viewer</a>
+        <a href="journey-compare.html" class="active">Compare</a>
+        <a href="benchmarks.html">Benchmarks</a>
+        <a href="tool-waste.html">Tool Waste</a>
+      </nav>
+      <div class="top-actions">
+        <button id="btn-auth">🔑 Key</button>
+        <button id="btn-theme">🌓 Theme</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="banner-file" class="banner alert hidden">
+    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+  </div>
+  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span></div>
+  <div id="banner-missing" class="banner alert hidden">
+    <span>⚠️ 这不是一套完整的 analyze 产物（manifest.json 或 compare 切片缺失）。对比数据需 CLI 离线生成：<code>vmr analyze -compare &lt;a&gt;,&lt;b&gt;</code></span>
+  </div>
+
+  <div class="container">
+    <!-- Compare Picker (no #data=) -->
+    <div id="picker-view" class="hidden">
+      <div class="card">
+        <div class="section-title" style="border:none; margin-top:0;">Available Comparisons (from <code>compares/index.json</code>)</div>
+        <div id="cand-list" class="cand-list"></div>
+      </div>
+    </div>
+
+    <!-- Comparison Detail -->
+    <div id="compare-view" class="hidden"></div>
+  </div>
+
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
+      <p style="color:var(--ink-dim); font-size:12.5px; margin-bottom:16px;">Data slices require auth when <code>api_keys</code> is configured. Stored in <code>localStorage['vmr_status_key']</code>.</p>
+      <input type="password" id="input-api-key" style="width:100%; margin-bottom:16px; padding:8px 10px;" placeholder="Bearer token…">
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save" style="background:var(--trace); color:#fff; border:none;">Save & Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    (async function() {
+      Theme.init();
+      const dom = {
+        bannerFile: document.getElementById('banner-file'),
+        bannerVersion: document.getElementById('banner-version'),
+        bannerVersionText: document.getElementById('banner-version-text'),
+        bannerMissing: document.getElementById('banner-missing'),
+        btnAuth: document.getElementById('btn-auth'),
+        btnTheme: document.getElementById('btn-theme'),
+        authModal: document.getElementById('auth-modal'),
+        inputApiKey: document.getElementById('input-api-key'),
+        btnAuthSave: document.getElementById('btn-auth-save'),
+        btnAuthCancel: document.getElementById('btn-auth-cancel'),
+        pickerView: document.getElementById('picker-view'),
+        candList: document.getElementById('cand-list'),
+        compareView: document.getElementById('compare-view')
+      };
+
+      function updateAuthButton() {
+        const k = Auth.getKey();
+        dom.btnAuth.textContent = k ? `🔑 ***${k.slice(-4)}` : '🔑 Key';
+      }
+      updateAuthButton();
+      dom.btnAuth.onclick = () => { dom.inputApiKey.value = Auth.getKey(); dom.authModal.classList.remove('hidden'); };
+      dom.btnAuthCancel.onclick = () => dom.authModal.classList.add('hidden');
+      dom.btnAuthSave.onclick = () => { Auth.setKey(dom.inputApiKey.value); dom.authModal.classList.add('hidden'); updateAuthButton(); location.reload(); };
+      dom.btnTheme.onclick = () => {
+        const cur = Theme.getPreference();
+        Theme.setPreference(cur === 'auto' ? 'dark' : (cur === 'dark' ? 'light' : 'auto'));
+      };
+
+      async function loadManifest() {
+        try {
+          const m = await fetchSlice('manifest.json');
+          const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
+          if (st === 'banner') {
+            dom.bannerVersionText.textContent = `⚠️ 期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${m.format}。请运行全量 vmr analyze。`;
+            dom.bannerVersion.classList.remove('hidden');
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return false; }
+          dom.bannerMissing.classList.remove('hidden');
+        }
+        return true;
+      }
+
+      function deltaClass(v) {
+        if (v == null) return 'delta-same';
+        if (v > 0) return 'delta-worse';
+        if (v < 0) return 'delta-better';
+        return 'delta-same';
+      }
+      function fmtDelta(r) {
+        // MetricDiff rows use Kind: "dur" | "count" | "ratio" (journey.Compare).
+        const a = r.A ?? r.a, b = r.B ?? r.b;
+        const pct = (a && b != null && a !== 0) ? ((b - a) / Math.abs(a) * 100).toFixed(1) + '%' : '';
+        const sign = (b - a) > 0 ? '+' : '';
+        return `${sign}${pct}`;
+      }
+      function fmtMetric(v, kind) {
+        if (v == null) return '—';
+        if (kind === 'dur') return FmtDuration(v);
+        if (kind === 'pct') return FmtPercent(v);
+        if (kind === 'ratio') return v.toFixed(2) + '×';
+        return Number(v).toLocaleString();
+      }
+
+      const dataPath = getDataParam();
+      if (dataPath) {
+        dom.pickerView.classList.add('hidden');
+        dom.compareView.classList.remove('hidden');
+        try {
+          await loadManifest();
+          const cmp = await fetchSlice(dataPath);
+          renderCompare(cmp, dataPath);
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.bannerMissing.classList.remove('hidden');
+          dom.compareView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load comparison at <code>${dataPath}</code>. <a href="journey-compare.html">← 回到对比列表</a></p></div>`;
+        }
+      } else {
+        // Probe compares/index.json (§6.2)
+        dom.pickerView.classList.remove('hidden');
+        try {
+          await loadManifest();
+          const idx = await fetchSlice('compares/index.json');
+          const comps = idx.compares || idx.comparisons || [];
+          if (comps.length === 0) {
+            dom.candList.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">尚无对比产物。运行 <code>vmr analyze -compare &lt;journey-a&gt;,&lt;journey-b&gt;</code> 生成。</p>`;
+          } else {
+            dom.candList.innerHTML = comps.map(c => {
+              const id = c.ID || c.id || c.File || c.file;
+              const label = `${c.A || (c.ARef && c.ARef.ID) || 'A'} vs ${c.B || (c.BRef && c.BRef.ID) || 'B'}`;
+              return `<a class="cand-row" href="journey-compare.html#data=compares/${id}">${label}<span style="margin-left:auto; color:var(--ink-dim);">${c.GeneratedAt || ''}</span></a>`;
+            }).join('');
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
+          dom.candList.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">compares/index.json 不可读取（可能尚未生成任何对比）。</p>`;
+        }
+      }
+
+      function renderCompare(cmp, srcPath) {
+        const aRef = cmp.A || cmp.a_journey || {};
+        const bRef = cmp.B || cmp.b_journey || {};
+        const rows = cmp.Rows || cmp.rows || [];
+
+        const rowsHtml = rows.map(r => {
+          const kind = r.Kind || r.kind || 'count';
+          const label = r.Label || r.label || r.Code || r.code;
+          const a = r.A ?? r.a, b = r.B ?? r.b;
+          const delta = fmtDelta(r);
+          const cls = deltaClass((b - a));
+          return `
+            <tr>
+              <td><strong>${label}</strong></td>
+              <td class="num">${fmtMetric(a, kind)}</td>
+              <td class="num">${fmtMetric(b, kind)}</td>
+              <td class="num ${cls}">${delta}</td>
+            </tr>
+          `;
+        }).join('');
+
+        const tools = cmp.Tools || cmp.tools || [];
+        const toolsHtml = tools.map(t => {
+          const name = t.Name || t.name;
+          const ac = t.ACalls ?? t.a_calls ?? 0;
+          const bc = t.BCalls ?? t.b_calls ?? 0;
+          return `<tr><td><code>${name}</code></td><td class="num">${ac}</td><td class="num">${bc}</td><td class="num ${deltaClass(bc - ac)}">${bc - ac > 0 ? '+' : ''}${bc - ac}</td></tr>`;
+        }).join('');
+
+        dom.compareView.innerHTML = `
+          <div class="card">
+            <h2 style="font-size:16px; margin-bottom:12px;">Journey Comparison</h2>
+            <div class="tape">
+              <div class="tape-side a">
+                <h3>${aRef.Title || aRef.title || aRef.ID || 'A'}</h3>
+                <div class="meta">${aRef.ID || aRef.id || ''} · ${aRef.Steps || aRef.steps || 0} steps · ${aRef.ToolCalls || aRef.tool_calls || 0} tool calls</div>
+                <div class="meta"><a href="journey-viewer.html#data=journeys/details/${aRef.ID || aRef.id}.json">open A →</a></div>
+              </div>
+              <div class="tape-side b">
+                <h3>${bRef.Title || bRef.title || bRef.ID || 'B'}</h3>
+                <div class="meta">${bRef.ID || bRef.id || ''} · ${bRef.Steps || bRef.steps || 0} steps · ${bRef.ToolCalls || bRef.tool_calls || 0} tool calls</div>
+                <div class="meta"><a href="journey-viewer.html#data=journeys/details/${bRef.ID || bRef.id}.json">open B →</a></div>
+              </div>
+            </div>
+
+            <div class="section-title">Metric Diff (A → B)</div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Metric</th><th>A</th><th>B</th><th>Δ B vs A</th></tr></thead>
+                <tbody>${rowsHtml || '<tr><td colspan="4" style="text-align:center;">No diff rows</td></tr>'}</tbody>
+              </table>
+            </div>
+
+            ${tools.length > 0 ? `
+            <div class="section-title">Tool Call Distribution</div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Tool</th><th>A Calls</th><th>B Calls</th><th>Δ</th></tr></thead>
+                <tbody>${toolsHtml}</tbody>
+              </table>
+            </div>` : ''}
+
+            <p style="margin-top:16px; font-size:11.5px; color:var(--ink-dim);">Source: <code>${srcPath}</code> · 对比由 CLI 离线计算；本页仅渲染既有 JSON。</p>
+          </div>
+        `;
+      }
+    })();
+  </script>
+</body>
+</html>

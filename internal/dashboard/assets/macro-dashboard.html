@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-06, VMR Forensics Macro Dashboard (§6.2, §6.3, §6.6) -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VMR Forensics — Macro Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0e14%22/><path d=%22M6 8l10 16 10-16%22 fill=%22none%22 stroke=%22%23ffb000%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/></svg>">
+  <style>
+    :root {
+      --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0;
+      --code: #eceef1; --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+        --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff;
+        --code: #1a2030;
+      }
+    }
+    [data-theme="dark"] {
+      --bg: #0a0e14; --panel: #121821; --panel-subtle: #161e2b; --ink: #d8dee9; --ink-dim: #7d8899;
+      --rule: #232c3a; --amber: #ffb000; --alert: #ff5c5c; --go: #35d0a5; --trace: #5b9dff;
+      --code: #1a2030;
+    }
+    [data-theme="light"] {
+      --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
+      --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0;
+      --code: #eceef1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13.5px;
+      line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--trace); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Topbar */
+    header.topbar {
+      position: sticky; top: 0; z-index: 100; background: var(--panel);
+      border-bottom: 1px solid var(--rule); padding: 0 20px;
+    }
+    .topbar-inner {
+      max-width: 1360px; margin: 0 auto; display: flex; align-items: center;
+      justify-content: space-between; height: 50px; gap: 16px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .brand span.badge { background: var(--amber); color: #000; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
+    nav.nav-links a {
+      font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px;
+      color: var(--ink-dim); transition: all 0.15s; white-space: nowrap;
+    }
+    nav.nav-links a:hover, nav.nav-links a.active {
+      color: var(--ink); background: var(--code); text-decoration: none;
+    }
+    nav.nav-links a.active { font-weight: 700; color: var(--trace); }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    button, input, select {
+      font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink);
+      border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; cursor: pointer;
+    }
+    button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
+
+    /* Banners */
+    .banner {
+      max-width: 1360px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px;
+      font-size: 12.5px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
+    .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
+    .banner.hidden { display: none; }
+
+    /* Container */
+    .container { max-width: 1360px; margin: 0 auto; padding: 16px 20px 60px; }
+    .subhead {
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+      gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule);
+    }
+    .subhead-meta { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); }
+
+    /* Tab Controls */
+    .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--rule); margin-bottom: 20px; }
+    .tab-btn {
+      background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+      padding: 8px 16px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-dim);
+    }
+    .tab-btn:hover { color: var(--ink); }
+    .tab-btn.active { color: var(--trace); border-bottom-color: var(--trace); font-weight: 700; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* Stat Cards */
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+    .stat-card {
+      background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 14px;
+    }
+    .stat-k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-dim); font-family: var(--mono); }
+    .stat-v { font-size: 22px; font-weight: 700; margin-top: 4px; font-family: var(--mono); }
+    .stat-sub { font-size: 11px; color: var(--ink-dim); margin-top: 2px; }
+
+    /* Section & Cards */
+    .section-title {
+      font-size: 13px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--ink-dim); margin: 24px 0 12px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .grid-2col { display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px;
+    }
+    .chart-card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 14px; margin-bottom: 16px; }
+
+    /* Tables */
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; text-align: left; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--rule); }
+    th { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); background: var(--panel-subtle); }
+    td.num { text-align: right; font-family: var(--mono); }
+    tr:hover td { background: var(--panel-subtle); }
+
+    /* Badges */
+    .badge-pill {
+      display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 1px 6px;
+      border-radius: 3px; font-weight: 600;
+    }
+    .badge-ok { background: rgba(53,208,165,0.15); color: var(--go); }
+    .badge-warn { background: rgba(255,176,0,0.15); color: var(--amber); }
+    .badge-alert { background: rgba(255,92,92,0.15); color: var(--alert); }
+
+    /* Highlights list */
+    .highlight-item {
+      padding: 8px 12px; border-left: 3px solid var(--trace); background: var(--panel-subtle);
+      margin-bottom: 8px; border-radius: 0 4px 4px 0; font-size: 13px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center;
+      justify-content: center; z-index: 200; backdrop-filter: blur(2px);
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-card {
+      background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+      padding: 24px; width: 440px; max-width: 90vw; box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span>VMR FORENSICS</span>
+        <span class="badge">Macro</span>
+      </div>
+      <nav class="nav-links">
+        <a href="macro-dashboard.html" class="active">Macro Dashboard</a>
+        <a href="request-browser.html">Request Browser</a>
+        <a href="journey-viewer.html">Journey Viewer</a>
+        <a href="journey-compare.html">Compare</a>
+        <a href="benchmarks.html">Benchmarks</a>
+        <a href="tool-waste.html">Tool Waste</a>
+      </nav>
+      <div class="top-actions">
+        <button id="btn-auth">🔑 Key</button>
+        <button id="btn-theme">🌓 Theme</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Universal Banners (§6.2, §6.6) -->
+  <div id="banner-file" class="banner alert hidden">
+    <span>⚠️ file:// 协议受同源策略限制无法读取数据切片。请使用 vmr 托管 (<code>vmr start</code> 访问 <code>/reports/</code>) 或任意静态 HTTP 服务器 (例如 <code>python3 -m http.server</code>)。</span>
+  </div>
+  <div id="banner-version" class="banner warn hidden">
+    <span id="banner-version-text">⚠️ 数据格式版本不一致：页面期望格式 v11，当前产物格式未知。渲染继续；如需完全对齐请运行全量 <code>vmr analyze</code>。</span>
+  </div>
+  <div id="banner-missing" class="banner alert hidden">
+    <span>⚠️ 这不是一套完整的 analyze 产物（未找到 manifest.json）。部分领域切片可能缺失。</span>
+  </div>
+  <div id="banner-err" class="banner alert hidden">
+    <span id="banner-err-text">⚠️ 渲染发生异常。如果产物版本与看板不一致，这可能是主要原因。请运行全量 <code>vmr analyze</code> 重新生成。</span>
+  </div>
+
+  <!-- Main Content -->
+  <div class="container">
+    <div class="subhead">
+      <div class="subhead-meta" id="meta-info">Loading snapshot metadata…</div>
+      <div class="subhead-meta" id="meta-time"></div>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+      <button class="tab-btn active" data-tab="tab-summary">Summary & Highlights</button>
+      <button class="tab-btn" data-tab="tab-finance">Finance & Cost</button>
+      <button class="tab-btn" data-tab="tab-reliability">Reliability & Latency</button>
+      <button class="tab-btn" data-tab="tab-workloads">Workloads & Temporal</button>
+      <button class="tab-btn" data-tab="tab-efficiency">Context Efficiency</button>
+    </div>
+
+    <!-- Tab 1: Summary -->
+    <div id="tab-summary" class="tab-panel active">
+      <div class="stat-grid" id="summary-stats"></div>
+      <div class="section-title">Highlights</div>
+      <div class="card" id="summary-highlights"><p class="stat-sub">Loading highlights…</p></div>
+      <div class="section-title">Findings & Behavioral Alerts</div>
+      <div class="card" id="summary-findings"><p class="stat-sub">Loading findings…</p></div>
+    </div>
+
+    <!-- Tab 2: Finance -->
+    <div id="tab-finance" class="tab-panel">
+      <div id="cost-coverage-box"></div>
+      <div class="chart-card" id="chart-cost-model"></div>
+      <div class="section-title">Cost by Virtual Model</div>
+      <div class="card table-wrap" id="table-by-model"></div>
+      <div class="section-title">Cost by Client</div>
+      <div class="card table-wrap" id="table-by-client"></div>
+      <div class="section-title">Provider Accounts & Quota Compliance</div>
+      <div class="card table-wrap" id="table-provider-quotas"></div>
+    </div>
+
+    <!-- Tab 3: Reliability -->
+    <div id="tab-reliability" class="tab-panel">
+      <div class="chart-card" id="chart-latency-endpoints"></div>
+      <div class="section-title">Endpoint Availability & Percentile Latencies</div>
+      <div class="card table-wrap" id="table-endpoints"></div>
+      <div class="section-title">Sticky Model Effectiveness</div>
+      <div class="card" id="sticky-card"></div>
+    </div>
+
+    <!-- Tab 4: Workloads -->
+    <div id="tab-workloads" class="tab-panel">
+      <div class="chart-card" id="chart-traffic-trend"></div>
+      <div class="chart-card" id="chart-traffic-heatmap"></div>
+      <div class="section-title">Temporal Distribution (By Date)</div>
+      <div class="card table-wrap" id="table-by-date"></div>
+      <div class="section-title">Client-Endpoint Routing Matrix</div>
+      <div class="card table-wrap" id="table-client-endpoints"></div>
+    </div>
+
+    <!-- Tab 5: Context Efficiency -->
+    <div id="tab-efficiency" class="tab-panel">
+      <div class="stat-grid" id="efficiency-stats"></div>
+      <div class="section-title">Compaction Events & Token Salvage</div>
+      <div class="card table-wrap" id="table-compactions"></div>
+      <div class="section-title">Tool Schema Waste Overview</div>
+      <div class="card" id="tool-waste-overview"></div>
+    </div>
+  </div>
+
+  <!-- Auth Key Modal -->
+  <div id="auth-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
+      <p style="color:var(--ink-dim); font-size:12.5px; margin-bottom:16px;">
+        Data slices (.json) require authentication when <code>api_keys</code> is configured in vmr.
+        The key will be stored securely in your browser's <code>localStorage</code>.
+      </p>
+      <input type="password" id="input-api-key" placeholder="Enter Bearer Token / API Key" style="width:100%; margin-bottom:16px; padding:8px 10px;">
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btn-auth-cancel">Cancel</button>
+        <button class="primary" id="btn-auth-save">Save & Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="common.js"></script>
+  <script>
+    // Inline execution fallback & bootstrap
+    (async function() {
+      Theme.init();
+
+      // UI Element references
+      const dom = {
+        metaInfo: document.getElementById('meta-info'),
+        metaTime: document.getElementById('meta-time'),
+        bannerFile: document.getElementById('banner-file'),
+        bannerVersion: document.getElementById('banner-version'),
+        bannerVersionText: document.getElementById('banner-version-text'),
+        bannerMissing: document.getElementById('banner-missing'),
+        bannerErr: document.getElementById('banner-err'),
+        bannerErrText: document.getElementById('banner-err-text'),
+        btnAuth: document.getElementById('btn-auth'),
+        btnTheme: document.getElementById('btn-theme'),
+        authModal: document.getElementById('auth-modal'),
+        inputApiKey: document.getElementById('input-api-key'),
+        btnAuthSave: document.getElementById('btn-auth-save'),
+        btnAuthCancel: document.getElementById('btn-auth-cancel'),
+        tabBtns: document.querySelectorAll('.tab-btn'),
+        tabPanels: document.querySelectorAll('.tab-panel')
+      };
+
+      // Auth button state
+      function updateAuthButton() {
+        const k = Auth.getKey();
+        dom.btnAuth.textContent = k ? `🔑 ***${k.slice(-4)}` : '🔑 Key';
+      }
+      updateAuthButton();
+
+      dom.btnAuth.onclick = () => {
+        dom.inputApiKey.value = Auth.getKey();
+        dom.authModal.classList.remove('hidden');
+        dom.inputApiKey.focus();
+      };
+      dom.btnAuthCancel.onclick = () => dom.authModal.classList.add('hidden');
+      dom.btnAuthSave.onclick = () => {
+        Auth.setKey(dom.inputApiKey.value);
+        dom.authModal.classList.add('hidden');
+        updateAuthButton();
+        loadAll();
+      };
+
+      dom.btnTheme.onclick = () => {
+        const cur = Theme.getPreference();
+        const next = cur === 'auto' ? 'dark' : (cur === 'dark' ? 'light' : 'auto');
+        Theme.setPreference(next);
+      };
+
+      // Tab switching
+      dom.tabBtns.forEach(btn => {
+        btn.onclick = () => {
+          dom.tabBtns.forEach(b => b.classList.remove('active'));
+          dom.tabPanels.forEach(p => p.classList.remove('active'));
+          btn.classList.add('active');
+          const target = document.getElementById(btn.dataset.tab);
+          if (target) target.classList.add('active');
+        };
+      });
+
+      // Data loader
+      async function loadAll() {
+        if (location.protocol === 'file:') {
+          dom.bannerFile.classList.remove('hidden');
+        }
+
+        let manifest = null;
+        try {
+          manifest = await fetchSlice('manifest.json');
+          const status = versionBehavior(EXPECTED_MANIFEST_FORMAT, manifest.format);
+          if (status === 'banner') {
+            dom.bannerVersionText.innerHTML = `⚠️ 数据格式版本不一致：页面期望格式 v${EXPECTED_MANIFEST_FORMAT}，实际产物格式 v${manifest.format}。渲染继续；如需完全对齐请运行全量 <code>vmr analyze</code>。`;
+            dom.bannerVersion.classList.remove('hidden');
+          } else if (status === 'missing') {
+            dom.bannerMissing.classList.remove('hidden');
+          }
+          if (manifest.generated_at) {
+            dom.metaInfo.textContent = `Generated: ${manifest.generated_at.ts_display || new Date(manifest.generated_at.ts).toISOString()} · Lang: ${manifest.lang || 'en'}`;
+          }
+          if (manifest.time_range) {
+            dom.metaTime.textContent = `Window: ${manifest.time_range[0]} → ${manifest.time_range[1]}`;
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) {
+            dom.authModal.classList.remove('hidden');
+            return;
+          }
+          dom.bannerMissing.classList.remove('hidden');
+        }
+
+        // Progressively fetch slices
+        try {
+          await Promise.allSettled([
+            loadSummary(),
+            loadFinance(),
+            loadReliability(),
+            loadWorkloads(),
+            loadEfficiency()
+          ]);
+        } catch (err) {
+          dom.bannerErr.classList.remove('hidden');
+          dom.bannerErrText.textContent = `⚠️ 渲染异常：${err.message}。如果产物版本不一致，请运行全量 vmr analyze。`;
+        }
+      }
+
+      // Tab 1: Summary
+      async function loadSummary() {
+        const s = await fetchSlice('macro/summary.json');
+        const o = s.overall || {};
+        const successRate = o.Requests > 0 ? ((o.Requests - (o.Errors || 0)) / o.Requests) : 1;
+        const totalTokens = (o.TokensIn || 0) + (o.TokensOut || 0);
+
+        document.getElementById('summary-stats').innerHTML = `
+          <div class="stat-card">
+            <div class="stat-k">Total Requests</div>
+            <div class="stat-v">${(o.Requests || 0).toLocaleString()}</div>
+            <div class="stat-sub">Errors: ${(o.Errors || 0).toLocaleString()} (${FmtPercent(o.ErrorRate ? o.ErrorRate/100 : (1 - successRate))})</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-k">Success Rate</div>
+            <div class="stat-v">${FmtPercent(successRate)}</div>
+            <div class="stat-sub">Fallbacks: ${(o.Fallbacks || 0).toLocaleString()}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-k">Total Tokens</div>
+            <div class="stat-v">${FmtTokens(totalTokens)}</div>
+            <div class="stat-sub">In: ${FmtTokens(o.TokensIn || 0)} · Out: ${FmtTokens(o.TokensOut || 0)}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-k">Estimated Spend</div>
+            <div class="stat-v">${o.CostEstimate != null ? FmtCurrency(o.CostEstimate) : '—'}</div>
+            <div class="stat-sub">Cache Hit: ${FmtPercent(o.CacheEff || 0)}</div>
+          </div>
+        `;
+
+        const hlBox = document.getElementById('summary-highlights');
+        if (s.highlights && s.highlights.length > 0) {
+          hlBox.innerHTML = s.highlights.map(h => `<div class="highlight-item">${h}</div>`).join('');
+        } else {
+          hlBox.innerHTML = `<p class="stat-sub">No highlights reported for this run.</p>`;
+        }
+
+        const fdBox = document.getElementById('summary-findings');
+        if (s.efficiency && s.efficiency.length > 0) {
+          fdBox.innerHTML = s.efficiency.map(f => `
+            <div style="padding:10px 0; border-bottom:1px solid var(--rule); display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+              <div>
+                <span class="badge-pill ${f.severity === 'critical' ? 'badge-alert' : 'badge-warn'}">${f.code || 'NOTICE'}</span>
+                <strong style="margin-left:8px;">${f.title || f.code}</strong>
+                <div style="color:var(--ink-dim); font-size:12px; margin-top:3px;">${f.message || ''}</div>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          fdBox.innerHTML = `<p class="stat-sub">No behavioral efficiency warnings detected.</p>`;
+        }
+      }
+
+      // Tab 2: Finance
+      async function loadFinance() {
+        const f = await fetchSlice('macro/finance.json');
+        if (f.cost_coverage) {
+          const cc = f.cost_coverage;
+          document.getElementById('cost-coverage-box').innerHTML = `
+            <div class="banner info" style="margin-bottom:16px;">
+              <span>Pricing Coverage Disclosure: Unpriced Endpoints: <strong>${cc.unpriced_count || 0}</strong> · Incomplete Rate Rules: <strong>${cc.incomplete_rate_count || 0}</strong> · Degraded Estimates: <strong>${FmtPercent((cc.degraded_estimate_pct || 0)/100)}</strong></span>
+            </div>
+          `;
+        }
+
+        // SVG Bar Chart: Cost by Model
+        const models = (f.by_model || []).map(m => ({
+          name: m.Model || m.model || 'unknown',
+          cost: m.CostEstimate != null ? m.CostEstimate : (m.cost_estimate || 0),
+          requests: m.Requests || m.requests || 0
+        })).sort((a,b) => b.cost - a.cost).slice(0, 10);
+
+        document.getElementById('chart-cost-model').innerHTML = svgBarChart({
+          data: models,
+          xKey: 'name',
+          yKey: 'cost',
+          title: 'Top Models by Estimated Cost ($)',
+          barColor: 'var(--amber)',
+          yFormatter: (v) => FmtCurrency(v)
+        });
+
+        // By Model Table
+        const modelRows = (f.by_model || []).map(m => `
+          <tr>
+            <td><strong>${m.Model || m.model}</strong></td>
+            <td class="num">${(m.Requests || m.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(m.TokensInFresh || m.tokens_in_fresh || 0)}</td>
+            <td class="num">${FmtTokens(m.TokensInCached || m.tokens_in_cached || 0)}</td>
+            <td class="num">${FmtTokens(m.TokensOut || m.tokens_out || 0)}</td>
+            <td class="num" style="font-weight:700;">${m.CostEstimate != null ? FmtCurrency(m.CostEstimate) : '—'}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-by-model').innerHTML = `
+          <table>
+            <thead><tr><th>Model</th><th class="num">Requests</th><th class="num">Fresh In</th><th class="num">Cached In</th><th class="num">Tokens Out</th><th class="num">Cost ($)</th></tr></thead>
+            <tbody>${modelRows || '<tr><td colspan="6" style="text-align:center;">No data</td></tr>'}</tbody>
+          </table>
+        `;
+
+        // By Client Table
+        const clientRows = (f.by_client || []).map(c => `
+          <tr>
+            <td><strong>${c.ClientKey || c.client_key}</strong></td>
+            <td class="num">${(c.Requests || c.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(c.TokensIn || c.tokens_in || 0)}</td>
+            <td class="num">${FmtTokens(c.TokensOut || c.tokens_out || 0)}</td>
+            <td class="num" style="font-weight:700;">${c.CostEstimate != null ? FmtCurrency(c.CostEstimate) : '—'}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-by-client').innerHTML = `
+          <table>
+            <thead><tr><th>Client Key</th><th class="num">Requests</th><th class="num">Tokens In</th><th class="num">Tokens Out</th><th class="num">Cost ($)</th></tr></thead>
+            <tbody>${clientRows || '<tr><td colspan="5" style="text-align:center;">No data</td></tr>'}</tbody>
+          </table>
+        `;
+
+        // Provider Quotas Table
+        const quotaRows = (f.provider_quotas || []).map(q => `
+          <tr>
+            <td><strong>${q.Provider || q.provider}</strong></td>
+            <td>${q.Role || q.role || 'primary'}</td>
+            <td class="num">${(q.WindowConsumed || 0).toFixed(2)}</td>
+            <td class="num">${q.Live && q.Live.Used != null ? q.Live.Used.toFixed(2) : '—'}</td>
+            <td class="num">${q.HeadroomScore != null ? q.HeadroomScore.toFixed(2) : '—'}</td>
+            <td>${q.ResetsIn || q.resets_in || '—'}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-provider-quotas').innerHTML = `
+          <table>
+            <thead><tr><th>Provider</th><th>Role</th><th class="num">Window Consumed</th><th class="num">Live Used</th><th class="num">Headroom</th><th>Resets In</th></tr></thead>
+            <tbody>${quotaRows || '<tr><td colspan="6" style="text-align:center;">No quotas tracked</td></tr>'}</tbody>
+          </table>
+        `;
+      }
+
+      // Tab 3: Reliability
+      async function loadReliability() {
+        const r = await fetchSlice('macro/reliability.json');
+        const eps = r.endpoints || r.endpoints_all || [];
+
+        // SVG Latency plot
+        document.getElementById('chart-latency-endpoints').innerHTML = svgLatencyPlot({
+          endpoints: eps.slice(0, 10),
+          title: 'Endpoint Latency Percentiles (P50 / P90 / P99 ms)'
+        });
+
+        // Endpoints table
+        const epRows = eps.map(e => `
+          <tr>
+            <td><code>${e.Endpoint || e.endpoint}</code></td>
+            <td>${e.Protocol || e.protocol || '—'}</td>
+            <td class="num">${(e.Requests || e.requests || 0).toLocaleString()}</td>
+            <td class="num">${(e.Errors || e.errors || 0).toLocaleString()}</td>
+            <td class="num">${FmtPercent(e.ErrorRate ? e.ErrorRate/100 : 0)}</td>
+            <td class="num">${e.P50MS || e.p50_ms || '—'}ms</td>
+            <td class="num">${e.P90MS || e.p90_ms || '—'}ms</td>
+            <td class="num">${e.TTFTP50MS || e.ttft_p50_ms || '—'}ms</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-endpoints').innerHTML = `
+          <table>
+            <thead><tr><th>Endpoint</th><th>Protocol</th><th class="num">Requests</th><th class="num">Errors</th><th class="num">Error Rate</th><th class="num">P50</th><th class="num">P90</th><th class="num">TTFT P50</th></tr></thead>
+            <tbody>${epRows || '<tr><td colspan="8" style="text-align:center;">No endpoint metrics</td></tr>'}</tbody>
+          </table>
+        `;
+
+        // Sticky Effectiveness
+        const s = r.sticky;
+        if (s) {
+          const cont = s.Continued || s.continued || {};
+          const sw = s.Switched || s.switched || {};
+          document.getElementById('sticky-card').innerHTML = `
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-k">Sticky Continued</div>
+                <div class="stat-v" style="color:var(--go);">${(cont.Requests || cont.requests || 0).toLocaleString()}</div>
+                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(cont.CacheEff || 0)}</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-k">Sticky Switched</div>
+                <div class="stat-v" style="color:var(--amber);">${(sw.Requests || sw.requests || 0).toLocaleString()}</div>
+                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(sw.CacheEff || 0)}</div>
+              </div>
+            </div>
+          `;
+        } else {
+          document.getElementById('sticky-card').innerHTML = `<p class="stat-sub">No sticky affinity data available.</p>`;
+        }
+      }
+
+      // Tab 4: Workloads
+      async function loadWorkloads() {
+        const w = await fetchSlice('macro/workloads.json');
+        const byDate = (w.by_date || []).map(d => ({
+          date: d.Date || d.date || '—',
+          cost: d.CostEstimate != null ? d.CostEstimate : 0,
+          requests: d.Requests || d.requests || 0
+        }));
+
+        // SVG Line chart
+        document.getElementById('chart-traffic-trend').innerHTML = svgLineChart({
+          data: byDate,
+          xKey: 'date',
+          yKey: 'requests',
+          title: 'Daily Request Volume Trend',
+          stroke: 'var(--trace)',
+          yFormatter: (v) => Math.round(v).toLocaleString()
+        });
+
+        // SVG Heatmap
+        document.getElementById('chart-traffic-heatmap').innerHTML = svgHeatmap({
+          hours: w.hours_of_day || [],
+          title: '24-Hour Traffic Intensity Heatmap'
+        });
+
+        // By Date Table
+        const dateRows = (w.by_date || []).map(d => `
+          <tr>
+            <td><strong>${d.Date || d.date}</strong></td>
+            <td class="num">${(d.Requests || d.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(d.TokensInFresh || d.tokens_in_fresh || 0)}</td>
+            <td class="num">${FmtTokens(d.TokensInCached || d.tokens_in_cached || 0)}</td>
+            <td class="num">${FmtTokens(d.TokensOut || d.tokens_out || 0)}</td>
+            <td class="num">${d.CostEstimate != null ? FmtCurrency(d.CostEstimate) : '—'}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-by-date').innerHTML = `
+          <table>
+            <thead><tr><th>Date</th><th class="num">Requests</th><th class="num">Fresh In</th><th class="num">Cached In</th><th class="num">Tokens Out</th><th class="num">Cost ($)</th></tr></thead>
+            <tbody>${dateRows || '<tr><td colspan="6" style="text-align:center;">No date data</td></tr>'}</tbody>
+          </table>
+        `;
+
+        // Client Endpoints Table
+        const ceRows = (w.client_endpoints || []).map(ce => `
+          <tr>
+            <td><strong>${ce.ClientKey || ce.client_key}</strong></td>
+            <td><code>${ce.Endpoint || ce.endpoint}</code></td>
+            <td class="num">${(ce.Requests || ce.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(ce.TokensIn || ce.tokens_in || 0)}</td>
+            <td class="num">${FmtTokens(ce.TokensOut || ce.tokens_out || 0)}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-client-endpoints').innerHTML = `
+          <table>
+            <thead><tr><th>Client</th><th>Endpoint</th><th class="num">Requests</th><th class="num">Tokens In</th><th class="num">Tokens Out</th></tr></thead>
+            <tbody>${ceRows || '<tr><td colspan="5" style="text-align:center;">No routing matrix data</td></tr>'}</tbody>
+          </table>
+        `;
+      }
+
+      // Tab 5: Context Efficiency
+      async function loadEfficiency() {
+        const ce = await fetchSlice('macro/context-efficiency.json');
+        const sess = ce.sessions || [];
+        const comp = ce.compactions || [];
+        const tools = ce.tools || [];
+
+        let totalSessTurns = 0;
+        sess.forEach(s => totalSessTurns += (s.Turns || s.turns || 0));
+        const avgTurns = sess.length > 0 ? (totalSessTurns / sess.length).toFixed(1) : 0;
+
+        document.getElementById('efficiency-stats').innerHTML = `
+          <div class="stat-card">
+            <div class="stat-k">Tracked Sessions</div>
+            <div class="stat-v">${sess.length.toLocaleString()}</div>
+            <div class="stat-sub">Avg Turns / Session: ${avgTurns}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-k">Compaction Events</div>
+            <div class="stat-v">${comp.length.toLocaleString()}</div>
+            <div class="stat-sub">Context Truncations</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-k">Declared Tool Shapes</div>
+            <div class="stat-v">${tools.length.toLocaleString()}</div>
+            <div class="stat-sub"><a href="tool-waste.html">View Tool Waste Analysis →</a></div>
+          </div>
+        `;
+
+        // Compactions Table
+        const compRows = comp.slice(0, 15).map(c => `
+          <tr>
+            <td>${c.ts_display || (c.ts ? new Date(c.ts).toISOString() : '—')}</td>
+            <td class="num">${FmtTokens(c.tokens_in || c.TokensIn || 0)}</td>
+            <td class="num">${FmtTokens(c.tokens_out || c.TokensOut || 0)}</td>
+            <td>${(c.swallowed_entities || []).join(', ') || '—'}</td>
+            <td>${(c.survived_entities || []).join(', ') || '—'}</td>
+          </tr>
+        `).join('');
+        document.getElementById('table-compactions').innerHTML = `
+          <table>
+            <thead><tr><th>Timestamp</th><th class="num">Tokens In</th><th class="num">Tokens Out</th><th>Dropped Entities</th><th>Survived Entities</th></tr></thead>
+            <tbody>${compRows || '<tr><td colspan="5" style="text-align:center;">No compaction events detected</td></tr>'}</tbody>
+          </table>
+        `;
+
+        // Tool waste preview
+        let totalShipped = 0, totalWaste = 0;
+        tools.forEach(t => {
+          totalShipped += (t.SchemaBytesShipped || t.schema_bytes_shipped || 0);
+          totalWaste += (t.SchemaWasteBytes || t.schema_waste_bytes || 0);
+        });
+        const wastePct = totalShipped > 0 ? FmtPercent(totalWaste / totalShipped) : '0.0%';
+
+        document.getElementById('tool-waste-overview').innerHTML = `
+          <p>Total tool schema bytes shipped: <strong>${FmtBytes(totalShipped)}</strong> · Dead/Unused waste: <strong>${FmtBytes(totalWaste)}</strong> (<strong>${wastePct}</strong> waste ratio).</p>
+          <p style="margin-top:8px;"><a href="tool-waste.html" class="primary" style="display:inline-block; padding:4px 10px; border-radius:4px; background:var(--trace); color:#fff;">Open Full Tool Waste Card →</a></p>
+        `;
+      }
+
+      loadAll();
+    })();
+  </script>
+</body>
+</html>
