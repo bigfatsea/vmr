@@ -202,7 +202,7 @@ charge(L) = base(L.Metric, L.TokenWeights) × L.ModelMultipliers[model]
 
 **别名不是手写清单，是标准表自己的一部分——覆盖全表，不是只覆盖某个部署路由的模型**。`standard_price_curated.yaml` 是给所有 vmr 用户用的公共参考表，只把某个部署恰好用到的模型钉死，等于让其余用户继续暴露在同一个静默失效的风险里。
 
-**`aliases:` 只有一层，全在 `standard_price_curated.yaml`（生成器永不写别名）**。2026-08-31 快照共 **11 条**，只钉三类：① 两个非转售厂商共用同一裸名（per (厂商, 模型) 的分裂，per-vendor 排序原理上装不下，见上文 dashscope 例）；② 目标行本身是 curated 手工加的（LiteLLM 快照没有）；③ 网关自造的模型 id（压根不是任何厂商发布的名字）。曾经有过“生成器每次刷新自动给全表裸名钉别名”的设计（`generateAliases`，2026-08-31 覆盖 342 条），已彻底移除：生成表是纯机器价目表，“谁钉谁、钉向哪里”是人工决策，自动钉别名把这两层边界重新模糊掉；且单一厂商的裸名本就由厂商优先级无歧义解析、不需要别名免疫——刷新引入新的撞车时，靠 `tools/gen_standard_pricing` 每次跑完打印的歧义报告显式亮出来，而不是让一个 342 条的自动别名集悄悄兜底。
+**`aliases:` 只有一层，全在 `standard_price_curated.yaml`（生成器永不写别名）**。数量随表刷新变化（以“手拉得过来”的量级表述，不硬编码具体条目数），只钉三类：① 两个非转售厂商共用同一裸名（per (厂商, 模型) 的分裂，per-vendor 排序原理上装不下，见上文 dashscope 例）；② 目标行本身是 curated 手工加的（LiteLLM 快照没有）；③ 网关自造的模型 id（压根不是任何厂商发布的名字）。曾经有过“生成器每次刷新自动给全表裸名钉别名”的设计（`generateAliases`），已彻底移除：生成表是纯机器价目表，“谁钉谁、钉向哪里”是人工决策，自动钉别名把这两层边界重新模糊掉；且单一厂商的裸名本就由厂商优先级无歧义解析、不需要别名免疫——刷新引入新的撞车时，靠 `tools/gen_standard_pricing` 每次跑完打印的歧义报告显式亮出来，而不是让一个几百条规模的自动别名集悄悄兜底。
 
 别名与厂商优先级共用**同一条判据**（`internal/pricing` 的 `aggregatorVendors` 集合，经 `Table.Ambiguities` 体现）：`tools/gen_standard_pricing` 的歧义报告与运行时解析器都走 `Table.Ambiguities` 的同一份实现，不会各自推断而漂移。
 
