@@ -525,13 +525,7 @@
 
 叠加第三部分 N1（`common.js` 从未部署，本轮已修），**Phase 2 看板作为交付形态从未真正工作过**。根因：看板 JS 按"理想契约"（Go 字段名）编写，从无渲染测试对真实切片输出验证；`dashboard_test.go` 只测 `WriteSkeletons` 写文件，`js_test.go` 只测 `common.js` 纯函数。
 
-**本轮已直接解决的部分**：`request-browser.html` —— 它是 D7 删掉人读请求索引后**唯一**的请求浏览界面（"浏览交给看板"是 D7 的立论），却几乎完全失效。`0788d8f` 把它的字段名全部对齐 `requests/index.json` 实际 key（含 facet 构建、过滤、排序、journey 链接从 `details/j-<id>.md` 派生出裸 id），端到端核对真实产出，加静态守卫 `TestRequestBrowser_ReadsSnakeCaseFields`。
-
-**未解决部分（建议方案 + ROI）**：
-- **问题**：其余 5 页同类字段错配 + 缺渲染测试。
-- **根因**：Phase 2 未做"渲染层对真实切片验证"这一步。
-- **建议方案**：一次专项"看板补完盘"——(1) 逐页把字段读对齐各切片的 json tag（对照 `internal/report/rows.go`、`internal/report/slices.go`、`internal/journey/{summary,structure,benchmarks,compare}.go`、`internal/report/manifest.go`）；(2) 每页加一个 Node 渲染 smoke（喂一份真实切片 fixture，断言关键单元格非 `—`/`NaN`）；(3) 顺带做 N10（chrome 本地化统一——推荐读 `manifest.lang` 切一套内置 dict，`common.js` 已 fetch manifest）。
-- **ROI**：工作量约 **2–4 人天**（6 页字段审计 + 测试脚手架 + chrome）。价值高——这是"生成即交付"能否成立的前提，且 request-browser 之外的 4 个 zoom 页目前对用户基本无用。**建议列为下一个独立任务**，不塞进评审后续。
+**本轮处置**：✅ **已全部解决**（`0788d8f` 修复 `request-browser.html`；第三轮通过多 Agent 并行完成其余 5 页字段对齐、`common.js` 修复、N10 Chrome 英文规范化、Go 静态门禁与 Node 渲染 smoke 守卫，详见第九部分）。
 
 ### N16（中）— `vmr-report.md` §8 附录与详单回链仍指向 D7 删除的 `vmr-requests.md`
 
@@ -575,8 +569,79 @@
 
 ## 第八部分：仍待用户裁决 / 后续任务
 
-1. **N15 看板补完盘**（2–4 人天）—— 5 个页面字段审计 + 渲染测试 + N10 chrome。**最高优先级后续任务**。
+1. ~~**N15 看板补完盘**（5 个页面字段审计 + 渲染测试 + N10 chrome）~~ —— ✅ **已在第三轮全部完成**。
 2. **N2 / C5**（journey `llm_interpretation` 入 JSON）—— 本轮用户未列入；仍是方案 §3.6 点名要消除的旁路拼接。
 3. **C3 SessionRow 收敛**（约 15 行）—— 若不认可 4.2 的缩小理由。
 4. **N9 leaf 包注释残留**（低优）—— `vmr story` / `vmr report` 作命令名的约 100+ 处注释。
 5. **N11**（配置指纹字段核对）/ **N12**（方案 §7.2 `-from/-to` 术语脚注）—— 观察/文档项。
+6. **N17**（`config.yaml` 语法兼容 notice）—— 见第九部分。
+
+---
+
+## 第九部分：第三轮（N15 看板补完盘、N10 英文规范化与真实日志端到端复核）
+
+**触发**：用户要求按照建议方案彻底解决 N15（严重），全面审计并修复看板渲染层字段错配，并基于 `logs/` 真实日志完整跑通 macro、journey、benchmark、compare 与 render-only，核验所有产出。
+**实施模式**：依据 `docs/prompts/prompt-multi-agent-guide.md`，启用 Pi Agent CLI 多 Worker + `git worktree` 并行实施。
+
+### 9.1 任务分组与并行编排
+
+根据领域内聚性与文件正交性划分为两个子任务包，主控统一管控 `common.js` 与集成测试：
+
+| 分组 | 责任范围 | 变更白名单 | 交付分支 / 状态 |
+|---|---|---|---|
+| **Worker 1 (Macro & Tool Waste)** | `macro-dashboard.html` 全部 5 个 Tab 字段重写，`tool-waste.html` 字段对齐与 Chrome 规范化 | `macro-dashboard.html`, `tool-waste.html` | `feat/n15-macro-dash` (`77504ea`) ✅ |
+| **Worker 2 (Journey & Zoom)** | `journey-viewer.html`（候选/详情模式）、`benchmarks.html`、`journey-compare.html`（索引/详情模式）字段对齐与 Chrome 规范化 | `journey-viewer.html`, `benchmarks.html`, `journey-compare.html` | `feat/n15-journey-dash` (`bd70ba7`) ✅ |
+| **Lead (主控整合)** | `common.js` 修复、Go 静态禁止 PascalCase 门禁、Node.js 渲染 smoke 自动化测试、真实日志实跑核验 | `common.js`, `dashboard_test.go`, `js_test.go` | `main` (`89320c5`) ✅ |
+
+### 9.2 关键缺陷修复明细
+
+1. **`macro-dashboard.html`**：
+   - **Summary Tab 整体唤醒**：旧代码读 `o.Requests`、`o.Errors`、`o.TokensIn`、`o.CostEstimate`、`o.CacheEff` 等全部为 `undefined`，导致请求数显示 0、总 Tokens 显示 0、成功率显示 100%、花费呈现 `—`。全部收敛为 `o.requests`、`o.errors`、`o.tokens_in`、`o.tokens_out`、`o.cost_estimate`、`o.cache_efficiency`，所有卡片均恢复真实数值。
+   - **Findings 叙事恢复**：旧代码读 `f.title || f.code` 与 `f.message`，而 `report.Finding` 正文存放在 `f.finding`，导致标题后无叙事正文。修复为渲染 `f.finding`、`f.value` 与 `f.action`。
+   - **Finance Tab**：修复 `m.model`、`m.tokens_in_fresh`、`m.cost_estimate`、`c.client_key`、`q.window_consumed` 等字段读取。
+   - **Reliability Tab**：修复端点时延 P50/P90 读取为 `dur_ms_p50`、`dur_ms_p95`、`ttft_ms_p50`（原先读 `e.P50MS`/`e.p50_ms` 恒为 `—`）；修复粘性会话 `cont.cache_efficiency`（原先读 `cont.CacheEff` 恒为 `0.0%`）。
+   - **Context Efficiency Tab**：修复会话平均轮数计算，`SessionRow` 无 `turns` 字段，其轮数即为嵌于 `TrafficStats` 的 `s.requests`，修复后平均轮次正确反映。
+2. **`tool-waste.html`**：
+   - 旧代码读 `t.DeclaredCount` 与 `t.CalledCount` 导致声明与调用工具数全为 `0 / 0`。修复为读取 `t.declared.length` 与 `t.distinct_called`，并使用 `t.schema_bytes_shipped` 与 `t.schema_waste_bytes`。
+3. **`journey-viewer.html`**：
+   - 修复详情卡片中的 `metrics.model_ms`、`metrics.agent_exec_ms`、`metrics.human_idle_ms`、`metrics.tool_call_count`、`metrics.duplicate_action_rate`、`metrics.plan_exec_ratio`（原先全为 `—` 或 `0`）。
+   - 修复 Findings 列表：`journey.Finding` 包含 `code`、`finding`、`evidence`、`action`，修复了原本因读取 `f.Title` / `f.Message` 而导致的叙事空白。
+   - 修复步骤 timeline 中 `s.ts_display`、`s.dur_ms`、`s.tool_calls` 以及 `s.resp_ref` 引用的 `bodies` 映射。
+4. **`journey-compare.html`**：
+   - **索引模式死链接修复**：旧代码读 `c.ID` / `c.File` / `c.A`，导致生成的对比列表链接均为 `journey-compare.html#data=compares/undefined`、标题均为 `A vs B`。全部对齐 `compares/index.json` 真实字段 `c.filename`、`c.a_journey.id`、`c.b_journey.id`。
+   - **详情模式**：对齐 `cmp.a_journey` / `cmp.b_journey`，修复指标对比表格与工具频次对比表格。
+5. **`benchmarks.html`**：
+   - 对齐 `s.journey_count`、`s.metric_distributions`、`s.finding_rates`、`s.correlations`（`c.metric_a`、`c.metric_b`、`c.rho`）与 `s.protocol_share`。
+6. **`common.js` 基础运行时**：
+   - `svgLatencyPlot` 原先只检查 `P50MS`/`p50_ms`/`DurMS`，导致真实切片中的 `dur_ms_p50`/`dur_ms_p95` 被完全过滤、图表永远提示 "No latency metrics recorded"。已补全对齐。
+   - `Theme.apply` 与 `getDataParam` 增加 Node / 无 DOM / SSR 环境保护，支持在 Node 沙箱中直接运行测试。
+7. **N10 看板 Chrome 统一为英文规范**：
+   - 6 个骨架页的所有系统 Banner（版本差异、缺失数据、file:// 警告）、错误提示、空状态与表头，统一收敛为简洁的英文模板（数据切片正文依然严格遵从 `-lang`）。
+
+### 9.3 测试守卫与双重门禁
+
+1. **Go 静态代码门禁**（`internal/dashboard/dashboard_test.go`）：
+   - `TestAllDashboardPages_ReadSnakeCaseFields`：针对 5 个骨架页建立白名单与禁止的 PascalCase 属性集合，任何重新引入 Go 字段名直接打红 CI。
+2. **Node.js 自动化渲染 Smoke 测试**（`internal/dashboard/js_test.go`）：
+   - `TestJS_DashboardRenderSmoke`：在 Node 环境下启动轻量 DOM 沙箱，将全部 6 个页面的真实渲染逻辑完整加载，喂入真实切片 schema 模拟数据。断言关键单元格非空、非 `—`、无 `undefined` 与 `NaN`。
+
+### 9.4 真实日志全流程端到端复核（`logs/vmr-audit-2026-08-24.jsonl.zst`）
+
+在独立全新目录 `/tmp/vmr-reports-e2e` 下实跑：
+1. `vmr analyze -o /tmp/vmr-reports-e2e logs/vmr-audit-2026-08-24.jsonl.zst`（全量 macro 5 切片 + 15 个 journey 详情 + manifest.json + vmr-report.md）
+2. `vmr analyze -o /tmp/vmr-reports-e2e -benchmark logs/vmr-audit-2026-08-24.jsonl.zst`（生成 `journeys/benchmarks.{json,md}`）
+3. `vmr analyze -o /tmp/vmr-reports-e2e -compare j-lobster-20260824T060000-20260824T060456-c68624be,j-lobster-20260824T080000-20260824T081049-74c4c58a logs/vmr-audit-2026-08-24.jsonl.zst`（生成对比 JSON 与 MD，重建 `compares/index.json`）
+4. `vmr analyze -o /tmp/vmr-reports-e2e -render-only`（Markdown 单一渲染路径验证，产物逐字节一致，退出码 0）
+5. **看板数据复核**：使用 Node 对 `/tmp/vmr-reports-e2e` 真实落盘的 7 类文件（`summary.json`、`finance.json`、`reliability.json`、`workloads.json`、`context-efficiency.json`、`benchmarks.json`、`j-*.json`、`compares/index.json`、`compare-*.json`）执行端到端渲染，验证全部通过：
+   - `macro-dashboard.html` Summary 卡片：Total Requests 519, Success Rate 99.0%, Total Tokens 60.86M, Estimated Spend $4.68，全量有效。
+   - `tool-waste.html`：成功识别 68 个工具声明，浪费字节 24.43 MB，准确展示未调用工具数量与浪费率。
+   - `journey-viewer.html`：成功渲染 Model Time 3m 13s, Agent Exec 1m 46s, Duplicate Actions 7.1%, 28 次工具调用，以及完整的行为发现叙事与步骤时间线。
+   - `journey-compare.html`：索引列表与对比详情页数据准确呈现。
+   - `benchmarks.html`：正确统计 15 个 Journey、14 类指标分布与 35 组经验相关性。
+
+### 9.5 新发现问题：N17
+
+- **问题描述**：运行 `vmr analyze` 时日志提示：`config: config.yaml not usable (parse yaml: yaml: unmarshal errors: line 222: cannot unmarshal !!seq into map[string][]config.EndpointGroup ...)`。
+- **现状分析**：分析半区已针对此类配置损坏做了优雅降级（$ estimates 降级为仅使用标准价目表，不使用账户覆盖），不会导致崩溃。但说明本地的 `config.yaml` 存在旧语法或格式不合规的 endpoint group 声明。
+- **处置建议**：建议后续对当前工作区的 `config.yaml` 模型路由组配置进行格式校验与规整，避免定价层降级。
+
