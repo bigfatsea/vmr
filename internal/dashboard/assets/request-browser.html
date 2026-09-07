@@ -165,18 +165,18 @@
       <table>
         <thead>
           <tr>
-            <th data-sort="ts_display">Time (ts_display)</th>
-            <th data-sort="ClientKey">Client</th>
-            <th data-sort="Model">Model</th>
-            <th data-sort="Endpoint">Endpoint</th>
-            <th data-sort="Outcome">Outcome</th>
-            <th data-sort="DurMS">Duration</th>
-            <th data-sort="TTFTMS">TTFT</th>
-            <th data-sort="TokensInFresh">Fresh In</th>
-            <th data-sort="TokensInCached">Cached In</th>
-            <th data-sort="TokensOut">Out</th>
-            <th data-sort="CacheEff">Cache Eff</th>
-            <th data-sort="Fallbacks">FB</th>
+            <th data-sort="ts">Time</th>
+            <th data-sort="client_key">Client</th>
+            <th data-sort="model">Model</th>
+            <th data-sort="endpoint">Endpoint</th>
+            <th data-sort="outcome">Outcome</th>
+            <th data-sort="dur_ms">Duration</th>
+            <th data-sort="ttft_ms">TTFT</th>
+            <th data-sort="tokens_in_fresh">Fresh In</th>
+            <th data-sort="tokens_in_cached">Cached In</th>
+            <th data-sort="tokens_out">Out</th>
+            <th data-sort="cache_eff">Cache Eff</th>
+            <th data-sort="fallbacks">FB</th>
             <th data-sort="detail_file">Detail</th>
             <th>Journey</th>
           </tr>
@@ -325,9 +325,9 @@
       function buildFacets() {
         const clients = new Set(), models = new Set(), endpoints = new Set();
         allRows.forEach(r => {
-          if (r.ClientKey) clients.add(r.ClientKey);
-          if (r.Model) models.add(r.Model);
-          if (r.Endpoint) endpoints.add(r.Endpoint);
+          if (r.client_key) clients.add(r.client_key);
+          if (r.model) models.add(r.model);
+          if (r.endpoint) endpoints.add(r.endpoint);
         });
         const fill = (sel, values) => {
           const cur = sel.value;
@@ -349,14 +349,15 @@
         const search = dom.fSearch.value.toLowerCase().trim();
 
         let out = allRows.filter(r => {
-          if (fc && r.ClientKey !== fc) return false;
-          if (fm && r.Model !== fm) return false;
-          if (fe && r.Endpoint !== fe) return false;
-          if (fo && r.Outcome !== fo) return false;
+          if (fc && r.client_key !== fc) return false;
+          if (fm && r.model !== fm) return false;
+          if (fe && r.endpoint !== fe) return false;
+          if (fo && r.outcome !== fo) return false;
           if (tFrom !== null && r.TSNum < tFrom) return false;
           if (tTo !== null && r.TSNum > tTo) return false;
           if (search) {
-            const hay = `${r.Title || ''} ${r.Session || ''} ${r.Task || ''}`.toLowerCase();
+            const sm = sessionMeta[r.session || ''] || {};
+            const hay = `${sm.title || ''} ${sm.alias || ''} ${r.session || ''} ${r.task || ''}`.toLowerCase();
             if (!hay.includes(search)) return false;
           }
           return true;
@@ -396,31 +397,34 @@
         }
 
         const html = slice.map(r => {
-          const outcome = r.Outcome || '—';
+          const outcome = r.outcome || '—';
           const isErr = outcome === 'error';
-          const sessionKey = r.Session || '';
+          const sessionKey = r.session || '';
           const sm = sessionMeta[sessionKey] || {};
-          const sessionTitle = (sm.Title || sm.Alias || sessionKey || '—');
-          const jLink = journeyLinks[sessionKey];
-          const detailHref = r.DetailFile ? `requests/details/${r.DetailFile}` : null;
+          const sessionTitle = (sm.title || sm.alias || sessionKey || '—');
+          // journey_link maps a lineage/session id to "details/j-<id>.md";
+          // journey-viewer wants the bare id's .json.
+          const jRel = journeyLinks[sessionKey];
+          const jId = jRel ? jRel.replace(/^details\//, '').replace(/\.md$/, '') : null;
+          const detailHref = r.detail_file ? `requests/details/${r.detail_file}` : null;
           const outcomeBadge = `<span class="badge-pill ${isErr ? 'badge-alert' : 'badge-ok'}">${outcome}</span>`;
 
           return `
             <tr class="${isErr ? 'row-error' : 'row-ok'}">
               <td>${r.ts_display || '—'}</td>
-              <td title="${r.ClientKey || ''}">${r.ClientKey || '—'}</td>
-              <td>${r.Model || '—'}</td>
-              <td title="${r.Endpoint || ''}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${r.Endpoint || '—'}</td>
-              <td>${outcomeBadge}${r.ErrorClass ? ` <code>${r.ErrorClass}</code>` : ''}</td>
-              <td class="num">${FmtDuration(r.DurMS)}</td>
-              <td class="num">${r.TTFTMS ? FmtDuration(r.TTFTMS) : '—'}</td>
-              <td class="num">${FmtTokens(r.TokensInFresh)}</td>
-              <td class="num">${FmtTokens(r.TokensInCached)}</td>
-              <td class="num">${FmtTokens(r.TokensOut)}</td>
-              <td class="num">${r.CacheEff != null ? FmtPercent(r.CacheEff) : '—'}</td>
-              <td class="num">${r.Fallbacks || 0}</td>
+              <td title="${r.client_key || ''}">${r.client_key || '—'}</td>
+              <td>${r.model || '—'}</td>
+              <td title="${r.endpoint || ''}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${r.endpoint || '—'}</td>
+              <td>${outcomeBadge}${r.error_class ? ` <code>${r.error_class}</code>` : ''}</td>
+              <td class="num">${r.dur_ms ? FmtDuration(r.dur_ms) : '—'}</td>
+              <td class="num">${r.ttft_ms ? FmtDuration(r.ttft_ms) : '—'}</td>
+              <td class="num">${FmtTokens(r.tokens_in_fresh || 0)}</td>
+              <td class="num">${FmtTokens(r.tokens_in_cached || 0)}</td>
+              <td class="num">${FmtTokens(r.tokens_out || 0)}</td>
+              <td class="num">${r.cache_eff != null ? FmtPercent(r.cache_eff) : '—'}</td>
+              <td class="num">${r.fallbacks || 0}</td>
               <td>${detailHref ? `<a href="${detailHref}">detail</a>` : '—'}</td>
-              <td>${jLink ? `<a href="journey-viewer.html#data=journeys/details/${jLink}.json">${(jLink.length > 20 ? jLink.slice(0, 18) + '…' : jLink)}</a>` : `<span title="${sessionTitle}" style="color:var(--ink-dim);">—</span>`}</td>
+              <td>${jId ? `<a href="journey-viewer.html#data=journeys/details/${jId}.json">${(jId.length > 20 ? jId.slice(0, 18) + '…' : jId)}</a>` : `<span title="${sessionTitle}" style="color:var(--ink-dim);">—</span>`}</td>
             </tr>
           `;
         }).join('');
@@ -428,16 +432,15 @@
         dom.rowsBody.innerHTML = html;
       }
 
-      // Normalize row ts into TSNum
+      // Normalize row ts (epoch ms number, or a legacy RFC3339 string) into TSNum.
       function normalizeRow(r) {
         if (r.TSNum === undefined) {
-          // ts in RequestRow is a string like "2026-09-06T12:00:00Z"
-          const raw = r.TS || r.ts;
-          if (typeof raw === 'string') {
+          const raw = r.ts;
+          if (typeof raw === 'number') {
+            r.TSNum = raw;
+          } else if (typeof raw === 'string') {
             const parsed = Date.parse(raw);
             r.TSNum = isNaN(parsed) ? 0 : parsed;
-          } else if (typeof raw === 'number') {
-            r.TSNum = raw;
           } else {
             r.TSNum = 0;
           }

@@ -189,6 +189,36 @@ func TestSkeletonPages_NoExternalDependencies(t *testing.T) {
 	}
 }
 
+// TestRequestBrowser_ReadsSnakeCaseFields is the regression guard for N15:
+// request-browser.html was written against Go struct field names
+// (r.ClientKey, r.DurMS, …) while requests/index.json emits snake_case json
+// tags (client_key, dur_ms, …), so every data column rendered as a dash.
+// The page must read the JSON's own keys.
+func TestRequestBrowser_ReadsSnakeCaseFields(t *testing.T) {
+	data, err := assets.ReadFile("assets/request-browser.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	// The PascalCase names that do not exist in requests/index.json.
+	for _, bad := range []string{
+		"r.ClientKey", "r.Model", "r.Endpoint", "r.Outcome", "r.DurMS",
+		"r.TTFTMS", "r.TokensInFresh", "r.TokensInCached", "r.TokensOut",
+		"r.CacheEff", "r.Fallbacks", "r.ErrorClass", "r.DetailFile",
+		"r.Session", "r.Task", "r.Title", "sm.Title", "sm.Alias",
+	} {
+		if contains(s, bad) {
+			t.Errorf("request-browser.html reads %q, but requests/index.json has no such key (snake_case json tags)", bad)
+		}
+	}
+	// And it must read the real keys.
+	for _, want := range []string{"r.client_key", "r.dur_ms", "r.tokens_in_fresh", "r.ts_display"} {
+		if !contains(s, want) {
+			t.Errorf("request-browser.html does not read %q", want)
+		}
+	}
+}
+
 func replaceAll(s, old, new string) string {
 	out := ""
 	for {
