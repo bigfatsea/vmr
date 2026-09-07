@@ -827,12 +827,12 @@ func TestCmdAnalyze_LLMFlagValidation(t *testing.T) {
 		t.Error("-llm-addr with -render-all should be rejected")
 	}
 
-	// -llm-addr with -corpus must be rejected the same way as -render-all —
+	// -llm-addr with -benchmark must be rejected the same way as -render-all —
 	// same "one LLM call per journey in a batch pass" cost-profile reasoning.
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-benchmark", "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", filepath.Join(t.TempDir(), "out4"), path})
 	}); err == nil {
-		t.Error("-llm-addr with -corpus should be rejected")
+		t.Error("-llm-addr with -benchmark should be rejected")
 	}
 }
 
@@ -1022,7 +1022,7 @@ func TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	t.Run("-benchmark", func(t *testing.T) {
 		outDir3 := filepath.Join(t.TempDir(), "out3")
 		if err := cmdAnalyze([]string{"-benchmark", "-report-config", reportConfigPath, "-o", outDir3, path}); err != nil {
-			t.Fatalf("cmdAnalyze -corpus (report.yaml llm_addr default): %v", err)
+			t.Fatalf("cmdAnalyze -benchmark (report.yaml llm_addr default): %v", err)
 		}
 	})
 
@@ -1039,18 +1039,18 @@ func TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	})
 }
 
-// TestCmdAnalyze_Corpus covers -corpus: two independent candidate journeys
-// must produce vmr-story-corpus.md + .json under {outDir}/stories, and the
+// TestCmdAnalyze_Benchmark covers -benchmark: two independent candidate journeys
+// must produce benchmarks.md + .json under {outDir}/journeys, and the
 // "no candidates" path (an audit log that groups into zero lineages at all)
 // must return without error and without writing either file, matching
 // renderBenchmarks' own len(toRender)==0 early return.
-func TestCmdAnalyze_Corpus(t *testing.T) {
+func TestCmdAnalyze_Benchmark(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, _, _ := writeTwoCandidateJourneys(t, outDir)
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdAnalyze -corpus: %v", err)
+			t.Fatalf("cmdAnalyze -benchmark: %v", err)
 		}
 	})
 	if !strings.Contains(out, "2 journey(s) analyzed") {
@@ -1060,36 +1060,36 @@ func TestCmdAnalyze_Corpus(t *testing.T) {
 	mdPath := filepath.Join(outDir, "journeys", "benchmarks.md")
 	mdData, err := os.ReadFile(mdPath)
 	if err != nil {
-		t.Fatalf("vmr-story-corpus.md not written: %v", err)
+		t.Fatalf("benchmarks.md not written: %v", err)
 	}
 	if len(mdData) == 0 {
-		t.Error("vmr-story-corpus.md is empty")
+		t.Error("benchmarks.md is empty")
 	}
 
 	jsonPath := filepath.Join(outDir, "journeys", "benchmarks.json")
 	jsonData, err := os.ReadFile(jsonPath)
 	if err != nil {
-		t.Fatalf("vmr-story-corpus.json not written: %v", err)
+		t.Fatalf("benchmarks.json not written: %v", err)
 	}
 	var stats journey.BenchmarkStats
 	if err := json.Unmarshal(jsonData, &stats); err != nil {
-		t.Fatalf("vmr-story-corpus.json is not valid JSON: %v\n%s", err, jsonData)
+		t.Fatalf("benchmarks.json is not valid JSON: %v\n%s", err, jsonData)
 	}
 	if stats.JourneyCount != 2 {
 		t.Errorf("stats.JourneyCount = %d, want 2", stats.JourneyCount)
 	}
 }
 
-// TestCmdAnalyze_CorpusNoCandidates covers renderBenchmarks' own early return when
+// TestCmdAnalyze_BenchmarkNoCandidates covers renderBenchmarks' own early return when
 // there are zero candidate journeys to analyze (here: a single record with
 // no non-system messages, which ctxgraph groups into Ungrouped rather than
 // any Lineage at all — same fixture shape as TestCmdAnalyze_ShowUngrouped).
-// The command must not error, and must not write vmr-story-corpus.md/.json
+// The command must not error, and must not write benchmarks.md/.json
 // (nothing to analyze) — but journeys/index.json/.md still get written, same
 // as every other invocation (an empty candidate list is still a real,
 // worth-recording result, unlike -llm-dry-run's "should I even run this"
 // pure query, which is why that one still leaves no directory at all).
-func TestCmdAnalyze_CorpusNoCandidates(t *testing.T) {
+func TestCmdAnalyze_BenchmarkNoCandidates(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sysOnly := journeyRec(at(0), []any{journeyMsg("system", "sys, nothing else")}, journeySSE("ok"))
 	path := writeJourneyJSONL(t, []audit.Record{sysOnly})
@@ -1097,14 +1097,14 @@ func TestCmdAnalyze_CorpusNoCandidates(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdAnalyze -corpus (no candidates): %v", err)
+			t.Fatalf("cmdAnalyze -benchmark (no candidates): %v", err)
 		}
 	})
 	if !strings.Contains(out, "no candidate journeys to analyze") {
 		t.Errorf("expected the no-candidates message:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "journeys", "benchmarks.md")); err == nil {
-		t.Error("-corpus with zero candidates should not write vmr-story-corpus.md")
+		t.Error("-benchmark with zero candidates should not write benchmarks.md")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "journeys", "index.json")); err != nil {
 		t.Errorf("journeys/index.json should still be written even with zero candidates: %v", err)
