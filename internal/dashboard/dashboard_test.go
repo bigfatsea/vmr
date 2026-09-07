@@ -219,6 +219,100 @@ func TestRequestBrowser_ReadsSnakeCaseFields(t *testing.T) {
 	}
 }
 
+// TestAllDashboardPages_ReadSnakeCaseFields is the complete regression guard for N15:
+// All 6 dashboard pages must read their slices using the actual snake_case json tags
+// instead of Go PascalCase struct field names.
+func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
+	type pageCase struct {
+		file string
+		bad  []string
+		want []string
+	}
+
+	cases := []pageCase{
+		{
+			file: "assets/macro-dashboard.html",
+			bad: []string{
+				"o.Requests", "o.Errors", "o.TokensIn", "o.TokensOut", "o.CostEstimate",
+				"m.CostEstimate", "c.CostEstimate", "d.CostEstimate",
+				"c.TokensIn", "c.TokensOut", "e.P50MS", "e.P90MS", "e.TTFTP50MS",
+				"s.Turns", "s.turns", "cont.CacheEff", "sw.CacheEff",
+			},
+			want: []string{
+				"o.requests", "o.errors", "o.tokens_in", "o.tokens_out", "o.cost_estimate",
+				"m.tokens_in_fresh", "e.dur_ms_p50", "e.dur_ms_p95", "e.ttft_ms_p50",
+				"s.requests", "cont.cache_efficiency", "sw.cache_efficiency",
+			},
+		},
+		{
+			file: "assets/tool-waste.html",
+			bad: []string{
+				"t.DeclaredCount", "t.CalledCount", "t.SchemaBytesShipped",
+				"t.SchemaWasteBytes", "t.Signature", "ce.Tools",
+			},
+			want: []string{
+				"t.schema_bytes_shipped", "t.schema_waste_bytes", "t.distinct_called",
+				"t.declared", "ce.tools",
+			},
+		},
+		{
+			file: "assets/journey-viewer.html",
+			bad: []string{
+				"metrics.ModelMS", "metrics.AgentExecMS", "metrics.HumanIdleMS",
+				"metrics.ToolCallCount", "metrics.DuplicateActionRate", "metrics.PlanExecRatio",
+				"cost.Total", "cost.Currency", "f.Severity", "f.Title", "f.Message",
+			},
+			want: []string{
+				"metrics.model_ms", "metrics.agent_exec_ms", "metrics.human_idle_ms",
+				"metrics.tool_call_count", "metrics.duplicate_action_rate", "metrics.plan_exec_ratio",
+				"cost.total", "f.finding", "s.ts_display",
+			},
+		},
+		{
+			file: "assets/benchmarks.html",
+			bad: []string{
+				"s.JourneyCount", "s.MetricDist", "s.FindingRate", "s.Correlations",
+				"s.ProtocolShare", "c.MetricA", "c.MetricB", "c.Rho",
+			},
+			want: []string{
+				"s.journey_count", "s.metric_distributions", "s.finding_rates",
+				"s.correlations", "s.protocol_share", "c.metric_a", "c.metric_b", "c.rho",
+			},
+		},
+		{
+			file: "assets/journey-compare.html",
+			bad: []string{
+				"c.ID", "c.ARef", "c.BRef", "cmp.Rows", "cmp.Tools",
+				"t.ACalls", "t.BCalls", "aRef.Steps", "aRef.ToolCalls",
+			},
+			want: []string{
+				"c.filename", "c.a_journey", "c.b_journey", "cmp.rows",
+				"cmp.tools", "t.a_calls", "t.b_calls", "aRef.steps", "aRef.tool_calls",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			data, err := assets.ReadFile(tc.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := string(data)
+			for _, bad := range tc.bad {
+				if contains(s, bad) {
+					t.Errorf("%s reads %q, but slices emit snake_case keys", tc.file, bad)
+				}
+			}
+			for _, want := range tc.want {
+				if !contains(s, want) {
+					t.Errorf("%s does not read expected key %q", tc.file, want)
+				}
+			}
+		})
+	}
+}
+
 func replaceAll(s, old, new string) string {
 	out := ""
 	for {

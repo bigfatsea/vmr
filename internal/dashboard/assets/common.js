@@ -142,6 +142,7 @@ const Theme = {
     this.apply(p);
   },
   apply(p) {
+    if (typeof document === 'undefined') return;
     const root = document.documentElement;
     if (p === 'dark' || p === 'light') {
       root.setAttribute('data-theme', p);
@@ -151,7 +152,7 @@ const Theme = {
   },
   init() {
     this.apply(this.getPreference());
-    if (window.matchMedia) {
+    if (typeof window !== 'undefined' && window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (this.getPreference() === 'auto') {
           this.apply('auto');
@@ -163,8 +164,9 @@ const Theme = {
 
 // getDataParam retrieves #data=... from location.hash (§6.2 D13).
 function getDataParam() {
-  if (typeof location === 'undefined' || !location.hash) return null;
-  const hash = location.hash.replace(/^#/, '');
+  const loc = typeof window !== 'undefined' && window.location ? window.location : (typeof location !== 'undefined' ? location : (typeof globalThis !== 'undefined' && globalThis.location ? globalThis.location : null));
+  if (!loc || !loc.hash) return null;
+  const hash = loc.hash.replace(/^#/, '');
   const match = hash.match(/(?:^|&)data=([^&]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
