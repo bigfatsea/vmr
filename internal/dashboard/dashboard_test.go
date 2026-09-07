@@ -261,11 +261,12 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 				"metrics.ModelMS", "metrics.AgentExecMS", "metrics.HumanIdleMS",
 				"metrics.ToolCallCount", "metrics.DuplicateActionRate", "metrics.PlanExecRatio",
 				"cost.Total", "cost.Currency", "f.Severity", "f.Title", "f.Message",
+				"usage.In", "usage.Out",
 			},
 			want: []string{
 				"metrics.model_ms", "metrics.agent_exec_ms", "metrics.human_idle_ms",
 				"metrics.tool_call_count", "metrics.duplicate_action_rate", "metrics.plan_exec_ratio",
-				"cost.total", "f.finding", "s.ts_display",
+				"cost.total", "f.finding", "s.ts_display", "usage.in", "usage.out",
 			},
 		},
 		{

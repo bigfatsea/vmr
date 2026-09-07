@@ -24,13 +24,20 @@ import (
 // into the cache on this turn (cache_creation_input_tokens) — billed at a
 // premium, not a "hit", but still part of In. In - CacheRead - CacheWrite is
 // the fresh (non-cached) portion.
+// The json tags keep every on-disk serialization of this type (the journey
+// slice's per-step `usage`, ctxgraph's cached Manifest) in the same
+// snake_case shape as the rest of the analytics schema — a self-copied
+// dashboard reading `usage.in` must not get `undefined`.
 type Usage struct {
-	In, Out               int64
-	CacheRead, CacheWrite int64
+	In  int64 `json:"in"`
+	Out int64 `json:"out"`
+
+	CacheRead  int64 `json:"cache_read"`
+	CacheWrite int64 `json:"cache_write"`
 	// Reasoning is the thinking-token portion of Out when the provider
 	// reports it (usage.completion_tokens_details.reasoning_tokens); 0 when
 	// absent — consumers treat 0 as "not reported".
-	Reasoning int64
+	Reasoning int64 `json:"reasoning"`
 }
 
 // Shape counters (S-2 "make the silence loud"): package-level atomics that
@@ -52,7 +59,7 @@ var (
 // UnrecognizedShapeCounts returns how many unrecognized content-part types
 // and how many unrecognized usage holders chatmsg has met since process
 // start (or since the last ResetUnrecognizedShapeCounts). Read by vmr
-// analyze's corpus renderer for its shape-lineage disclosure line.
+// analyze's benchmarks renderer for its shape-lineage disclosure line.
 func UnrecognizedShapeCounts() (parts, holders int64) {
 	return unrecognizedPartTypes.Load(), unrecognizedUsageHolders.Load()
 }

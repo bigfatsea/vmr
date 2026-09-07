@@ -269,7 +269,7 @@ const mockMacro = {
       structure: {
         tasks: [{
           title: 'Task 1',
-          steps: [{ seq: 1, ts_display: '2026-08-24 10:01:00', model: 'sonnet', dur_ms: 1200, usage: { In: 2000, Out: 150 } }]
+          steps: [{ seq: 1, ts_display: '2026-08-24 10:01:00', model: 'sonnet', dur_ms: 1200, usage: { in: 2000, out: 150 } }]
         }]
       }
     }

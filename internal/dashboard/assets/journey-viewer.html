@@ -322,7 +322,7 @@
                   <span class="step-seq">Step ${seq}</span>
                   <span class="step-ts">${tsDisplay}</span>
                   <span class="step-model">${endpoint}</span>
-                  <span class="step-model">in ${FmtTokens(usage.In || 0)} · out ${FmtTokens(usage.Out || 0)} · ${FmtDuration(s.dur_ms || 0)}</span>
+                  <span class="step-model">in ${FmtTokens(usage.in || 0)} · out ${FmtTokens(usage.out || 0)} · ${FmtDuration(s.dur_ms || 0)}</span>
                   ${flags.join(' ')}
                 </div>
                 ${toolChips ? `<div style="margin: 4px 0;">${toolChips}</div>` : ''}

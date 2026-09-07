@@ -45,7 +45,7 @@ import (
 // EstIn/EstOut become per-side fills. A cached v6 manifest decodes with
 // both OK flags false and would silently degrade every side to the
 // estimate, so cached v6 entries must not be reused — hence the bump.
-const CacheSchemaVersion = 7
+const CacheSchemaVersion = 8
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no
