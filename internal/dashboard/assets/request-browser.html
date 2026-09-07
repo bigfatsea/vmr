@@ -310,7 +310,7 @@
 
         try {
           const idx = await fetchSlice('requests/index.json');
-          allRows = idx.requests || [];
+          allRows = (idx.requests || []).map(normalizeRow);
           journeyLinks = idx.journey_link || {};
           sessionMeta = idx.sessions || {};
           buildFacets();
@@ -447,8 +447,6 @@
         }
         return r;
       }
-      allRows = allRows.map(normalizeRow);
-
       loadAll();
     })();
   </script>
