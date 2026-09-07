@@ -127,14 +127,10 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 	if err != nil {
 		return err
 	}
-	targetDir := dir
-	if filepath.Base(dir) != "requests" {
-		targetDir = filepath.Join(dir, "requests")
-	}
-	if err := os.MkdirAll(targetDir, 0o700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(targetDir, "index.json"), data, 0o600)
+	return os.WriteFile(filepath.Join(dir, "index.json"), data, 0o600)
 }
 
 // fmtDisplayFull renders an RFC3339 timestamp (CompactionRow.TS, the

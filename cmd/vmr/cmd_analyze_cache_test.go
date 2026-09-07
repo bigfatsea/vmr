@@ -13,6 +13,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
@@ -471,5 +472,87 @@ func TestAnalyzeCache_L2HitSweepsOrphanJourneys(t *testing.T) {
 	}
 	if len(entries) == 0 {
 		t.Fatal("sweep removed every journey detail, not just the orphan")
+	}
+}
+
+// TestAnalyzeCache_ZoomArtifactMissingRebuilt (N-B4) asserts that when an
+// artifact produced by a zoom mode (-compare or -journey) is deleted between
+// runs, L2 cache check detects the missing output and falls back to a full
+// rebuild rather than silently succeeding and leaving the artifact missing.
+func TestAnalyzeCache_ZoomArtifactMissingRebuilt(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
+	sys := journeyMsg("system", "sys")
+
+	aU1 := journeyMsg("user", "candidate A for zoom cache test")
+	aR1 := journeyRec(at(0), []any{sys, aU1}, journeySSE("开工 A"))
+	aR2 := journeyRec(at(1), []any{sys, aU1, journeyMsg("assistant", "done A")}, journeySSE("完成 A"))
+
+	bU1 := journeyMsg("user", "candidate B for zoom cache test")
+	bR1 := journeyRec(at(10), []any{sys, bU1}, journeySSE("开工 B"))
+	bR2 := journeyRec(at(11), []any{sys, bU1, journeyMsg("assistant", "done B")}, journeySSE("完成 B"))
+
+	path := writeJourneyJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	outDir := filepath.Join(t.TempDir(), "reports")
+
+	// Initial default run to establish index.
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, path})
+	}); err != nil {
+		t.Fatalf("setup run: %v", err)
+	}
+
+	idx := journey.LoadJourneyIndex(filepath.Join(outDir, "journeys", "index.json"))
+	if idx == nil || len(idx.Journeys) < 2 {
+		t.Fatalf("expected at least 2 journeys in index, got %+v", idx)
+	}
+	idA := idx.Journeys[0].ID
+	idB := idx.Journeys[1].ID
+
+	// Run compare once
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
+	}); err != nil {
+		t.Fatalf("initial compare run: %v", err)
+	}
+
+	cmpJSON := filepath.Join(outDir, "compares", "compare-"+idA+"-vs-"+idB+".json")
+	if _, err := os.Stat(cmpJSON); err != nil {
+		t.Fatalf("expected compare JSON to exist: %v", err)
+	}
+
+	// Delete compare JSON
+	if err := os.Remove(cmpJSON); err != nil {
+		t.Fatalf("failed to delete compare JSON: %v", err)
+	}
+
+	// Re-run the exact same compare run without -no-cache
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
+	}); err != nil {
+		t.Fatalf("subsequent compare run: %v", err)
+	}
+
+	// It must be rebuilt!
+	if _, err := os.Stat(cmpJSON); err != nil {
+		t.Fatalf("N-B4 failure: compare JSON was not rebuilt when missing on L2 hit: %v", err)
+	}
+
+	// Test single -journey as well
+	jJSON := filepath.Join(outDir, "journeys", "details", idA+".json")
+	if _, err := os.Stat(jJSON); err != nil {
+		t.Fatalf("expected journey JSON to exist: %v", err)
+	}
+	if err := os.Remove(jJSON); err != nil {
+		t.Fatalf("failed to delete journey JSON: %v", err)
+	}
+
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, "-journey", idA, path})
+	}); err != nil {
+		t.Fatalf("subsequent journey run: %v", err)
+	}
+
+	if _, err := os.Stat(jJSON); err != nil {
+		t.Fatalf("N-B4 failure: journey JSON was not rebuilt when missing on L2 hit: %v", err)
 	}
 }

@@ -8,6 +8,7 @@
 package report
 
 import (
+	"math"
 	"sort"
 	"strings"
 )
@@ -83,6 +84,9 @@ func buildProviders(rep *Report2, quotas map[string][]ProviderQuotaRef) []Provid
 
 		if refs, ok := quotas[provider]; ok {
 			pr.Quota = refs
+		}
+		if pr.CostEstimate != nil {
+			*pr.CostEstimate = math.Round(*pr.CostEstimate*1e6) / 1e6
 		}
 		out = append(out, *pr)
 	}

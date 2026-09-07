@@ -79,6 +79,9 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 	if !hit {
 		return false
 	}
+	if zoomArtifactMissing(r, mode) {
+		return false
+	}
 	vmFP, err := report.ComputeVMFingerprintFromManifest(r.outDir)
 	if err != nil {
 		return false
@@ -119,7 +122,61 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 			_, _ = journey.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), ids)
 		}
 	}
+	if r.lang == i18n.ZH {
+		fmt.Fprintln(os.Stderr, "L2/L3 缓存命中，产物已是最新（-no-cache 可强制重算）")
+	} else {
+		fmt.Fprintln(os.Stderr, "L2/L3 cache hit: outputs are up to date (-no-cache forces rebuild)")
+	}
 	return true
+}
+
+func zoomArtifactMissing(r *analyzeRun, mode string) bool {
+	if strings.HasPrefix(mode, "compare:") {
+		parts := strings.Split(r.compareArg, ",")
+		if len(parts) != 2 {
+			return true
+		}
+		p0, p1 := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+		comparesDir := filepath.Join(r.outDir, "compares")
+		if strings.ContainsAny(p0+p1, "*?[]") {
+			matches, err := filepath.Glob(filepath.Join(comparesDir, "compare-"+p0+"-vs-"+p1+".json"))
+			return err != nil || len(matches) == 0
+		}
+		target := filepath.Join(comparesDir, "compare-"+p0+"-vs-"+p1+".json")
+		if _, err := os.Stat(target); err == nil {
+			return false
+		}
+		matches, err := filepath.Glob(filepath.Join(comparesDir, "compare-"+p0+"*-vs-"+p1+"*.json"))
+		return err != nil || len(matches) == 0
+	}
+	if strings.HasPrefix(mode, "journey:") {
+		arg := strings.TrimSpace(r.journeyArg)
+		detailsDir := filepath.Join(r.outDir, "journeys", "details")
+		tokens := strings.Split(arg, ",")
+		for _, tok := range tokens {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
+			patterns := []string{tok + ".json", tok + "*.json"}
+			if !strings.HasPrefix(tok, "j-") {
+				patterns = append(patterns, "j-"+tok+".json", "j-"+tok+"*.json")
+			}
+			found := false
+			for _, pat := range patterns {
+				matches, err := filepath.Glob(filepath.Join(detailsDir, pat))
+				if err == nil && len(matches) > 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func recordPostAnalyzeCache(r *analyzeRun) {
@@ -167,6 +224,11 @@ func tryRenderOnlyL3Cache(outDir string, requestedLang string, langPassed bool) 
 		return false
 	}
 	_ = dashboard.WriteSkeletons(outDir)
+	if manifestLang == i18n.ZH {
+		fmt.Fprintln(os.Stderr, "L3 缓存命中，产物已是最新（-no-cache 可强制重绘）")
+	} else {
+		fmt.Fprintln(os.Stderr, "L3 cache hit: outputs are up to date (-no-cache forces rebuild)")
+	}
 	return true
 }
 

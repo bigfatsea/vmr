@@ -531,7 +531,8 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "details")); err != nil {
+	requestsDir := filepath.Join(dir, "requests")
+	if err := WriteRequestsIndex(rep, sess, requestsDir, i18n.EN, nil, filepath.Join(requestsDir, "details")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -828,10 +829,11 @@ func TestWriteFailedIndex(t *testing.T) {
 		t.Errorf("want exactly 3 failed rows reported in requests/failed.md:\n%s", failedReqMD)
 	}
 
-	if err := WriteRequestsIndex(rep, sess, dir, i18n.EN, nil, filepath.Join(dir, "requests", "details")); err != nil {
+	requestsDir := filepath.Join(dir, "requests")
+	if err := WriteRequestsIndex(rep, sess, requestsDir, i18n.EN, nil, filepath.Join(requestsDir, "details")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "requests", "index.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(requestsDir, "index.json")); err != nil {
 		t.Errorf("missing requests/index.json: %v", err)
 	}
 }

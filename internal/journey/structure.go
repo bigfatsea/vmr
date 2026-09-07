@@ -39,7 +39,7 @@ const maxBodyExcerptChars = 3000
 
 func hashText(s string) string {
 	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])
+	return hex.EncodeToString(sum[:8])
 }
 
 type blobStore map[string]string

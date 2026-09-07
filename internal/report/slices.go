@@ -227,6 +227,7 @@ func BuildContextEfficiencySlice(r *Report2) ContextEfficiencySlice {
 }
 
 // WriteMacroSlices writes the 5 domain slices into <dir>/macro/*.json atomically (0600).
+// Slices are built, marshaled, and released sequentially (K-01 / §11.3) to minimize peak RSS.
 func WriteMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
 	if r == nil {
 		return fmt.Errorf("cannot write nil report slices")
@@ -236,28 +237,19 @@ func WriteMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
 		return fmt.Errorf("mkdir macro dir: %w", err)
 	}
 
-	summary := BuildSummarySlice(r, lang)
-	if err := writeJSONAtomic(macroDir, "summary.json", summary); err != nil {
+	if err := writeJSONAtomic(macroDir, "summary.json", BuildSummarySlice(r, lang)); err != nil {
 		return err
 	}
-
-	finance := BuildFinanceSlice(r)
-	if err := writeJSONAtomic(macroDir, "finance.json", finance); err != nil {
+	if err := writeJSONAtomic(macroDir, "finance.json", BuildFinanceSlice(r)); err != nil {
 		return err
 	}
-
-	reliability := BuildReliabilitySlice(r)
-	if err := writeJSONAtomic(macroDir, "reliability.json", reliability); err != nil {
+	if err := writeJSONAtomic(macroDir, "reliability.json", BuildReliabilitySlice(r)); err != nil {
 		return err
 	}
-
-	workloads := BuildWorkloadsSlice(r)
-	if err := writeJSONAtomic(macroDir, "workloads.json", workloads); err != nil {
+	if err := writeJSONAtomic(macroDir, "workloads.json", BuildWorkloadsSlice(r)); err != nil {
 		return err
 	}
-
-	ctxEff := BuildContextEfficiencySlice(r)
-	if err := writeJSONAtomic(macroDir, "context-efficiency.json", ctxEff); err != nil {
+	if err := writeJSONAtomic(macroDir, "context-efficiency.json", BuildContextEfficiencySlice(r)); err != nil {
 		return err
 	}
 
