@@ -366,9 +366,9 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		}
 		stats := ComputeBenchmarkStats(journeys)
 		md := RenderBenchmarksMarkdown(stats, i18n.EN)
-		for _, want := range []string{"# Journey Corpus Report", "## Metric Distributions", "## Finding Hit Rates", "## Metric Correlations", "## Finding-Grouped Comparison"} {
+		for _, want := range []string{"# Journey Benchmarks", "## Metric Distributions", "## Finding Hit Rates", "## Metric Correlations", "## Finding-Grouped Comparison"} {
 			if !strings.Contains(md, want) {
-				t.Errorf("rendered corpus report missing %q:\n%s", want, md)
+				t.Errorf("rendered benchmarks report missing %q:\n%s", want, md)
 			}
 		}
 		// The distribution table always carries the "Mean is skewed by a few
@@ -377,7 +377,7 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		// statistical reader (see the 36-day Max case in the reports-
 		// generation review).
 		if !strings.Contains(md, i18n.Benchmarks(i18n.EN).MetricDistFootnote) {
-			t.Errorf("rendered corpus report missing the metric-distribution mean-skew footnote:\n%s", md)
+			t.Errorf("rendered benchmarks report missing the metric-distribution mean-skew footnote:\n%s", md)
 		}
 	})
 

@@ -59,7 +59,7 @@ type BenchmarksText struct {
 func Benchmarks(lang Lang) BenchmarksText {
 	if lang == ZH {
 		return BenchmarksText{
-			Title:        "# Journey 语料统计报告\n\n",
+			Title:        "# Journey 基准统计报告\n\n",
 			JourneyCount: func(n int) string { return "> 分析了 " + strconv.Itoa(n) + " 个 Journey\n\n" },
 			NoJourneys:   "没有可分析的 Journey。\n",
 
@@ -107,7 +107,7 @@ func Benchmarks(lang Lang) BenchmarksText {
 		}
 	}
 	return BenchmarksText{
-		Title:        "# Journey Corpus Report\n\n",
+		Title:        "# Journey Benchmarks\n\n",
 		JourneyCount: func(n int) string { return "> Analyzed " + strconv.Itoa(n) + " journeys\n\n" },
 		NoJourneys:   "No journeys to analyze.\n",
 
