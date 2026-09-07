@@ -114,6 +114,32 @@ func TestWriteSkeletons_OverwriteStale(t *testing.T) {
 	}
 }
 
+// TestWriteSkeletons_InlinesCommonRuntime is the regression guard for the
+// bug where WriteSkeletons wrote only the .html files while every page
+// referenced <script src="common.js">: /reports/ serves no .js, so every
+// deployed dashboard 404'd on the shared runtime and rendered nothing.
+// The written pages must carry the runtime inline and reference no sibling
+// script.
+func TestWriteSkeletons_InlinesCommonRuntime(t *testing.T) {
+	dir := t.TempDir()
+	if err := WriteSkeletons(dir); err != nil {
+		t.Fatalf("WriteSkeletons: %v", err)
+	}
+	for _, name := range skeletonPages {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(data)
+		if contains(s, `src="common.js"`) {
+			t.Errorf("%s still references src=\"common.js\" after write — the runtime was not inlined", name)
+		}
+		if !contains(s, "function versionBehavior") {
+			t.Errorf("%s does not carry common.js's versionBehavior after write — the runtime is missing", name)
+		}
+	}
+}
+
 // TestAssetNames_MatchesSkeletonPages locks the embed FS against the
 // hardcoded write list: every .html under assets/ must be in skeletonPages,
 // so adding a page without wiring it in fails here instead of silently not
