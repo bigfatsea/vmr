@@ -142,7 +142,7 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 				_ = os.WriteFile(cmpMDPath, []byte(cmpMD), 0o600)
 			}
 		}
-		_ = RebuildComparesIndex(comparesDir)
+		_ = RebuildComparesIndex(comparesDir, lang)
 	}
 
 	// 6. Idempotently refresh skeletons (§5.4)
