@@ -558,7 +558,12 @@ const (
 // backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;
 // unavailable signals are omitted rather than fabricated.
 type RequestRow struct {
-	TS             string  `json:"ts"`
+	TS string `json:"ts"`
+	// TSDisplay is the DisplayZone-formatted timestamp (§3.3/§5.6: every
+	// slice time point carries both a machine form and a display form so the
+	// dashboard never does timezone math). request-browser.html's Time
+	// column and default sort read this.
+	TSDisplay      string  `json:"ts_display"`
 	Session        string  `json:"session,omitempty"`
 	Task           string  `json:"task,omitempty"`
 	Turn           int     `json:"turn,omitempty"`         // within task
