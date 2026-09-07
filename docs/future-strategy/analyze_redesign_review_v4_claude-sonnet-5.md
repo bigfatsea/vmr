@@ -272,7 +272,9 @@
 | J | 历史 review 遗留零散事项 | **大部分完成**（J-01 注释清理未完成 —— T-A；T-D/E/F 为低优/观察项） |
 | K | 优化机会 | K-04 已修；K-01/K-02 记为可选优化 |
 
-**总体判断**：方案的四个 Phase 与裁决 D1–D21 已**实质、正确落地**。以 `050ad25..69aa242` 的累积效果独立核验，没有发现数据正确性、渲染路径一致性、缓存失效逻辑、安全模型层面的错误；`-render-only` 与全量运行逐字节一致，冒烟产物拓扑与方案 §4 逐字匹配。3 份历史 review + 其后数轮迭代的工作扎实，本轮独立取证**大体证实**其结论（未采信其 claim，均回到代码验证）。**剩余全部为文档/注释一致性问题，无一涉及行为**。
+**总体判断**：方案的四个 Phase 与裁决 D1–D21 已**实质、正确落地**。以 `050ad25..69aa242` 的累积效果独立核验，没有发现数据正确性、缓存失效逻辑、安全模型层面的错误；`-render-only` 与全量运行逐字节一致，冒烟产物拓扑与方案 §4 逐字匹配。3 份历史 review + 其后数轮迭代的工作扎实，本轮独立取证**大体证实**其结论（未采信其 claim，均回到代码验证）。
+
+**Phase A（读码 + 小样本冒烟）剩余问题全为文档/注释一致性；但 Phase B（真实数据 + 真实 LLM 端到端验收）另查出 3 个真实缺陷** —— 最重的一个（N-B1）是 journey `.md` 里指向请求详单/证据的相对链接因目录拓扑下沉而全部 404（1338/1338），且被两个守卫测试用错误的期望前缀"锁定"。这印证了"不轻信 claim、要到真实产物里核实"的必要：小样本冒烟和 golden 测试都没暴露它，因为 golden 把错误路径当成了正确基线。三个缺陷已当场修复（`5215bf0`），守卫强化为校验链接真实可解析。详见第四部分。
 
 ### 部分完成 / 未完成事项详述
 
@@ -307,12 +309,12 @@
 - **建议方案**：`WriteRequestsIndex` 直接要求/断言 `dir` 已是 `requests` 目录，删掉 fallback。
 - **ROI**：**极低**。零行为风险、~3 行，适合随 T-A/N3 收尾一起做，不值得单独立项。
 
-#### T-E. 工作区 `config.yaml` 的 endpoint group 使用旧语法，触发定价层降级（N17）—— **待你决策（不属方案缺口）**
+#### T-E. 工作区 `config.yaml` 的 endpoint group 使用旧语法，触发定价层降级（N17）—— **待你决策（不属方案缺口，属路由半区）**
 
-- **问题描述**：`./vmr analyze` 启动即打印 `config: config.yaml not usable (parse yaml: line 222/234/266/293: cannot unmarshal !!seq into map[string][]config.EndpointGroup)`。分析半区已优雅降级（`$` 估算仅用标准价目表、`§2.5` 不带额度对照），不崩溃。
-- **根因分析**：本地 `config.yaml` 的模型路由组声明用了序列（`- ...`）而当前 schema 要求映射（`map[string][]EndpointGroup`）。是本地配置文件的语法陈旧，不是分析半区的 bug。
-- **建议方案**：对当前工作区 `config.yaml` 第 222/234/266/293 行附近的 endpoint group 声明做格式规整（改为 map 形态），或用 `./vmr check -c config.yaml` 逐条核对。规整后 Phase B 的真实数据测试才能覆盖账户定价覆盖与额度对照路径。
-- **ROI**：**中**。不改不影响分析正确性，但会让 Phase B 的定价/额度相关产物一直走降级路径、测不到账户覆盖分支。**Phase B 开始前建议先处理**（见下方 Phase B action plan 的前置项）。
+- **问题描述**：`./vmr analyze` / `./vmr check` 启动即报 `parse yaml: line 222/234/266/293: cannot unmarshal !!seq into map[string][]config.EndpointGroup`。分析半区优雅降级（`$` 估算仅标准价目表 + `pricing.yaml`，`§2.5` 不带额度对照），产物完整不崩。
+- **根因分析**：`endpoints:` / `fallback_endpoints:` 的 schema 演进过两步 ——(1) 从"扁平列表、每项带 `protocol:` 字段"改为"按 protocol 分键的 map"；(2) `EndpointGroup` 结构本身收窄为 `{providers, models, priority}`，`role_map` 下沉到 provider、`capabilities` 下沉到 `model_defaults:`。本地 config 停留在第一步之前。本轮试做迁移后确认：**不是机械 1:1 重排**，两步都要动，且第 (2) 步改变 `role_map` 的作用域（per-endpoint-group → per-provider），需逐 provider 判断。已还原 config.yaml，未改。
+- **建议方案**：由你按当前 schema（见 `config.example.yaml` 的 `endpoints:` / `model_defaults:` 注释）迁移 —— 本 config 里全部 endpoint 都是 `openai-completions` 且 `role_map` 均为 `{developer: system}`，迁移无歧义，但属路由半区、本次分析半区评审不代改。迁移后 `./vmr check` 应通过，Phase B 的账户定价覆盖 / 额度对照路径才能被真实数据覆盖。
+- **ROI**：**中**。不改不影响分析正确性；Phase B 已在降级路径下完成，`§2.5` 账户上卷仍渲染（仅缺 quota 列），只是没测到账户 `pricing.rates` 覆盖分支。**不阻塞**。
 
 #### T-F. 观察 / 文档脚注项（N11 / N12 / N18）—— **无需改动，仅记录**
 
@@ -346,5 +348,114 @@ Phase A 剩余修复项（T-A 注释清理、T-B 文档 §4 改写）同属"文�
 
 ## 第四部分：Phase B —— 独立验收测试（真实数据 + 真实 LLM）
 
-（执行过程中回填）
+**定位**：Phase A 结论为"实质落地、仅剩文档/注释一致性小问题"，据此对 analyze 已落地的功能特性做一次端到端验收 —— 用 `logs/` 真实日志、`report.yaml` 已配置的真实 LLM（`192.168.0.22:8800`，model `cheap`，连通性已验证返回 pong），产物落 `reports/`（主中文、抽测英文），逐一复核生成是否符合预期、有无明显错误与疏漏。发现的问题同 Phase A 分级处置。
+
+### 前置状态
+
+- **LLM**：`report.yaml` → `llm_addr: http://192.168.0.22:8800/v1/`、`llm_model: cheap`、`llm_key` 实测可用（`curl` 返回 `pong`，provider `GMICloud`）。`language: zh`。
+- **config.yaml（T-E）**：仍为旧 `endpoints:` 序列语法，`./vmr check` 失败（line 222/234/266/293）。**本轮尝试迁移为 protocol-keyed map 后发现 schema 变更不止于 keying —— `EndpointGroup` 已移除 `role_map`/`capabilities` 两字段（分别下沉到 provider 与 `model_defaults:`），非机械 1:1 重排，且属路由半区、超出本次分析半区评审范围。已还原 config.yaml，Phase B 在"定价降级"路径下运行**（`$` 估算仅用标准价目表 + `pricing.yaml` 补充，`§2.5` 不带账户额度对照）—— 这本身是方案既定的优雅降级行为，值得作为一条用例记录。详见 T-E 更新。
+- **`reports/` 清理**：删除评审前遗留的 `reports/.parse-cache/`（pre-rename 旧命名）与 `.DS_Store`。`reports/` 已 gitignore。
+
+### B 组 Action Plan（验收用例）
+
+| 用例 | 命令 | 验收点 |
+|---|---|---|
+| **UC-1 默认套件（zh）** | `vmr analyze -c config.yaml -o reports -details <3日志>` | 宏观 + journey 两半区全产物；§4 拓扑 + 0600/0700；manifest format=11 最后写；五 macro 切片字段完整；highlights/footnotes/disclaimers/cost_coverage 非空；`requests/index.json` ts=epoch ms + ts_display + sessions + journey_link；`details/r-*.md` 生成 |
+| **UC-2 Benchmarks（zh）** | `vmr analyze -c config.yaml -o reports -benchmark <同>` | `journeys/benchmarks.{json,md}` 生成并进 manifest；指标分布 / Finding 检出率 / Spearman 相关；provenance（time_range/inputs）随 zoom 保留（69aa242） |
+| **UC-3 Compare + 真实 LLM（zh）** | `vmr analyze -c config.yaml -o reports -compare <a>,<b> -llm-cache-dir reports/.cache/llm` | `compares/compare-*.{json,md}` + `compares/index.{json,md}` 重建；`llm_interpretation` + `llm_divergence` 两 record 入 JSON；`.md` 两段从 record 渲染；`compares/` 不进 manifest |
+| **UC-4 单 Journey + 真实 LLM（zh）** | `vmr analyze -c config.yaml -o reports -journey <id> -llm-cache-dir reports/.cache/llm` | `j-<id>.json.llm_interpretation`（model/duration_ms/status/text）；`.md` 渲染 `## LLM` 段；zoom 不动兄弟 journey 详情 |
+| **UC-5 render-only（zh）** | `vmr analyze -o reports -render-only` | 与 UC-1..4 累积后的产物逐字节一致（除 `.cache/`）；语言继承；骨架页幂等刷新；LLM 段从 JSON 恢复不刮 `.md` |
+| **UC-6 英文变体（抽测）** | `vmr analyze -c config.yaml -o reports-en -lang en <同3日志>` | 全人读产物英文；`compares/index.md`、benchmarks、findings 叙述英文；`Code` 跨语言稳定 |
+| **UC-7 -no-cache 冷热一致** | `vmr analyze -c config.yaml -o /tmp/vmr-b-nocache -no-cache <同>` + 对比 UC-1 | 除 `.cache/`、`manifest.generated_at` 外逐字节一致 |
+| **UC-8 看板真实数据渲染** | Node smoke + 手工抽查六页对 `reports/` 真实切片 | 关键单元格非空 / 非 `—` / 无 `undefined`/`NaN`；金额随 `pricing.currency`；版本 banner 逻辑；`#data=` 相对路径可解析 |
+| **UC-9 大输入生存性（抽测）** | `vmr analyze -c config.yaml -o /tmp/vmr-b-big <一个大日志如 07-16 44M>` | 不 OOM、不崩、产物完整；用于确认 §11.3 内存边界 |
+| **UC-10 内容复核** | 人读 `vmr-report.md` / 一个 `j-*.md` / `benchmarks.md` / `compare-*.md` / `failed.md` | 无失效链接、无空段、无中英混排、数字自洽（合计行、覆盖率、置信度标记） |
+
+### 执行记录
+
+**数据**：`logs/vmr-audit-2026-08-{23,24,25}.jsonl.zst`（53 + 519 + 885 = 1457 records，41 candidate journeys，其中 38 非心跳被渲染）。真实 LLM：`report.yaml` 的 `192.168.0.22:8800` / model `cheap`（真实调用，非 mock）。
+
+| UC | 结果 | 关键观察 |
+|---|---|---|
+| UC-1 默认套件（zh） | ✅ 通过 | §4 拓扑逐字命中；全树权限：**vmr 自建的输出目录及全部子目录 0700 / 文件 0600**（实测 `-o /tmp/新建/nested/out` 链路每级 0700）；`reports/` 顶层若为预先 `mkdir` 则保留 755——非 vmr 行为。manifest format=11 最后写、8 slices（5 macro + journeys/index + benchmarks + requests/index）。summary 切片：`highlights`/`efficiency`/`cost_estimate`/`tokens_coverage_pct` 齐备；`meta` 携 records/parse_errors/details_enabled/self_traffic_exclusion_active。finance：`cost_coverage`、`pricing.currency=USD`、`standard_generated_at`。requests/index.json：`ts` = epoch ms（`1787500778429`）+ `ts_display`、`sessions`（50）+ `journey_link`（15）投影、`detail_file` 带 `r-` 前缀。附录如实披露"排除 10 条自指流量"（1457 → 1447）。 |
+| UC-2 Benchmarks（zh） | ✅ 通过 | `journeys/benchmarks.{json,md}` 生成并进 manifest；14 类指标分布 + 5 条 Finding 检出率 + Spearman 相关表；zoom 运行**保留** provenance（`time_range`/`inputs` 未被覆写，69aa242 生效）；均值敏感性与非-Anthropic 协议信号缺失都有显式免责。 |
+| UC-3 Compare + 真实 LLM（zh） | ✅ 通过 | 2 次真实 LLM 调用（evidence pack ~14.7K tok + divergence ~180 tok）；`compare-*.json` 落 `llm_interpretation`（status=ok / model=cheap / scope=overall / `duration_ms` 记录了含重试退避的总耗时 / text ~2.5K 字）+ `llm_divergence`（scope=divergence / ~1K 字）；`.md` 两段 `## LLM 解读（模型：cheap · 整体对比 / · 分叉点）` 从 record 渲染；`compares/` 不进 manifest；`compares/index.{json,md}` 重建。失败调用会以 `status:"failed"` + error 入 JSON 并渲染空段（§3.6"状态"字兑现）。 |
+| UC-4 单 Journey + 真实 LLM（zh） | ✅ 通过 | `j-<id>.json.llm_interpretation`（status=ok / model=cheap / scope=""（单 journey）/ text ~2–6K 字，随端点负载 `duration_ms` 实测在 6s–176s 间波动）；`.md` 渲染 `## LLM 解读（模型：cheap）`（无 scope 后缀，正确）。 |
+| UC-5 render-only（zh） | ✅ 通过 | UC-1..4 累积后（含 benchmark + compare + 两处 LLM record）`-render-only` 产物与全量运行**逐字节一致**（`diff -rq` 除 `.cache/` 外零差异，manifest `generated_at` 亦一致）；LLM 段从 JSON 恢复，不刮 `.md`。 |
+| UC-6 英文变体（抽测） | ✅ 通过（发现 2 处残留，已修） | 全人读产物英文；manifest.lang=en；`Code` 跨语言稳定。**发现并修复**：`journeys/index.md` H1 曾为 "VMR Story Index"（N-B2）；`requests/failed.md` 引子曾指向已删的 `vmr-requests-<tag>.md`（N-B3）。 |
+| UC-7 -no-cache 冷热一致 | ✅ 通过（1e-6 容差） | 两次独立冷运行的产物在 `.json` 层 1e-6 容差下一致；**唯一逐字节差异**：`macro/finance.json` 的 `providers[volc_coding_plan].cost_estimate` = `1.6864257969599998` vs `1.68642579696`（第 15 位有效数字，FP 累加顺序）—— 见 N-B6，在方案 §9 "浮点用容差" 契约内。`TestAnalyzeCache_ColdWarmAndNoCache` 对 `.json` 正是 1e-6 容差比较，不 flaky。 |
+| UC-8 看板真实数据渲染 | ✅ 通过 | 用 `internal/dashboard/js_test.go` 的 `runPageSmoke` 同款沙箱喂真实 `reports/` 切片渲染 8 个页/模式组合：0 处 `undefined`/`NaN`/`[object Object]`。**发现**：`macro-dashboard.html` 的成功率取 `o.success_rate`（round2 值 0.98 → 显示 98.0%），而 `vmr-report.md` §0 用 `pctStr2(ok, requests)` 重算（98.2%）—— 见 N-B5。 |
+| UC-9 大输入生存性（抽测） | ✅ 通过 | `logs/vmr-audit-2026-07-16.jsonl.zst`（44 MB → 1815 records / 47 journeys）：不 OOM、不崩、产物完整；§3 可靠性表、低样本端点折叠、错误类 × 端点矩阵均正常。 |
+| UC-10 内容复核 | ✅ 通过（发现 1 处严重链接错误，已修） | `vmr-report.md`：§0/§1/§2/§2.5/§3/§7/附录结构完整、合计行/覆盖率/置信度标记（⭐¹⚠️low-n）自洽、§8 指向 `requests/index.json` + `request-browser.html`（无 `vmr-requests.md`）；§2.5 在 config 降级下仍渲染账户上卷（quota 列缺省）。`benchmarks.md`/`compare-*.md` 结构与叙事正常。**发现并修复 N-B1**：38 个 journey `.md` 中 1338/1338 个 `→ [详情]` / System-Prompt 证据链接全部 404（`../details/` 应为 `../../requests/details/`）。 |
+
+**config.yaml 降级路径（T-E）实测**：`./vmr check` 因 line 222/234/266/293 旧 `endpoints:` 序列语法失败；分析半区优雅降级（`$` 估算仅标准价目表 + `pricing.yaml`，`§2.5` 无 quota 对照），**产物完整不崩**。但两点须知：① 迁移不止 protocol-keying —— `EndpointGroup` 已移除 `role_map`/`capabilities`（下沉到 provider / `model_defaults:`），非机械重排、属路由半区、本次不改；② **不带显式输入文件时**，`-compare`/`-journey`/`-benchmark`/默认套件在"读 config 求 `log_dir` 默认值"处**硬失败**（非降级）—— 降级只覆盖定价解析，不覆盖输入路径解析。Phase B 全部 UC 均传显式日志文件，规避了②。
+
+### 本轮直接修复
+
+| # | 修复 | commit |
+|---|---|---|
+| N-B1 | journey `.md` 决策脊柱的 `→ [详情]` 链接与 System-Prompt 证据链接深度错误（`../details/`→`../../requests/details/`、`../evidence/`→`../../requests/evidence/`）；2 个 dead-link 守卫测试改为**校验链接真实可解析**而非匹配前缀 | `5215bf0` |
+| N-B2 | `journeys/index.md` H1 `VMR Story 索引` / `VMR Story Index` → `VMR Journey ...`（退役术语泄漏进渲染产物） | `5215bf0` |
+| N-B3 | `requests/failed.md` 引子指向已删除的 `vmr-requests-<tag>.md` / `-unresolved.md`、自称"额外索引"（现为唯一人读请求文档）→ 改指 `requests/index.json` + `request-browser.html`；`report_requests.go` 包注释同步 | `5215bf0` |
+| — | `.gitignore` 增 `/reports-en/`（英文抽测产物，与 `/reports/` 同类，含对话正文不入库） | `5215bf0` |
+
+### Phase B 待裁决 / 未改事项
+
+#### N-B4. zoom 模式（`-compare`/`-journey`）L2 缓存命中不校验主产物存在，产物被删后静默不重建 — **待你决策**
+
+- **问题描述**：`tryL2Cache` 在 L2+L3 命中时，对 `compare:`/`journey:` 模式直接 `return true`（只刷骨架 + 重建 compares 索引 + default 模式清 orphan），**不验证该模式的主产物**（`compares/compare-<a>-vs-<b>.json`、`journeys/details/j-<id>.json`）**是否还在盘上**。实测：跑一次 `-compare A,B` → 删掉 `compare-A-vs-B.{json,md}` → 再跑同一条 `-compare A,B`（不带 `-no-cache`）→ **exit 0、零输出、产物不重建**，且 `RebuildComparesIndex` 扫到空目录把 `compares/index.json` 重写为 `{"count":0}`。`-journey` 同理（删 `j-<id>.{json,md}` 后重跑 `-journey <id>` 静默不恢复）。默认套件**不受影响**（删 macro 切片 → `ValidateManifest` sha256 不匹配 → 回落全量重算，实测恢复）。
+- **根因分析**：D20/D21 有意不给逐任务详情 / `compares/` 子树加 manifest 指纹（防 manifest 随任务量膨胀）。代价是这些产物没有任何完整性校验：manifest 校验只覆盖 8 个 slice，`renderAllFromDisk` 只对**已存在**的 `*.json` 重渲 `.md`，L2 digest 只由输入哈希 + 参数决定、与输出盘上有没有文件无关。`.cache/fingerprint.json` 只存**最后一次运行**的单个 l2_digest，所以触发条件较窄：连续两次相同 zoom 调用之间产物被删（手工清理 `compares/`、`git` 操作、磁盘问题）。属方案 N18（`-render-only` L3 暖缓存信任磁盘）的同类但更重——那个只是不修手改的 `.md`，这个是主产物整个丢失仍静默跳过 + 连带把索引改空。
+- **建议方案**（二选一）：
+  - **A（推荐，小改）**：`tryL2Cache` 在对 `compare:` / 单-`journey:` 模式 `return true` 前，检查该模式解析出的主产物文件存在；缺失则 `return false` 回落全量。`-compare A,B` 的产物名可由 arg 直接拼（`compare-<arg0>-vs-<arg1>.json`）；单-id `-journey` 同理。glob/前缀选择器无法廉价解析文件名时，保守地不吃 L2 命中（多跑一次全量、正确）。约 15–25 行 + 一个红绿守卫测试。
+  - **B**：接受为已知限制，`KNOWN_ISSUES` 与方案 §7 登记一句"删除 zoom 产物后须 `-no-cache` 重建"，同 N18。
+- **附带的小 UX 问题**：任何 L2/L3 缓存命中路径**完全无 stdout/stderr 输出**（exit 0）——用户跑 `vmr analyze -compare X,Y` 看到一片空白会怀疑没执行。建议命中时打一行 `L2/L3 缓存命中，产物已是最新（-no-cache 可强制重算）`。这一条**事实清楚、方案确定、零风险**，若你同意可立即单独修（未改是因为要确认不打乱 `TestAnalyzeCache_*` 的 stdout 断言）。
+- **ROI**：A 方案中等偏低（触发条件窄，但静默 + 连带损坏索引对"这是可再生派生物、随便删"的心智模型是硬伤）；UX 一行日志 ROI 高（半行代码，消除"没反应"的困惑）。
+
+#### N-B5. `macro/summary.json` 的 `success_rate` 被 round2 截断，看板与报告显示不同的成功率 — **待你决策**
+
+- **问题描述**：`metrics.go` 里 `r.SuccessRate = round2(float64(r.OK)/float64(r.Requests))` —— `1421/1447 = 0.98203…` 被 `round2` 成 **0.98** 落进 `macro/summary.json`。而 `vmr-report.md` §0 的成功率单元格是 `pctStr2(o.OK, o.Requests)`（用原始计数**重算**），显示 **98.2%**；`macro-dashboard.html` 第 387 行 `successRate = o.success_rate != null ? o.success_rate : …` 直接取 round2 的 0.98，显示 **98.0%**。同一指标，看板 98.0% / 报告 98.2%。`ByModel`/`ByClient`/`EndpointRow` 的 `SuccessRate` 字段同样 round2。
+- **根因分析**：`success_rate` 是**冗余派生标量**——原始 `ok` / `requests` 已在同一切片里。方案 §11.1#5"不新增双账本 / 看板不在前端重算"的本意是让看板==报告，但这里两者分歧：报告从原始计数重算（高精度），看板信任存储的 round2 字段（低精度）。`round2`（保留 2 位小数 = 1% 粒度）对成功率这种"98% vs 99.5% 有意义"的指标偏粗。`cache_efficiency` 不受影响——报告 §0 也用存储的 round2 值（`cacheEffCell(o.CacheEfficiency,…)`），两侧一致。
+- **建议方案**（三选一）：
+  - **A**：`metrics.go` 不再 `round2` 这些 rate 字段（存全精度 float），格式化留给渲染侧——两个消费者格式化同一个数得同一答案。~几行 + golden 重生。最符合"raw 值进切片，格式化归渲染"的方案哲学。
+  - **B**：`macro-dashboard.html` 改为 `successRate = (o.requests>0 ? o.ok/o.requests : 1)`（像它已有的 fallback 分支那样从原始计数算），报告不动。看板与报告一致到 98.2%；`success_rate` 字段仍在但成为看板不用的冗余。
+  - **C**：删除 `success_rate` / `cache_hit_rate` 等纯冗余 rate 字段，切片只留原始计数 + 一句"rate = ok/requests"约定。最干净但触及所有消费者。
+- **ROI**：低-中。是精度/一致性瑕疵，非决策级错误（都是"约 98%"）；但正是 §9 守卫想防的"同一数字两处算法"，值得收敛。推荐 A。
+
+#### N-B6. `macro/finance.json` provider 成本非逐字节确定 — **记录，方案契约内，可不改**
+
+- **问题描述**：相同输入两次独立冷运行，`macro/finance.json` 的 `providers[].cost_estimate` 在第 15 位有效数字上不同（`1.6864257969599998` vs `1.68642579696`，差 ~2e-13），FP 加法非结合性 + 累加顺序（大概率 Go map 迭代顺序）所致。仅 `volc_coding_plan` 一项，其余 provider 逐字节稳定。
+- **影响评估**：方案 §9 明确"缓存命中与冷启动一致，**浮点用容差**（1e-6）"，`TestAnalyzeCache_ColdWarmAndNoCache` 对 `.json` 正是 1e-6 容差比较——**在契约内**。manifest 记录 finance.json 的 sha256 是在**同一次运行内**写的，与切片自洽；`-render-only` 读盘上现有字节；L2 digest 由输入哈希决定、与输出字节无关——都不受影响。唯一"异常"是跨两次独立运行做 `diff -rq` 会命中（这不是受支持的操作）。
+- **建议方案**：若要消除——(a) 序列化前把持久化的成本字段量化到固定精度（如 6 位小数，对 `$` 估算绰绰有余）；(b) 累加前按稳定键（如请求坐标 / endpoint label）排序。均需 golden 重生。**ROI 很低**，除非未来有人要 hash finance.json 或依赖跨运行字节一致。
+- **结论**：记录备查，不改。
+
+### 验收测试总结
+
+- **10 个 UC 全部通过**。方案落地的功能特性在真实数据 + 真实 LLM 下按预期生成，产物拓扑/权限/字节一致性/缓存失效/语言继承/看板渲染均无实质错误。
+- 过程中发现 **3 个真实缺陷（N-B1 严重 / N-B2 / N-B3），已全部当场修复**（`5215bf0`），并把 2 个 dead-link 守卫强化为"校验链接真实可解析"。
+- **3 个待裁决/记录事项**：N-B4（zoom 缓存不校验产物存在 + 命中无输出）、N-B5（success_rate 精度分歧）、N-B6（finance FP 非确定，契约内）。均非决策级数据错误。
+- N-B1 影响面最大：journey `.md` 的逐步"看原始请求/响应"链接是方案"索引→详单导航零成本"的核心 affordance，此前 **100% 失效**且被两个守卫测试用错误的期望前缀"锁定"为正确。修复后 38 个 journey 报告的 1338 个链接全部可解析。
+
+### 报告目录导览（`reports/` — 供人工复核）
+
+> 主快照：`logs/vmr-audit-2026-08-{23,24,25}.jsonl.zst`（1457 records / 41 journeys）· 语言 zh · 生成于本轮 · config 定价降级（`$` 为标准价目表估算）。
+> 英文抽测另存 `reports-en/`（同数据、`-lang en`、不含 LLM 与 compare/journey zoom）。
+
+| 路径 | 对应用例 | 复核要点 |
+|---|---|---|
+| `reports/manifest.json` | 全套快照准入令牌 | `format=11`；`slices` 列 8 份的 sha256；`generated_at` 双字段；`footnotes`/`disclaimers` 注册表 |
+| `reports/vmr-report.md` | UC-1 宏观报告（§0–§8 + 附录） | 人读主入口。§2.5 账户上卷（降级：无 quota 列）；§7 工具浪费；§8 指向 `requests/index.json`；附录如实披露自指流量排除 |
+| `reports/macro/summary.json` | UC-1 总览切片 | `overall` 全指标 + `highlights` + `meta` 溯源；注意 `success_rate` 是 round2（N-B5） |
+| `reports/macro/finance.json` | UC-1 成本切片 | `by_model`/`by_client`/`providers` + `cost_coverage` + `pricing.currency`；provider 成本末位 FP 抖动（N-B6） |
+| `reports/macro/{reliability,workloads,context-efficiency}.json` | UC-1 可用性 / 负载 / 上下文效率切片 | 端点可用率、失败分类、按日/时段分布、会话膨胀、compaction、工具 schema 浪费 |
+| `reports/requests/index.json` | UC-1 请求明细机读单一真源（1447 行） | 每行 `ts`（epoch ms）+ `ts_display` + `detail_file`（`r-` 前缀）+ `req` 坐标；`sessions` / `journey_link` 投影 |
+| `reports/requests/failed.md` · `failed.jsonl` | UC-1 排障入口（26 条） | 故障聚类；引子已改指 `requests/index.json`（N-B3 修复后） |
+| `reports/requests/details/r-*.md`（1447） | UC-1 `-details` 单请求全量捕获 | journey `.md` 的 `→ [详情]` 链接目标（N-B1 修复后可解析） |
+| `reports/requests/evidence/{sysprompt,tools}-*.md`（21） | UC-1 内容寻址证据块 | 系统提示词正文 / 工具 schema，被宏观详单与 journey 脊柱共用 |
+| `reports/journeys/index.md` · `index.json` | UC-1 journey 候选集（41 条，H1 = "VMR Journey 索引"，N-B2 修复后） | 挑一个 journey 看的入口；心跳类默认折叠 |
+| `reports/journeys/details/j-*.{json,md}`（38） | UC-1 单任务叙事 | `.json` 自包含（`structure` tree + `bodies` blob 表 + 三级 `match`）；`.md` 决策脊柱 + 行为指标 + Findings；`j-pimini-...0357ba6c` 是 UC-4 带 `## LLM 解读` 的那条 |
+| `reports/journeys/benchmarks.md` · `benchmarks.json` | UC-2 群体基准 | 14 类指标分布 / Finding 检出率 / Spearman 相关；均值敏感性免责 |
+| `reports/compares/compare-j-lobster-…97de6f0e-vs-…a03e6d1f.{json,md}` | UC-3 双任务 A/B 对照 + 真实 LLM | `.json` 带 `llm_interpretation` + `llm_divergence` 两 record；`.md` 两段 `## LLM 解读（· 整体对比 / · 分叉点）` |
+| `reports/compares/index.md` · `index.json` | UC-3 "跑过哪些对照"发现入口 | 扫目录派生；不进 manifest |
+| `reports/*.html`（6） | UC-8 看板骨架页 | `macro-dashboard` / `request-browser` / `journey-viewer` / `journey-compare` / `benchmarks` / `tool-waste`；浏览器打开需经静态服务器（`file://` 有降级提示）；`common.js` 已内联 |
+| `reports/.cache/{parse,llm,fingerprint.json}` | L1 解析缓存 / LLM 解读缓存 / L2·L3 产物指纹 | 可再生，非交付物 |
 
