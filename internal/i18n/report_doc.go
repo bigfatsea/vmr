@@ -25,9 +25,9 @@ type DocText struct {
 	// JourneyIndexLinkLine is the "vmr-report.md → journeys/index.md" edge
 	// (P6.2a) — path is relative to vmr-report.md itself.
 	JourneyIndexLinkLine func(path string, journeyCount int, from, to string) string
-	SummaryTitle    string
-	SummaryRequests func(requests, fallbacks, truncated int) string
-	SummaryHeaders  [6]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration, pay-as-you-go equivalent cost
+	SummaryTitle         string
+	SummaryRequests      func(requests, fallbacks, truncated int) string
+	SummaryHeaders       [6]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration, pay-as-you-go equivalent cost
 	// SummaryCostUnknown fills the cost cell when nothing priced at all —
 	// never "0", which reads as "this was free".
 	SummaryCostUnknown string
