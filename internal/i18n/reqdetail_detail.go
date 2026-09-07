@@ -18,12 +18,12 @@ type DetailText struct {
 	ListSep       string // joins e.g. multiple detected capabilities ("`image`、`tools`" vs "`image`, `tools`")
 	FactsLine     func(caps, estTokens string) string
 
-	// BackToIndexLine is the "detail → vmr-requests.md" return edge
-	// (P6.2e). details/ is always a direct sibling of vmr-requests.md
-	// under the same output root regardless of which command rendered
-	// this page, so the relative path never varies and needs no
-	// existence check (generation-time guarantee, same class as
-	// PrevTurnLink below).
+	// BackToIndexLine is the "detail → request browser" return edge
+	// (P6.2e). A detail page lives at requests/details/r-<...>.md; the
+	// browser skeleton is two levels up at the report root, and its path
+	// never varies regardless of which command rendered this page
+	// (generation-time guarantee, same class as PrevTurnLink below).
+	// D7 deleted the markdown request index this used to point at.
 	BackToIndexLine  string
 	PrevTurnLink     func(ts, file string) string
 	ThisTurnCalls    string // "本轮调用: " prefix
@@ -145,7 +145,7 @@ func Detail(lang Lang) DetailText {
 				return "> **VMR 路由前判断**：\n> 请求所需能力：" + caps + "\n> 预估Token数量：" + estTokens + "\n\n"
 			},
 
-			BackToIndexLine:  "← 返回 [vmr-requests.md](../vmr-requests.md)\n\n",
+			BackToIndexLine:  "← 返回 [request-browser.html](../../request-browser.html)\n\n",
 			PrevTurnLink:     func(ts, file string) string { return "上一轮: [" + ts + "](./" + file + ")\n\n" },
 			ThisTurnCalls:    "本轮调用: ",
 			TraceLabel:       "trace ",
@@ -300,7 +300,7 @@ func Detail(lang Lang) DetailText {
 			return "> **VMR pre-routing judgment**:\n> Capabilities required: " + caps + "\n> Estimated token count: " + estTokens + "\n\n"
 		},
 
-		BackToIndexLine:  "← Back to [vmr-requests.md](../vmr-requests.md)\n\n",
+		BackToIndexLine:  "← Back to [request-browser.html](../../request-browser.html)\n\n",
 		PrevTurnLink:     func(ts, file string) string { return "Previous turn: [" + ts + "](./" + file + ")\n\n" },
 		ThisTurnCalls:    "this turn's calls: ",
 		TraceLabel:       "trace ",

@@ -22,8 +22,8 @@ type DocText struct {
 	// that was never meant to have one.
 	MetaReportConfig func(path string) string
 	DetailLinkLine   string
-	// StoriesLinkLine is the "vmr-report.md → stories/vmr-stories.md"
-	// edge (P6.2a) — path is relative to vmr-report.md itself.
+	// StoriesLinkLine is the "vmr-report.md → journeys/index.md" edge
+	// (P6.2a) — path is relative to vmr-report.md itself.
 	StoriesLinkLine func(path string, journeyCount int, from, to string) string
 	SummaryTitle    string
 	SummaryRequests func(requests, fallbacks, truncated int) string
@@ -89,7 +89,7 @@ func Doc(lang Lang) DocText {
 				}
 				return "配置: " + path
 			},
-			DetailLinkLine: "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json",
+			DetailLinkLine: "请求明细数据见 `requests/index.json`；交互式浏览用 `request-browser.html`",
 			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
 			},
@@ -119,11 +119,11 @@ func Doc(lang Lang) DocText {
 				return "，主因 " + cls + " ×" + strconv.Itoa(n)
 			},
 			RequestIndexTitle:  "§8 请求详单",
-			RequestIndexBody:   "每条记录（Chat User -> Session -> Task -> Turn）见 [vmr-requests.md](./vmr-requests.md)。\n",
+			RequestIndexBody:   "每条请求的机读明细在 `requests/index.json`（含会话/任务标题投影与 journey 交叉链接）；按客户端/模型/端点/耗时/token 筛选、排序、定位单条请求用 `request-browser.html`。\n",
 			PerClientLabel:     "per-client: ",
-			DetailsCaptureBody: "单请求全量捕获（req/resp/SSE）见 `details/*.md`。\n\n",
+			DetailsCaptureBody: "单请求全量捕获（req/resp/SSE）见 `requests/details/*.md`。\n\n",
 			DetailsOnDemandBody: func(example string) string {
-				s := "本次运行未生成 `details/*.md`（默认按需生成）。用坐标（`vmr-requests.md` 的『文件』列，未生成详单时显示为该坐标，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标>`"
+				s := "本次运行未生成 `requests/details/*.md`（默认按需生成）。用坐标（`requests/index.json` 的 `req` 字段，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标>`"
 				if example != "" {
 					s += "，例如 `vmr replay -print -req " + example + "`"
 				}
@@ -169,7 +169,7 @@ func Doc(lang Lang) DocText {
 			}
 			return "Config: " + path
 		},
-		DetailLinkLine: "Details in [vmr-requests.md](./vmr-requests.md) · matching .json",
+		DetailLinkLine: "Request-level data is in `requests/index.json`; browse it interactively with `request-browser.html`",
 		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
 			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
 		},
@@ -199,11 +199,11 @@ func Doc(lang Lang) DocText {
 			return ", top cause " + cls + " ×" + strconv.Itoa(n)
 		},
 		RequestIndexTitle:  "§8 Request Detail Index",
-		RequestIndexBody:   "Every record (Chat User -> Session -> Task -> Turn) is in [vmr-requests.md](./vmr-requests.md).\n",
+		RequestIndexBody:   "Machine-readable per-request detail is in `requests/index.json` (with the session/task title projection and journey cross-links); filter by client/model/endpoint/duration/tokens, sort, and locate one request with `request-browser.html`.\n",
 		PerClientLabel:     "per-client: ",
-		DetailsCaptureBody: "Full single-request capture (req/resp/SSE) is in `details/*.md`.\n\n",
+		DetailsCaptureBody: "Full single-request capture (req/resp/SSE) is in `requests/details/*.md`.\n\n",
 		DetailsOnDemandBody: func(example string) string {
-			s := "This run did not write `details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the \"File\" column of `vmr-requests.md` shows it as this coordinate when no details were generated, `basename:line`): `vmr replay -print -req <coord>`"
+			s := "This run did not write `requests/details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the `req` field of `requests/index.json`, `basename:line`): `vmr replay -print -req <coord>`"
 			if example != "" {
 				s += ", e.g. `vmr replay -print -req " + example + "`"
 			}

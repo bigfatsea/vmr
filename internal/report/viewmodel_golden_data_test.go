@@ -23,7 +23,7 @@ const (
       "Body": "a.jsonl, b.jsonl\n"
     },
     {
-      "Text": "Details in [vmr-requests.md](./vmr-requests.md) · matching .json\n\n"
+      "Text": "Request-level data is in ` + "`" + `requests/index.json` + "`" + `; browse it interactively with ` + "`" + `request-browser.html` + "`" + `\n\n"
     },
     {
       "Text": "Task narratives in [journeys/index.md](journeys/index.md) (2 task(s) indexed · covers 2026-07-23 02:39:00 – 2026-07-24 10:00:00)\n\n"
@@ -497,7 +497,7 @@ const (
           "Notes": null
         },
         {
-          "Text": "**Error Timeline** (errors / hour)\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"Errors / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Errors\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**Error Timeline** (errors / hour)\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Errors / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Errors\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
           "Text": "> Errors peak at 09:00 (1 total).\n\n"
@@ -645,10 +645,10 @@ const (
           "Notes": null
         },
         {
-          "Text": "**Hourly Activity**\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"Requests / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Requests\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + "`" + "`" + `\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**Hourly Activity**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Requests / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Requests\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
-          "Text": "**Daily Activity**\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"Requests / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Requests\"\n    bar [50]\n` + "`" + "`" + "`" + `\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**Daily Activity**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Requests / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Requests\"\n    bar [50]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
           "Title": "",
@@ -1262,10 +1262,10 @@ const (
       "Title": "§8 Request Detail Index",
       "Blocks": [
         {
-          "Text": "Every record (Chat User -> Session -> Task -> Turn) is in [vmr-requests.md](./vmr-requests.md).\n\n"
+          "Text": "Machine-readable per-request detail is in ` + "`" + `requests/index.json` + "`" + ` (with the session/task title projection and journey cross-links); filter by client/model/endpoint/duration/tokens, sort, and locate one request with ` + "`" + `request-browser.html` + "`" + `.\n\n"
         },
         {
-          "Text": "This run did not write ` + "`" + `details/*.md` + "`" + ` (generated on demand by default). Fetch a single record any time by its coordinate (the \"File\" column of ` + "`" + `vmr-requests.md` + "`" + ` shows it as this coordinate when no details were generated, ` + "`" + `basename:line` + "`" + `): ` + "`" + `vmr replay -print -req <coord>` + "`" + `, e.g. ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `; or pass ` + "`" + `-details` + "`" + ` to materialize all of them.\n\n"
+          "Text": "This run did not write ` + "`" + `requests/details/*.md` + "`" + ` (generated on demand by default). Fetch a single record any time by its coordinate (the ` + "`" + `req` + "`" + ` field of ` + "`" + `requests/index.json` + "`" + `, ` + "`" + `basename:line` + "`" + `): ` + "`" + `vmr replay -print -req <coord>` + "`" + `, e.g. ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `; or pass ` + "`" + `-details` + "`" + ` to materialize all of them.\n\n"
         }
       ]
     },
@@ -1311,7 +1311,7 @@ const (
       "Body": "a.jsonl, b.jsonl\n"
     },
     {
-      "Text": "详单见 [vmr-requests.md](./vmr-requests.md) · 同名 .json\n\n"
+      "Text": "请求明细数据见 ` + "`" + `requests/index.json` + "`" + `；交互式浏览用 ` + "`" + `request-browser.html` + "`" + `\n\n"
     },
     {
       "Text": "任务叙事见 [journeys/index.md](journeys/index.md)（2 个任务索引 · 覆盖 2026-07-23 02:39:00 – 2026-07-24 10:00:00）\n\n"
@@ -1785,7 +1785,7 @@ const (
           "Notes": null
         },
         {
-          "Text": "**错误时间线**（错误数 / 小时）\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"错误数 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"错误数\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**错误时间线**（错误数 / 小时）\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"错误数 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"错误数\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
           "Text": "> 错误集中在 09:00（共 1 条）。\n\n"
@@ -1933,10 +1933,10 @@ const (
           "Notes": null
         },
         {
-          "Text": "**每小时活跃度**\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"请求\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + "`" + "`" + `\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**每小时活跃度**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"请求\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
-          "Text": "**按日期活跃度**\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"请求\"\n    bar [50]\n` + "`" + "`" + "`" + `\n\n` + "`" + "`" + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + "`" + "`" + `\n\n"
+          "Text": "**按日期活跃度**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"请求\"\n    bar [50]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
         },
         {
           "Title": "",
@@ -2550,10 +2550,10 @@ const (
       "Title": "§8 请求详单",
       "Blocks": [
         {
-          "Text": "每条记录（Chat User -> Session -> Task -> Turn）见 [vmr-requests.md](./vmr-requests.md)。\n\n"
+          "Text": "每条请求的机读明细在 ` + "`" + `requests/index.json` + "`" + `（含会话/任务标题投影与 journey 交叉链接）；按客户端/模型/端点/耗时/token 筛选、排序、定位单条请求用 ` + "`" + `request-browser.html` + "`" + `。\n\n"
         },
         {
-          "Text": "本次运行未生成 ` + "`" + `details/*.md` + "`" + `（默认按需生成）。用坐标（` + "`" + `vmr-requests.md` + "`" + ` 的『文件』列，未生成详单时显示为该坐标，形如 ` + "`" + `basename:line` + "`" + `）随时取出单条记录：` + "`" + `vmr replay -print -req <坐标>` + "`" + `，例如 ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `；或加 ` + "`" + `-details` + "`" + ` 全量生成。\n\n"
+          "Text": "本次运行未生成 ` + "`" + `requests/details/*.md` + "`" + `（默认按需生成）。用坐标（` + "`" + `requests/index.json` + "`" + ` 的 ` + "`" + `req` + "`" + ` 字段，形如 ` + "`" + `basename:line` + "`" + `）随时取出单条记录：` + "`" + `vmr replay -print -req <坐标>` + "`" + `，例如 ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `；或加 ` + "`" + `-details` + "`" + ` 全量生成。\n\n"
         }
       ]
     },
