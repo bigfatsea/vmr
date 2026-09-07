@@ -28,7 +28,7 @@ type JourneyIndexText struct {
 func JourneyIndexT(lang Lang) JourneyIndexText {
 	if lang == ZH {
 		return JourneyIndexText{
-			Title:            "VMR Story 索引",
+			Title:            "VMR Journey 索引",
 			TableHeader:      "| ID | Client | 时间范围 | 任务 | 轮数 | 标题 | 已渲染 |\n|---|---|---|---|---|---|---|\n",
 			NotRendered:      "—",
 			UnresolvedClient: "(unresolved)",
@@ -47,7 +47,7 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 		}
 	}
 	return JourneyIndexText{
-		Title:            "VMR Story Index",
+		Title:            "VMR Journey Index",
 		TableHeader:      "| ID | Client | Time Range | Tasks | Steps | Title | Rendered |\n|---|---|---|---|---|---|---|\n",
 		NotRendered:      "—",
 		UnresolvedClient: "(unresolved)",

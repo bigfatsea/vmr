@@ -76,7 +76,10 @@ func vmStepHeader(ss *StepStructure, repeated, flagged bool, reply, reasoning st
 	}
 	header += "\n\n"
 	if linkDetails {
-		header += t.SpineDetailLink("../details/" + vmDetailFileName(ss))
+		// journey .md lives at journeys/details/j-<id>.md; request detail
+		// files live at requests/details/r-<...>.md (§4 topology) — two
+		// levels up, then into the requests/ tree.
+		header += t.SpineDetailLink("../../requests/details/" + vmDetailFileName(ss))
 	} else {
 		header += t.SpineDetailCoord(ss.Req)
 	}

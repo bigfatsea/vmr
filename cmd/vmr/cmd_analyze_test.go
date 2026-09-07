@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -331,11 +332,8 @@ func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(md)
-	if strings.Contains(s, "](../details/") {
-		t.Errorf("default-suite journey report has a dead ../details/ link (B10), want inline coordinates:\n%s", s)
-	}
-	if strings.Contains(s, "](../evidence/") {
-		t.Errorf("default-suite journey report has a dead ../evidence/ link (B10):\n%s", s)
+	if strings.Contains(s, "](../") && (strings.Contains(s, "requests/details/") || strings.Contains(s, "requests/evidence/")) {
+		t.Errorf("default-suite journey report has a dead detail/evidence link (B10), want inline coordinates:\n%s", s)
 	}
 	if !strings.Contains(s, "`audit.jsonl:1`") {
 		t.Errorf("default-suite spine should reference Step 1 by its `file:line` coordinate:\n%s", s)
@@ -351,12 +349,36 @@ func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 		t.Error("-render-all should materialize detail files, got 0")
 	}
 	got2 := journeyFileNames(t, filepath.Join(outDir2, "journeys"))
-	md2, err := os.ReadFile(filepath.Join(outDir2, "journeys", "details", got2[0]))
+	journeyMDPath := filepath.Join(outDir2, "journeys", "details", got2[0])
+	md2, err := os.ReadFile(journeyMDPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(md2), "](../details/") {
-		t.Errorf("-render-all journey report should carry real ../details/ links:\n%s", md2)
+	assertJourneyDetailLinksResolve(t, string(md2), journeyMDPath)
+}
+
+// assertJourneyDetailLinksResolve checks every `](../...)` relative link in a
+// journey .md points at a file that actually exists — a real dead-link guard,
+// not a prefix-string match. The journey .md lives at journeys/details/j-*.md,
+// so its detail/evidence links must be `../../requests/details|evidence/...`.
+func assertJourneyDetailLinksResolve(t *testing.T, md, journeyMDPath string) {
+	t.Helper()
+	dir := filepath.Dir(journeyMDPath)
+	re := regexp.MustCompile(`\]\((\.\./[^)\s]+)\)`)
+	matches := re.FindAllStringSubmatch(md, -1)
+	var detailLinks int
+	for _, m := range matches {
+		rel := m[1]
+		if !strings.Contains(rel, "requests/details/") && !strings.Contains(rel, "requests/evidence/") {
+			continue
+		}
+		detailLinks++
+		if _, err := os.Stat(filepath.Join(dir, rel)); err != nil {
+			t.Errorf("journey report links to a non-existent file %q: %v", rel, err)
+		}
+	}
+	if detailLinks == 0 {
+		t.Errorf("-render-all journey report carries no resolvable ../../requests/details/ links:\n%s", md)
 	}
 }
 
@@ -452,8 +474,8 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(preMD), "](../details/") {
-		t.Fatalf("precondition failed: default-suite journey report already has ../details/ links")
+	if strings.Contains(string(preMD), "requests/details/") {
+		t.Fatalf("precondition failed: default-suite journey report already has requests/details/ links")
 	}
 
 	// Step 2: -compare names two candidates whose j-*.md ALREADY
@@ -468,13 +490,12 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	if n := detailFileCount(t, outDir); n == 0 {
 		t.Error("-compare left both named journeys' details/ empty even though their j-*.md pre-existed (F-01 regression)")
 	}
-	postMD, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", preGot[0]))
+	journeyMDPath := filepath.Join(outDir, "journeys", "details", preGot[0])
+	postMD, err := os.ReadFile(journeyMDPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(postMD), "](../details/") {
-		t.Errorf("-compare should have re-rendered the pre-existing journey report with real ../details/ links, got:\n%s", postMD)
-	}
+	assertJourneyDetailLinksResolve(t, string(postMD), journeyMDPath)
 }
 
 // TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly covers P9.1: a zoom

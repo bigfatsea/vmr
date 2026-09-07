@@ -185,15 +185,17 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 
 	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil, nil)
 	md := RenderMarkdownFromSummary(&sum, i18n.EN, false, true)
+	// "深入调研这个内存涨价这一波" is the opening instruction, shared by both
+	// lineages. "../../requests/details/" — P5.1: raw message bodies no longer
+	// inline in the Markdown; every Step, including the stitch boundary, is one
+	// click away via its own detail link (P5.2), which lives at requests/details/
+	// two levels up from journeys/details/j-*.md (§4 topology). Presence of the
+	// link is what this test checks without materializing the detail file.
 	for _, want := range []string{
 		"🧵 **Stitched from an earlier fragment**",
 		"compaction",
-		"深入调研这个内存涨价这一波", // the opening instruction, shared by both lineages
-		"../details/", // P5.1: raw message bodies (e.g. "post-break reply") no
-		// longer inline in the Markdown — every Step, including the stitch
-		// boundary, is reachable one click away via its own detail link
-		// instead (P5.2); presence of the link is what this test can check
-		// without also materializing the detail file on disk.
+		"深入调研这个内存涨价这一波",
+		"../../requests/details/",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered Markdown missing %q\n--- full output ---\n%s", want, md)

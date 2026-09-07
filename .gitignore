@@ -73,6 +73,7 @@ _review
 /logs/
 /image_cache/
 /reports/
+/reports-en/
 
 # loadtest (loadtest/README.md): generated output lands in the /logs/ and
 # /reports/ rules above (namespaced: logs/loadtest/, reports/loadtest-*).

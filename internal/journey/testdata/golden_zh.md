@@ -8,7 +8,7 @@
 
 ## System Prompt
 
-- Step 1–3 · 28 字符 · → [详情](../evidence/sysprompt-943e842f.md)
+- Step 1–3 · 28 字符 · → [详情](../../requests/evidence/sysprompt-943e842f.md)
 
 ## 概览
 
@@ -50,13 +50,13 @@
 
 **🔷 💬 Step 1 · 10:00:00**
 
-→ [详情](../details/r-20260729-100000.000_agent_agent_ok_5a3c25bf.md)
+→ [详情](../../requests/details/r-20260729-100000.000_agent_agent_ok_5a3c25bf.md)
 
 💬 汇报 · 好的，我来搜索相关数据。
 
 **🔷 💬 Step 2 · 10:00:02**
 
-→ [详情](../details/r-20260729-100002.000_agent_agent_ok_3386028d.md)
+→ [详情](../../requests/details/r-20260729-100002.000_agent_agent_ok_3386028d.md)
 
 💬 汇报 · 根据搜索结果，2026年A股新股打新平均收益率为12.5%，中签率约0.03%。
 
@@ -64,7 +64,7 @@
 
 **🔷 💬 Step 3 · 10:00:06**
 
-→ [详情](../details/r-20260729-100006.000_agent_agent_ok_588f9830.md)
+→ [详情](../../requests/details/r-20260729-100006.000_agent_agent_ok_588f9830.md)
 
 💬 汇报 · 好的，前10名的新股打新收益如下…
 
