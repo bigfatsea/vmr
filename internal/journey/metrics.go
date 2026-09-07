@@ -81,12 +81,12 @@ type Metrics struct {
 	CompactionLossTokens int64 `json:"compaction_loss_tokens"`
 
 	// ModelUsage (modelusage.go) is list-typed, unlike every other field
-	// above — it doesn't participate in corpus.go's Spearman/diff scalar
+	// above — it doesn't participate in benchmarks.go's Spearman/diff scalar
 	// set (same reason ToolCallDist above doesn't either). ModelSwitches is
 	// also list-typed and itself carries no scalar, but its LENGTH is
 	// registered as MetricModelSwitchCount — one of the thirteen
 	// codes compare.go's metricSpecs registers a Value extractor for,
-	// consumed by both Compare and corpus.go; see MetricModelSwitchCount's
+	// consumed by both Compare and benchmarks.go; see MetricModelSwitchCount's
 	// own doc comment (compare.go) for why it's a routing-environment
 	// metric, not an agent-behavior one.
 	ModelUsage    []ModelUsageStat `json:"model_usage"`

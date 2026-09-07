@@ -845,7 +845,7 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | 配置 YAML 严格解析（`KnownFields`，未知键拒绝加载） | 宽松解析（未知键静默忽略） | 拼错的键（`max_concurency`）静默失效是配置驱动工具最常见的真实事故：用户以为限流/超时生效了，实际没有。"坏配置拒绝启动"的既有契约本来就该覆盖这种坏法；代价是配置里不能再放自造的注释性键——本来也不该放 |
 | think_strip 触发加前缀守卫：首个非空 content/text 值以 `<think>` 开头才认定思考形态 | 任意位置出现 `<think>` 即触发 | 任意位置触发对"正文合法引用 think 标签"（用户问标签格式、代码示例复现它）会静默删掉引用片段——真实的数据损坏向量，且与 Thinking Process 形态的前缀守卫不对称。MiniMax 真实思考输出永远以标记开头，收紧触发条件不丢任何真实修复场景（回归测试锁定两个方向） |
 | `vmr replay -stream` 改写出站 body 的顶层 `stream` 字段（复用 splice 扫描器，缺键则补） | 只改 replay 本地簿记，flag 本身不生效 | 上游读的是 body 里的 `stream` 字段，不改字节等于没改。改写走与 model 改写同一条 `jsonscan.TopLevelValues` splice 路径，除该字段外逐字节保留；`--record` 产出的记录同步反映覆盖后的请求 |
-| `vmr report` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755 | details/、索引、报表与 vmr-requests.json 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600，派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异，单用户机器上无感知 |
+| `vmr analyze` 全部产物 0600/目录 0700（与审计文件同权限） | 0644/0755 | requests/details/、切片、报表与 requests/index.json 承载与审计 JSONL 完全相同的完整对话正文——源头刻意 0600，派生副本放宽到全局可读是自相矛盾的。多用户机器上这是真实的信息面差异，单用户机器上无感知 |
 | 条件路由用新接口 `Condition`（elimination，感知请求），不扩展 `Dimension` | 给 `Dimension.Compare` 加一个 request 参数 | `Dimension` 的现有实现（priority）和未来实现（weight/latency）本来就不需要看请求，硬塞一个参数会强迫每个排序维度都感知请求；`Condition` 语义上是准入不是排序，混进同一个接口是把两种不同的事情绑在一起。两个接口平行存在，`router.Serve` 分两步跑，互不干扰 |
 | 上下文长度条件（`WithinContext`）不注册进 `Condition` 接口，单独一个函数 | 也注册成一个普通 Condition | 唯一需要"全体拒绝时不能真的拒绝"这个降级行为的条件，其余（image/tools）都是确定性的，全体拒绝就该直接拒绝——为一个目前只有一个成员的特例改动整个接口的语义不划算，`router.Serve` 里两行代码就能表达清楚这个特例 |
 | `sticky_ttl` 挂在 `Provider`（账号级声明一次，账号下端点全部继承），不是 `VirtualModel`/`EndpointGroup` | 挂在虚拟模型或端点层级 | 调研到 prompt cache 寿命四家官方数据横跨 5 分钟到数天 3 个数量级，是上游 provider 基础设施的属性；粘性是软亲和，少量 TTL 偏差只损失一次缓存优惠不影响路由正确性，聚合网关背后实例调度不可观测、细分到 provider+model 属于伪精确；账号级声明消除了多账号端点组内属性强制共享的耦合与跨虚拟模型的重复配置 |
@@ -947,11 +947,12 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 
 **定位要回放哪条记录**，三种互斥方式（均需搭配位置参数指定原始审计文件）：
 
-* `-req basename:line`：`vmr-requests.json`/`vmr-stories.json` 发布的跨命令坐标（Part 2 §7.3
-  坐标层），用户排障时最先拿到手的定位符——先跑 `vmr report`，在 `vmr-requests.md`/`.json` 里定位到
-  失败请求的 `req` 字段，直接拿来用，不用数行号。`internal/ctxgraph.CanonicalPath` 校验位置参数的
+* `-req basename:line`：`requests/index.json`/`journeys/index.json` 发布的跨命令坐标（Part 2 §7.3
+  坐标层），用户排障时最先拿到手的定位符——先跑 `vmr analyze`，在 `request-browser.html` 或
+  `requests/index.json` 里定位到失败请求的 `req` 字段，直接拿来用，不用数行号。
+  `internal/ctxgraph.CanonicalPath` 校验位置参数的
   basename 与坐标一致（不一致报错，不静默按行号裸猜）。
-* `-ts <timestamp>`：按毫秒精度匹配 `ts` 字段，容忍两种精度来源——`vmr-requests.json` 用毫秒精度格式化，原始 `audit.jsonl` 是 `time.Time` 默认的纳秒精度序列化；`time.Parse(time.RFC3339, ...)` 对两种精度都能正确解析（Go 对小数秒位数天然宽容，与 layout 声明的精度无关），双方都 `Truncate(time.Millisecond)` 后比较即可统一。同一毫秒内有多条记录匹配时报错要求改用 `-line`，不做静默猜测。
+* `-ts <timestamp>`：按毫秒精度匹配 `ts` 字段，容忍两种精度来源——`requests/index.json` 用毫秒精度格式化，原始 `audit.jsonl` 是 `time.Time` 默认的纳秒精度序列化；`time.Parse(time.RFC3339, ...)` 对两种精度都能正确解析（Go 对小数秒位数天然宽容，与 layout 声明的精度无关），双方都 `Truncate(time.Millisecond)` 后比较即可统一。同一毫秒内有多条记录匹配时报错要求改用 `-line`，不做静默猜测。
 * `-line N`：原始的、基于行号的兜底方式（默认 0 = 文件最后一条可解析记录），行号在实际排障流程里很难提前知道，保留是因为脚本化场景仍然有用，零维护成本。
 
 **`-print`**：与三种定位方式正交的开关——跳过请求构造 / `-provider` 必填校验，把定位到的记录原始字节（`internal/audit.LineAt`）直接打印到 stdout。这是"读"而不是"重放"：`vmr replay -req COORD -print` 是"看一眼这条记录长什么样"的入口，不需要先跑分析命令、也不需要配任何 provider。

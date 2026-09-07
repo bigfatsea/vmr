@@ -123,7 +123,7 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 }
 
 // TestMetricValue_ModelSwitchCount_Registered (updated when
-// corpus.go's three hand-maintained registrations were replaced by
+// benchmarks.go's three hand-maintained registrations were replaced by
 // compare.go's single metricSpecs list) locks in that MetricModelSwitchCount
 // has exactly one entry in metricSpecs, with KindCount and a Value that
 // extracts len(Metrics.ModelSwitches), not always 0 — both -compare's rows
@@ -148,7 +148,7 @@ func TestMetricValue_ModelSwitchCount_Registered(t *testing.T) {
 	}
 }
 
-func TestComputeCorpusStats(t *testing.T) {
+func TestComputeBenchmarkStats(t *testing.T) {
 	t.Run("empty corpus", func(t *testing.T) {
 		stats := ComputeBenchmarkStats(nil)
 		if stats.JourneyCount != 0 {
@@ -351,7 +351,7 @@ func TestProtocolShare(t *testing.T) {
 	})
 }
 
-func TestRenderCorpusMarkdown(t *testing.T) {
+func TestRenderBenchmarksMarkdown(t *testing.T) {
 	t.Run("empty corpus renders without panicking", func(t *testing.T) {
 		md := RenderBenchmarksMarkdown(BenchmarkStats{}, i18n.EN)
 		if md == "" {

@@ -9,7 +9,7 @@ import (
 	"vmr/internal/ctxgraph"
 )
 
-var errEmptyLineage = errors.New("story: lineage has no manifests")
+var errEmptyLineage = errors.New("journey: lineage has no manifests")
 
 // errNilProfile guards every exported entry point that fans out into
 // concurrent goroutines (BuildAll) or worker-free recursion (BuildChain) —
@@ -17,7 +17,7 @@ var errEmptyLineage = errors.New("story: lineage has no manifests")
 // would panic with no recover() in the call chain, which for a goroutine
 // means the whole process dies mid-flight instead of returning a clean
 // error the caller can report.
-var errNilProfile = errors.New("story: prof is nil")
+var errNilProfile = errors.New("journey: prof is nil")
 
 // classifyJourney tags a candidate Journey by structural signals in its
 // already-derived title alone (P6.3) — it does not re-scan message

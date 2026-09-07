@@ -1,6 +1,6 @@
 // Ver 2026-08-31, by Opus 5
 
-// The report-half / story-half cost-basis differential test. CLAUDE.md's
+// The report-half / journey-half cost-basis differential test. CLAUDE.md's
 // rule is that an analytics number reproducing another must be pinned by a
 // test, not a comment — "sharing the formula is only half of it; the BASIS
 // is chosen independently on each side, and a wrong basis reads exactly
@@ -59,11 +59,11 @@ data: {"choices":[{"index":0,"finish_reason":"stop","delta":{}}],"usage":{"promp
 data: [DONE]`
 }
 
-// TestCostBasis_ReportAndStoryAgreeCanceledAndError extends the parity
+// TestCostBasis_ReportAndJourneyAgreeCanceledAndError extends the parity
 // differential to the outcome shapes where the two halves' attribution
 // rules could (and once did) drift: a request canceled before any 2xx (the
 // early-cancel case that made a journey's total exceed the macro report's
-// — report unprices it via endpointInfo's empty result while story priced
+// — report unprices it via endpointInfo's empty result while journey priced
 // the request-side estimate), a canceled mid-stream (2xx committed, no
 // usage — priced degraded on BOTH sides), an outcome:"error" record whose
 // attempt still committed a 2xx (soft-block failover — priced on both
@@ -71,7 +71,7 @@ data: [DONE]`
 // response at all (unpriced on both sides). Every shape here pins the same
 // rule from both ends: cost belongs to the endpoint that SERVED the client,
 // and the two halves must agree on which records those are.
-func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
+func TestCostBasis_ReportAndJourneyAgreeCanceledAndError(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 9, 1, 9, m, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "cancel parity fixture opening instruction")
@@ -147,26 +147,26 @@ func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
 		estimatedSteps += c.EstimatedSteps
 	}
 	// Records 1/2/4/5 are served and priced; 3/6 never committed a < 400
-	// response and are unpriced on BOTH sides — story pricing them (or
+	// response and are unpriced on BOTH sides — journey pricing them (or
 	// report pricing them) would break the equality below.
 	if pricedSteps != 4 {
-		t.Fatalf("story priced %d/6 steps, want exactly 4 (the served ones)", pricedSteps)
+		t.Fatalf("journey priced %d/6 steps, want exactly 4 (the served ones)", pricedSteps)
 	}
 	if estimatedSteps != 3 {
 		t.Fatalf("estimatedSteps = %d, want 3 (records 2/4/5 priced from the degraded estimate)", estimatedSteps)
 	}
 	want := *rep.Overall.CostEstimate
 	if d := journeyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
-		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
+		t.Errorf("journey total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
 	}
 	// The exact-usage record alone is 10*4000/1e6 + 40*1500/1e6 = 0.10; the
 	// total must exceed that to prove the degraded records contributed too.
 	if journeyTotal < 0.10 {
-		t.Errorf("story total %v < 0.10 — the degraded records stopped contributing", journeyTotal)
+		t.Errorf("journey total %v < 0.10 — the degraded records stopped contributing", journeyTotal)
 	}
 }
 
-func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
+func TestCostBasis_ReportAndJourneyAgree(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 31, 9, m, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "cost basis parity fixture opening instruction")
@@ -198,7 +198,7 @@ func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
 	byIdx := ctxgraph.LineageIndex(g)
 	// Only chain TAILS become Journeys — a lineage some other lineage is
 	// stitched onto is already covered by that one's chain, and counting it
-	// twice would make the story side spuriously exceed the report's.
+	// twice would make the journey side spuriously exceed the report's.
 	tails := ctxgraph.StitchedSuccessorSet(g)
 	var journeyTotal float64
 	var pricedSteps, estimatedSteps int
@@ -216,13 +216,13 @@ func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
 		estimatedSteps += c.EstimatedSteps
 	}
 	if pricedSteps != len(recs) {
-		t.Fatalf("story priced %d/%d steps — every record has a priceable endpoint", pricedSteps, len(recs))
+		t.Fatalf("journey priced %d/%d steps — every record has a priceable endpoint", pricedSteps, len(recs))
 	}
 	if estimatedSteps == 0 {
 		t.Fatal("no step took the degraded-estimate path — the fixture stopped covering the case this test exists for")
 	}
 	want := *rep.Overall.CostEstimate
 	if d := journeyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
-		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
+		t.Errorf("journey total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
 	}
 }

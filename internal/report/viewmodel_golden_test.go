@@ -231,11 +231,11 @@ func TestGoldenVMStructure(t *testing.T) {
 
 	fixture := goldenFixture()
 	journeyLink := map[string]string{"l-d1": "j-claw-b-1.md"}
-	stories := &JourneysLinkInfo{Path: "journeys/index.md", JourneyCount: 2,
+	journeyIdx := &JourneysLinkInfo{Path: "journeys/index.md", JourneyCount: 2,
 		FromDisplay: "2026-07-23 02:39:00", ToDisplay: "2026-07-24 10:00:00"}
 
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
-		got := vmToJSON(BuildMacroReportVM(fixture, lang, stories, journeyLink))
+		got := vmToJSON(BuildMacroReportVM(fixture, lang, journeyIdx, journeyLink))
 		var want string
 		switch lang {
 		case i18n.EN:

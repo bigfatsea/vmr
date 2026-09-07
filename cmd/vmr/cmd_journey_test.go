@@ -910,7 +910,7 @@ func TestCmdAnalyze_CompareWithLLM(t *testing.T) {
 
 // TestCmdAnalyze_NoLLMCacheDirConfiguredMeansNoCaching covers the explicit
 // behavior change: -llm-cache-dir has no implicit default (unlike the old
-// hardcoded {out}/stories/.llm-cache) — with neither the flag nor
+// hardcoded .llm-cache) — with neither the flag nor
 // report.yaml's llm_cache_dir set, an -llm-addr call must still succeed
 // (the LLM section renders) but must leave no .llm-cache directory behind
 // anywhere under outDir.

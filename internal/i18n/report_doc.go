@@ -22,9 +22,9 @@ type DocText struct {
 	// that was never meant to have one.
 	MetaReportConfig func(path string) string
 	DetailLinkLine   string
-	// StoriesLinkLine is the "vmr-report.md → journeys/index.md" edge
+	// JourneyIndexLinkLine is the "vmr-report.md → journeys/index.md" edge
 	// (P6.2a) — path is relative to vmr-report.md itself.
-	StoriesLinkLine func(path string, journeyCount int, from, to string) string
+	JourneyIndexLinkLine func(path string, journeyCount int, from, to string) string
 	SummaryTitle    string
 	SummaryRequests func(requests, fallbacks, truncated int) string
 	SummaryHeaders  [6]string // requests, success rate, billed input(fresh), cache efficiency, p95 duration, pay-as-you-go equivalent cost
@@ -89,7 +89,7 @@ func Doc(lang Lang) DocText {
 				return "配置: " + path
 			},
 			DetailLinkLine: "请求明细数据见 `requests/index.json`；交互式浏览用 `request-browser.html`",
-			StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
+			JourneyIndexLinkLine: func(path string, journeyCount int, from, to string) string {
 				return "任务叙事见 [" + path + "](" + path + ")（" + strconv.Itoa(journeyCount) + " 个任务索引 · 覆盖 " + from + " – " + to + "）\n\n"
 			},
 			SummaryTitle: "§0 摘要",
@@ -166,7 +166,7 @@ func Doc(lang Lang) DocText {
 			return "Config: " + path
 		},
 		DetailLinkLine: "Request-level data is in `requests/index.json`; browse it interactively with `request-browser.html`",
-		StoriesLinkLine: func(path string, journeyCount int, from, to string) string {
+		JourneyIndexLinkLine: func(path string, journeyCount int, from, to string) string {
 			return "Task narratives in [" + path + "](" + path + ") (" + strconv.Itoa(journeyCount) + " task(s) indexed · covers " + from + " – " + to + ")\n\n"
 		},
 		SummaryTitle: "§0 Summary",

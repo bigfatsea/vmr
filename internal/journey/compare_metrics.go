@@ -76,7 +76,7 @@ const (
 	// MetricModelSwitchCount  is len(Metrics.ModelSwitches) — a
 	// ROUTING-ENVIRONMENT variable, not an agent-behavior one: failover,
 	// sticky-TTL expiry, and routing-policy changes all produce a switch
-	// with no change in what the agent itself did. In corpus.go's
+	// with no change in what the agent itself did. In benchmarks.go's
 	// correlation matrix this reads as "did these two groups' routing
 	// environment differ", never as "did the agent behave differently".
 	MetricModelSwitchCount     MetricCode = "model_switch_count"
@@ -91,9 +91,9 @@ const (
 // metric's display text can come from, not two (this struct plus the i18n
 // table) that could drift apart. metricSpecs below is the ONE authoritative
 // list of the behavior-profile metrics vmr tracks — both Compare's per-row
-// diff and corpus.go's per-metric distribution/correlation/Markdown-
+// diff and benchmarks.go's per-metric distribution/correlation/Markdown-
 // rendering range over this same slice, instead of each independently
-// declaring which metrics exist (corpus.go used to hand-maintain its own
+// declaring which metrics exist (benchmarks.go used to hand-maintain its own
 // copy of this exact code/kind/extractor mapping across three separate
 // declarations, kept in sync with Compare only by a comment asserting they
 // matched).

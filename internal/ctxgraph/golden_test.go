@@ -18,7 +18,7 @@ import (
 // the exact input whose hashing hashMsgJSON strips. It exists so that ANY
 // change to the extraction logic or the serialized Manifest shape shows up
 // here instead of silently invalidating (or, worse, silently reusing)
-// on-disk .parse-cache entries.
+// on-disk .cache/parse entries.
 func goldenRecord() audit.Record {
 	hdr := http.Header{}
 	hdr.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
@@ -69,7 +69,7 @@ func goldenRecord() audit.Record {
 // if this test fails, EITHER you changed extraction logic unintentionally
 // (fix the regression), OR you intentionally changed it and MUST bump
 // CacheSchemaVersion in internal/ctxgraph/cache.go and update this golden —
-// otherwise stale .parse-cache entries keep silently serving output from
+// otherwise stale .cache/parse entries keep silently serving output from
 // the old logic with no error anywhere.
 func TestManifestJSONGolden(t *testing.T) {
 	t.Parallel()
@@ -92,7 +92,7 @@ want: %s
 If this change is INTENTIONAL (extraction logic legitimately changed), bump
 CacheSchemaVersion in internal/ctxgraph/cache.go AND update this golden —
 a version bump without this golden (or this golden without a bump) leaves
-stale .parse-cache entries silently serving old-logic output.
+stale .cache/parse entries silently serving old-logic output.
 If it is NOT intentional, fix the extraction regression instead.`,
 			got, want)
 	}

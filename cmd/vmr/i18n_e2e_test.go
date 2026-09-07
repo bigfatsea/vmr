@@ -285,9 +285,9 @@ func e2eStoryFixture(t *testing.T) string {
 	return writeJourneyJSONL(t, []audit.Record{recA1, recA2, recB1, recB2})
 }
 
-// TestE2E_StoryRenderAllDefaultsToEnglish covers vmr analyze -render-all with
+// TestE2E_JourneyRenderAllDefaultsToEnglish covers vmr analyze -render-all with
 // no -lang/report.yaml: journey-*.md must render in English.
-func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
+func TestE2E_JourneyRenderAllDefaultsToEnglish(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
@@ -315,9 +315,9 @@ func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 	}
 }
 
-// TestE2E_StoryRenderAllLangZh covers -lang zh flowing through cmdAnalyze into
+// TestE2E_JourneyRenderAllLangZh covers -lang zh flowing through cmdAnalyze into
 // journey.BuildAll/RenderMarkdown.
-func TestE2E_StoryRenderAllLangZh(t *testing.T) {
+func TestE2E_JourneyRenderAllLangZh(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-render-all", "-lang", "zh", "-o", outDir, path}); err != nil {
@@ -344,7 +344,7 @@ func TestE2E_StoryRenderAllLangZh(t *testing.T) {
 	}
 }
 
-// TestE2E_StoryCompareLangZh_JSONLabelsFollowLang covers -compare's
+// TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang covers -compare's
 // JSON/Markdown consistency (P8, docs/VirtualModelRouter_Design_v4_Analytics.md
 // §4.3): compare-*.md and compare-*.json's rows[].label — MetricDiff.Label,
 // produced by Compare(a, b, lang) — must both switch to Chinese under
@@ -352,7 +352,7 @@ func TestE2E_StoryRenderAllLangZh(t *testing.T) {
 // the opposite (JSON stayed English regardless of -lang) — reversed, not
 // deleted, so the fact that this was a deliberate policy change (not an
 // accidental regression) stays visible in history.
-func TestE2E_StoryCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
+func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 
@@ -432,7 +432,7 @@ func TestE2E_StoryCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 
 // TestE2E_LangZh_AllThreeJSONOutputsAgree is the cross-check
 // TestE2E_ReportLangFlagZh_EfficiencyFollowsLang and
-// TestE2E_StoryCompareLangZh_JSONLabelsFollowLang each individually can't
+// TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang each individually can't
 // provide: one test function asserting all three JSON outputs
 // (vmr-report.json, journey-<id>.json, compare-*.json) are in Chinese
 // under the SAME -lang zh run, so a future regression in any one of them
@@ -465,7 +465,7 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	}
 
 	// journey-<id>.json: parses cleanly under -lang zh — its narrative
-	// fields already followed lang before P8 (TestE2E_StoryRenderAllLangZh
+	// fields already followed lang before P8 (TestE2E_JourneyRenderAllLangZh
 	// covers the Markdown side); this just confirms it's still true
 	// alongside the other two outputs in the same run.
 	journeyPath := e2eStoryFixture(t)

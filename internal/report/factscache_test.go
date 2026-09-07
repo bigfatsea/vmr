@@ -107,7 +107,7 @@ func TestScanFiles_DetailsPathIgnoresFactsCache(t *testing.T) {
 // fails, EITHER you changed extraction logic unintentionally (fix the
 // regression), OR you intentionally changed it and MUST bump
 // CacheSchemaVersion in internal/ctxgraph/cache.go AND update this golden
-// — otherwise stale .parse-cache entries keep silently serving output from
+// — otherwise stale .cache/parse entries keep silently serving output from
 // the old logic with no error anywhere.
 func TestRecordFactsJSONGolden(t *testing.T) {
 	hdr := http.Header{}
@@ -161,7 +161,7 @@ want: %s
 If this change is INTENTIONAL (extraction logic legitimately changed), bump
 CacheSchemaVersion in internal/ctxgraph/cache.go AND update this golden —
 a version bump without this golden (or this golden without a bump) leaves
-stale .parse-cache entries silently serving old-logic output.
+stale .cache/parse entries silently serving old-logic output.
 If it is NOT intentional, fix the extraction regression instead.`,
 			got, want)
 	}

@@ -1,6 +1,6 @@
 // Ver 2026-08-21, by Sonnet 5
 
-// The detector-coverage disclosure: split out of corpus.go once this
+// The detector-coverage disclosure: split out of benchmarks.go once this
 // pushed that file over archtest's file-line budget — same package, no new
 // import boundary. See RenderBenchmarksMarkdown's call to anthropicCoverageNote
 // for where this actually surfaces.

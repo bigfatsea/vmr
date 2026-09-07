@@ -498,11 +498,11 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 	assertJourneyDetailLinksResolve(t, string(postMD), journeyMDPath)
 }
 
-// TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly covers P9.1: a zoom
+// TestCmdAnalyze_JourneySelectorRunsJourneyHalfOnly covers P9.1: a zoom
 // selector routes into that one story-side view and does NOT also run the
 // macro report half — behavior is equivalent to the targeted zoom mode, not
 // the default suite with an extra filter.
-func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
+func TestCmdAnalyze_JourneySelectorRunsJourneyHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "single candidate for -journey selector test")
@@ -522,9 +522,9 @@ func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly mirrors the -journey case
+// TestCmdAnalyze_BenchmarkSelectorRunsJourneyHalfOnly mirrors the -journey case
 // for -benchmark.
-func TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly(t *testing.T) {
+func TestCmdAnalyze_BenchmarkSelectorRunsJourneyHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "single candidate for -benchmark selector test")
@@ -572,10 +572,10 @@ func TestCmdAnalyze_RenderAllRejectsSelector(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly mirrors the -journey case
+// TestCmdAnalyze_CompareSelectorRunsJourneyHalfOnly mirrors the -journey case
 // for -compare: two independent candidates, diffed, with the macro report
 // half never invoked.
-func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
+func TestCmdAnalyze_CompareSelectorRunsJourneyHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 
