@@ -317,7 +317,7 @@ func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
 	if err := dashboard.WriteSkeletons(r.outDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed (pages may be stale until next analyze): %v\n", err)
 	}
-	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
+	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares"), r.lang); err != nil {
 		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 	}
 	// rep != nil means the report half ran and already committed the manifest

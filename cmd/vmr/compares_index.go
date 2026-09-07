@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Gemini 3.8 Flash
+// Ver 2026-09-07, by pi
 //
 // Dynamic derived comparison index (§3.8, D21).
 // Scans compares/compare-*.json on every analyze run to build compares/index.{json,md}.
@@ -15,18 +15,19 @@ import (
 	"strings"
 
 	"vmr/internal/fmtutil"
+	"vmr/internal/i18n"
 	"vmr/internal/journey"
 )
 
 // CompareItem describes one pairwise comparison entry in compares/index.json (§3.8, D21).
 type CompareItem struct {
-	Filename string             `json:"filename"`
-	Markdown string             `json:"markdown"`
-	HTML     string             `json:"html,omitempty"`
+	Filename string `json:"filename"`
+	Markdown string `json:"markdown"`
+	HTML     string `json:"html,omitempty"`
 	// Partial marks a head-truncated side (D19: data, not filename suffix).
-	Partial  bool               `json:"partial,omitempty"`
-	A        journey.JourneyRef `json:"a_journey"`
-	B        journey.JourneyRef `json:"b_journey"`
+	Partial bool               `json:"partial,omitempty"`
+	A       journey.JourneyRef `json:"a_journey"`
+	B       journey.JourneyRef `json:"b_journey"`
 }
 
 // ComparesIndex is the root schema of compares/index.json (§3.8, D21).
@@ -38,7 +39,7 @@ type ComparesIndex struct {
 // RebuildComparesIndex scans comparesDir for compare-*.json files, parses their
 // journey references, sorts them deterministically, and writes index.json and
 // index.md atomically (0600). An empty directory produces an empty-state guide.
-func RebuildComparesIndex(comparesDir string) error {
+func RebuildComparesIndex(comparesDir string, lang i18n.Lang) error {
 	if err := os.MkdirAll(comparesDir, 0o700); err != nil {
 		return fmt.Errorf("mkdir compares dir: %w", err)
 	}
@@ -109,7 +110,7 @@ func RebuildComparesIndex(comparesDir string) error {
 		return fmt.Errorf("write compares index.json: %w", err)
 	}
 
-	mdData := renderComparesIndexMarkdown(items)
+	mdData := renderComparesIndexMarkdown(items, lang)
 	if err := writeAtomic(comparesDir, "index.md", []byte(mdData)); err != nil {
 		return fmt.Errorf("write compares index.md: %w", err)
 	}
@@ -117,22 +118,18 @@ func RebuildComparesIndex(comparesDir string) error {
 	return nil
 }
 
-func renderComparesIndexMarkdown(items []CompareItem) string {
+func renderComparesIndexMarkdown(items []CompareItem, lang i18n.Lang) string {
+	t := i18n.ComparesIndex(lang)
 	var buf bytes.Buffer
-	buf.WriteString("# Journey Comparisons\n\n")
+	buf.WriteString(t.Title)
 
 	if len(items) == 0 {
-		buf.WriteString("No comparisons found in this directory.\n\n")
-		buf.WriteString("To run a pairwise journey comparison:\n")
-		buf.WriteString("```bash\n")
-		buf.WriteString("vmr analyze -compare <id1>,<id2>\n")
-		buf.WriteString("```\n")
+		buf.WriteString(t.EmptyState)
 		return buf.String()
 	}
 
-	fmt.Fprintf(&buf, "Total comparisons: %d\n\n", len(items))
-	buf.WriteString("| Side A (Baseline) | Side B (Candidate) | Report |\n")
-	buf.WriteString("| --- | --- | --- |\n")
+	buf.WriteString(t.Total(len(items)))
+	buf.WriteString(t.TableHeader)
 
 	for _, item := range items {
 		formatSide := func(ref journey.JourneyRef) string {
@@ -144,11 +141,11 @@ func renderComparesIndexMarkdown(items []CompareItem) string {
 			if !ref.From.IsZero() && !ref.To.IsZero() {
 				fromStr := ref.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
 				toStr := ref.To.In(fmtutil.DisplayZone).Format("15:04:05")
-				timeStr = fmt.Sprintf("<br>%s ~ %s", fromStr, toStr)
+				timeStr = t.TimeRange(fromStr, toStr)
 			}
 			stepStr := ""
 			if ref.Steps > 0 {
-				stepStr = fmt.Sprintf(" (%d steps)", ref.Steps)
+				stepStr = t.Steps(ref.Steps)
 			}
 			return fmt.Sprintf("**%s** (`%s`)%s%s", title, ref.ID, stepStr, timeStr)
 		}
@@ -156,10 +153,10 @@ func renderComparesIndexMarkdown(items []CompareItem) string {
 		sideA := formatSide(item.A)
 		sideB := formatSide(item.B)
 		if item.A.Partial {
-			sideA += " ⚠️ partial"
+			sideA += t.PartialMark
 		}
 		if item.B.Partial {
-			sideB += " ⚠️ partial"
+			sideB += t.PartialMark
 		}
 
 		links := fmt.Sprintf("[%s](%s)", item.Markdown, item.Markdown)

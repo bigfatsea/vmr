@@ -98,7 +98,7 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 	if err := dashboard.WriteSkeletons(r.outDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed (pages may be stale until next analyze): %v\n", err)
 	}
-	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
+	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares"), r.lang); err != nil {
 		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 	}
 	// D20/§3.4: the orphan sweep is the default-suite full run's job, and an
