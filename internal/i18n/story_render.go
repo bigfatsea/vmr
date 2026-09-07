@@ -1,8 +1,8 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/journey/render_md.go and its viewmodel counterpart
-// internal/journey/viewmodel_build.go (journey-*.md, both render paths), and
-// the three
+// Pairs with internal/journey/viewmodel_build.go + viewmodel_spine.go
+// (j-<id>.md via the ViewModel path, the only render path since the legacy
+// in-memory renderer was removed in Phase 3), and the three
 // fallback title strings in internal/journey/journey.go (toolLoopTitle,
 // stitchTaskTitle, deriveTitle's placeholder) — Journey/Task titles are
 // mostly a verbatim quote of the user's own message and so aren't localized

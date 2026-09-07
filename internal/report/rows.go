@@ -25,7 +25,15 @@ const Format = ManifestFormat
 // (V2 C-family / F-family). 30s matches the V2 spec.
 const SlowThresholdMS = 30_000
 
-// Report2 is the top-level JSON output, mirroring the Markdown structure.
+// Report2 is the report half's in-memory aggregate shape: what Build
+// fills in and what both consumers read back out. It is NOT persisted —
+// since D2 the five macro slices (slices.go) are the only persisted macro
+// data; -render-only rebuilds an in-memory Report2 from those slices via
+// LoadReport (viewmodel_doc.go), and the ViewModel builders (viewmodel_*.go)
+// consume the same shape in the full-run path. Keeping one shape for both
+// directions is what makes full-run and -render-only renders take the same
+// code path (D11/§5.0) without a second persistence layer.
+//
 // Every aggregating bucket carries the derived fields that are cheap to
 // compute during finish* (fresh tokens, cache_efficiency, slow_requests,
 // true stream_ms percentiles) since the raw sums already exist then.

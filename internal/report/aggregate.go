@@ -1,19 +1,24 @@
 // Ver 2026-07-29 23:55, by Sonnet 5
 
-// This file is the aggregation pass behind `vmr report`: it reads audit
-// JSONL and fills in the Report2 buckets declared in rows.go. Rendering
-// lives in render_doc.go + one section_*.go per numbered section; the
-// per-request detail files in detail.go/render.go; session and task
-// grouping in session.go; token extraction in chatmsg.ExtractUsage; the
-// optional pricing sidecar in pricing.go. Per-bucket accumulation
-// (TrafficStats.Ingest and friends) lives in ingest.go; per-record
-// extraction (buildRec2 and friends) lives in recextract.go — this file is
-// buildInternal's own orchestration: aggState plus its three phases
-// (scanFiles/finishBuckets/sortBuckets).
+// This file is the aggregation pass behind `vmr analyze`'s report half: it
+// reads audit JSONL and fills in the Report2 buckets declared in rows.go.
+// Rendering lives in the internal/report/viewmodel_*.go builders + the
+// fixed Markdown serializer (no template engine, D3/§5.3); the
+// five-domain macro slices in slices.go are derived from this Report2 by
+// BuildSummarySlice/BuildFinanceSlice/... — slices are the only persisted
+// macro data (D2), and LoadReport (viewmodel_doc.go) rebuilds an
+// in-memory Report2 from them on -render-only. The per-request detail
+// files in detail.go/render.go; session and task grouping in session.go;
+// token extraction in chatmsg.ExtractUsage; the optional pricing sidecar
+// in pricing.go. Per-bucket accumulation (TrafficStats.Ingest and friends)
+// lives in ingest.go; per-record extraction (buildRec2 and friends) lives
+// in recextract.go — this file is buildInternal's own orchestration:
+// aggState plus its three phases (scanFiles/finishBuckets/sortBuckets).
 //
-// The report is organized around nine numbered sections (§0-§8) plus §6.5
-// sticky effectiveness, §6.6 endpoint value, and §6.7 compaction — see
-// docs/VirtualModelRouter_Design_v4_Analytics.md's `vmr report` section.
+// See docs/future-strategy/analyze_architecture_redesign_opus-5.md for the
+// slice/ViewModel/manifest architecture, and
+// docs/VirtualModelRouter_Design_v4_Analytics.md for the section-level
+// data semantics.
 //
 // Meta.Format (const Format, rows.go) encodes one invariant: every bucket
 // keeps its own raw dur_ms / ttft_ms / stream_ms slices and computes true

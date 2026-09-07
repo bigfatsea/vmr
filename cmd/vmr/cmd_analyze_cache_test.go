@@ -420,3 +420,56 @@ func TestAnalyzeCache_RenderOnlyOrthogonality(t *testing.T) {
 		t.Fatalf("-render-only with -no-cache should work: %v", err)
 	}
 }
+
+// TestAnalyzeCache_L2HitSweepsOrphanJourneys pins the D20/§3.4 sweep
+// contract on the L2-hit path: the orphan sweep is the default-suite full
+// run's job, and an L2 hit still IS that run — files landing in
+// journeys/details/ between two identical runs (manual copies, crashed zoom
+// runs) must not survive the replay. Zoom-mode L2 digests differ from the
+// default suite's, so a zoom run's L2 hit can never trigger this sweep.
+func TestAnalyzeCache_L2HitSweepsOrphanJourneys(t *testing.T) {
+	path := crossCheckFixture(t)
+	outDir := filepath.Join(t.TempDir(), "reports")
+
+	// Cold run: establishes the snapshot and its L2 digest.
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, path})
+	}); err != nil {
+		t.Fatalf("cold start: %v", err)
+	}
+
+	// Plant an orphan in journeys/details/ — anything a prior zoom run or a
+	// manual copy could have left there.
+	orphanJSON := filepath.Join(outDir, "journeys", "details", "j-ghost-20260101T000000-20260101T000001-deadbee1.json")
+	orphanMD := strings.TrimSuffix(orphanJSON, ".json") + ".md"
+	for _, p := range []string{orphanJSON, orphanMD} {
+		if err := os.WriteFile(p, []byte("{}"), 0o600); err != nil {
+			t.Fatalf("plant orphan: %v", err)
+		}
+	}
+
+	// Warm run: L2 hit (same inputs/params — verified by the digest not
+	// moving), and the orphan must be swept despite the sweep not living in
+	// dispatchDefaultSuite on this path.
+	if err := captureStdoutErr(t, func() error {
+		return cmdAnalyze([]string{"-o", outDir, path})
+	}); err != nil {
+		t.Fatalf("warm run: %v", err)
+	}
+
+	if _, err := os.Stat(orphanJSON); !os.IsNotExist(err) {
+		t.Fatalf("orphan json survived an L2-hit full run: %v", err)
+	}
+	if _, err := os.Stat(orphanMD); !os.IsNotExist(err) {
+		t.Fatalf("orphan md survived an L2-hit full run: %v", err)
+	}
+
+	// The real journeys must be untouched by the sweep.
+	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
+	if err != nil {
+		t.Fatalf("read details dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("sweep removed every journey detail, not just the orphan")
+	}
+}
