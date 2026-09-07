@@ -22,7 +22,10 @@ import (
 
 // RendererVersion is the current version of the report presentation renderer (§7.1, §7.4).
 // Bumping this invalidates L3 Markdown presentation cache while leaving L2 data cache intact.
-const RendererVersion = 1
+// v2: journey .md spine/evidence links retargeted at requests/details|evidence/ (two
+// levels up), journeys/index.md + requests/failed.md wording — a renderer-only change,
+// so existing snapshots need this bump for -render-only to pick it up.
+const RendererVersion = 2
 
 // ComputeInputHashes hashes all input paths using ctxgraph.HashFile sha256 (no mtime fast path, §7.2).
 func ComputeInputHashes(paths []string) ([][]byte, error) {
