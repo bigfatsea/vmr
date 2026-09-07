@@ -31,19 +31,25 @@
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
     .brand span.badge { background: var(--go); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
-    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; transition: color .15s, background .15s; }
     nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
     nav.nav-links a.active { font-weight: 700; color: var(--trace); }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
     button { cursor: pointer; }
+    button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
 
     .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
     .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
     .banner.hidden { display: none; }
 
     .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
     .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
     .jhead h1 { font-size: 18px; font-family: var(--sans); margin-bottom: 4px; word-break: break-word; }
     .jmeta { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); margin-bottom: 14px; }
@@ -78,6 +84,28 @@
     .finding-item code { margin-right: 6px; }
     .section-title { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-dim); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 20px 0 12px; }
 
+    /* Overview / metrics / model usage */
+    .overview-list { margin: 0 0 12px 18px; font-size: 12.5px; }
+    .overview-list li { margin: 2px 0; }
+    .kv-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
+    .kv-table th, .kv-table td { padding: 5px 10px; border-bottom: 1px solid var(--rule); text-align: left; }
+    .kv-table th { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); background: var(--panel-subtle); }
+    .kv-table td.num { text-align: right; font-family: var(--mono); }
+    .kv-table tr:hover td { background: var(--panel-subtle); }
+    .sparkline-cap { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); margin: 4px 0 12px; }
+    .switch-line { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); margin: 3px 0; }
+    .tags-line { font-size: 11.5px; color: var(--ink-dim); margin-bottom: 12px; }
+    /* Tool calls inside a step */
+    .tool-call { border-left: 2px solid var(--rule); padding-left: 10px; margin: 6px 0; }
+    .tool-call-head { font-family: var(--mono); font-size: 11.5px; }
+    .tool-args { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+    .step details { margin-top: 4px; }
+    .step details > summary { cursor: pointer; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .step details pre { background: var(--panel-subtle); border: 1px solid var(--rule); border-radius: 4px; padding: 8px 10px; margin-top: 4px; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
+    .result-err > summary { color: var(--alert); }
+    .step-transition { font-family: var(--mono); font-size: 11px; color: var(--amber); margin: 3px 0; }
+    .step-instruction { font-size: 12px; background: rgba(47,111,208,0.06); border-left: 3px solid var(--trace); padding: 4px 8px; border-radius: 0 3px 3px 0; margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
+
     /* Candidate list */
     .cand-list { display: flex; flex-direction: column; gap: 6px; }
     .cand-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel-subtle); }
@@ -110,7 +138,7 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ Direct file:// access is restricted by browser same-origin policy and cannot fetch data slices. Please open via vmr hosting (/reports/) or any static HTTP server.</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span></div>
   <div id="banner-missing" class="banner alert hidden">
@@ -140,6 +168,8 @@
     <div id="journey-view" class="hidden"></div>
   </div>
 
+  <div id="source-bar"></div>
+
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
@@ -156,7 +186,9 @@
   <script>
     (async function() {
       Theme.init();
+      wireHashReload();
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         bannerFile: document.getElementById('banner-file'),
         bannerVersion: document.getElementById('banner-version'),
         bannerVersionText: document.getElementById('banner-version-text'),
@@ -214,6 +246,8 @@
           if (st === 'banner') {
             dom.bannerVersionText.textContent = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Please run a full 'vmr analyze'.`;
             dom.bannerVersion.classList.remove('hidden');
+          } else if (st === 'missing') {
+            dom.bannerMissing.classList.remove('hidden');
           }
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return false; }
@@ -222,7 +256,257 @@
         return true;
       }
 
-      // Load journey details if #data= given, else list candidates
+      // Formatting aligned with internal/journey (compare_metrics.go /
+      // viewmodel_build.go). Section titles stay English like every other
+      // skeleton page; System Prompt eras and the ASCII tool-call timeline
+      // grid are left to j-<id>.md (D5 — details/evidence are another product).
+      const secs = (ms) => (Number(ms || 0) / 1000).toFixed(1) + 's';
+      const pct0 = (f) => FmtPercent(f, 0);
+      const SPARK = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
+      // journeyMetrics' order + formatting, from compare_metrics.go.
+      const JOURNEY_METRICS = [
+        ['net_working_ms', 'Net Working Time', m => secs(m.net_working_ms)],
+        ['model_ms', 'Model Time', m => secs(m.model_ms)],
+        ['agent_exec_ms', 'Agent-Side Execution Time', m => secs(m.agent_exec_ms)],
+        ['human_idle_ms', 'Human Idle Time', m => secs(m.human_idle_ms)],
+        ['model_to_tool_ratio', 'Model/Tool Time Ratio', m => (m.agent_exec_ms ? (Number(m.model_to_tool_ratio) || 0).toFixed(2) + '×' : '—')],
+        ['tool_call_count', 'Tool Call Count', m => String(m.tool_call_count || 0)],
+        ['duplicate_action_rate', 'Duplicate Action Rate', m => pct0(m.duplicate_action_rate || 0)],
+        ['output_repetition_rate', 'Output Repetition Rate', m => pct0(m.output_repetition_rate || 0)],
+        ['error_recovery_count', 'Error Recovery Count', (m, nonA) => (nonA && !m.error_recovery_count ? 'n/a' : String(m.error_recovery_count || 0))],
+        ['plan_exec_ratio', 'Plan/Execution Ratio', m => pct0(m.plan_exec_ratio || 0)],
+        ['context_utilization', 'Context Utilization', m => pct0(m.context_utilization || 0)],
+        ['compaction_count', 'Compaction Count', m => String(m.compaction_count || 0)],
+        ['compaction_loss_tokens', 'Compaction Information Loss', m => FmtTokens(m.compaction_loss_tokens || 0)],
+        ['model_switch_count', 'Model Switch Count', m => String((m.model_switches || []).length)]
+      ];
+
+      function overviewNodes(steps, metrics, cost) {
+        const nodes = [];
+        if (steps.length === 0) return nodes;
+        nodes.push('Started ' + esc(steps[0].ts_display || ''));
+        const errStep = steps.find(s => s.outcome === 'error' || s.has_error_marker);
+        if (errStep) nodes.push(`First error marker · Step ${errStep.seq} · ${esc(errStep.ts_display || '')}`);
+        const trStep = steps.find(s => s.stitch_edge || (s.edit && s.edit.kind && s.edit.kind !== 'append'));
+        if (trStep) {
+          const kind = trStep.stitch_edge ? (trStep.stitch_edge.kind || 'stitch') : trStep.edit.kind;
+          nodes.push(`First non-routine transition (${esc(kind)}) · Step ${trStep.seq} · ${esc(trStep.ts_display || '')}`);
+        }
+        const last = steps[steps.length - 1];
+        nodes.push(`Ended · Step ${last.seq} · finish=${esc(last.finish || '-')} · ${esc(last.ts_display || '')}`);
+        return nodes;
+      }
+
+      function structuralTags(m) {
+        const tags = [];
+        if ((m.tool_call_count || 0) >= 10) tags.push('tool-intensive');
+        if ((m.duplicate_action_rate || 0) >= 0.2) tags.push('retry-heavy');
+        if ((m.compaction_count || 0) > 0) tags.push('context-compacted');
+        return tags;
+      }
+
+      function contextSparkline(curve) {
+        if (!curve || curve.length < 2) return '';
+        const totals = curve.map(p => (p.system_tokens || 0) + (p.user_tokens || 0) + (p.assistant_tokens || 0) + (p.tool_tokens || 0));
+        const maxT = Math.max(...totals);
+        if (maxT === 0) return '';
+        const chart = svgLineChart({
+          data: curve.map((p, i) => ({ seq: p.seq || (i + 1), total: totals[i] })),
+          xKey: 'seq', yKey: 'total',
+          title: 'Context Token Trajectory',
+          width: 1040, height: 170,
+          yFormatter: (v) => FmtTokens(v)
+        });
+        const ascii = totals.map(v => SPARK[Math.min(SPARK.length - 1, Math.max(0, Math.round(v / maxT * (SPARK.length - 1))))]).join('');
+        return chart + `<div class="sparkline-cap">\`${ascii}\` (start ${FmtTokens(totals[0])} tok → end ${FmtTokens(totals[totals.length - 1])} tok)</div>`;
+      }
+
+      function stepRoleTag(s, repeated, reply) {
+        if (s.stitch_edge || s.compaction) return '🧹';
+        if (s.outcome === 'error' || s.has_error_marker) return '⚠️';
+        if (repeated) return '🔄';
+        if ((s.tool_calls || []).length > 0) return '🔧';
+        if (reply) return '💬';
+        return '👀';
+      }
+
+      function toolCallHtml(s, tc, bodies) {
+        const name = tc.name || '(tool)';
+        const args = tc.args_ref ? (bodies[tc.args_ref] || '') : (tc.args || '');
+        let argsHtml = '';
+        if (args) {
+          if (args.length <= 160 && !args.includes('\n')) {
+            argsHtml = `<div class="tool-args">${esc(args)}</div>`;
+          } else {
+            argsHtml = `<details><summary>args (${FmtBytes(args.length)})</summary><pre>${esc(args)}</pre></details>`;
+          }
+        }
+        let resultHtml = '';
+        const res = tc.result;
+        if (res && res.ref) {
+          const text = bodies[res.ref] || '';
+          if (text) {
+            const mark = res.is_error ? '❌' : '↩️';
+            const badge = res.match === 'positional' ? ' (matched by position — ID unmatched)' : '';
+            const cls = res.is_error ? 'result-err' : '';
+            resultHtml = `<details class="${cls}"><summary>${mark} result${esc(badge)} (${FmtBytes(text.length)})</summary><pre>${esc(text)}</pre></details>`;
+          }
+        }
+        return `<div class="tool-call"><div class="tool-call-head">🔧 <code>${esc(name)}</code></div>${argsHtml}${resultHtml}</div>`;
+      }
+
+      function renderJourney(j) {
+        const id = j.id || dataPath;
+        const metrics = j.metrics || {};
+        const findings = j.findings || [];
+        const structure = j.structure || { tasks: [] };
+        const bodies = j.bodies || {};
+        const cost = j.cost;
+        const allSteps = (structure.tasks || []).flatMap(t => t.steps || []);
+        const nonAnthropic = allSteps.length > 0 && !allSteps.some(s => s.protocol === 'anthropic-messages');
+        const out = [];
+
+        // --- header ---
+        out.push(`<div class="card jhead">
+          <h1>${esc(j.title || id)}</h1>
+          <div class="jmeta">${esc(id)} · ${esc(j.from_display || j.from || '')} → ${esc(j.to_display || j.to || '')} ${j.partial ? '· ⚠️ partial (head-truncated)' : ''}</div>
+          <div class="stat-row">
+            <div class="stat-box"><strong>${metrics.net_working_ms ? secs(metrics.net_working_ms) : '—'}</strong>Net Working</div>
+            <div class="stat-box"><strong>${metrics.model_ms ? secs(metrics.model_ms) : '—'}</strong>Model Time</div>
+            <div class="stat-box"><strong>${metrics.human_idle_ms ? secs(metrics.human_idle_ms) : '—'}</strong>Human Idle</div>
+            <div class="stat-box"><strong>${(metrics.tool_call_count || 0).toLocaleString()}</strong>Tool Calls</div>
+            <div class="stat-box"><strong>${pct0(metrics.duplicate_action_rate || 0)}</strong>Duplicate Actions</div>
+            <div class="stat-box"><strong>${pct0(metrics.plan_exec_ratio || 0)}</strong>Plan/Exec Ratio</div>
+            ${cost && cost.total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.total, cost.currency)}</strong>Est. Cost (${esc(cost.currency || 'USD')})</div>` : ''}
+          </div>`);
+
+        // --- overview ---
+        const nodes = overviewNodes(allSteps, metrics, cost);
+        const tags = structuralTags(metrics);
+        const failed = allSteps.filter(s => s.outcome === 'error').length;
+        if (nodes.length || tags.length) {
+          out.push(`<div class="section-title" style="margin-top:8px;">Overview</div><ul class="overview-list">`);
+          nodes.forEach(n => out.push(`<li>${n}</li>`));
+          if (failed > 0) out.push(`<li>${failed}/${allSteps.length} steps failed (HTTP/upstream error)</li>`);
+          if (cost && cost.resolved) out.push(`<li>Estimated cost ≈ ${FmtCurrency(cost.total, cost.currency)} (list-price estimate, not your bill)</li>`);
+          out.push(`</ul>`);
+          if (tags.length) out.push(`<div class="tags-line"><strong>Tags</strong>: ${tags.map(esc).join(' · ')}</div>`);
+        }
+
+        // --- findings ---
+        out.push(`<div class="verdict ${findings.length === 0 ? 'v-go' : ''}">
+          <div class="vlabel">Suspected Issues — candidate list, not a verdict (${findings.length})</div>
+          <div class="findings-list">`);
+        if (findings.length === 0) {
+          out.push(`<p style="font-size:12px; color:var(--ink-dim);">No rule-detectable suspected issues.</p>`);
+        } else {
+          const byCode = {};
+          const order = [];
+          findings.forEach(f => { if (!byCode[f.code]) { byCode[f.code] = []; order.push(f.code); } byCode[f.code].push(f); });
+          order.forEach(code => {
+            const g = byCode[code];
+            const earliest = Math.min(...g.map(f => f.step_seq || 0));
+            out.push(`<div style="margin-bottom:8px;"><div style="font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-bottom:3px;">${esc(code)} · ${g.length} hit${g.length > 1 ? 's' : ''} (earliest Step ${earliest})</div>`);
+            g.forEach(f => {
+              out.push(`<div class="finding-item">
+                <strong>Step ${f.step_seq} · ${esc(f.finding || f.code)}</strong>
+                ${f.evidence ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">evidence: ${esc(f.evidence)}</div>` : ''}
+                ${f.action ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">action: ${esc(f.action)}</div>` : ''}
+              </div>`);
+            });
+            out.push(`</div>`);
+          });
+        }
+        out.push(`</div></div>`);
+
+        // --- behavior indicators ---
+        out.push(`<div class="section-title">Behavior Indicators</div><table class="kv-table"><thead><tr><th>Metric</th><th class="num">Value</th></tr></thead><tbody>`);
+        JOURNEY_METRICS.forEach(([, label, fmt]) => {
+          out.push(`<tr><td>${esc(label)}</td><td class="num">${esc(fmt(metrics, nonAnthropic))}</td></tr>`);
+        });
+        out.push(`</tbody></table>`);
+        out.push(contextSparkline(metrics.context_composition_curve));
+
+        // --- model usage ---
+        const mu = metrics.model_usage || [];
+        if (mu.length) {
+          out.push(`<div class="section-title">Model Usage</div><table class="kv-table"><thead><tr><th>Model (Provider)</th><th class="num">Steps</th><th class="num">Tokens In</th><th class="num">Cached In</th><th class="num">Tokens Out</th></tr></thead><tbody>`);
+          mu.forEach(u => {
+            out.push(`<tr><td>${esc(u.model)} (${esc(u.provider)})</td><td class="num">${u.steps || 0}</td><td class="num">${FmtTokens(u.tokens_in || 0)}</td><td class="num">${FmtTokens(u.tokens_in_cached || 0)}</td><td class="num">${FmtTokens(u.tokens_out || 0)}</td></tr>`);
+          });
+          out.push(`</tbody></table>`);
+          const sw = metrics.model_switches || [];
+          if (sw.length === 0) {
+            out.push(`<div class="switch-line">No mid-journey model switches.</div>`);
+          } else {
+            sw.forEach(s => {
+              let line = `Step ${s.step_seq}: ${esc(s.from)} → ${esc(s.to)}`;
+              if (s.has_cache_data) line += ` · cache ${pct0(s.prev_cache_ratio || 0)} → ${pct0(s.cur_cache_ratio || 0)}`;
+              if (s.on_failover_step) line += ' · on a failover step';
+              out.push(`<div class="switch-line">${line}</div>`);
+            });
+          }
+        }
+
+        // --- decision spine (tasks & steps) ---
+        out.push(`<div class="section-title">Decision Spine · Tasks &amp; Steps</div>`);
+        (structure.tasks || []).forEach((task, ti) => {
+          out.push(`<div class="task-block"><div class="task-title">t${String(ti + 1).padStart(2, '0')} · <span>${esc(task.title || '(untitled)')}</span></div>`);
+          (task.steps || []).forEach((s, si) => {
+            const usage = s.usage || {};
+            const repeated = (s.tool_calls || []).some(tc => tc.repeat);
+            const replyText = s.resp_ref && !s.resp_is_reasoning ? (bodies[s.resp_ref] || '') : '';
+            const reasoningText = (s.reasoning_ref ? bodies[s.reasoning_ref] : (s.resp_ref && s.resp_is_reasoning ? bodies[s.resp_ref] : '')) || '';
+            const why = replyText || reasoningText;
+            const flags = [];
+            if (s.stitch_edge) flags.push('<span class="badge-pill badge-warn">stitch</span>');
+            if (s.compaction) flags.push('<span class="badge-pill badge-warn">compaction</span>');
+            if (s.human_initiated) flags.push('<span class="badge-pill badge-ok">human</span>');
+            const cls = (s.outcome === 'error' || s.has_error_marker) ? 'error' : ((s.compaction || s.stitch_edge) ? 'flagged' : '');
+            out.push(`<div class="step ${cls}">
+              <div class="step-top">
+                <span class="step-seq">${stepRoleTag(s, repeated, why)} Step ${s.seq}</span>
+                <span class="step-ts">${esc(s.ts_display || '')}</span>
+                <span class="step-model">${esc(s.endpoint || s.model || '')}</span>
+                <span class="step-model">in ${FmtTokens(usage.in || 0)} · out ${FmtTokens(usage.out || 0)} · ${FmtDuration(s.dur_ms || 0)}</span>
+                ${flags.join(' ')}
+              </div>`);
+            if (s.compaction) {
+              const c = s.compaction;
+              out.push(`<div class="step-transition">🧹 compaction: ${FmtTokens(c.tokens_before || 0)} → ${FmtTokens(c.tokens_after || 0)}${(c.swallowed_entities || []).length ? ` · dropped: ${esc((c.swallowed_entities || []).join(', '))}` : ''}</div>`);
+            }
+            if (s.stitch_edge) {
+              out.push(`<div class="step-transition">🔗 stitched (${esc(s.stitch_edge.kind || '')}) score ${pct0(s.stitch_edge.score || 0)} · confidence ${pct0(s.stitch_edge.confidence || 0)}</div>`);
+            }
+            if (si > 0 && s.instruction) {
+              out.push(`<div class="step-instruction">💬 ${esc(s.instruction.length > 500 ? s.instruction.slice(0, 500) + '…' : s.instruction)}</div>`);
+            }
+            if ((s.tool_calls || []).length > 0) {
+              if (why) out.push(`<div class="resp-text">${esc(why.slice(0, 600))}${why.length > 600 ? '…' : ''}</div>`);
+              (s.tool_calls || []).forEach(tc => out.push(toolCallHtml(s, tc, bodies)));
+            } else if (why) {
+              out.push(`<div class="resp-text">${esc(why.slice(0, 1500))}${why.length > 1500 ? '…' : ''}</div>`);
+            }
+            out.push(`</div>`);
+          });
+          out.push(`</div>`);
+        });
+
+        // --- final deliverable ---
+        if (j.deliverable && j.deliverable.found) {
+          const d = j.deliverable;
+          out.push(`<div class="section-title">Final Deliverable</div>
+            <p style="font-size:12px;">Step ${d.step_seq} · <code>${esc(d.tool_name)}</code></p>
+            <details><summary>Deliverable excerpt${d.truncated ? ' (truncated)' : ''}</summary><pre>${esc(d.excerpt || '')}</pre></details>`);
+        }
+
+        out.push(`<p class="note" style="font-size:11px; color:var(--ink-dim); margin-top:16px;">System Prompt eras and the tool-call timeline grid are in the <code>.md</code> report (linked below).</p>`);
+        out.push(`</div>`);
+        dom.journeyView.innerHTML = out.join('\n');
+      }
+
+      // --- dispatch: journey detail if #data= given, else candidate list ---
       if (location.protocol === 'file:') {
         dom.bannerFile.classList.remove('hidden');
       }
@@ -234,15 +518,23 @@
           await loadManifest();
           const j = await fetchSlice(dataPath);
           renderJourney(j);
+          dom.sourceBar.innerHTML = sourceBar([
+            { label: dataPath.split('/').pop(), href: dataPath },
+            { label: dataPath.split('/').pop().replace(/\.json$/, '.md'), href: dataPath.replace(/\.json$/, '.md') }
+          ]);
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
           dom.bannerMissing.classList.remove('hidden');
-          dom.journeyView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load journey data at <code>${dataPath}</code>. Back to candidates: <a href="journey-viewer.html">journey-viewer.html</a></p></div>`;
+          dom.journeyView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load journey data at <code>${esc(dataPath)}</code>. Back to candidates: <a href="journey-viewer.html">journey-viewer.html</a></p></div>`;
         }
       } else {
         // Probe journeys/index.json for candidates (§6.2)
         dom.candidatesView.classList.remove('hidden');
         dom.journeyView.classList.add('hidden');
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'journeys/index.json', href: 'journeys/index.json' },
+          { label: 'journeys/index.md', href: 'journeys/index.md' }
+        ]);
         try {
           await loadManifest();
           const idx = await fetchSlice('journeys/index.json');
@@ -252,10 +544,10 @@
           } else {
             dom.candList.innerHTML = journeys.map(j => `
               <label class="cand-row">
-                <input type="checkbox" data-id="${j.id}" onchange="window.__toggleCand(this)">
-                <span class="cand-id">${j.id}</span>
-                <span class="cand-meta">${(j.title || '').slice(0, 40)} · ${(j.requests || 0)} reqs</span>
-                <a href="journey-viewer.html#data=journeys/details/${j.id}.json" style="margin-left:8px;">open →</a>
+                <input type="checkbox" data-id="${esc(j.id)}" onchange="window.__toggleCand(this)">
+                <span class="cand-id">${esc(j.id)}</span>
+                <span class="cand-meta">${esc((j.title || '').slice(0, 40))} · ${(j.requests || 0)} reqs</span>
+                <a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(j.id)}.json" style="margin-left:8px;">open →</a>
               </label>
             `).join('');
             window.__toggleCand = (el) => {
@@ -272,94 +564,6 @@
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
           dom.candList.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">journeys/index.json is not available (run 'vmr analyze' to generate artifacts, or serve via HTTP instead of file://).</p>`;
         }
-      }
-
-      function renderJourney(j) {
-        const id = j.id || dataPath;
-        const metrics = j.metrics || {};
-        const findings = j.findings || [];
-        const structure = j.structure || { tasks: [] };
-        const bodies = j.bodies || {};
-        const cost = j.cost;
-
-        let findingsHtml = '';
-        if (findings.length > 0) {
-          findingsHtml = findings.map(f => `
-            <div class="finding-item">
-              <code>${f.code}</code>
-              <strong>${f.finding || f.code}</strong>
-              ${f.action ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">Action: ${f.action}</div>` : ''}
-              ${f.evidence ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">Evidence: ${f.evidence}</div>` : ''}
-            </div>
-          `).join('');
-        } else {
-          findingsHtml = `<p style="font-size:12px; color:var(--ink-dim);">No behavioral findings — clean journey.</p>`;
-        }
-
-        let tasksHtml = '';
-        (structure.tasks || []).forEach((task, ti) => {
-          const steps = task.steps || [];
-          const stepRows = steps.map(s => {
-            const usage = s.usage || {};
-            const endpoint = s.endpoint || s.model || '';
-            const seq = s.seq;
-            const tsDisplay = s.ts_display || (s.ts ? new Date(s.ts).toISOString() : '');
-            const toolChips = (s.tool_calls || []).map(tc => {
-              const name = tc.name;
-              const argsText = tc.args_ref ? (bodies[tc.args_ref] || '') : (tc.args || '');
-              return '<span class="tool-chip" title="' + (argsText.slice(0, 200).replace(/"/g, '&quot;')) + '">' + name + '</span>';
-            }).join('');
-            const respRef = s.resp_ref;
-            const respText = respRef ? (bodies[respRef] || '') : '';
-            const flags = [];
-            if (s.stitch_edge) flags.push('<span class="badge-pill badge-warn">stitch</span>');
-            if (s.compaction) flags.push('<span class="badge-pill badge-warn">compaction</span>');
-            if (s.human_initiated) flags.push('<span class="badge-pill badge-ok">human</span>');
-
-            return `
-              <div class="step ${s.compaction ? 'flagged' : ''}">
-                <div class="step-top">
-                  <span class="step-seq">Step ${seq}</span>
-                  <span class="step-ts">${tsDisplay}</span>
-                  <span class="step-model">${endpoint}</span>
-                  <span class="step-model">in ${FmtTokens(usage.in || 0)} · out ${FmtTokens(usage.out || 0)} · ${FmtDuration(s.dur_ms || 0)}</span>
-                  ${flags.join(' ')}
-                </div>
-                ${toolChips ? `<div style="margin: 4px 0;">${toolChips}</div>` : ''}
-                ${respText ? `<div class="resp-text">${respText.slice(0, 1500)}${respText.length > 1500 ? '…' : ''}</div>` : ''}
-              </div>
-            `;
-          }).join('');
-
-          tasksHtml += `
-            <div class="task-block">
-              <div class="task-title">Task ${ti + 1} · <span>${task.title || '(untitled)'}</span></div>
-              ${stepRows}
-            </div>
-          `;
-        });
-
-        dom.journeyView.innerHTML = `
-          <div class="card jhead">
-            <h1>${j.title || id}</h1>
-            <div class="jmeta">${id} · ${j.from_display || j.from || ''} → ${j.to_display || j.to || ''} ${j.partial ? '· ⚠️ partial (head-truncated)' : ''}</div>
-            <div class="stat-row">
-              <div class="stat-box"><strong>${metrics.model_ms ? FmtDuration(metrics.model_ms) : '—'}</strong>Model Time</div>
-              <div class="stat-box"><strong>${metrics.agent_exec_ms ? FmtDuration(metrics.agent_exec_ms) : '—'}</strong>Agent Exec</div>
-              <div class="stat-box"><strong>${metrics.human_idle_ms ? FmtDuration(metrics.human_idle_ms) : '—'}</strong>Human Idle</div>
-              <div class="stat-box"><strong>${(metrics.tool_call_count || 0).toLocaleString()}</strong>Tool Calls</div>
-              <div class="stat-box"><strong>${FmtPercent(metrics.duplicate_action_rate || 0)}</strong>Duplicate Actions</div>
-              <div class="stat-box"><strong>${FmtPercent(metrics.plan_exec_ratio || 0)}</strong>Plan/Exec Ratio</div>
-              ${cost && cost.total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.total, cost.currency)}</strong>Est. Cost (${cost.currency || 'USD'})</div>` : ''}
-            </div>
-            <div class="verdict ${findings.length === 0 ? 'v-go' : ''}">
-              <div class="vlabel">Behavior Findings (${findings.length})</div>
-              <div class="findings-list">${findingsHtml}</div>
-            </div>
-            <div class="section-title">Timeline · Tasks & Steps</div>
-            ${tasksHtml || '<p style="color:var(--ink-dim);">No tasks/steps in structure.</p>'}
-          </div>
-        `;
       }
     })();
   </script>

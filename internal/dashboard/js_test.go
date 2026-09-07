@@ -123,7 +123,7 @@ function runPageSmoke(pageFile, sliceMap, hash) {
     return elements.get(id);
   }
 
-  const loc = { protocol: 'http:', hash: hash || '' };
+  const loc = { protocol: 'http:', hash: hash || '', reload: () => {} };
   global.location = loc;
   globalThis.location = loc;
 
@@ -139,7 +139,7 @@ function runPageSmoke(pageFile, sliceMap, hash) {
     ...common,
     document: doc,
     location: loc,
-    window: { location: loc },
+    window: { location: loc, addEventListener: () => {} },
     navigator: { clipboard: { writeText: async () => {} } },
     localStorage: { getItem: () => '', setItem: () => {}, removeItem: () => {} },
     fetchSlice: async (rel) => {
@@ -255,7 +255,9 @@ const mockMacro = {
     throw new Error('journey-viewer index failed: ' + candList);
   }
 
-  // 5. journey-viewer.html (detail)
+  // 5. journey-viewer.html (detail) — exercises the full behavior-indicator
+  // table, the context sparkline, model usage, and tool-call args + paired
+  // results resolved through the bodies blob table.
   const mockJourneyDetail = {
     'manifest.json': mockManifest,
     'journeys/details/j-test-1.json': {
@@ -263,15 +265,33 @@ const mockMacro = {
       title: 'Test Journey 1',
       from_display: '2026-08-24 10:00:00',
       to_display: '2026-08-24 10:05:00',
-      metrics: { model_ms: 5000, agent_exec_ms: 3000, human_idle_ms: 1000, tool_call_count: 4, duplicate_action_rate: 0.1, plan_exec_ratio: 0.5 },
-      cost: { total: 0.15, currency: 'USD' },
-      findings: [{ code: 'test_code', finding: 'Test finding description', action: 'Take action' }],
+      metrics: {
+        net_working_ms: 9000, model_ms: 5000, agent_exec_ms: 3000, human_idle_ms: 1000,
+        model_to_tool_ratio: 1.67, tool_call_count: 4, duplicate_action_rate: 0.1,
+        output_repetition_rate: 0.05, error_recovery_count: 0, plan_exec_ratio: 0.5,
+        context_utilization: 0.9, compaction_count: 0, compaction_loss_tokens: 0,
+        context_composition_curve: [
+          { seq: 1, system_tokens: 100, user_tokens: 200, assistant_tokens: 0, tool_tokens: 0 },
+          { seq: 2, system_tokens: 100, user_tokens: 200, assistant_tokens: 300, tool_tokens: 400 }
+        ],
+        model_usage: [{ model: 'sonnet', provider: 'anthropic', steps: 4, tokens_in: 8000, tokens_in_cached: 6000, tokens_out: 600 }],
+        model_switches: []
+      },
+      cost: { total: 0.15, currency: 'USD', resolved: true, priced_steps: 4, total_steps: 4 },
+      findings: [{ code: 'test_code', step_seq: 1, finding: 'Test finding description', evidence: 'e', action: 'Take action' }],
+      bodies: { A: 'the args payload', B: 'the tool result body', R: 'the assistant reply' },
       structure: {
         tasks: [{
           title: 'Task 1',
-          steps: [{ seq: 1, ts_display: '2026-08-24 10:01:00', model: 'sonnet', dur_ms: 1200, usage: { in: 2000, out: 150 } }]
+          steps: [{
+            seq: 1, ts_display: '2026-08-24 10:01:00', model: 'sonnet', protocol: 'anthropic-messages',
+            endpoint: 'anthropic-messages:anthropic:sonnet', outcome: 'ok', finish: 'stop', dur_ms: 1200,
+            usage: { in: 2000, out: 150 }, resp_ref: 'R', resp_is_reasoning: false,
+            tool_calls: [{ name: 'exec', args_ref: 'A', result: { ref: 'B', match: 'exact', is_error: false } }]
+          }]
         }]
-      }
+      },
+      deliverable: { found: true, tool_name: 'write', step_seq: 1, excerpt: 'package main', truncated: false }
     }
   };
   const jvDetailEls = runPageSmoke('journey-viewer.html', mockJourneyDetail, '#data=journeys/details/j-test-1.json');
@@ -279,6 +299,11 @@ const mockMacro = {
   const jvDetail = jvDetailEls.get('journey-view').innerHTML;
   if (!jvDetail.includes('Test Journey 1') || jvDetail.includes('undefined') || jvDetail.includes('NaN')) {
     throw new Error('journey-viewer detail failed: ' + jvDetail);
+  }
+  for (const section of ['Behavior Indicators', 'Model Usage', 'Decision Spine', 'the tool result body', 'Final Deliverable']) {
+    if (!jvDetail.includes(section)) {
+      throw new Error('journey-viewer detail missing "' + section + '": ' + jvDetail);
+    }
   }
 
   // 6. journey-compare.html (index)
@@ -295,21 +320,52 @@ const mockMacro = {
     throw new Error('journey-compare index failed: ' + cmpCand);
   }
 
-  // 7. journey-compare.html (detail)
+  // 7. journey-compare.html (detail) — rows[].kind values match
+  // internal/journey/compare.go (ms/multiple/ratio/count/tokens), and the
+  // page must render the extras.* + llm_* sections, not just the diff table.
   const mockCmpDetail = {
     'manifest.json': mockManifest,
     'compares/compare-a-vs-b.json': {
       a_journey: { id: 'j-a', title: 'Journey A', steps: 10, tool_calls: 5 },
       b_journey: { id: 'j-b', title: 'Journey B', steps: 8, tool_calls: 3 },
-      rows: [{ metric: 'model_ms', label: 'Model Time', kind: 'dur', a: 5000, b: 4000, delta_rel: -0.2 }],
-      tools: [{ name: 'exec', a_calls: 5, b_calls: 3 }]
+      rows: [
+        { metric: 'model_ms', label: 'Model Time', kind: 'ms', a: 5000, b: 4000, delta_rel: -0.2, notable: false },
+        { metric: 'agent_exec_ms', label: 'Agent Exec', kind: 'ms', a: 8000, b: 800, delta_rel: -0.9, notable: true },
+        { metric: 'plan_exec_ratio', label: 'Plan/Exec', kind: 'ratio', a: 0.5, b: 0.4, delta_rel: -0.2, notable: false }
+      ],
+      tools: [{ name: 'exec', a_calls: 5, b_calls: 3 }],
+      extras: {
+        endpoints: { a: ['openai:p:m1'], b: ['openai:p:m2'], same: false },
+        cache: { a: { first_ratio: 0.2, steady_mean: 0.9, min: 0, max: 1, series: [{ seq: 1, ratio: 0.2 }, { seq: 2, ratio: 0.9 }] },
+                 b: { first_ratio: 0.1, steady_mean: 0.95, min: 0, max: 1, series: [{ seq: 1, ratio: 0.1 }] } },
+        sys_prompt: { a: { tokens: 0, changes: 0, excerpt: '', truncated: false }, b: { tokens: 0, changes: 0, excerpt: '', truncated: false } },
+        final_context: { a: { seq: 10, system_tokens: 0, user_tokens: 100, assistant_tokens: 200, tool_tokens: 50 },
+                         b: { seq: 8, system_tokens: 0, user_tokens: 80, assistant_tokens: 150, tool_tokens: 40 } },
+        duration: { a_wall_ns: 8582590290000, b_wall_ns: 3206357437000, a_termination: 'stop', b_termination: 'stop' },
+        deliverable: { a: { found: true, tool_name: 'write', step_seq: 7, excerpt: 'package main', truncated: true }, b: { found: false } },
+        cost: { a: { currency: 'USD', total: 0.3, resolved: true, priced_steps: 3, total_steps: 10 }, b: { currency: 'USD', resolved: false, priced_steps: 0, total_steps: 8 } },
+        initial_instruction: { a: { found: true, text: 'do the thing' }, b: { found: true, text: 'verify the thing' } },
+        divergence: { found: true, index: 0, a_step_seq: 1, b_step_seq: 1, task_title: 'do the thing', a_tools: ['bash'], b_tools: ['bash'], severity: 'light' },
+        sources: ['vmr-audit-2026-08-25.jsonl']
+      },
+      llm_interpretation: { model: 'cheap', scope: 'overall', status: 'ok', cached: true, text: 'A and B differ in scope.' },
+      llm_divergence: { model: 'cheap', scope: 'divergence', status: 'ok', cached: true, text: 'They diverge at step 1.' }
     }
   };
   const cmpDetailEls = runPageSmoke('journey-compare.html', mockCmpDetail, '#data=compares/compare-a-vs-b.json');
   await new Promise(r => setTimeout(r, 60));
   const cmpDetail = cmpDetailEls.get('compare-view').innerHTML;
-  if (!cmpDetail.includes('Metric Diff') || cmpDetail.includes('undefined') || cmpDetail.includes('NaN')) {
-    throw new Error('journey-compare detail failed: ' + cmpDetail);
+  if (cmpDetail.includes('undefined') || cmpDetail.includes('NaN')) {
+    throw new Error('journey-compare detail has undefined/NaN: ' + cmpDetail);
+  }
+  for (const section of ['Behavior Profile Comparison', 'Divergence Point', 'Model &amp; Endpoint Check', 'Prompt Cache Hit Rate', 'Cost Estimate', 'Evidence Provenance', 'LLM Interpretation']) {
+    if (!cmpDetail.includes(section)) {
+      throw new Error('journey-compare detail missing section "' + section + '": ' + cmpDetail);
+    }
+  }
+  // kind: 'ms' must format as seconds, never a bare millisecond count.
+  if (!cmpDetail.includes('5.0s') || cmpDetail.includes('>5000<')) {
+    throw new Error('journey-compare detail did not format ms rows as seconds: ' + cmpDetail);
   }
 })();
 `

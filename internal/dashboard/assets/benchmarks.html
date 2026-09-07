@@ -31,19 +31,25 @@
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
     .brand span.badge { background: var(--trace); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
-    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; transition: color .15s, background .15s; }
     nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
     nav.nav-links a.active { font-weight: 700; color: var(--trace); }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
     button { cursor: pointer; }
+    button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
 
     .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
     .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
     .banner.hidden { display: none; }
 
     .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
     .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
     .section-title { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-dim); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 20px 0 12px; }
     .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -81,7 +87,7 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ Direct file:// access is restricted by browser same-origin policy and cannot fetch data slices. Please open via vmr hosting (/reports/) or any static HTTP server.</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span></div>
   <div id="banner-missing" class="banner alert hidden">
@@ -104,6 +110,8 @@
     <div class="card" id="table-protocol"></div>
   </div>
 
+  <div id="source-bar"></div>
+
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
@@ -121,6 +129,7 @@
     (async function() {
       Theme.init();
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         bannerFile: document.getElementById('banner-file'),
         bannerVersion: document.getElementById('banner-version'),
         bannerVersionText: document.getElementById('banner-version-text'),
@@ -155,12 +164,18 @@
         if (location.protocol === 'file:') {
           dom.bannerFile.classList.remove('hidden');
         }
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'journeys/benchmarks.json', href: 'journeys/benchmarks.json' },
+          { label: 'journeys/benchmarks.md', href: 'journeys/benchmarks.md' }
+        ]);
         try {
           const m = await fetchSlice('manifest.json');
           const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
           if (st === 'banner') {
             dom.bannerVersionText.textContent = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Please run a full 'vmr analyze'.`;
             dom.bannerVersion.classList.remove('hidden');
+          } else if (st === 'missing') {
+            dom.bannerMissing.classList.remove('hidden');
           }
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }

@@ -162,6 +162,51 @@ const Theme = {
   }
 };
 
+// esc HTML-escapes a string before it is interpolated into innerHTML.
+// Conversation bodies (journey titles, tool args/results, LLM text, system
+// prompt excerpts) reach these pages as data and must never be trusted as
+// markup — the Markdown renderers have their own escapeHTML; this is its
+// browser-side counterpart.
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// wireHashReload makes an in-page `#data=` navigation actually reload the
+// document. The skeleton pages that serve both a candidate list and a
+// detail view (journey-viewer, journey-compare) switch via location.hash;
+// browsers treat a bare fragment change as same-document and never re-run
+// the page script, so clicking "open →" from the candidate list did
+// nothing (copying the link into a fresh tab worked because that is a full
+// load). A full reload is cheap for a local static file and keeps the
+// one-page-two-roles design (§6.2 D13) intact.
+function wireHashReload() {
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('hashchange', function () {
+      if (typeof location !== 'undefined' && location.reload) location.reload();
+    });
+  }
+}
+
+// sourceBar returns the shared "download the underlying artifact" strip
+// every page carries (G3): a row of relative links to the .json / .md /
+// .jsonl files the page rendered from. links is [{label, href}]. Plain <a>
+// navigation carries no Bearer key, so under an api_keys-gated vmr host
+// these 401; the dominant use (python3 -m http.server, no auth) is fine.
+function sourceBar(links) {
+  if (!links || links.length === 0) return '';
+  const parts = links
+    .filter(function (l) { return l && l.href; })
+    .map(function (l) {
+      return '<a href="' + esc(l.href) + '" download>' + esc(l.label || l.href) + '</a>';
+    });
+  return '<div class="source-bar">↓ Source: ' + parts.join(' &middot; ') + '</div>';
+}
+
 // getDataParam retrieves #data=... from location.hash (§6.2 D13).
 function getDataParam() {
   const loc = typeof window !== 'undefined' && window.location ? window.location : (typeof location !== 'undefined' ? location : (typeof globalThis !== 'undefined' && globalThis.location ? globalThis.location : null));
@@ -378,10 +423,14 @@ function svgHeatmap({
   `;
 }
 
-// svgLatencyPlot renders endpoint P50 / P90 / P99 latency percentiles (§6.3).
+// svgLatencyPlot renders endpoint P50 / P95 / Max duration percentiles from
+// reliability.json's own fields (§6.3). Only real recorded percentiles are
+// plotted — an endpoint with no `dur_ms_p50` is listed as "no percentile
+// data" below the chart rather than having values fabricated from a mean
+// (a made-up P99 reads exactly like a measured one).
 function svgLatencyPlot({
   endpoints = [],
-  title = 'Endpoint Latency Percentiles (P50 / P90 / P99 ms)',
+  title = 'Endpoint Duration Percentiles (P50 / P95 / Max ms)',
   width = 600,
   height = 220
 }) {
@@ -393,28 +442,34 @@ function svgLatencyPlot({
   const plotW = width - pLeft - pRight;
   const plotH = height - pTop - pBottom;
 
-  const data = endpoints.filter(e => (e.dur_ms_p50 || e.dur_ms_p95 || e.dur_ms_max || e.p50_ms || e.p90_ms || e.p99_ms || e.dur_ms));
+  const hasPct = (e) => e && (e.dur_ms_p50 != null || e.p50_ms != null);
+  const data = endpoints.filter(hasPct);
+  const noPct = endpoints.filter(e => !hasPct(e));
+  const noPctNote = noPct.length > 0
+    ? `<div class="chart-empty" style="margin-top:6px;">${noPct.length} endpoint${noPct.length > 1 ? 's have' : ' has'} no recorded percentile data (not plotted).</div>`
+    : '';
   if (data.length === 0) {
-    return `<div class="chart-empty">No latency metrics recorded</div>`;
+    return `<div class="chart-empty">No latency percentiles recorded</div>${noPctNote}`;
   }
 
   const items = data.map(d => {
-    const p50 = Number(d.dur_ms_p50 || d.p50_ms || (d.dur_ms ? d.dur_ms * 0.7 : 0));
-    const p90 = Number(d.dur_ms_p95 || d.p90_ms || d.dur_ms || 0);
-    const p99 = Number(d.dur_ms_max || d.p99_ms || (d.dur_ms ? d.dur_ms * 1.3 : 0));
-    const label = d.endpoint || d.model || 'unknown';
-    return { label, p50, p90, p99 };
+    const p50 = Number(d.dur_ms_p50 != null ? d.dur_ms_p50 : d.p50_ms);
+    const p95 = Number(d.dur_ms_p95 != null ? d.dur_ms_p95 : (d.p95_ms != null ? d.p95_ms : p50));
+    const mx = Number(d.dur_ms_max != null ? d.dur_ms_max : p95);
+    let label = d.endpoint || d.model || 'unknown';
+    if (d.dur_low_n) label += ' (low-n)';
+    return { label, p50, p95, mx };
   });
 
-  const maxVal = Math.max(...items.flatMap(d => [d.p50, d.p90, d.p99]), 100);
+  const maxVal = Math.max(...items.flatMap(d => [d.p50, d.p95, d.mx]), 100);
   const rowH = plotH / items.length;
 
   let rowsSvg = '';
   items.forEach((item, i) => {
     const y = pTop + i * rowH + rowH / 2;
     const x50 = pLeft + (item.p50 / maxVal) * plotW;
-    const x90 = pLeft + (item.p90 / maxVal) * plotW;
-    const x99 = pLeft + (item.p99 / maxVal) * plotW;
+    const x95 = pLeft + (item.p95 / maxVal) * plotW;
+    const xmx = pLeft + (item.mx / maxVal) * plotW;
 
     const shortLabel = item.label.length > 18 ? '…' + item.label.slice(-17) : item.label;
 
@@ -423,33 +478,33 @@ function svgLatencyPlot({
         <title>${item.label}</title>
         ${shortLabel}
       </text>
-      <!-- Line connecting P50 to P99 -->
-      <line x1="${x50.toFixed(1)}" y1="${y}" x2="${x99.toFixed(1)}" y2="${y}" stroke="var(--rule)" stroke-width="2"/>
+      <!-- Line connecting P50 to Max -->
+      <line x1="${x50.toFixed(1)}" y1="${y}" x2="${xmx.toFixed(1)}" y2="${y}" stroke="var(--rule)" stroke-width="2"/>
       <!-- P50 Dot -->
       <circle cx="${x50.toFixed(1)}" cy="${y}" r="4" fill="var(--go)">
         <title>P50: ${item.p50}ms</title>
       </circle>
-      <!-- P90 Dot -->
-      <circle cx="${x90.toFixed(1)}" cy="${y}" r="4" fill="var(--amber)">
-        <title>P90: ${item.p90}ms</title>
+      <!-- P95 Dot -->
+      <circle cx="${x95.toFixed(1)}" cy="${y}" r="4" fill="var(--amber)">
+        <title>P95: ${item.p95}ms</title>
       </circle>
-      <!-- P99 Dot -->
-      <circle cx="${x99.toFixed(1)}" cy="${y}" r="4" fill="var(--alert)">
-        <title>P99: ${item.p99}ms</title>
+      <!-- Max Dot -->
+      <circle cx="${xmx.toFixed(1)}" cy="${y}" r="4" fill="var(--alert)">
+        <title>Max: ${item.mx}ms</title>
       </circle>
-      <text x="${(x99 + 6).toFixed(1)}" y="${y + 3.5}" fill="var(--ink-dim)" font-size="9" font-family="var(--mono)">${item.p99}ms</text>
+      <text x="${(xmx + 6).toFixed(1)}" y="${y + 3.5}" fill="var(--ink-dim)" font-size="9" font-family="var(--mono)">${item.mx}ms</text>
     `;
   });
 
   // Legend
   const legendSvg = `
-    <g transform="translate(${width - 75}, 14)" font-size="9" font-family="var(--mono)">
+    <g transform="translate(${width - 78}, 14)" font-size="9" font-family="var(--mono)">
       <circle cx="0" cy="0" r="3" fill="var(--go)"/>
       <text x="6" y="3" fill="var(--ink-dim)">P50</text>
       <circle cx="26" cy="0" r="3" fill="var(--amber)"/>
-      <text x="32" y="3" fill="var(--ink-dim)">P90</text>
+      <text x="32" y="3" fill="var(--ink-dim)">P95</text>
       <circle cx="52" cy="0" r="3" fill="var(--alert)"/>
-      <text x="58" y="3" fill="var(--ink-dim)">P99</text>
+      <text x="58" y="3" fill="var(--ink-dim)">Max</text>
     </g>
   `;
 
@@ -460,7 +515,7 @@ function svgLatencyPlot({
       <line x1="${pLeft}" y1="${pTop}" x2="${pLeft}" y2="${pTop + plotH}" stroke="var(--rule)" stroke-width="1"/>
       ${rowsSvg}
     </svg>
-  `;
+  ${noPctNote}`;
 }
 
 // Module export for Node.js testing (§5.6)
@@ -477,6 +532,9 @@ if (typeof module !== 'undefined' && module.exports) {
     FmtDuration,
     Auth,
     Theme,
+    esc,
+    wireHashReload,
+    sourceBar,
     getDataParam,
     svgLineChart,
     svgBarChart,

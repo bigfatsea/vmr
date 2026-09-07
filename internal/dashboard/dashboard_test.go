@@ -258,15 +258,24 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 		{
 			file: "assets/journey-viewer.html",
 			bad: []string{
-				"metrics.ModelMS", "metrics.AgentExecMS", "metrics.HumanIdleMS",
+				"metrics.ModelMS", "m.AgentExecMS", "metrics.HumanIdleMS",
 				"metrics.ToolCallCount", "metrics.DuplicateActionRate", "metrics.PlanExecRatio",
 				"cost.Total", "cost.Currency", "f.Severity", "f.Title", "f.Message",
-				"usage.In", "usage.Out",
+				"usage.In", "usage.Out", "m.ContextCompositionCurve", "m.ModelUsage",
+				"u.TokensIn", "tc.ArgsRef", "res.Ref", "s.ToolCalls",
 			},
 			want: []string{
-				"metrics.model_ms", "metrics.agent_exec_ms", "metrics.human_idle_ms",
-				"metrics.tool_call_count", "metrics.duplicate_action_rate", "metrics.plan_exec_ratio",
-				"cost.total", "f.finding", "s.ts_display", "usage.in", "usage.out",
+				"metrics.model_ms", "metrics.human_idle_ms", "metrics.tool_call_count",
+				"metrics.duplicate_action_rate", "metrics.plan_exec_ratio",
+				"metrics.net_working_ms", "metrics.context_composition_curve",
+				"metrics.model_usage", "metrics.model_switches",
+				"m.agent_exec_ms", "m.model_to_tool_ratio", "m.error_recovery_count",
+				"cost.total", "cost.resolved", "f.finding", "f.step_seq", "f.evidence",
+				"s.ts_display", "s.tool_calls", "s.resp_ref", "s.resp_is_reasoning",
+				"s.reasoning_ref", "s.instruction", "s.stitch_edge", "s.compaction",
+				"usage.in", "usage.out", "u.tokens_in", "u.tokens_out",
+				"tc.args_ref", "tc.result", "res.ref", "res.is_error", "res.match",
+				"j.deliverable", "d.step_seq", "d.tool_name",
 			},
 		},
 		{
@@ -285,10 +294,18 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 			bad: []string{
 				"c.ID", "c.ARef", "c.BRef", "cmp.Rows", "cmp.Tools",
 				"t.ACalls", "t.BCalls", "aRef.Steps", "aRef.ToolCalls",
+				"cmp.Extras", "cmp.LLMInterpretation", "cmp.LLMDivergence",
+				"ex.Divergence", "ex.Endpoints", "ex.FinalContext", "r.DeltaRel", "r.Notable",
 			},
 			want: []string{
 				"c.filename", "c.a_journey", "c.b_journey", "cmp.rows",
 				"cmp.tools", "t.a_calls", "t.b_calls", "aRef.steps", "aRef.tool_calls",
+				// extras.* sections added when the compare page reached .md parity
+				"cmp.extras", "cmp.llm_interpretation", "cmp.llm_divergence",
+				"ex.divergence", "ex.endpoints", "ex.cache", "ex.sys_prompt",
+				"ex.final_context", "ex.deliverable", "ex.cost", "ex.sources",
+				"ex.initial_instruction", "r.delta_rel", "r.notable",
+				"dv.a_step_seq", "dv.task_title", "dv.a_tools",
 			},
 		},
 	}

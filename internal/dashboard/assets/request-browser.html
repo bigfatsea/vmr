@@ -37,24 +37,29 @@
     code { font-family: var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; word-break: break-all; }
 
     header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; }
-    .topbar-inner { max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
+    .topbar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
     .brand span.badge { background: var(--trace); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
-    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; transition: color .15s, background .15s; }
     nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
     nav.nav-links a.active { font-weight: 700; color: var(--trace); }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
     button { cursor: pointer; }
     button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
 
-    .banner { max-width: 1400px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
+    .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
     .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
     .banner.hidden { display: none; }
 
-    .container { max-width: 1400px; margin: 0 auto; padding: 16px 20px 60px; }
+    .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
     .filter-bar {
       background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
       padding: 12px 16px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
@@ -110,13 +115,13 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden">
-    <span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span>
+    <span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span>
   </div>
   <div id="banner-missing" class="banner alert hidden">
-    <span>⚠️ 这不是一套完整的 analyze 产物（manifest.json 缺失或 requests/index.json 无法读取）。</span>
+    <span>⚠️ This is not a complete analyze artifact set (manifest.json missing or requests/index.json unreadable).</span>
   </div>
 
   <div class="container">
@@ -194,6 +199,8 @@
     </div>
   </div>
 
+  <div id="source-bar"></div>
+
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
@@ -214,6 +221,7 @@
     (async function() {
       Theme.init();
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         bannerFile: document.getElementById('banner-file'),
         bannerVersion: document.getElementById('banner-version'),
         bannerMissing: document.getElementById('banner-missing'),
@@ -295,11 +303,16 @@
         if (location.protocol === 'file:') {
           dom.bannerFile.classList.remove('hidden');
         }
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'requests/index.json', href: 'requests/index.json' },
+          { label: 'requests/failed.jsonl', href: 'requests/failed.jsonl' },
+          { label: 'requests/failed.md', href: 'requests/failed.md' }
+        ]);
         try {
           const manifest = await fetchSlice('manifest.json');
           const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, manifest.format);
           if (st === 'banner') {
-            dom.bannerVersionText.textContent = `⚠️ 数据格式版本不一致：期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${manifest.format}。请运行全量 vmr analyze 对齐。`;
+            dom.bannerVersionText.textContent = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${manifest.format}. Please run a full 'vmr analyze'.`;
             dom.bannerVersion.classList.remove('hidden');
           } else if (st === 'missing') {
             dom.bannerMissing.classList.remove('hidden');
@@ -331,7 +344,7 @@
         });
         const fill = (sel, values) => {
           const cur = sel.value;
-          sel.innerHTML = '<option value="">All</option>' + [...values].sort().map(v => `<option value="${v}">${v}</option>`).join('');
+          sel.innerHTML = '<option value="">All</option>' + [...values].sort().map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
           sel.value = cur;
         };
         fill(dom.fClient, clients);
@@ -406,16 +419,16 @@
           // journey-viewer wants the bare id's .json.
           const jRel = journeyLinks[sessionKey];
           const jId = jRel ? jRel.replace(/^details\//, '').replace(/\.md$/, '') : null;
-          const detailHref = r.detail_file ? `requests/details/${r.detail_file}` : null;
-          const outcomeBadge = `<span class="badge-pill ${isErr ? 'badge-alert' : 'badge-ok'}">${outcome}</span>`;
+          const detailHref = r.detail_file ? `requests/details/${encodeURI(r.detail_file)}` : null;
+          const outcomeBadge = `<span class="badge-pill ${isErr ? 'badge-alert' : 'badge-ok'}">${esc(outcome)}</span>`;
 
           return `
             <tr class="${isErr ? 'row-error' : 'row-ok'}">
-              <td>${r.ts_display || '—'}</td>
-              <td title="${r.client_key || ''}">${r.client_key || '—'}</td>
-              <td>${r.model || '—'}</td>
-              <td title="${r.endpoint || ''}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${r.endpoint || '—'}</td>
-              <td>${outcomeBadge}${r.error_class ? ` <code>${r.error_class}</code>` : ''}</td>
+              <td>${esc(r.ts_display || '—')}</td>
+              <td title="${esc(r.client_key || '')}">${esc(r.client_key || '—')}</td>
+              <td>${esc(r.model || '—')}</td>
+              <td title="${esc(r.endpoint || '')}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${esc(r.endpoint || '—')}</td>
+              <td>${outcomeBadge}${r.error_class ? ` <code>${esc(r.error_class)}</code>` : ''}</td>
               <td class="num">${r.dur_ms ? FmtDuration(r.dur_ms) : '—'}</td>
               <td class="num">${r.ttft_ms ? FmtDuration(r.ttft_ms) : '—'}</td>
               <td class="num">${FmtTokens(r.tokens_in_fresh || 0)}</td>
@@ -424,7 +437,7 @@
               <td class="num">${r.cache_eff != null ? FmtPercent(r.cache_eff) : '—'}</td>
               <td class="num">${r.fallbacks || 0}</td>
               <td>${detailHref ? `<a href="${detailHref}">detail</a>` : '—'}</td>
-              <td>${jId ? `<a href="journey-viewer.html#data=journeys/details/${jId}.json">${(jId.length > 20 ? jId.slice(0, 18) + '…' : jId)}</a>` : `<span title="${sessionTitle}" style="color:var(--ink-dim);">—</span>`}</td>
+              <td>${jId ? `<a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(jId)}.json">${esc(jId.length > 20 ? jId.slice(0, 18) + '…' : jId)}</a>` : `<span title="${esc(sessionTitle)}" style="color:var(--ink-dim);">—</span>`}</td>
             </tr>
           `;
         }).join('');

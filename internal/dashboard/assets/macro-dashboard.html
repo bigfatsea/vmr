@@ -44,7 +44,7 @@
       border-bottom: 1px solid var(--rule); padding: 0 20px;
     }
     .topbar-inner {
-      max-width: 1360px; margin: 0 auto; display: flex; align-items: center;
+      max-width: 1280px; margin: 0 auto; display: flex; align-items: center;
       justify-content: space-between; height: 50px; gap: 16px;
     }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -52,7 +52,7 @@
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
     nav.nav-links a {
       font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px;
-      color: var(--ink-dim); transition: all 0.15s; white-space: nowrap;
+      color: var(--ink-dim); transition: color .15s, background .15s; white-space: nowrap;
     }
     nav.nav-links a:hover, nav.nav-links a.active {
       color: var(--ink); background: var(--code); text-decoration: none;
@@ -68,7 +68,7 @@
 
     /* Banners */
     .banner {
-      max-width: 1360px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px;
+      max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px;
       font-size: 12.5px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
     }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
@@ -77,7 +77,10 @@
     .banner.hidden { display: none; }
 
     /* Container */
-    .container { max-width: 1360px; margin: 0 auto; padding: 16px 20px 60px; }
+    .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
     .subhead {
       display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
       gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--rule);
@@ -175,7 +178,7 @@
 
   <!-- Universal Banners (§6.2, §6.6) -->
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ Opened via file:// protocol. Local file requests are restricted by browsers; please serve via HTTP (e.g. <code>vmr start</code> with <code>analytics.serve: true</code> or <code>python3 -m http.server</code>).</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden">
     <span id="banner-version-text">⚠️ Manifest format mismatch: expected v<span id="expected-format"></span>, actual v—.</span>
@@ -253,6 +256,8 @@
     </div>
   </div>
 
+  <div id="source-bar"></div>
+
   <!-- Auth Key Modal -->
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
@@ -277,6 +282,7 @@
 
       // UI Element references
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         metaInfo: document.getElementById('meta-info'),
         metaTime: document.getElementById('meta-time'),
         bannerFile: document.getElementById('banner-file'),
@@ -337,6 +343,16 @@
         if (location.protocol === 'file:') {
           dom.bannerFile.classList.remove('hidden');
         }
+
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'manifest.json', href: 'manifest.json' },
+          { label: 'macro/summary.json', href: 'macro/summary.json' },
+          { label: 'macro/finance.json', href: 'macro/finance.json' },
+          { label: 'macro/reliability.json', href: 'macro/reliability.json' },
+          { label: 'macro/workloads.json', href: 'macro/workloads.json' },
+          { label: 'macro/context-efficiency.json', href: 'macro/context-efficiency.json' },
+          { label: 'vmr-report.md', href: 'vmr-report.md' }
+        ]);
 
         let manifest = null;
         try {
@@ -541,7 +557,7 @@
         // SVG Latency plot
         document.getElementById('chart-latency-endpoints').innerHTML = svgLatencyPlot({
           endpoints: eps.slice(0, 10),
-          title: 'Endpoint Latency Percentiles (P50 / P90 / P99 ms)'
+          title: 'Endpoint Duration Percentiles (P50 / P95 / Max ms)'
         });
 
         // Endpoints table
@@ -552,7 +568,7 @@
           const errors = (e.failed != null ? e.failed : (e.errors || 0)).toLocaleString();
           const errorRate = e.error_rate != null ? FmtPercent(e.error_rate / 100) : FmtPercent(1 - (e.availability || e.success_rate || 1));
           const p50 = e.dur_ms_p50 ? e.dur_ms_p50 + 'ms' : '—';
-          const p90 = e.dur_ms_p95 ? e.dur_ms_p95 + 'ms' : '—';
+          const p95 = e.dur_ms_p95 ? e.dur_ms_p95 + 'ms' : '—';
           const ttft = e.ttft_ms_p50 ? e.ttft_ms_p50 + 'ms' : '—';
           return `
           <tr>
@@ -562,14 +578,14 @@
             <td class="num">${errors}</td>
             <td class="num">${errorRate}</td>
             <td class="num">${p50}</td>
-            <td class="num">${p90}</td>
+            <td class="num">${p95}</td>
             <td class="num">${ttft}</td>
           </tr>
         `;
         }).join('');
         document.getElementById('table-endpoints').innerHTML = `
           <table>
-            <thead><tr><th>Endpoint</th><th>Protocol</th><th class="num">Requests</th><th class="num">Errors</th><th class="num">Error Rate</th><th class="num">P50</th><th class="num">P90</th><th class="num">TTFT P50</th></tr></thead>
+            <thead><tr><th>Endpoint</th><th>Protocol</th><th class="num">Requests</th><th class="num">Errors</th><th class="num">Error Rate</th><th class="num">P50</th><th class="num">P95</th><th class="num">TTFT P50</th></tr></thead>
             <tbody>${epRows || '<tr><td colspan="8" style="text-align:center;">No endpoint metrics</td></tr>'}</tbody>
           </table>
         `;

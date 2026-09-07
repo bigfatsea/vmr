@@ -22,32 +22,38 @@
     [data-theme="light"] { --bg: #eef0f2; --panel: #ffffff; --panel-subtle: #f6f8fa; --ink: #1a1f28; --ink-dim: #5c6675;
       --rule: #d4d9e0; --amber: #b8730a; --alert: #c62828; --go: #1a7a5e; --trace: #2f6fd0; --code: #eceef1; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--ink); font-family: var(--mono); font-size: 13.5px; line-height: 1.6; font-variant-numeric: tabular-nums; }
+    body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13.5px; line-height: 1.6; font-variant-numeric: tabular-nums; }
     a { color: var(--trace); text-decoration: none; }
     a:hover { text-decoration: underline; }
     code { font-family: var(--mono); background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 11.5px; word-break: break-all; }
-    header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; font-family: var(--sans); }
-    .topbar-inner { max-width: 800px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
+    header.topbar { position: sticky; top: 0; z-index: 100; background: var(--panel); border-bottom: 1px solid var(--rule); padding: 0 20px; }
+    .topbar-inner { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; height: 50px; gap: 16px; }
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
     .brand span.badge { background: var(--amber); color: #000; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
-    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; transition: color .15s, background .15s; }
     nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
     nav.nav-links a.active { font-weight: 700; color: var(--trace); }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
     button { cursor: pointer; }
+    button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
 
-    .banner { max-width: 800px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; font-family: var(--sans); }
+    .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
     .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
     .banner.hidden { display: none; }
 
-    .container { max-width: 800px; margin: 0 auto; padding: 24px 20px 60px; }
-    .recbar { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 26px; }
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 20px 40px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
+    .recbar { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); padding-bottom: 10px; border-bottom: 1px solid var(--rule); margin-bottom: 26px; font-family: var(--mono); }
     .hero { text-align: center; margin-bottom: 28px; }
-    .hpct { font-size: 68px; font-weight: 700; color: var(--amber); letter-spacing: -0.02em; line-height: 1; }
-    .hcap { font-family: var(--sans); font-size: 14.5px; color: var(--ink-dim); max-width: 480px; margin: 10px auto 0; }
+    .hpct { font-size: 68px; font-weight: 700; color: var(--amber); letter-spacing: -0.02em; line-height: 1; font-family: var(--mono); }
+    .hcap { font-size: 14.5px; color: var(--ink-dim); max-width: 480px; margin: 10px auto 0; }
     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 24px; }
     .stat { border: 1px solid var(--rule); border-radius: 5px; padding: 9px 11px; background: var(--panel); }
     .stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); font-family: var(--mono); }
@@ -56,8 +62,8 @@
     table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     th, td { padding: 7px 9px; border-bottom: 1px solid var(--rule); text-align: left; vertical-align: middle; }
     th { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-dim); font-family: var(--mono); }
-    td.num, th.num { text-align: right; white-space: nowrap; }
-    td.shape { font-size: 11.5px; word-break: break-word; }
+    td.num, th.num { text-align: right; white-space: nowrap; font-family: var(--mono); }
+    td.shape { font-size: 11.5px; word-break: break-word; font-family: var(--mono); }
     .bar { display: inline-block; width: 96px; height: 9px; border-radius: 5px; background: var(--amber); overflow: hidden; vertical-align: middle; border: 1px solid var(--rule); }
     .bar span { display: block; height: 100%; background: var(--go); }
     .foot { margin-top: 24px; font-size: 11.5px; color: var(--ink-dim); font-family: var(--sans); line-height: 1.5; }
@@ -87,7 +93,7 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ Opened via file:// protocol. Local file requests are restricted by browsers; please serve via HTTP (e.g. <code>vmr start</code> with <code>analytics.serve: true</code> or <code>python3 -m http.server</code>).</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues; run a full 'vmr analyze' to realign.</span></div>
   <div id="banner-missing" class="banner alert hidden">
@@ -131,6 +137,8 @@
     </div>
   </div>
 
+  <div id="source-bar"></div>
+
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
@@ -151,6 +159,7 @@
     (async function() {
       Theme.init();
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         bannerFile: document.getElementById('banner-file'),
         bannerVersion: document.getElementById('banner-version'),
         bannerVersionText: document.getElementById('banner-version-text'),
@@ -188,12 +197,17 @@
         if (location.protocol === 'file:') {
           dom.bannerFile.classList.remove('hidden');
         }
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'macro/context-efficiency.json', href: 'macro/context-efficiency.json' }
+        ]);
         try {
           const m = await fetchSlice('manifest.json');
           const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
           if (st === 'banner') {
             dom.bannerVersionText.innerHTML = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Rendering continues; run a full 'vmr analyze' to realign.`;
             dom.bannerVersion.classList.remove('hidden');
+          } else if (st === 'missing') {
+            dom.bannerMissing.classList.remove('hidden');
           }
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }

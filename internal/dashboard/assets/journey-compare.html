@@ -31,21 +31,36 @@
     .brand { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }
     .brand span.badge { background: var(--alert); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 3px; }
     nav.nav-links { display: flex; gap: 6px; overflow-x: auto; }
-    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; }
+    nav.nav-links a { font-size: 12px; font-family: var(--mono); padding: 5px 10px; border-radius: 4px; color: var(--ink-dim); white-space: nowrap; transition: color .15s, background .15s; }
     nav.nav-links a:hover, nav.nav-links a.active { color: var(--ink); background: var(--code); text-decoration: none; }
     nav.nav-links a.active { font-weight: 700; color: var(--trace); }
     .top-actions { display: flex; align-items: center; gap: 8px; }
     button, input, select { font-family: inherit; font-size: 12px; background: var(--panel-subtle); color: var(--ink); border: 1px solid var(--rule); border-radius: 4px; padding: 5px 10px; }
     button { cursor: pointer; }
+    button:hover { border-color: var(--ink-dim); }
+    button.primary { background: var(--trace); color: #fff; border: none; font-weight: 600; }
 
     .banner { max-width: 1280px; margin: 12px auto 0; padding: 10px 16px; border-radius: 5px; font-size: 12.5px; }
     .banner.warn { border: 1px solid var(--amber); background: rgba(255,176,0,0.08); color: var(--amber); }
     .banner.alert { border: 1px solid var(--alert); background: rgba(255,92,92,0.08); color: var(--alert); }
+    .banner.info { border: 1px solid var(--trace); background: rgba(47,111,208,0.08); color: var(--trace); }
     .banner.hidden { display: none; }
 
     .container { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+    .source-bar { max-width: 1280px; margin: 0 auto; padding: 4px 20px 40px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+    .source-bar a { color: var(--ink-dim); text-decoration: underline; }
+    .source-bar a:hover { color: var(--trace); }
     .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; margin-bottom: 16px; }
     .section-title { font-family: var(--mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-dim); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 20px 0 12px; }
+    .summary-card { border: 1px solid var(--rule); border-left: 4px solid var(--trace); background: var(--panel-subtle); border-radius: 4px; padding: 12px 16px; margin-bottom: 16px; font-size: 12.5px; }
+    .summary-card ul { margin: 4px 0 0 18px; }
+    details { margin: 8px 0; }
+    details > summary { cursor: pointer; font-size: 12px; color: var(--ink-dim); font-family: var(--mono); }
+    details pre { background: var(--code); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow-y: auto; margin-top: 6px; }
+    .note { font-size: 11.5px; color: var(--ink-dim); margin: 6px 0 12px; }
+    .prose { font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .kv-line { font-family: var(--mono); font-size: 12px; margin: 6px 0; }
+    .llm-block { border: 1px solid var(--rule); border-left: 4px solid var(--amber); background: var(--panel-subtle); border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; }
 
     /* Tale of the tape */
     .tape { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
@@ -93,7 +108,7 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ Direct file:// access is restricted by browser same-origin policy and cannot fetch data slices. Please open via vmr hosting (/reports/) or any static HTTP server.</span>
+    <span>⚠️ Opened via file:// — browsers block data-slice fetches from local files. Serve over HTTP instead: <code>vmr start</code> with <code>analytics.serve: true</code>, or <code>python3 -m http.server</code> in the report directory.</span>
   </div>
   <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span></div>
   <div id="banner-missing" class="banner alert hidden">
@@ -113,6 +128,8 @@
     <div id="compare-view" class="hidden"></div>
   </div>
 
+  <div id="source-bar"></div>
+
   <div id="auth-modal" class="modal-overlay hidden">
     <div class="modal-card">
       <h3 style="font-size:16px; margin-bottom:12px;">🔑 Set API Key</h3>
@@ -129,7 +146,9 @@
   <script>
     (async function() {
       Theme.init();
+      wireHashReload();
       const dom = {
+        sourceBar: document.getElementById('source-bar'),
         bannerFile: document.getElementById('banner-file'),
         bannerVersion: document.getElementById('banner-version'),
         bannerVersionText: document.getElementById('banner-version-text'),
@@ -165,6 +184,8 @@
           if (st === 'banner') {
             dom.bannerVersionText.textContent = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Please run a full 'vmr analyze'.`;
             dom.bannerVersion.classList.remove('hidden');
+          } else if (st === 'missing') {
+            dom.bannerMissing.classList.remove('hidden');
           }
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return false; }
@@ -173,25 +194,55 @@
         return true;
       }
 
+      // ---- formatting, aligned with internal/journey/render_compare.go ----
+      // Section titles and computed prose stay English (like every other
+      // skeleton page's chrome); the localized data — rows[].label, the LLM
+      // text, excerpts — comes straight from the JSON.
+      const NEW_LABEL = 'new';
+      function secs(ms) { return (Number(ms || 0) / 1000).toFixed(1) + 's'; }
+      function pct0(f) { return FmtPercent(f, 0); }
       function deltaClass(v) {
-        if (v == null) return 'delta-same';
-        if (v > 0) return 'delta-worse';
-        if (v < 0) return 'delta-better';
-        return 'delta-same';
+        if (v == null || v === 0) return 'delta-same';
+        return v > 0 ? 'delta-worse' : 'delta-better';
       }
-      function fmtDelta(r) {
-        // MetricDiff rows use kind: "dur" | "count" | "ratio" (journey.Compare).
-        const a = r.a, b = r.b;
-        const pct = (a && b != null && a !== 0) ? ((b - a) / Math.abs(a) * 100).toFixed(1) + '%' : '';
-        const sign = (b - a) > 0 ? '+' : '';
-        return `${sign}${pct}`;
-      }
+      // formatMetric mirrors render_compare.go's formatMetric(kind, v).
       function fmtMetric(v, kind) {
         if (v == null) return '—';
-        if (kind === 'dur') return FmtDuration(v);
-        if (kind === 'pct') return FmtPercent(v);
-        if (kind === 'ratio') return v.toFixed(2) + '×';
-        return Number(v).toLocaleString();
+        v = Number(v);
+        switch (kind) {
+          case 'ms': return secs(v);
+          case 'tokens': return FmtTokens(v);
+          case 'ratio': return pct0(v);
+          case 'multiple': return v.toFixed(2) + '×';
+          default: return String(Math.round(v)); // count
+        }
+      }
+      // formatDelta mirrors render_compare.go's formatDelta(a, b, newLabel).
+      function fmtDelta(a, b) {
+        if (a === 0 && b === 0) return '—';
+        if (a === 0) return NEW_LABEL;
+        if (b === 0) return '-100%';
+        const r = b / a;
+        if (r >= 100) return r.toFixed(0) + '×';
+        if (r >= 2) return r.toFixed(1) + '×';
+        if (r > 0 && r <= 0.1) return r.toFixed(2) + '×';
+        if (r > 0 && r <= 0.5) return r.toFixed(1) + '×';
+        const p = (b - a) / a * 100;
+        return (p >= 0 ? '+' : '') + p.toFixed(0) + '%';
+      }
+      function totMoney(c) {
+        if (!c || !c.resolved) return '—';
+        const amt = Number(c.total || 0);
+        const s = ((!c.currency || c.currency === 'USD') ? '$' : (c.currency + ' ')) + amt.toFixed(amt >= 100 ? 0 : 2);
+        return s + ((Number(c.priced_steps || 0) < Number(c.total_steps || 0)) ? '+' : '');
+      }
+      function epList(eps) {
+        if (!eps || eps.length === 0) return '(no endpoint identified)';
+        return eps.map(e => `<code>${esc(e)}</code>`).join(', ');
+      }
+      function excerptBlock(summary, text, truncated) {
+        if (!text) return '';
+        return `<details><summary>${esc(summary)}${truncated ? ' (truncated)' : ''}</summary><pre>${esc(text)}</pre></details>`;
       }
 
       if (location.protocol === 'file:') {
@@ -201,6 +252,10 @@
       if (dataPath) {
         dom.pickerView.classList.add('hidden');
         dom.compareView.classList.remove('hidden');
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: dataPath.split('/').pop(), href: dataPath },
+          { label: dataPath.split('/').pop().replace(/\.json$/, '.md'), href: dataPath.replace(/\.json$/, '.md') }
+        ]);
         try {
           await loadManifest();
           const cmp = await fetchSlice(dataPath);
@@ -208,11 +263,15 @@
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
           dom.bannerMissing.classList.remove('hidden');
-          dom.compareView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load comparison at <code>${dataPath}</code>. <a href="journey-compare.html">← Back to comparison list</a></p></div>`;
+          dom.compareView.innerHTML = `<div class="card"><p style="color:var(--ink-dim);">Failed to load comparison at <code>${esc(dataPath)}</code>. <a href="journey-compare.html">← Back to comparison list</a></p></div>`;
         }
       } else {
         // Probe compares/index.json (§6.2)
         dom.pickerView.classList.remove('hidden');
+        dom.sourceBar.innerHTML = sourceBar([
+          { label: 'compares/index.json', href: 'compares/index.json' },
+          { label: 'compares/index.md', href: 'compares/index.md' }
+        ]);
         try {
           await loadManifest();
           const idx = await fetchSlice('compares/index.json');
@@ -224,9 +283,9 @@
               const aId = (c.a_journey && c.a_journey.id) || 'A';
               const bId = (c.b_journey && c.b_journey.id) || 'B';
               const aTitle = (c.a_journey && c.a_journey.title) || '';
-              const title = `${aId} vs ${bId}`;
-              const sub = aTitle ? (aTitle.slice(0, 40) + '…') : '';
-              return `<a class="cand-row" href="journey-compare.html#data=compares/${c.filename}"><span>${title}</span>${sub ? `<span style="margin-left:auto; color:var(--ink-dim);">${sub}</span>` : ''}</a>`;
+              const title = `${esc(aId)} vs ${esc(bId)}`;
+              const sub = aTitle ? esc(aTitle.slice(0, 40) + '…') : '';
+              return `<a class="cand-row" href="journey-compare.html#data=compares/${encodeURIComponent(c.filename)}"><span>${title}</span>${sub ? `<span style="margin-left:auto; color:var(--ink-dim);">${sub}</span>` : ''}</a>`;
             }).join('');
           }
         } catch (e) {
@@ -239,68 +298,211 @@
         const aRef = cmp.a_journey || {};
         const bRef = cmp.b_journey || {};
         const rows = cmp.rows || [];
-
-        const rowsHtml = rows.map(r => {
-          const kind = r.kind || 'count';
-          const label = r.label || r.metric || '';
-          const a = r.a, b = r.b;
-          const delta = fmtDelta(r);
-          const cls = deltaClass(b - a);
-          return `
-            <tr>
-              <td><strong>${label}</strong></td>
-              <td class="num">${fmtMetric(a, kind)}</td>
-              <td class="num">${fmtMetric(b, kind)}</td>
-              <td class="num ${cls}">${delta}</td>
-            </tr>
-          `;
-        }).join('');
-
         const tools = cmp.tools || [];
-        const toolsHtml = tools.map(t => {
-          const name = t.name;
-          const ac = t.a_calls || 0;
-          const bc = t.b_calls || 0;
-          const diff = bc - ac;
-          return `<tr><td><code>${name}</code></td><td class="num">${ac}</td><td class="num">${bc}</td><td class="num ${deltaClass(diff)}">${diff > 0 ? '+' : ''}${diff}</td></tr>`;
-        }).join('');
+        const ex = cmp.extras || {};
+        const out = [];
 
-        dom.compareView.innerHTML = `
-          <div class="card">
-            <h2 style="font-size:16px; margin-bottom:12px;">Journey Comparison</h2>
-            <div class="tape">
-              <div class="tape-side a">
-                <h3>${aRef.title || aRef.id || 'A'}</h3>
-                <div class="meta">${aRef.id || ''} · ${aRef.steps || 0} steps · ${aRef.tool_calls || 0} tool calls${aRef.partial ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
-                <div class="meta"><a href="journey-viewer.html#data=journeys/details/${aRef.id}.json">open A →</a></div>
-              </div>
-              <div class="tape-side b">
-                <h3>${bRef.title || bRef.id || 'B'}</h3>
-                <div class="meta">${bRef.id || ''} · ${bRef.steps || 0} steps · ${bRef.tool_calls || 0} tool calls${bRef.partial ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
-                <div class="meta"><a href="journey-viewer.html#data=journeys/details/${bRef.id}.json">open B →</a></div>
-              </div>
-            </div>
+        // --- Header ---
+        out.push(`<div class="card"><h2 style="font-size:16px; margin-bottom:6px;">Journey Comparison — A vs B</h2>`);
+        if (cmp.partial) {
+          out.push(`<div class="banner warn" style="margin:8px 0;">⚠️ One or both journeys are head-truncated by the loaded file range; the affected side shows only its visible part.</div>`);
+        }
 
-            <div class="section-title">Metric Diff (A → B)</div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Metric</th><th>A</th><th>B</th><th>Δ B vs A</th></tr></thead>
-                <tbody>${rowsHtml || '<tr><td colspan="4" style="text-align:center;">No diff rows</td></tr>'}</tbody>
-              </table>
-            </div>
+        // --- Comparison Summary card ---
+        const summary = [];
+        const notableTop = rows.filter(r => r.notable).slice(0, 3).map(r =>
+          `${esc(r.label || r.metric)}: ${fmtMetric(r.a, r.kind)} → ${fmtMetric(r.b, r.kind)} (${fmtDelta(Number(r.a), Number(r.b))})`);
+        if (notableTop.length) summary.push('Notable differences (Top): ' + notableTop.join('; '));
+        const dv = ex.divergence || {};
+        if (dv.found) summary.push(`Divergence point: aligned position ${dv.index + 1} (Step A${dv.a_step_seq} / B${dv.b_step_seq})`);
+        const eps = ex.endpoints || {};
+        summary.push(eps.same ? 'Endpoints: identical models/endpoints on both sides' : 'Endpoints: models/endpoints differ between sides');
+        const dur = ex.duration || {};
+        if (dur.a_termination || dur.b_termination) {
+          summary.push(`Termination: A finish=${esc(dur.a_termination || '(none)')} · B finish=${esc(dur.b_termination || '(none)')}`);
+        }
+        if (summary.length) {
+          out.push(`<div class="summary-card"><strong>Comparison Summary</strong><ul>${summary.map(s => `<li>${s}</li>`).join('')}</ul></div>`);
+        }
 
-            ${tools.length > 0 ? `
-            <div class="section-title">Tool Call Distribution</div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Tool</th><th>A Calls</th><th>B Calls</th><th>Δ</th></tr></thead>
-                <tbody>${toolsHtml}</tbody>
-              </table>
-            </div>` : ''}
-
-            <p style="margin-top:16px; font-size:11.5px; color:var(--ink-dim);">Source: <code>${srcPath}</code> · Comparison computed offline by CLI; this page only renders precomputed JSON.</p>
+        // --- Tape of the tape ---
+        out.push(`<div class="tape">
+          <div class="tape-side a">
+            <h3>${esc(aRef.title || aRef.id || 'A')}</h3>
+            <div class="meta">${esc(aRef.id || '')} · ${aRef.steps || 0} steps · ${aRef.tool_calls || 0} tool calls${aRef.partial ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
+            <div class="meta"><a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(aRef.id || '')}.json">open A →</a></div>
           </div>
-        `;
+          <div class="tape-side b">
+            <h3>${esc(bRef.title || bRef.id || 'B')}</h3>
+            <div class="meta">${esc(bRef.id || '')} · ${bRef.steps || 0} steps · ${bRef.tool_calls || 0} tool calls${bRef.partial ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
+            <div class="meta"><a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(bRef.id || '')}.json">open B →</a></div>
+          </div>
+        </div>`);
+
+        // --- Initial Instruction ---
+        const ii = ex.initial_instruction || {};
+        if ((ii.a && ii.a.found) || (ii.b && ii.b.found)) {
+          out.push(`<div class="section-title">Initial Instruction</div>`);
+          out.push(excerptBlock("A's initial instruction", ii.a && ii.a.text, ii.a && ii.a.truncated));
+          out.push(excerptBlock("B's initial instruction", ii.b && ii.b.text, ii.b && ii.b.truncated));
+        }
+
+        // --- Behavior Profile ---
+        out.push(`<div class="section-title">Behavior Profile Comparison</div>`);
+        const rowsHtml = rows.map(r => {
+          const a = Number(r.a), b = Number(r.b);
+          return `<tr>
+            <td><strong>${esc(r.label || r.metric || '')}</strong>${r.notable ? ' <span style="color:var(--amber)">⚠️</span>' : ''}</td>
+            <td class="num">${fmtMetric(r.a, r.kind)}</td>
+            <td class="num">${fmtMetric(r.b, r.kind)}</td>
+            <td class="num ${deltaClass(r.delta_rel)}">${fmtDelta(a, b)}</td>
+          </tr>`;
+        }).join('');
+        out.push(`<div class="table-wrap"><table>
+          <thead><tr><th>Metric</th><th>A</th><th>B</th><th>Change</th></tr></thead>
+          <tbody>${rowsHtml || '<tr><td colspan="4" style="text-align:center;">No diff rows</td></tr>'}</tbody>
+        </table></div>`);
+        out.push(`<p class="note">The "Change" column gives direction and magnitude (<code>156×</code> / <code>0.02×</code> / <code>+40%</code> / <code>new</code> / <code>-100%</code>), not proportional precision. ⚠️ = relative difference clears the notable threshold and the absolute difference clears the noise floor — a rule-based "worth a look" flag, not a determined cause.</p>`);
+
+        // --- Wall clock / Termination / Final-Turn Context ---
+        if (dur.a_wall_ns != null || dur.b_wall_ns != null) {
+          out.push(`<p class="kv-line">Wall-clock total: A ${secs((dur.a_wall_ns || 0) / 1e6)} · B ${secs((dur.b_wall_ns || 0) / 1e6)} — includes human idle time, not an efficiency metric; for efficiency see "Net Working Time" above.</p>`);
+        }
+        if (dur.a_termination != null || dur.b_termination != null) {
+          out.push(`<p class="kv-line">Termination: A <code>finish=${esc(dur.a_termination || '(none)')}</code> · B <code>finish=${esc(dur.b_termination || '(none)')}</code> — VMR only sees this step's result, not whether the Agent has something like loop detection configured.</p>`);
+        }
+        const fc = ex.final_context || {};
+        if (fc.a && fc.b && fc.a.seq && fc.b.seq) {
+          out.push(`<div class="section-title">Final-Turn Context Composition</div>`);
+          out.push(`<div class="table-wrap"><table>
+            <thead><tr><th></th><th>A (turn ${fc.a.seq})</th><th>B (turn ${fc.b.seq})</th></tr></thead>
+            <tbody>
+              <tr><td>system</td><td class="num">${FmtTokens(fc.a.system_tokens)}</td><td class="num">${FmtTokens(fc.b.system_tokens)}</td></tr>
+              <tr><td>user</td><td class="num">${FmtTokens(fc.a.user_tokens)}</td><td class="num">${FmtTokens(fc.b.user_tokens)}</td></tr>
+              <tr><td>assistant</td><td class="num">${FmtTokens(fc.a.assistant_tokens)}</td><td class="num">${FmtTokens(fc.b.assistant_tokens)}</td></tr>
+              <tr><td>tool</td><td class="num">${FmtTokens(fc.a.tool_tokens)}</td><td class="num">${FmtTokens(fc.b.tool_tokens)}</td></tr>
+            </tbody>
+          </table></div>`);
+        }
+
+        // --- Tool Call Comparison ---
+        if (tools.length) {
+          const toolsHtml = tools.map(t => {
+            const ac = t.a_calls || 0, bc = t.b_calls || 0, diff = bc - ac;
+            return `<tr><td><code>${esc(t.name)}</code></td><td class="num">${ac}</td><td class="num">${bc}</td><td class="num ${deltaClass(diff)}">${diff > 0 ? '+' : ''}${diff}</td></tr>`;
+          }).join('');
+          out.push(`<div class="section-title">Tool Call Comparison</div>`);
+          out.push(`<div class="table-wrap"><table>
+            <thead><tr><th>Tool</th><th>A Count</th><th>B Count</th><th>Δ</th></tr></thead>
+            <tbody>${toolsHtml}</tbody>
+          </table></div>`);
+        }
+
+        // --- Divergence Point ---
+        out.push(`<div class="section-title">Divergence Point</div>`);
+        if (!dv.found) {
+          out.push(`<p class="prose">No structural divergence in tool usage was detected within the two sides' shared prefix — stated honestly: this does not mean the two runs were identical, only that this detector's own signal never diverged.</p>`);
+        } else {
+          const at = (dv.a_tools || []).join(', ');
+          const bt = (dv.b_tools || []).join(', ');
+          if (dv.severity === 'heavy') {
+            out.push(`<p class="prose">🔴 <strong>Heavy divergence</strong> (aligned position ${dv.index + 1}, task: ${esc(dv.task_title || '')}): A's turn ${dv.a_step_seq} called [${esc(at)}], B's turn ${dv.b_step_seq} called [${esc(bt)}] — from here on the two runs chose different tools (or one called and the other didn't). This is a structural fact only.</p>`);
+          } else {
+            out.push(`<p class="prose">🟡 <strong>Light divergence</strong> (aligned position ${dv.index + 1}, task: ${esc(dv.task_title || '')}): A's turn ${dv.a_step_seq} and B's turn ${dv.b_step_seq} both called [${esc(at)}], but with different arguments — same tool choice, different target.</p>`);
+          }
+        }
+        out.push(`<p class="note">Divergence-point location ≠ root-cause determination: this only states "the two runs differ starting here", not who was right or why.</p>`);
+
+        // --- Model & Endpoint Check ---
+        out.push(`<div class="section-title">Model &amp; Endpoint Check</div>`);
+        out.push(`<p class="kv-line">A: ${epList(eps.a)}</p><p class="kv-line">B: ${epList(eps.b)}</p>`);
+        out.push(`<p class="prose">${eps.same ? 'Model/endpoint identical on both sides.' : 'Model/endpoint <strong>differ</strong> between the two sides — this alone may be a direct cause of any outcome difference; do not rule it out by default.'}</p>`);
+
+        // --- Prompt Cache Hit Rate ---
+        const ca = (ex.cache && ex.cache.a) || {};
+        const cb = (ex.cache && ex.cache.b) || {};
+        out.push(`<div class="section-title">Prompt Cache Hit Rate</div>`);
+        if ((!ca.series || !ca.series.length) && (!cb.series || !cb.series.length)) {
+          out.push(`<p class="prose">Neither side has usable usage/cache data.</p>`);
+        } else {
+          out.push(`<div class="table-wrap"><table>
+            <thead><tr><th></th><th>First Turn</th><th>Steady-State Mean</th><th>Min</th><th>Max</th></tr></thead>
+            <tbody>
+              <tr><td>A</td><td class="num">${pct0(ca.first_ratio)}</td><td class="num">${pct0(ca.steady_mean)}</td><td class="num">${pct0(ca.min)}</td><td class="num">${pct0(ca.max)}</td></tr>
+              <tr><td>B</td><td class="num">${pct0(cb.first_ratio)}</td><td class="num">${pct0(cb.steady_mean)}</td><td class="num">${pct0(cb.min)}</td><td class="num">${pct0(cb.max)}</td></tr>
+            </tbody>
+          </table></div>`);
+          const curve = (s) => (s || []).map(p => `R${p.seq} ${pct0(p.ratio)}`).join(' → ') || '(no data)';
+          out.push(`<details><summary>Per-turn curve</summary><pre>A: ${esc(curve(ca.series))}\n\nB: ${esc(curve(cb.series))}</pre></details>`);
+        }
+
+        // --- System Prompt ---
+        const spa = (ex.sys_prompt && ex.sys_prompt.a) || {};
+        const spb = (ex.sys_prompt && ex.sys_prompt.b) || {};
+        out.push(`<div class="section-title">System Prompt Size &amp; Stability</div>`);
+        out.push(`<div class="table-wrap"><table>
+          <thead><tr><th></th><th>tokens</th><th>Changes</th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td class="num">${FmtTokens(spa.tokens)}</td><td class="num">${spa.changes || 0}</td></tr>
+            <tr><td>B</td><td class="num">${FmtTokens(spb.tokens)}</td><td class="num">${spb.changes || 0}</td></tr>
+          </tbody>
+        </table></div>`);
+        if (spa.excerpt && spa.excerpt === spb.excerpt) {
+          out.push(`<p class="prose">Both sides' System Prompts are verbatim identical (${FmtTokens(spa.tokens)} tokens).</p>`);
+        } else {
+          out.push(excerptBlock("A's system prompt excerpt", spa.excerpt, spa.truncated));
+          out.push(excerptBlock("B's system prompt excerpt", spb.excerpt, spb.truncated));
+        }
+
+        // --- Final Deliverable ---
+        const da = (ex.deliverable && ex.deliverable.a) || {};
+        const db = (ex.deliverable && ex.deliverable.b) || {};
+        if (da.found || db.found) {
+          out.push(`<div class="section-title">Final Deliverable Comparison</div>`);
+          [['A', da], ['B', db]].forEach(([label, d]) => {
+            if (!d.found) {
+              out.push(`<p class="prose"><strong>${label}</strong>: no comparable final deliverable identified (no tool call whose parameter shape looks like a file write).</p>`);
+            } else {
+              out.push(`<p class="prose"><strong>${label}</strong>: a likely final deliverable was identified at turn ${d.step_seq} via <code>${esc(d.tool_name)}</code>.</p>`);
+              out.push(excerptBlock(label + "'s deliverable excerpt", d.excerpt, d.truncated));
+            }
+          });
+        }
+
+        // --- Cost Estimate ---
+        const costA = (ex.cost && ex.cost.a) || {};
+        const costB = (ex.cost && ex.cost.b) || {};
+        out.push(`<div class="section-title">Cost Estimate</div>`);
+        if (!costA.resolved && !costB.resolved) {
+          out.push(`<p class="prose">Neither side had resolvable pricing (common for Token-Plan / subscription accounts).</p>`);
+        } else {
+          out.push(`<p class="kv-line">A ${totMoney(costA)} · B ${totMoney(costB)} (list-price estimate, not your bill)</p>`);
+          if (!!costA.resolved !== !!costB.resolved) {
+            out.push(`<p class="note">${costA.resolved ? 'B' : 'A'}: pricing not on file (common for Token-Plan / subscription accounts) — a blank does not mean free.</p>`);
+          }
+        }
+
+        // --- Evidence Provenance ---
+        const sources = ex.sources || [];
+        if (sources.length) {
+          out.push(`<div class="section-title">Evidence Provenance</div>`);
+          out.push(`<p class="note">Every number above was computed from the following source audit files:</p>`);
+          out.push(`<ul class="prose">${sources.map(s => `<li><code>${esc(s)}</code></li>`).join('')}</ul>`);
+        }
+
+        // --- LLM Interpretation ---
+        [cmp.llm_interpretation, cmp.llm_divergence].forEach(rec => {
+          if (!rec || rec.status !== 'ok' || !rec.text) return;
+          const scope = rec.scope === 'divergence' ? 'divergence point' : (rec.scope === 'overall' ? 'overall comparison' : rec.scope);
+          out.push(`<div class="section-title">LLM Interpretation — ${esc(rec.model)}${scope ? ' · ' + esc(scope) : ''}</div>`);
+          out.push(`<div class="llm-block"><p class="note">The following was generated by <code>${esc(rec.model)}</code>. It is not the fact layer, may be wrong, and should be checked against the evidence above.${rec.cached ? ' (cache hit, not re-invoked)' : ''}</p><div class="prose">${esc(rec.text)}</div></div>`);
+        });
+
+        // --- Source footer ---
+        out.push(`<p class="note" style="margin-top:16px;">Source: <code>${esc(srcPath)}</code> · Comparison computed offline by CLI; this page only renders precomputed JSON.</p>`);
+        out.push(`</div>`);
+
+        dom.compareView.innerHTML = out.join('\n');
       }
     })();
   </script>
