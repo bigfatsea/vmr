@@ -62,7 +62,7 @@ func journeyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 	}
 }
 
-// TestCmdAnalyze_ListAndRender exercises the `vmr story` CLI end to end — a
+// TestCmdAnalyze_ListAndRender exercises the `vmr analyze -journey` CLI end to end — a
 // path flagged as untested: internal/journey's own
 // tests cover Build/RenderMarkdown directly, but nothing exercised
 // cmd_journey.go's flag parsing, candidate listing (batched PreviewTitles),
@@ -605,7 +605,7 @@ func TestCmdAnalyze_ShowUngrouped(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-show-ungrouped", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -show-ungrouped: %v", err)
+			t.Fatalf("cmdAnalyze -show-ungrouped: %v", err)
 		}
 	})
 	if !strings.Contains(out, "1 ungrouped record") {
@@ -616,11 +616,11 @@ func TestCmdAnalyze_ShowUngrouped(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr story`
+// TestCmdAnalyze_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr analyze`
 // with no positional args is a usage error, not a silent no-op.
 func TestCmdAnalyze_NoInputFiles(t *testing.T) {
 	if err := cmdAnalyze([]string{}); err == nil {
-		t.Error("cmdStory with no input files should return an error")
+		t.Error("cmdAnalyze with no input files should return an error")
 	}
 }
 
@@ -638,7 +638,7 @@ func TestCmdAnalyze_UnknownJourney(t *testing.T) {
 		return cmdAnalyze([]string{"-journey", "no-such-id", "-o", outDir, path})
 	})
 	if err == nil {
-		t.Error("cmdStory -journey with an unmatched id prefix should return an error")
+		t.Error("cmdAnalyze -journey with an unmatched id prefix should return an error")
 	}
 }
 
@@ -665,7 +665,7 @@ func TestCmdAnalyze_PartialHeadFilenameSuffix(t *testing.T) {
 	// writes nothing.
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -render-all (no -include-partial): %v", err)
+			t.Fatalf("cmdAnalyze -render-all (no -include-partial): %v", err)
 		}
 	})
 	if !strings.Contains(out, "skipped as partial-head") {
@@ -723,7 +723,7 @@ func captureStdoutErr(t *testing.T, fn func() error) error {
 }
 
 // captureStderr runs fn with os.Stderr redirected and returns what it wrote
-// — the -llm-* degradation tests assert on the warning text cmdStory prints
+// — the -llm-* degradation tests assert on the warning text cmdAnalyze prints
 // there (design doc C.7: a failed LLM call must warn, not fail the command).
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
@@ -847,7 +847,7 @@ func TestCmdAnalyze_CompareLLMDryRun(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -llm-dry-run: %v", err)
+			t.Fatalf("cmdAnalyze -llm-dry-run: %v", err)
 		}
 	})
 	if !strings.Contains(out, "dry run") {
@@ -888,7 +888,7 @@ func TestCmdAnalyze_CompareWithLLM(t *testing.T) {
 	cacheDir := filepath.Join(outDir, ".llm-cache")
 
 	if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -llm-addr: %v", err)
+		t.Fatalf("cmdAnalyze -llm-addr: %v", err)
 	}
 	base := "compare-" + idA + "-vs-" + idB
 	mdData, err := os.ReadFile(filepath.Join(outDir, "compares", base+".md"))
@@ -930,7 +930,7 @@ func TestCmdAnalyze_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
 	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -journey -llm-addr (no -llm-cache-dir): %v", err)
+		t.Fatalf("cmdAnalyze -journey -llm-addr (no -llm-cache-dir): %v", err)
 	}
 	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
@@ -972,7 +972,7 @@ func TestCmdAnalyze_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	}
 
 	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportConfigPath, "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -journey (llm settings from report.yaml): %v", err)
+		t.Fatalf("cmdAnalyze -journey (llm settings from report.yaml): %v", err)
 	}
 	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
@@ -1010,19 +1010,19 @@ func TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 
 	t.Run("multi-match -journey", func(t *testing.T) {
 		if err := cmdAnalyze([]string{"-journey", idA + "," + idB, "-report-config", reportConfigPath, "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -journey (comma list, report.yaml llm_addr default): %v", err)
+			t.Fatalf("cmdAnalyze -journey (comma list, report.yaml llm_addr default): %v", err)
 		}
 	})
 	t.Run("-render-all", func(t *testing.T) {
 		outDir2 := filepath.Join(t.TempDir(), "out2")
 		if err := cmdAnalyze([]string{"-render-all", "-report-config", reportConfigPath, "-o", outDir2, path}); err != nil {
-			t.Fatalf("cmdStory -render-all (report.yaml llm_addr default): %v", err)
+			t.Fatalf("cmdAnalyze -render-all (report.yaml llm_addr default): %v", err)
 		}
 	})
 	t.Run("-benchmark", func(t *testing.T) {
 		outDir3 := filepath.Join(t.TempDir(), "out3")
 		if err := cmdAnalyze([]string{"-benchmark", "-report-config", reportConfigPath, "-o", outDir3, path}); err != nil {
-			t.Fatalf("cmdStory -corpus (report.yaml llm_addr default): %v", err)
+			t.Fatalf("cmdAnalyze -corpus (report.yaml llm_addr default): %v", err)
 		}
 	})
 
@@ -1050,7 +1050,7 @@ func TestCmdAnalyze_Corpus(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -corpus: %v", err)
+			t.Fatalf("cmdAnalyze -corpus: %v", err)
 		}
 	})
 	if !strings.Contains(out, "2 journey(s) analyzed") {
@@ -1085,7 +1085,7 @@ func TestCmdAnalyze_Corpus(t *testing.T) {
 // no non-system messages, which ctxgraph groups into Ungrouped rather than
 // any Lineage at all — same fixture shape as TestCmdAnalyze_ShowUngrouped).
 // The command must not error, and must not write vmr-story-corpus.md/.json
-// (nothing to analyze) — but vmr-stories.json/.md still get written, same
+// (nothing to analyze) — but journeys/index.json/.md still get written, same
 // as every other invocation (an empty candidate list is still a real,
 // worth-recording result, unlike -llm-dry-run's "should I even run this"
 // pure query, which is why that one still leaves no directory at all).
@@ -1097,7 +1097,7 @@ func TestCmdAnalyze_CorpusNoCandidates(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-benchmark", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -corpus (no candidates): %v", err)
+			t.Fatalf("cmdAnalyze -corpus (no candidates): %v", err)
 		}
 	})
 	if !strings.Contains(out, "no candidate journeys to analyze") {
@@ -1107,7 +1107,7 @@ func TestCmdAnalyze_CorpusNoCandidates(t *testing.T) {
 		t.Error("-corpus with zero candidates should not write vmr-story-corpus.md")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "journeys", "index.json")); err != nil {
-		t.Errorf("vmr-stories.json should still be written even with zero candidates: %v", err)
+		t.Errorf("journeys/index.json should still be written even with zero candidates: %v", err)
 	}
 }
 
@@ -1199,7 +1199,7 @@ func TestCmdAnalyze_JourneyWithLLM(t *testing.T) {
 	cacheDir := filepath.Join(outDir, ".llm-cache")
 
 	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -journey -llm-addr: %v", err)
+		t.Fatalf("cmdAnalyze -journey -llm-addr: %v", err)
 	}
 	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
@@ -1271,7 +1271,7 @@ func TestCmdAnalyze_JourneyWithRealLLM(t *testing.T) {
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
 	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportYamlPath, "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory with real report.yaml: %v", err)
+		t.Fatalf("cmdAnalyze with real report.yaml: %v", err)
 	}
 	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
@@ -1284,7 +1284,7 @@ func TestCmdAnalyze_JourneyWithRealLLM(t *testing.T) {
 
 // TestCmdAnalyze_JourneyLLMDryRun mirrors TestCmdAnalyze_CompareLLMDryRun but
 // for -journey: -llm-dry-run must print a size estimate and return before
-// writing anything (including reports/stories/ itself), and must never dial
+// writing anything (including journeys/ itself), and must never dial
 // the given address.
 func TestCmdAnalyze_JourneyLLMDryRun(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
@@ -1292,7 +1292,7 @@ func TestCmdAnalyze_JourneyLLMDryRun(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", "127.0.0.1:1", "-llm-dry-run", "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdStory -journey -llm-dry-run: %v", err)
+			t.Fatalf("cmdAnalyze -journey -llm-dry-run: %v", err)
 		}
 	})
 	if !strings.Contains(out, "dry run") {
@@ -1302,7 +1302,7 @@ func TestCmdAnalyze_JourneyLLMDryRun(t *testing.T) {
 		t.Error("-llm-dry-run should return before writing the journey .md")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
-		t.Error("-llm-dry-run should not create reports/stories/ at all")
+		t.Error("-llm-dry-run should not create journeys/ at all")
 	}
 }
 
@@ -1319,7 +1319,7 @@ func TestCmdAnalyze_CompareLLMFailureDegrades(t *testing.T) {
 		cmdErr = cmdAnalyze([]string{"-compare", idA + "," + idB, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", "-o", outDir, path})
 	})
 	if cmdErr != nil {
-		t.Fatalf("cmdStory should not fail when the LLM endpoint is unreachable: %v", cmdErr)
+		t.Fatalf("cmdAnalyze should not fail when the LLM endpoint is unreachable: %v", cmdErr)
 	}
 	if !strings.Contains(stderr, "warning") {
 		t.Errorf("expected a warning on stderr about the failed LLM call, got: %q", stderr)

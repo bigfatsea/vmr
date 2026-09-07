@@ -6,7 +6,7 @@ import "time"
 
 // DisplayZone is the system default timezone every human-facing rendering
 // of a persisted timestamp must convert through — a live router/CLI log
-// line, a `vmr report`/`vmr story` Markdown document, or an aggregation
+// line, a `vmr analyze` Markdown document, or an aggregation
 // bucket key (e.g. the byDate/hour-of-day statistics in vmr-report.md).
 // time.Local already resolves the OS/container TZ setting, which is
 // exactly "the system default timezone"; this var exists so every call

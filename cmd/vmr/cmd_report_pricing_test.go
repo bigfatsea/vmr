@@ -171,7 +171,7 @@ models:
 }
 
 // TestBuildPricing_DisplayCurrency_NoConfigReachable proves -currency
-// works even with no config.yaml at all — vmr report's documented degrade
+// works even with no config.yaml at all — vmr analyze's documented degrade
 // path (see buildPricing's own doc comment).
 func TestBuildPricing_DisplayCurrency_NoConfigReachable(t *testing.T) {
 	var tw bytes.Buffer
@@ -191,7 +191,7 @@ func TestBuildPricing_DisplayCurrency_NoConfigReachable(t *testing.T) {
 }
 
 // TestBuildPricing_LoadErrDoesNotWarnItself is the unit-level lock-in:
-// buildPricing must NOT print its own cfgErr warning anymore — cmdReport
+// buildPricing must NOT print its own cfgErr warning anymore — runReport
 // prints the one unified warning now, so a duplicate here would resurrect
 // the "same file, two warnings" noise the fix removed.
 func TestBuildPricing_LoadErrDoesNotWarnItself(t *testing.T) {

@@ -311,7 +311,7 @@ type Config struct {
 	Listen string `yaml:"listen"`
 	// APIKeys is the list of credentials vmr itself accepts (empty = auth
 	// disabled). Each entry gets tagged in the audit trail via audit.KeyTag
-	// (the key's own tail, not a separately configured name) so `vmr report`
+	// (the key's own tail, not a separately configured name) so `vmr analyze`
 	// can group a shared instance's traffic by caller after the fact — see
 	// config.example.yaml for the naming convention. minAPIKeyLen guards
 	// against a key short enough that its whole value becomes the tag.
@@ -383,7 +383,7 @@ type Config struct {
 	// internal/pricing.FactorBetween/EffectiveExchangeRate. Its two
 	// consumers are both OFF the request path: converting a provider's own
 	// pricing.currency-denominated rates to USD once at validate time, and
-	// vmr report's -currency display conversion. A currency named anywhere
+	// vmr analyze's -currency display conversion. A currency named anywhere
 	// (a provider's pricing.currency, -currency) with no entry here falls
 	// back to the embedded default table (internal/pricing.
 	// LoadDefaultExchangeRate); still unresolved after that is a load-time

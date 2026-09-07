@@ -13,7 +13,7 @@ import (
 // exactly).
 //
 // Moved here from internal/router/quota.go (originally baseAmount) so both
-// the router's decision path and a read-only offline consumer (vmr report's
+// the router's decision path and a read-only offline consumer (vmr analyze's
 // §2.5 quota-vs-consumption table) share exactly one formula — see
 // the quota design specification. Takes a core.Limit (not the whole
 // QuotaSpec) since P3: TokenWeights is per-Limit, not account-level — see
@@ -88,7 +88,7 @@ func ApplyModelMultiplier(l core.Limit, model string, d Counters, estimated floa
 // account whose usage has been fully sniffed. Moved here from
 // internal/router/quota.go's QuotaStatus (the only prior computation of
 // this ratio) for the same "one formula, two independent consumers" reason
-// BaseAmount was moved: a read-only offline consumer (vmr report's §2.5
+// BaseAmount was moved: a read-only offline consumer (vmr analyze's §2.5
 // live-quota column) needs the exact same share router.QuotaStatus reports
 // for /status, not a re-derivation of it.
 //

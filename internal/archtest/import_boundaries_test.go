@@ -20,7 +20,7 @@ import (
 // the package grows, not because it's currently violated.
 //
 // internal/ctxgraph (the content-addressed manifest/lineage layer behind
-// `vmr story`, and now behind internal/report's own session grouping too;
+// the journey half, and now behind internal/report's own session grouping too;
 // see docs/VirtualModelRouter_Design_v4_Analytics.md's internal/ctxgraph
 // content-addressing layer section) is
 // held to the same island rule, plus one more: it must not depend on
@@ -32,10 +32,10 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/router",
 		"vmr/internal/server",
 		"vmr/internal/config",
-		// The other half of story's own "and vice versa" (see its entry
-		// below): the two commands are independent consumers of the same
+		// The other half of journey's own "and vice versa" (see its entry
+		// below): the two halves are independent consumers of the same
 		// shared layers, so neither may reach into the other's rendering or
-		// analysis helpers. Only story's direction was ever enforced, which
+		// analysis helpers. Only journey's direction was ever enforced, which
 		// made the symmetric claim in that comment true by luck rather than
 		// by test — the exact "documented tripwire nobody sees trip" shape
 		// this package exists to eliminate.
@@ -53,16 +53,16 @@ var forbiddenImports = map[string][]string{
 		// real import cycle, not just a layering preference.
 		"vmr/internal/taskseg",
 	},
-	// internal/journey (the `vmr story` narrative renderer) sits on top of
+	// internal/journey (the journey narrative renderer) sits on top of
 	// ctxgraph, never on report — the same reasoning as ctxgraph's own
 	// rule. report's session/task grouping already consumes ctxgraph
 	// directly (session.go's Lineage/Classify use) and shares its
-	// agent-dialect Profile with story via internal/taskseg, but the two
-	// consumers remain independent of each other: story must not reach past
+	// agent-dialect Profile with journey via internal/taskseg, but the two
+	// consumers remain independent of each other: journey must not reach past
 	// this boundary just because report happens to have similar-looking
 	// helpers, and vice versa.
 	//
-	// story→pricing is deliberately NOT forbidden: cost.go takes a
+	// journey→pricing is deliberately NOT forbidden: cost.go takes a
 	// *pricing.Resolver for its per-journey $ estimate exactly the way
 	// report.Build already does, and pricing is a near-leaf (its only
 	// internal dependency is core). config stays out — the resolver is built

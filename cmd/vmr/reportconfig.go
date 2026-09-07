@@ -1,14 +1,14 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// vmr report/vmr story's own tiny sidecar config — report.yaml. Entirely
+// vmr analyze's own tiny sidecar config — report.yaml. Entirely
 // separate from internal/config.Config: config.yaml is the router's
 // deployment config (holds provider secrets, has a complex schema, and vmr
-// report/vmr story routinely run without one at all, e.g. analyzing logs
+// analyze routinely runs without one at all, e.g. analyzing logs
 // copied off-box). report.yaml can hold a real secret (llm_key), same as
 // config.yaml, so it's .gitignore'd the same way — report.example.yaml is
 // the committed template both files follow. See
 // docs/VirtualModelRouter_Design_v4_Analytics.md's "配置与命令行" subsection
-// for the full rationale. New report/story-only settings land here in the
+// for the full rationale. New analyze-only settings land here in the
 // future, not in config.yaml.
 package main
 
@@ -36,12 +36,12 @@ import (
 type reportConfig struct {
 	Language       string `yaml:"language"`        // en (default) | zh
 	Output         string `yaml:"output"`          // -o's default when -o isn't passed
-	Details        *bool  `yaml:"details"`         // vmr report's -details default
-	IncludePartial *bool  `yaml:"include_partial"` // vmr story's -include-partial default
-	LLMAddr        string `yaml:"llm_addr"`        // vmr story's -llm-addr default
-	LLMModel       string `yaml:"llm_model"`       // vmr story's -llm-model default
-	LLMKey         string `yaml:"llm_key"`         // vmr story's -llm-key default; plaintext or "${SOME_ENV_VAR}"
-	LLMCacheDir    string `yaml:"llm_cache_dir"`   // vmr story's -llm-cache-dir default; "" everywhere = no caching, never an implicit path
+	Details        *bool  `yaml:"details"`         // vmr analyze's -details default
+	IncludePartial *bool  `yaml:"include_partial"` // vmr analyze's -include-partial default
+	LLMAddr        string `yaml:"llm_addr"`        // vmr analyze's -llm-addr default
+	LLMModel       string `yaml:"llm_model"`       // vmr analyze's -llm-model default
+	LLMKey         string `yaml:"llm_key"`         // vmr analyze's -llm-key default; plaintext or "${SOME_ENV_VAR}"
+	LLMCacheDir    string `yaml:"llm_cache_dir"`   // vmr analyze's -llm-cache-dir default; "" everywhere = no caching, never an implicit path
 	// SelfTrafficClientTags (P6.4) extends the self-traffic exclusion set
 	// beyond the one tag auto-derived from LLMKey — needed only when
 	// -llm-addr traffic was generated under a DIFFERENT, e.g. rotated,
@@ -49,7 +49,7 @@ type reportConfig struct {
 	// leave this empty: the LLMKey-derived tag alone is sufficient. See
 	// selftraffic.go.
 	SelfTrafficClientTags []string `yaml:"self_traffic_client_tags"`
-	// Currency is vmr report's -currency default — the currency $ cost
+	// Currency is vmr analyze's -currency default — the currency $ cost
 	// estimates are DISPLAYED in, independent of whatever currency they were
 	// actually computed in (config.yaml's pricing.currency, or USD with no
 	// config.yaml reachable). Empty = show whatever currency computation

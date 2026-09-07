@@ -277,7 +277,7 @@ func TestHashFile_ChangesWithContent(t *testing.T) {
 
 // TestScanCached_NilManifestInCacheTriggersReparse: a cache entry whose
 // Manifests slice contains a nil element (the shape a hand-edited or
-// truncated-write-corrupted vmr-requests.json/vmr-stories.json can produce —
+// truncated-write-corrupted requests/index.json/journeys/index.json can produce —
 // a `null` array entry decodes without error) must be treated as a miss and
 // reparsed, not trusted as-is — trusting it would panic buildGraph's sort.
 func TestScanCached_NilManifestInCacheTriggersReparse(t *testing.T) {

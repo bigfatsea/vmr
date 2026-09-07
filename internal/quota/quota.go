@@ -89,7 +89,7 @@ func ModelSetsOverlap(a, b []string) bool {
 //     see PerModelPrefix/ExtractModel for how a caller walks the Registry's
 //     actual keys instead.
 //
-// Shared by router (charge/score) and any offline reader (vmr report's
+// Shared by router (charge/score) and any offline reader (vmr analyze's
 // §2.5 table) — one formula, every consumer, the same reason
 // BaseAmount/ApplyModelMultiplier live here instead of being reimplemented
 // at each call site.
@@ -107,7 +107,7 @@ func LimitKey(l core.Limit, model string) string {
 // charged against a per-model Limit (its Scope alone doesn't say — "*"
 // covers an open-ended set, and even a restricted list only says which
 // models COULD have a bucket, not which ones actually do yet). Callers:
-// router.QuotaStatus (walks the live Registry) and vmr report's §2.5 table
+// router.QuotaStatus (walks the live Registry) and vmr analyze's §2.5 table
 // (walks the offline quota.LoadFile snapshot) — both need the same prefix,
 // computed the same way, so this isn't reimplemented on either side.
 func PerModelPrefix(l core.Limit) string {

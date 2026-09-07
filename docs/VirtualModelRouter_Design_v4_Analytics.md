@@ -67,7 +67,7 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 `AnalyzeSessions` 失败（唯一的失败面是文件级 I/O：`OpenLogFile` 打开失败 / `ForEachLine` 扫描中途出错——单行 JSON 解析失败只是跳过计数，不会导致整体失败）即整个 `Build` 返回错误，切片与 `vmr-report.md` 都不写出，不做分文件容错——现实中触发场景几乎只有一种：`vmr start` 常驻进程的 housekeeping 轮转扫描与 analyze 并发读同一份日志时的竞态窗口，属于"重跑就好"的窄场景，不值得为它引入按文件粒度容错的复杂度。
 
-**会话分组算法**（`session.go` 的 `group()`）：一个 `ctxgraph.Lineage` 对应一个 `SessionInfo`——Lineage 已经在结构上把 Contract/Fork 类型的历史重置切成了独立片段（见 §3.2），`group()` 不再自己判断"这是不是同一个会话"，只是消费这个既有分类。`SessionInfo.ID`（P6.1）直接就是这条 Lineage 的内容寻址身份（`Lineage.LineageID()`，`"l-" + RootHash 前 8 位十六进制`，与 `story` 的 Journey id 同一套口径）——run-scoped 的位置序号 `s01`/`s02`……降级为 `SessionInfo.DisplayAlias`，只供人读表格里快速对照，不再承担身份职责；`story` 的 `JourneyIndexRow.Lineages` 携带同一批 id，两侧的会话行/任务因此可以直接按集合成员关系判定归属，不需要各自算一个哈希再对表。每条记录的"这一轮相对上一轮改了什么"（`DeltaStart`/`ReplacedTail`/`SysChanged`）来自 `ctxgraph.Classify(前一条记录的 manifest, 这一条的 manifest)`，不再有报表包自己的哈希向量/LCP 实现——历史上这是两套并行实现（`ReqInfo.keys` + 私有 `lcp()` vs `ctxgraph.Manifest.Keys` + `Classify`），现在统一成一套。任务边界判定（是否开新任务）曾经是报表领域自己的规则、`story` 另有一份独立实现，架构审查 B3 批把两者收敛进了下文 `internal/taskseg` 一节描述的共享算法：`taskseg.IsNewTask`——新 trace id、或 delta 里出现一条不在父级历史里出现过的真实用户指令，就开一个新任务；父级回复是 NoReply（空回复或 OpenClaw 的 `NO_REPLY` 标记）时不开新任务，视为对同一指令的重试。`report`/`story` 都只调用这一份实现，不再各自维护。
+**会话分组算法**（`session.go` 的 `group()`）：一个 `ctxgraph.Lineage` 对应一个 `SessionInfo`——Lineage 已经在结构上把 Contract/Fork 类型的历史重置切成了独立片段（见 §3.2），`group()` 不再自己判断"这是不是同一个会话"，只是消费这个既有分类。`SessionInfo.ID`（P6.1）直接就是这条 Lineage 的内容寻址身份（`Lineage.LineageID()`，`"l-" + RootHash 前 8 位十六进制`，与 `journey` 的 Journey id 同一套口径）——run-scoped 的位置序号 `s01`/`s02`……降级为 `SessionInfo.DisplayAlias`，只供人读表格里快速对照，不再承担身份职责；`journey` 的 `JourneyIndexRow.Lineages` 携带同一批 id，两侧的会话行/任务因此可以直接按集合成员关系判定归属，不需要各自算一个哈希再对表。每条记录的"这一轮相对上一轮改了什么"（`DeltaStart`/`ReplacedTail`/`SysChanged`）来自 `ctxgraph.Classify(前一条记录的 manifest, 这一条的 manifest)`，不再有报表包自己的哈希向量/LCP 实现——历史上这是两套并行实现（`ReqInfo.keys` + 私有 `lcp()` vs `ctxgraph.Manifest.Keys` + `Classify`），现在统一成一套。任务边界判定（是否开新任务）曾经是报表领域自己的规则、`journey` 另有一份独立实现，架构审查 B3 批把两者收敛进了下文 `internal/taskseg` 一节描述的共享算法：`taskseg.IsNewTask`——新 trace id、或 delta 里出现一条不在父级历史里出现过的真实用户指令，就开一个新任务；父级回复是 NoReply（空回复或 OpenClaw 的 `NO_REPLY` 标记）时不开新任务，视为对同一指令的重试。`report`/`journey` 都只调用这一份实现，不再各自维护。
 
 **跨会话链接，两条并列信号**：
 - `linkStitchedLineages`：任何 Lineage 从其所在的 SessKey 桶断裂（Contract/Fork）又被 `ctxgraph.StitchGraph` 缝合回某个更早 Lineage 时，直接把 `SessionInfo.ContinuedFrom` 设成前驱会话的 ID——这是纯结构信号，覆盖同一 SessKey 桶内的断裂重连（典型：一次原地改写式的历史压缩，开场白锚点原样保留）。
@@ -99,9 +99,9 @@ vmr 的审计日志（Part 1 §9）记录的不是"日志"，是同一份对话�
 
 **§2 的口径是"按量计费等价成本"**（pay-as-you-go equivalent，见 Quota 设计文档"简化：砍什么、留什么"一节的⑧）：这些流量若按定价体系里可解析到的公开价（渠道自定价或第一方列表价）逐 Token 计费要花多少。不是实付金额——包月账号边际成本是 0，经转售商/代理的实际单价只有用户知道；要实付价就配 `providers[].pricing.rates`。标题、免责声明、`§0` 摘要列都按这个口径措辞。
 
-**四张表都带合计行，并把"合计里没有什么"说出来**（`costTotalOf`/`renderCostBy*`）。一个静默省略未定价行的合计，是一个精确的、系统性偏低的、读起来完全正常的数字——这正是这一整套披露机制要防的事。三类旁注：**未定价**（N/M 行的端点解析不出费率，成本未知而非 0）｜**降级估算占比**（上游没返回 usage、按字节数推算 Token 后计价的那部分金额，`EndpointRow.CostEstimateEst` 汇总）｜**费率缺分量**（`EndpointRow.CostRateIncomplete`：`pricing.Rate.Cost` 把 nil 分量按 0 计价——一个防御性下限，不是文档化的降级路径——所以这些端点的金额是系统性偏低的下界；厂商不公布 `cache_read` 而账号缓存命中率 90% 时，九成输入 Token 是没计价的）。**未定价的剔除规则（从未成功送达的行不计入未定价分母——那不是定价缺口）仅适用于 endpoint 表**：该表有 attempt 粒度的 `Forwarded` 信号，一个从未送达的端点单独成行会直接制造"为什么没有它的价格"的错觉；model 和 client 表聚合层级不同、没有 attempt 粒度的送达信号，如实列出所有有流量的行（即使其请求全失败）保留了完整性，两个口径的差异是刻意的。`§0` 摘要的成本列在完全没解析出定价时显示"未定价"而**不是 0**——`0` 读起来是"这些流量免费"，正是 `internal/pricing` 整个包在防的 unknown/zero 混淆。展示币种可以和账号实际计费的币种不同——`-currency`（或 `report.yaml` 的 `currency`/`exchange_rate`）在 `buildPricing` 里对 `pricing.Resolver` 套一层 `WithDisplayFactor`，只重新标定最终显示的数字，从不改动实际解析/计费逻辑；解析不出对应汇率时降级为显示原始计费币种并打印一行警告，不会中断报告生成，同样是"定价问题只丢 `$` 列精度，绝不丢整份报告"的既定哲学。**成本基数在两个半区之间是同一个**：`internal/report` 与 `internal/journey` 都通过 `pricing.Rate.Cost` 计价（同一个**公式**），但公式的**基数**——哪些记录进入这个和——曾经各选各的：report 把上游没返回 usage 的记录按字节数估算计价并计入总额（`§2` 脚注一直写着），story 直接跳过该 step，于是同一批记录两个产物给出不同金额，而两边都不说自己漏了什么。现已统一：降级估算下沉为一份实现（`chatmsg.BodyRaw`/`EstimateRequestBodyTokens`/`EstimateResponseBodyTokens`，放在 `chatmsg` 而不是 `reqdetail`，因为 `reqdetail` import `ctxgraph`、方向上到不了 manifest 构建），`ctxgraph.Manifest` 带上 `EstIn`/`EstOut`（parse cache v3→v4），`story.ComputeJourneyCost` 按同一基数计价并用 `EstimatedSteps` 披露降级占比；端点归属也一并对齐（`outcome == "error"` 的记录两边都不计——report 侧本就要求"某次 attempt 拿到过 2xx"）。这条等价关系由 `cmd/vmr/cost_basis_parity_test.go` 差分测试钉住，理由与 `quota_parity_test.go` 相同，也同样只能放在能同时看见两个产物的组合根。
+**四张表都带合计行，并把"合计里没有什么"说出来**（`costTotalOf`/`renderCostBy*`）。一个静默省略未定价行的合计，是一个精确的、系统性偏低的、读起来完全正常的数字——这正是这一整套披露机制要防的事。三类旁注：**未定价**（N/M 行的端点解析不出费率，成本未知而非 0）｜**降级估算占比**（上游没返回 usage、按字节数推算 Token 后计价的那部分金额，`EndpointRow.CostEstimateEst` 汇总）｜**费率缺分量**（`EndpointRow.CostRateIncomplete`：`pricing.Rate.Cost` 把 nil 分量按 0 计价——一个防御性下限，不是文档化的降级路径——所以这些端点的金额是系统性偏低的下界；厂商不公布 `cache_read` 而账号缓存命中率 90% 时，九成输入 Token 是没计价的）。**未定价的剔除规则（从未成功送达的行不计入未定价分母——那不是定价缺口）仅适用于 endpoint 表**：该表有 attempt 粒度的 `Forwarded` 信号，一个从未送达的端点单独成行会直接制造"为什么没有它的价格"的错觉；model 和 client 表聚合层级不同、没有 attempt 粒度的送达信号，如实列出所有有流量的行（即使其请求全失败）保留了完整性，两个口径的差异是刻意的。`§0` 摘要的成本列在完全没解析出定价时显示"未定价"而**不是 0**——`0` 读起来是"这些流量免费"，正是 `internal/pricing` 整个包在防的 unknown/zero 混淆。展示币种可以和账号实际计费的币种不同——`-currency`（或 `report.yaml` 的 `currency`/`exchange_rate`）在 `buildPricing` 里对 `pricing.Resolver` 套一层 `WithDisplayFactor`，只重新标定最终显示的数字，从不改动实际解析/计费逻辑；解析不出对应汇率时降级为显示原始计费币种并打印一行警告，不会中断报告生成，同样是"定价问题只丢 `$` 列精度，绝不丢整份报告"的既定哲学。**成本基数在两个半区之间是同一个**：`internal/report` 与 `internal/journey` 都通过 `pricing.Rate.Cost` 计价（同一个**公式**），但公式的**基数**——哪些记录进入这个和——曾经各选各的：report 把上游没返回 usage 的记录按字节数估算计价并计入总额（`§2` 脚注一直写着），journey 侧直接跳过该 step，于是同一批记录两个产物给出不同金额，而两边都不说自己漏了什么。现已统一：降级估算下沉为一份实现（`chatmsg.BodyRaw`/`EstimateRequestBodyTokens`/`EstimateResponseBodyTokens`，放在 `chatmsg` 而不是 `reqdetail`，因为 `reqdetail` import `ctxgraph`、方向上到不了 manifest 构建），`ctxgraph.Manifest` 带上 `EstIn`/`EstOut`（parse cache v3→v4），`journey.ComputeJourneyCost` 按同一基数计价并用 `EstimatedSteps` 披露降级占比；端点归属也一并对齐（`outcome == "error"` 的记录两边都不计——report 侧本就要求"某次 attempt 拿到过 2xx"）。这条等价关系由 `cmd/vmr/cost_basis_parity_test.go` 差分测试钉住，理由与 `quota_parity_test.go` 相同，也同样只能放在能同时看见两个产物的组合根。
 
-**已知缺口**：溯源目前只做到聚合级——`report.Pricing` 摘要只给"本次用了哪些定价来源"的总数，单行 `$` 数字看不出它具体走的是标准表还是账号覆盖；真要做需要在 `pricing.Resolve` 的返回值里带上来源标记并一路穿到 `report` 的行结构里，不是小改动，暂缓到额度看板（`section_quota.go`）那批一并考虑，详见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。
+**已知缺口**：溯源目前只做到聚合级——`report.Pricing` 摘要只给"本次用了哪些定价来源"的总数，单行 `$` 数字看不出它具体走的是标准表还是账号覆盖；真要做需要在 `pricing.Resolve` 的返回值里带上来源标记并一路穿到 `report` 的行结构里，不是小改动，暂缓到额度展示相关改动那批一并考虑，详见 `docs/VirtualModelRouter_Design_v4_Quota.md`"现状与后续计划"一节。
 
 ### 2.4 §6.7 Compaction 还原（CCR N-4 的落地）
 
@@ -179,7 +179,7 @@ Agent 每一轮请求都重发累积的完整对话历史。把这个事实推�
 不含任何 Agent 特化知识——纯粹基于消息哈希与结构比较，不做模板匹配。依赖 `{audit, core, chatmsg}`，被 `internal/report`/`internal/journey` 共同依赖，自身不依赖两者（`internal/archtest` 强制）。
 
 - **`Manifest`**（`manifest.go`）：一次请求的内容寻址快照——每条非前导 system 消息的哈希（`Keys []Hash`）、前导 system 块整体哈希（`SysHash`/`HasSys`/`LeadSys`）、`SessKey`（`metadata.user_id` 优先，否则 `"anchor:" + Keys[0]`）、`TS`/`Model`/`Usage` 等请求元数据。`Hash` 是消息规范化 JSON 编码的 md5（`encoding/json` 排序 map key，跨请求同一条消息哈希一致）。
-- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描），或由其流式孪生 `ForEachRecord` 逐条喂给回调、用完即弃（详情页渲染、LLM anchor 校验等「读一次」场景）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。**回捞结果不得被长寿命结构持有**：`story.Step` 只保存 `buildFrom` 从记录里提取好的事实（token 构成、attempt 的 provider/model、本步 delta 的 tool result、system 块字符数），不保存 `*audit.Record` 本身——否则 O(N²) 的原始字节（每轮重发全历史）会被钉在对象图里，把「按需回捞」变成「回捞后缓存」。`Manifest` 另带 `Bytes`（解压 JSON 行长），供 `cmd/vmr` 按字节预算分批构建时把每批的回捞工作集卡在数百 MB。
+- **源坐标与按需回捞**（`records.go`）：每条 `Manifest` 自带 `Path`/`Line`（以及规范化后的 `Req` 坐标），正文不驻留内存；需要原始 `audit.Record` 时由 `FetchRecords` 按文件批量回捞（zstd 不可随机寻址，每个文件只开一次、顺序扫描），或由其流式孪生 `ForEachRecord` 逐条喂给回调、用完即弃（详情页渲染、LLM anchor 校验等「读一次」场景）。不另维护 `map[Hash]→位置` 的独立哈希索引——`Manifest` 自带的坐标已覆盖同一职责。**回捞结果不得被长寿命结构持有**：`journey.Step` 只保存 `buildFrom` 从记录里提取好的事实（token 构成、attempt 的 provider/model、本步 delta 的 tool result、system 块字符数），不保存 `*audit.Record` 本身——否则 O(N²) 的原始字节（每轮重发全历史）会被钉在对象图里，把「按需回捞」变成「回捞后缓存」。`Manifest` 另带 `Bytes`（解压 JSON 行长），供 `cmd/vmr` 按字节预算分批构建时把每批的回捞工作集卡在数百 MB。
 - **编辑分类**（`edit.go`）：相邻 manifest 之间的转换归为五类之一，判据全部基于最长公共前缀（LCP）与集合覆盖率，O(n) 纯结构比较：
   | 编辑 | 判据 | 语义 |
   | --- | --- | --- |
@@ -253,9 +253,9 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **Revision 关系**（`Event.Revises`）：一次 `Splice` 编辑的分岔点是一条消息被原地改写，不是巧合的新消息——不标注的话，全局去重会把改写后的版本渲染成一个全新的、无关的 Event，读起来像是"同一件事说了两遍"。
 
-**`internal/taskseg`：Agent 特化知识 + 会话/任务切分算法（`report`/`story` 共用）**：`ctxgraph` 全程不做模板匹配（§3.1），但"这条 user 消息是不是真实指令，还是路由信封/纯工具结果/心跳时间戳""这次回复是不是 Agent 框架约定的'本轮故意不回复'""chat_id 这类会话标识怎么从消息里抠出来"这三件事本质上依赖具体框架的约定，硬塞进 `ctxgraph` 会破坏它的框架无关性。`taskseg.Profile` 接口（`RealUserText`/`NoReply`/`ChatID`）就是这条边界——`story`（`journey.go` 的任务边界判定、标题提取、缝合边界处的"是否有新指令"判断）与 `report`（`session.go` 的会话/任务边界判定、chat_id 提取、NoReply 检测）都通过这个接口调用，从不各自硬编码某个框架的约定。目前只有两个实现：`OpenClawAware`（认 OpenClaw 已验证过的具体标记）与 `Generic`（模板无关的兜底）——刻意不做基于检测的 profile 注册表/自动选择：第二个真实 profile（另一款 Agent 框架）出现、且真实语料显示需要专属规则时才值得抽象，现在建一个只有两个成员的注册表是猜测未来需求。两个命令目前都用同一个默认（`OpenClawAware`），选择逻辑收在 `cmd/vmr` 的一个共用解析函数（`resolveTaskProfile`）里，不是两处各自判断。
+**`internal/taskseg`：Agent 特化知识 + 会话/任务切分算法（`report`/`journey` 共用）**：`ctxgraph` 全程不做模板匹配（§3.1），但"这条 user 消息是不是真实指令，还是路由信封/纯工具结果/心跳时间戳""这次回复是不是 Agent 框架约定的'本轮故意不回复'""chat_id 这类会话标识怎么从消息里抠出来"这三件事本质上依赖具体框架的约定，硬塞进 `ctxgraph` 会破坏它的框架无关性。`taskseg.Profile` 接口（`RealUserText`/`NoReply`/`ChatID`）就是这条边界——`journey`（`journey.go` 的任务边界判定、标题提取、缝合边界处的"是否有新指令"判断）与 `report`（`session.go` 的会话/任务边界判定、chat_id 提取、NoReply 检测）都通过这个接口调用，从不各自硬编码某个框架的约定。目前只有两个实现：`OpenClawAware`（认 OpenClaw 已验证过的具体标记）与 `Generic`（模板无关的兜底）——刻意不做基于检测的 profile 注册表/自动选择：第二个真实 profile（另一款 Agent 框架）出现、且真实语料显示需要专属规则时才值得抽象，现在建一个只有两个成员的注册表是猜测未来需求。两个命令目前都用同一个默认（`OpenClawAware`），选择逻辑收在 `cmd/vmr` 的一个共用解析函数（`resolveTaskProfile`）里，不是两处各自判断。
 
-`report`/`session.go` 与 `story`/`journey.go` 曾各自维护一份"同一个概念"的切分算法（`responseSummary`/`taskTitle`/`preview`/是否有新指令/挑最新指令这五对同名函数 + 任务边界规则本身）；已收敛进 `taskseg/segment.go`（裁决以 `story` 侧无状态纯函数为权威）：`RealUsers`/`IndexRealUsers`（一次请求只建一次"哪些消息是真实用户指令"的索引）、`HasNewInstruction`（按内容哈希集合判定而非位置，避免历史裁剪把旧消息挤进窗口误判为"新"）、`LastInstruction`/`FirstInstruction`、`IsNewTask`（`traceChanged || (!prevNoReply && hasNewInstr)` 的唯一实现）、`TaskTitle`、`ResponseSummary`、`Preview`。缝合边界特有的 `newInstructionTitleAtStitch` 无 `report` 对应概念，留在 `story` 内。`taskseg` 因此依赖 `internal/ctxgraph` 的 `Hash`/`Manifest` 类型（不成环）。
+`report`/`session.go` 与 `internal/journey/journey.go` 曾各自维护一份"同一个概念"的切分算法（`responseSummary`/`taskTitle`/`preview`/是否有新指令/挑最新指令这五对同名函数 + 任务边界规则本身）；已收敛进 `taskseg/segment.go`（裁决以 `journey` 侧无状态纯函数为权威）：`RealUsers`/`IndexRealUsers`（一次请求只建一次"哪些消息是真实用户指令"的索引）、`HasNewInstruction`（按内容哈希集合判定而非位置，避免历史裁剪把旧消息挤进窗口误判为"新"）、`LastInstruction`/`FirstInstruction`、`IsNewTask`（`traceChanged || (!prevNoReply && hasNewInstr)` 的唯一实现）、`TaskTitle`、`ResponseSummary`、`Preview`。缝合边界特有的 `newInstructionTitleAtStitch` 无 `report` 对应概念，留在 `journey` 内。`taskseg` 因此依赖 `internal/ctxgraph` 的 `Hash`/`Manifest` 类型（不成环）。
 
 **Markdown 渲染**（`render_md.go`）：单文件自包含，事件默认折叠进 `<details>`，Step 拆成 **Messages**（本轮新进入上下文的内容）与 **LLM Response**（推理块、回复文本、每个 tool_call 的完整参数）两段。Compaction 边界渲染信息损失摘要（§3.6）。产物 0600/目录 0700——正文含完整对话内容。每个 Step 的"→ detail"指针与 system-prompt 证据指针：单 `-journey` / `-compare` / `-render-all` 路径渲染成指向 `requests/details/*.md` / `requests/evidence/*.md` 的链接；默认批量套件（不物化）渲染成行内 `文件:行` 坐标（`Manifest.Req`），不产生死链接。概览卡在定价可解析时（单 `-journey`/`-compare` 才穿 `*pricing.Resolver`，默认批量套件不穿）多一行成本估算——与 `j-<id>.json` 的 `cost` 同源（`ComputeJourneyCost`），并标注"按标价估算，非实际账单"。
 
@@ -283,7 +283,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 ### 3.5a Findings：规则派生的 Step 级"疑似问题"清单（`findings.go`）
 
-`internal/report` 的 `buildFindings`（§6.7 之前那批§7 效率发现）是**聚合级**发现——扫全部请求算出一行统计。`story.ComputeFindings(j *Journey, lang i18n.Lang) []Finding` 是同一套"稳定 `Code` + 展示文案分离 + 一句话建议"模式的**Step 级**版本——每条 `Finding` 定位到 Journey 里具体的一个 `StepSeq`（+ 可选的 `RelatedSeq`），不是一个聚合数字。两者故意不共享类型：`internal/archtest` 的 import 边界禁止 `story` 依赖 `report`（反之亦然），语义粒度也本来就不同。
+`internal/report` 的 `buildFindings`（§6.7 之前那批§7 效率发现）是**聚合级**发现——扫全部请求算出一行统计。`journey.ComputeFindings(j *Journey, lang i18n.Lang) []Finding` 是同一套"稳定 `Code` + 展示文案分离 + 一句话建议"模式的**Step 级**版本——每条 `Finding` 定位到 Journey 里具体的一个 `StepSeq`（+ 可选的 `RelatedSeq`），不是一个聚合数字。两者故意不共享类型：`internal/archtest` 的 import 边界禁止 `journey` 依赖 `report`（反之亦然），语义粒度也本来就不同。
 
 **措辞纪律**：每条 Finding 都是"候选/嫌疑清单，不是判决"——文案统一是"检测到疑似 X，建议人工复核"，不是"Agent 在这里出错了"。这不是谦虚，是被学术证据逼出来的克制：Who&When（ICML 2025）/TRAIL（Patronus AI）两个独立数据集上，公开最好的自动根因定位方法 step 级准确率也只有 11%–14.2%——叙事半区不承诺、也不该承诺比这更高的确定性（详见前期 Journey 深挖分析 §3 的规则化边界表）。
 
@@ -307,7 +307,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 **Phase 1b（LLM 语义检测器，`llm_findings.go`，可选）**：`ComputeLLMFindings` 共六个检测器——上表四行加两个复用规则层 `FindingCode` 的（`plan_execution_misalignment` / `constraint_text_dropped_at_compaction`，同码不同触发路径）。仅在 `-llm-addr` 解读层开启时运行；只有 HIGH 置信度、且 `EvidenceAnchor` 在真实 transcript 里逐字命中的才提升为 `Finding`（`SourceLLMInferred`），其余一律丢弃。这六个尚未完成规则层那种黄金样本校准，见 `KNOWN_ISSUES` 的 Phase 1b 语义检测器校准条目。
 
-**I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`story.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
+**I1：`chatmsg.ToolResultList`**（Phase 2 基础设施）：`CheckToolPairing`（F9 因果配对不变量）只证明每个 `tool_call`/`tool_use` 都有匹配的结果，不返回结果内容本身；`ToolResultList(rawMsgs []any) []ToolResult`（`CallID`/`Text`/`IsError`）是它的内容版，复用同一套双协议扫描逻辑。`journey.toolResultsFor(steps, i)` 从**下一个** Step 的请求体里查 `steps[i]` 自己发起的 `tool_call` 的应答——协议本身的轮次结构保证这一点成立：模型在自己发起的 `tool_call` 被应答之前拿不到新的一轮。
 
 **校准（真实语料，两轮，提交前跑而非理论设计后直接上线）**：四处假阳性/精度问题已发现并修复，固化为 `findings_test.go`/`findings_toolresult_test.go` 的具名回归测试——`reasoning_action_mismatch` 改为只扫推理**最后一句** + 双向子串匹配（原对整段做实体差集，假阳性约 90%）；`plan_execution_misalignment` 改为扫描含首个 Step 自己的 `tool_call`、且 `lastNumberedList` 只取**最后一段连续编号**（避免两段独立编号列表被拼成一个虚高的"计划"）、编号列表 > `maxPlanItems`（8）项直接跳过（多为长篇文档非可执行计划）；`unused_tool_result` 改为只在**整个结果的所有实体都没被再引用**时触发（原按单实体判定，目录列表类结果一次列几十个文件、Agent 只跟进几个是正常 triage）。
 
@@ -380,9 +380,9 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 ### 4.1 `internal/i18n`：按来源文件组织的类型化文本
 
-新增的零依赖叶子包，只装类型化的双语文本，不装渲染逻辑、不装业务判断——`internal/report`/`internal/journey` 都合法依赖它，它不依赖两者，也不依赖 `internal/config`（语言这类"报表/叙事产物的展示偏好"不属于路由部署配置，`report`/`story` 本来就经常在没有 `config.yaml` 的场景下运行——见 §4.4）。
+新增的零依赖叶子包，只装类型化的双语文本，不装渲染逻辑、不装业务判断——`internal/report`/`internal/journey` 都合法依赖它，它不依赖两者，也不依赖 `internal/config`（语言这类"报表/叙事产物的展示偏好"不属于路由部署配置，`report`/`journey` 本来就经常在没有 `config.yaml` 的场景下运行——见 §4.4）。
 
-文本**不放在一个大文件里，也不放在消费它的 `report`/`story` 包里**，而是按"它服务哪个源文件"一一对应拆成多个小文件，延续 `internal/report` 里 `section_*.go` 已经验证过的组织原则：`internal/i18n/report_workload.go` 对应 `section_workload.go`，`story_render.go` 对应 `render_md.go`，以此类推。每个文件导出一个"取当前语言这一份文本"的函数，返回一个只在这个文件里定义的 struct，不做成横跨全部章节的巨型 `Catalog`：
+文本**不放在一个大文件里，也不放在消费它的 `report`/`journey` 包里**，而是按"它服务哪个源文件"一一对应拆成多个小文件，延续 `internal/report` 里 `viewmodel_*.go` 已经验证过的组织原则：`internal/i18n/report_workload.go` 对应 `viewmodel_workload.go`，`i18n/journey_render.go` 对应 `render_md.go`，以此类推。每个文件导出一个"取当前语言这一份文本"的函数，返回一个只在这个文件里定义的 struct，不做成横跨全部章节的巨型 `Catalog`：
 
 ```go
 // internal/i18n/report_workload.go
@@ -410,7 +410,7 @@ type EfficiencyText struct {
 
 这样 Go 编译器/`go vet` 的 printf 检查在编译期就独立核实每个语言分支自己的 `Sprintf` 调用，不需要额外写"两种语言占位符数量必须一致"的反射测试——不存在"两边共用同一个模板、其中一边漏填"的风险类别，因为压根没有共用模板。这与"一个格式串 + 两语言共享同一套 `%s` 占位符顺序"的方案相对：后者要求译者倒着数第几个占位符对应哪个参数，是一类肉眼难查的错误源。
 
-语言值像 `report.Build` 现有的 `pricing *Pricing` 参数一样，作为普通参数逐层显式传入，不用包级单例/`atomic.Pointer` 存一份"当前语言"给所有函数隐式读取——这与项目里唯一的包级可变状态先例（`adapter.registry`/`strategy.conditions`）解决的是本质不同的问题（"编译期注册的一组实现，运行时只读" vs "这一次调用要用哪个语言"），不应该套用同一个模式。代价是给约 15 个 `report`/`story` 的导出函数各加一个 `lang i18n.Lang` 参数——这些函数已经在传 `rep *Report2`/`o Row` 这类参数，多一个 token 不构成心智负担的质变。
+语言值像 `report.Build` 现有的 `pricing *Pricing` 参数一样，作为普通参数逐层显式传入，不用包级单例/`atomic.Pointer` 存一份"当前语言"给所有函数隐式读取——这与项目里唯一的包级可变状态先例（`adapter.registry`/`strategy.conditions`）解决的是本质不同的问题（"编译期注册的一组实现，运行时只读" vs "这一次调用要用哪个语言"），不应该套用同一个模式。代价是给约 15 个 `report`/`journey` 的导出函数各加一个 `lang i18n.Lang` 参数——这些函数已经在传 `rep *Report2`/`o Row` 这类参数，多一个 token 不构成心智负担的质变。
 
 ### 4.2 identity 与展示文案分离
 
@@ -428,9 +428,9 @@ type EfficiencyText struct {
 
 两个类型达成这条规则的**具体机制不同**：
 - **`MetricDiff.Label`**（14 个固定标签，无嵌入数据）：`Compare(a, b JourneySummary, lang i18n.Lang)` 直接接收 `lang`，循环体调 `i18n.MetricLabel(lang, string(spec.Code))`（纯静态查表）算出 `Label` 写进 `Comparison.Rows`；`RenderComparisonMarkdown` 直接读 `cmp.Rows[].Label` 不重复查表。
-- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子）：`buildFindings(rep, lang)` 保留 `lang` 参数；`report.Build`/`BuildCached` 自身**不接收** `lang`（刻意保持语言无关），内部先算一份英文默认写进 `rep.Efficiency`，`cmd_report.go` 在写 JSON 前用 `report.LocalizeEfficiency(rep, lang)` 覆写。`section_efficiency.go` 的 Markdown 渲染路径**不读**被覆写的值，保留独立的 `buildFindings(rep, lang)` 调用——否则会引入一条隐藏的调用顺序契约（`Markdown()` 必须在 `LocalizeEfficiency()` 之后），未来新增调用点不遵守就会静默产出语言不一致的输出。给 `Build`/`BuildCached`（已有 6/9 个参数）加 `lang` 本可避免这个顺序依赖，但会牵动数十处测试，改动面大两个数量级，选后者——多付的成本只是一次内存内的纯函数重复调用。
+- **`Finding.Finding`/`Implicated`/`Action`**（拼了插值数据的完整句子）：`buildFindings(rep, lang)` 保留 `lang` 参数；`report.Build`/`BuildCached` 自身**不接收** `lang`（刻意保持语言无关），内部先算一份英文默认写进 `rep.Efficiency`，`cmd_report.go` 在写 JSON 前用 `report.LocalizeEfficiency(rep, lang)` 覆写。`viewmodel_efficiency.go` 的 Markdown 渲染路径**不读**被覆写的值，保留独立的 `buildFindings(rep, lang)` 调用——否则会引入一条隐藏的调用顺序契约（`Markdown()` 必须在 `LocalizeEfficiency()` 之后），未来新增调用点不遵守就会静默产出语言不一致的输出。给 `Build`/`BuildCached`（已有 6/9 个参数）加 `lang` 本可避免这个顺序依赖，但会牵动数十处测试，改动面大两个数量级，选后者——多付的成本只是一次内存内的纯函数重复调用。
 
-`story.Interpret` 的 system prompt 本身指示模型用 en/中文回答（§4.5），不受这条规则约束——它产出的是模型自由文本，不是模板拼句。
+`journey.Interpret` 的 system prompt 本身指示模型用 en/中文回答（§4.5），不受这条规则约束——它产出的是模型自由文本，不是模板拼句。
 
 ### 4.4 配置与命令行
 
@@ -470,13 +470,13 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
   - `-macro-only`：**仅运行宏观聚合报表**；
   - `-list-only`：**仅生成候选索引与列表**，不执行任何 Journey 渲染；
   - `-journey-only`：**仅运行叙事套件**，不生成宏观报表（与 `-macro-only` 不同，可与 `-render-all` 组合）。
-- **默认全套件模式**（无上述互斥选择器）：先跑 story 半区、再跑 report 半区，共用同一个 `-o` 目录，产出完整互链的套件。
+- **默认全套件模式**（无上述互斥选择器）：先跑 journey 半区、再跑 report 半区，共用同一个 `-o` 目录，产出完整互链的套件。
 - **渲染范围与物化控制开关**：
-  - 默认预渲染范围（P14）：默认只预渲染**非噪声候选**（`!story.IsNoiseCategory`，即 `task`/`cron`/`subagent` 均纳入预渲染，仅 `heartbeat` 跳过预渲染并折叠）；
+  - 默认预渲染范围（P14）：默认只预渲染**非噪声候选**（`!journey.IsNoiseCategory`，即 `task`/`cron`/`subagent` 均纳入预渲染，仅 `heartbeat` 跳过预渲染并折叠）；
   - `-render-all`：将渲染范围放宽到物化全部候选（含 `heartbeat`）；
   - `-details`：显式为所有被渲染的 Step 物化全量 `details/*.md` 文件（默认按需懒加载生成，见 §2.5）。
 
-各模式在 `cmd/vmr` 内部共享同一套执行函数（`runReport`/`setupStoryRun` 及既有的 `renderJourney`/
+各模式在 `cmd/vmr` 内部共享同一套执行函数（`runReport`/`setupJourneyRun` 及既有的 `renderJourney`/
 `renderAllJourneys`/`compareJourneys`/`corpusStats`），`cmdAnalyze` 本身只做 flag 解析与按选择器
 路由，不重新实现任何渲染或聚合逻辑——`internal/report`/`internal/journey` 互不 import，`cmd/vmr`
 依旧是唯一同时看到两半区的组合根。
@@ -484,9 +484,9 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 刻意没有做"一次扫描、一份缓存、一次建图"的深度合并：P3 之后两个半区共用同一个内容哈希分片的
 `.cache/parse/`，`analyze` 内部先跑叙事半区再跑宏观半区时，后者那一趟扫描已经是热缓存命中，
 不是重新解析——真正的单遍扫描收益因此有限，而实现成本（把 `AnalyzeSessionsCached` 的扫描与它的
-图构建拆开，让 report/story 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
+图构建拆开，让 report/journey 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
 
-**顺序不是任意的**：story 半区必须先跑、report 半区后跑——`report.Markdown` 只在渲染时
+**顺序不是任意的**：journey 半区必须先跑、report 半区后跑——`report.Markdown` 只在渲染时
 `journeys/index.json` 已存在才会挂链接（`loadStoriesLink`），叙事半区先跑能让这条边
 在**第一次** `vmr analyze` 调用就命中，而不是要等到第二次运行。
 
@@ -500,7 +500,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 ### 4.7 扩展性
 
-新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的文本函数加一个 `case` 分支——不改任何一行 `report`/`story`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Workload(lang)` 等拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
+新增第三种语言：`internal/i18n/lang.go` 加一个常量、`Parse` 认识新的字符串值；每个 `internal/i18n/*.go` 文件里对应的文本函数加一个 `case` 分支——不改任何一行 `report`/`journey`/`cmd/vmr` 的代码，因为它们只认 `i18n.Lang` 类型和从 `i18n.Workload(lang)` 等拿到的 struct，不关心内部有几种语言分支。新增一条文案：在对应文件里给相应 struct 加一个字段（或函数字段）、两个语言分支各填一个值。这条路径没有被架构性堵死，但没有为它预先做任何多余准备（没有语言注册表、没有插件化翻译加载器）——第二个真实需求出现之前，"支持任意多语言"是一个假设的需求，与 `internal/taskseg` 只有两个 profile 实现、刻意不做自动检测注册表是同一个原则。
 
 ---
 
@@ -508,7 +508,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 | 决策 | 备选 | 取舍逻辑 |
 | --- | --- | --- |
-| 内容寻址的 manifest + 编辑分类 + lineage 图（`internal/ctxgraph`），`report`/`story` 共同消费 | 各自一套独立的启发式分组 | 会话、任务、compaction、上下文生命周期本质都是对同一份 manifest 序列做差分；两套独立实现迟早分叉，且已经真实分叉过一次（`report` 的私有 `keys`/`lcp()` 长期不知道 Contract 型历史重置，见 §3.2） |
+| 内容寻址的 manifest + 编辑分类 + lineage 图（`internal/ctxgraph`），`report`/`journey` 共同消费 | 各自一套独立的启发式分组 | 会话、任务、compaction、上下文生命周期本质都是对同一份 manifest 序列做差分；两套独立实现迟早分叉，且已经真实分叉过一次（`report` 的私有 `keys`/`lcp()` 长期不知道 Contract 型历史重置，见 §3.2） |
 | compaction 检测靠结构性编辑分类（Contract/Fork/Splice），模板只是补充证据 | 靠识别已知框架的固定文本标记 | 真实语料至少有三种压缩形态，其中两种没有任何模板可认；结构性判据天然框架无关 |
 | lineage 断裂"宁可断开，不要错连"——低置信度只标注疑似同源，不自动缝合 | 尽量缝合，容忍误连 | 误连（把两个不相关任务缝成一个）比误断（把一个任务切成两段分别展示）代价更高——前者会让读者基于错误的因果关系做判断；断裂在渲染层是显式可见的，误连不是 |
 | `Splice` 与 `ReplaceTail` 分开建模，即便真实语料上前者命中数为零 | 只建模 `ReplaceTail`，不单独拆 `Splice` | 判据本身忠实实现了设计公式，这个模式在当前语料的非剧烈收缩型编辑里没有真实样本，不代表未来不会出现；分开建模的运行时成本是几行代码，不是新增复杂度的理由 |
@@ -518,8 +518,8 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 | 双 Journey 对比（4d）用规则化的相对变化阈值，不生成自由文本解读 | 让 LLM 生成对比叙述 | 4d 和其余八项指标同属"剖面层"（规则派生），LLM 解读层是独立的、可选的第三层，两者不能混——数字必须只由规则产生，混入 LLM 生成的数字会破坏"报告里的每个数字都可复现"这个约束 |
 | 两个半区内部对同一批文件各跑一次独立扫描（`AnalyzeSessions` 内的 `ctxgraph.Scan` 通道 + 报表自己的 `collect()`/`analyzeFile` 通道），用 goroutine 并发而非合并成一趟 | 合并成单一遍历，两边共享同一份解析结果 | 合并需要把两套本来独立演进的特征提取（`ctxgraph` 的哈希/lineage vs 报表的工具签名/角色统计等）耦合进同一个循环体，代价是架构复杂度；并发跑两条独立通道用 goroutine 就能把"审计文件读两遍"的墙钟代价从翻倍压到大致不变。语料规模涨到需要正视这件事之后，先做的是更小的一步：`ctxgraph.Scan` 那条通道加了文件级哈希缓存（`ScanCached`/`.cache/parse/`，见 §2.5），文件内容没变就跳过它的解析，`collect()`/`analyzeFile` 通道仍未缓存、仍全量重跑——合并成单一遍历、让 report 直接消费 `ctxgraph.Manifest` 仍是更大的一步，尚未做 |
 | 报表的独立 compaction 文本匹配（`linkCompactions`）与 `ctxgraph` 的结构化缝合（`linkStitchedLineages`）并存，不用后者取代前者 | 统一成一套机制 | 两者覆盖不同场景：结构化缝合基于精确哈希匹配，对"零字面重合的历史重写"没有信号；文本匹配能覆盖这个盲区，代价是精度较低。合并会让报表在最需要它的场景（标准的独立摘要调用）里失去唯一还有效的信号 |
-| `internal/chatmsg` 承接三方（`ctxgraph`/`story`/`report`）共享的消息解析/实体抽取，不各自维护一份 | 各包各自实现 | 曾经真实发生过：`extractEntities` 一度是 `story` 包的私有函数，`report` 需要同样的能力时面临"复制一份"或"下沉"的选择——下沉到两者都已依赖的 `chatmsg`，换来的是以后只有一处规则要维护，不增加任何一方的依赖面 |
-| 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`story` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |
+| `internal/chatmsg` 承接三方（`ctxgraph`/`journey`/`report`）共享的消息解析/实体抽取，不各自维护一份 | 各包各自实现 | 曾经真实发生过：`extractEntities` 一度是 `journey` 包的私有函数，`report` 需要同样的能力时面临"复制一份"或"下沉"的选择——下沉到两者都已依赖的 `chatmsg`，换来的是以后只有一处规则要维护，不增加任何一方的依赖面 |
+| 语言配置走独立 `report.yaml`，不进 `config.yaml`（§4.4） | 复用 `config.yaml`，加一个 `language` 字段 | `report`/`journey` 本来就不依赖 `internal/config`，且这两个命令经常在没有 `config.yaml`（无 provider 密钥）的场景下运行；语言是纯展示偏好，不该绑定到一份含敏感凭证、面向路由部署的配置文件上 |
 | 叙述字段（`Finding.Finding`/`MetricDiff.Label`）跟随 `-lang`，与 Markdown 一致（§4.3） | JSON 里固定英文，只有 Markdown 本地化 | `Code`/`MetricCode`/`EvidenceAnchor` 已经是程序化消费方唯一应该依赖的稳定锚点（§4.2）；叙述句子再额外锁死英文是重复保险，不是唯一防线。这个项目里唯一真实存在的 JSON 消费脚本（`_eval/calibrate_p1b.go`）只匹配 `EvidenceAnchor`，从不依赖叙述文本本身；≤3 人、聚焦中国大陆场景的团队，`report.yaml` 的 `language: zh` 基本等于"全程只想看中文"，JSON 里混一半英文对这个使用模式没有实际价值，只增加认知负担 |
 | 动态拼句用函数值字段（`func(args...) FindingText`），不用位置化占位符模板（§4.1） | 一个格式串 + 两语言共享同一套 `%s` 占位符顺序 | 中英文语序天然不同；共享模板要求译者数第几个占位符对应哪个参数，是一类肉眼难查的错误源，`go vet` 的 printf 检查覆盖不到"两边模板参数对不上"这类错误。函数字段让每个语言分支各自是独立类型检查过的 `Sprintf` 调用 |
 | 详单渲染按需懒物化（§2.5，P13） | 默认套件批量全量写盘 `details/*.md` | 批量模式预生成数百个 Journey 的详单会产生数百 MB 磁盘写入与数十秒延迟；纯函数链接生成允许按需懒加载，只在用户单点钻取（`-journey`）或显式 `-details` 时物化，兼顾可读性与执行效率 |

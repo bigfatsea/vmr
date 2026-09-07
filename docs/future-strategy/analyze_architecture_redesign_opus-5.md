@@ -697,7 +697,7 @@ reports/journey-viewer.html#data=journeys/details/j-a1b2.json     (file 布局)
 
 ### 6.3 前端工程化边界
 
-- **选定：零依赖内联 SVG**。手写坐标轴与 path，覆盖折线/柱状/热力/散点四种形态，复用既有 "VMR Forensics" 视觉系统（暗色飞行记录仪 / 亮色工程方格纸）。
+- **选定：零依赖内联 SVG**。手写坐标轴与 path，覆盖折线/柱状/热力/延迟分位图（`svgLatencyPlot`）四种形态，复用既有 "VMR Forensics" 视觉系统（暗色飞行记录仪 / 亮色工程方格纸）。
 - **否决图表库**：避免体积、更新及 CSP 限制负担。
 - **主题系统**：通过 CSS 变量注入，支持暗/亮及跟随系统，与 `/status.html` 保持一致视觉。
 
@@ -887,7 +887,7 @@ Digest(c₁, c₂, …, cₙ) :=
 - 配置指纹 = 生效的 `config.yaml` 中**影响金额的那部分**：各 provider 的 `pricing.rates`
   覆盖、顶层 `exchange_rate`、内嵌标准表的 `GeneratedAt`。不是整个配置文件的哈希——
   改一个 `listen` 地址不该让报表全量重算。
-- 分析参数 = 时间窗（`-from`/`-to`）、`-lang`、taskseg profile、自流量排除集
+- 分析参数 = 时间窗（注：实际 CLI 输入通过文件 glob 指定输入范围，时间覆盖由审计输入文件本身的内容哈希集合直接决定，无需单独的 `-from`/`-to` 旗标）、`-lang`、taskseg profile、自流量排除集
   （`report.yaml` 的 `llm_key` / `self_traffic_client_tags`）、以及所有改变**取样口径**的 flag。
   判据是"改了它会不会改变任何一个落盘数值或人读文本"——会，就进指纹。
 
@@ -1017,7 +1017,7 @@ Phase 1 — 数据层闭环                                        4~6 人天
 
 Phase 2 — HTML 看板（替换现有三处自包含渲染器，非纯新增）   5~7 人天
   ├── go:embed 骨架 + 主题变量系统（复用 VMR Forensics 视觉）
-  ├── 零依赖内联 SVG 图表基元（折线/柱状/热力/散点）
+  ├── 零依赖内联 SVG 图表基元（折线/柱状/热力/延迟分位图）
   ├── 六个看板页 + #data= 加载协议 + file:// 提示降级
   ├── 骨架页版本探测 banner + 渲染异常归因（§6.6）
   ├── 前端格式化函数与跨语言 fixture（§5.6）
@@ -1077,6 +1077,7 @@ Phase 1 与 Phase 2 之间无强依赖，可并行。Phase 4 因为放弃了切�
 | 不支持跨语言 `-render-only`（§5.5） | JSON 按既有政策带语言；要改先改语言政策 |
 | `requests/details/*.md` 永不进 `-render-only`（§3.6 末段） | 详单展示单轮全历史，全量物化是 O(N²)；journey 去重后才是 O(N) |
 | 不引入图表库（§6.3） | 体积 + 升级 + CSP 三重负担，换几百行手写 SVG |
+| 选用专用延迟分位图元而非通用散点（§6.3） | 看板选用专用延迟分位图元（`svgLatencyPlot`）而非通用二维散点，满足端点时延分布的真实可视化诉求 |
 | 二进制版本不进缓存指纹（§7.4） | 每次构建全量失效，收益为零 |
 | journey JSON 携带正文（§3.6） | "JSON 比 Markdown 少"本身就是缺陷；blob 表去重后增幅约五成，可接受 |
 | 废弃自包含 HTML 与 `-redact`（§6.4，D6/D15） | 价值被托管 + Markdown 覆盖；`-redact` 在骨架形态下无处安放 |

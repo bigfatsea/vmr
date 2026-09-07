@@ -133,7 +133,7 @@ type DetailWriter struct {
 // parent, i.e. dir's sibling — dir is always {outDir}/details (every
 // caller follows this convention), so this resolves to {outDir}/evidence,
 // matching internal/journey's own future use of the same directory (P3.4's
-// scope is `vmr report` only; the convention itself is package-agnostic).
+// scope is the macro report half only; the convention itself is package-agnostic).
 func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailWriter, error) {
 	// 0o700/0o600 throughout: detail files carry the same full conversation
 	// bodies as the audit JSONL they were derived from, which is
@@ -234,7 +234,7 @@ func (dw *DetailWriter) Close() (int, error) {
 //
 // Deprecated: WriteDetails is retained only as the two-pass differential
 // baseline TestBuildOnRecordMatchesWriteDetails (detail_test.go) diffs
-// Build's single-pass onRecord hook against, byte-for-byte. `vmr report`
+// Build's single-pass onRecord hook against, byte-for-byte. `vmr analyze`
 // itself no longer calls this — Build's onRecord hook covers detail export
 // in the same pass session analysis already runs. Production callers use
 // BuildCached with an onRecord hook (see DetailWriter.Submit), not this.

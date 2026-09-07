@@ -11,7 +11,7 @@ import (
 
 // Resolver memoizes Resolve() across repeated (provider, model) lookups
 // against a shared Table and one ResolveOptions-shaped policy per provider.
-// `vmr report` calls RateFor once per audit record — tens of thousands of
+// `vmr analyze` calls RateFor once per audit record — tens of thousands of
 // calls easily reusing the same provider+model pair — and re-walking the
 // 4-step canonical resolution that often would be wasteful. Safe for
 // concurrent use.
@@ -19,7 +19,7 @@ type Resolver struct {
 	table       *Table
 	perProvider map[string]ProviderPolicy
 	// displayFactor, when non-zero and not 1, scales every Rate RateFor
-	// returns — vmr report's final "resolved in USD, SHOWN in a different
+	// returns — vmr analyze's final "resolved in USD, SHOWN in a different
 	// display currency" step (see WithDisplayFactor). A pure linear rescale
 	// applied once here, so aggregate.go's per-record Cost() math
 	// (internal/report/cost.go's costFor) stays currency-unaware — it just
@@ -57,7 +57,7 @@ func NewResolver(table *Table, perProvider map[string]ProviderPolicy) *Resolver 
 }
 
 // WithDisplayFactor returns a new Resolver that scales every RateFor result
-// by f — vmr report's display-currency step (cmd/vmr/cmd_report.go's
+// by f — vmr analyze's display-currency step (cmd/vmr/cmd_report.go's
 // buildPricing): resolution still happens in USD, this only rescales the
 // number shown. A genuinely new Resolver (its own cache/mutex), not a
 // shallow copy of r, so the two never share a sync.Mutex value under two
@@ -76,7 +76,7 @@ func (r *Resolver) WithDisplayFactor(f float64) *Resolver {
 // entry, no override, or a dangling discount over an empty Base (an
 // all-nil Rate is "unpriced", not "free": best-effort reports drop the $
 // column rather than report $0.00). A resolved-but-incomplete Rate still
-// returns ok=true (best-effort — vmr report degrades gracefully on partial
+// returns ok=true (best-effort — vmr analyze degrades gracefully on partial
 // data).
 func (r *Resolver) RateFor(provider, model string) (Rate, bool) {
 	spec, ok := r.resolve(provider, model)

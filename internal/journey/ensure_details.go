@@ -22,7 +22,7 @@ import (
 // safe to call before every render (EnsureRendered's own existence check
 // makes repeat calls cheap) — this is what lets a spine's "→ detail" link
 // (render_spine_step.go) resolve without requiring the caller to have run
-// `vmr report -details` first.
+// `vmr analyze -details` first.
 //
 // recs is the record map the caller already fetched (BuildAllWithRecords)
 // — passed straight through so a batch render doesn't re-decompress its
@@ -34,10 +34,10 @@ import (
 // s.PrevManifest (nil at a Lineage's first Step, including a stitch
 // boundary — see its own doc comment on Step) is passed straight through:
 // this is what keeps a page EnsureJourneyDetails writes byte-identical to
-// the one `vmr report -details` would write for the same record, matching
+// the one `vmr analyze -details` would write for the same record, matching
 // internal/report/session.go's own per-Lineage "prev" semantics.
 //
-// A per-Step failure is reported to w, not returned — `vmr story` is a
+// A per-Step failure is reported to w, not returned — `vmr analyze` is a
 // read-only offline analysis tool, and a single record that fails to
 // render (a rare malformed body, a transient disk error) should not cost
 // the reader the other 99% of an otherwise-complete Journey narrative. The

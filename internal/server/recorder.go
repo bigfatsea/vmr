@@ -17,7 +17,7 @@ import (
 // stream (SSE or otherwise) would make recorder.buf grow unbounded in
 // lockstep, entirely outside the client's own memory budget. Kept above
 // router.bufferedCap (audit completeness matters more here — a truncated
-// audit copy loses vmr report/vmr story information, not just "smart"
+// audit copy loses `vmr analyze` information, not just "smart"
 // normalization) but still just a fraction of the old 64MB: today's
 // ~1M-token context windows are ~3-4MB of bytes, and a legitimate response
 // has no structural reason to run many times larger than that.

@@ -295,7 +295,7 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 	case "tokens":
 		lc.Resolved.Metric = core.MetricTokens
 	case "cost":
-		return fmt.Errorf("provider %q: %s: metric: cost is no longer supported — express the same budget as a tokens limit (convert once: budget ÷ price), optionally with model_multipliers/token_weights to weight expensive models; $ cost estimates remain available in vmr report", providerName, fieldPrefix)
+		return fmt.Errorf("provider %q: %s: metric: cost is no longer supported — express the same budget as a tokens limit (convert once: budget ÷ price), optionally with model_multipliers/token_weights to weight expensive models; $ cost estimates remain available in vmr analyze", providerName, fieldPrefix)
 	case "":
 		return fmt.Errorf("provider %q: %s: metric is required (requests|tokens)", providerName, fieldPrefix)
 	default:

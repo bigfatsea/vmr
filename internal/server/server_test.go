@@ -325,7 +325,7 @@ func TestRouterAuthMultiKeyTagsRequests(t *testing.T) {
 // with neither api_key nor api_keys configured, the door stays fully open
 // (no config change from today), but a client that voluntarily sends an
 // Authorization value still gets it KeyTag-derived and recorded, letting it
-// self-identify to `vmr report` with zero vmr-side config. A client sending
+// self-identify to `vmr analyze` with zero vmr-side config. A client sending
 // nothing must still get an untagged, unaffected record (backward compat).
 func TestNoAuthConfiguredSelfDeclaredTag(t *testing.T) {
 	u := newUpstream(t)

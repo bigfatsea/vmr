@@ -2,7 +2,7 @@
 
 // Package fmtutil holds small, dependency-free display-formatting functions
 // shared between vmr's live router log (internal/router) and its offline
-// `vmr report`/`vmr diagnose` output. Split out of internal/core: these are
+// `vmr analyze`/`vmr diagnose` output. Split out of internal/core: these are
 // display formatting, not routing-domain types, and keeping them separate
 // from core means the analysis layer (internal/report) doesn't have to pull
 // in core.Endpoint/core.CanonicalRequest and friends just to render a number.
@@ -19,7 +19,7 @@ import (
 // FmtBytes renders a byte count human-readably (B/KB/MB) — request/response
 // bodies range from a few hundred bytes to several MB (inline images), so a
 // fixed unit would be either unreadable or falsely precise at one end.
-// Shared by every place that prints a body size (`vmr report` rendering,
+// Shared by every place that prints a body size (`vmr analyze` rendering,
 // chatmsg's inline-attachment placeholder text) so they don't each carry
 // their own copy of this threshold logic.
 func FmtBytes(n int64) string {
@@ -66,7 +66,7 @@ func FmtSeconds(d time.Duration, decimals int) string {
 
 // FmtPercent renders a 0..1 fraction as a percentage string ("42.3%").
 // decimals follows FmtSeconds' convention (trade precision for width): 1
-// for `vmr report`'s dense per-cell metrics tables, 0 for `vmr story`'s
+// for the macro report's dense per-cell metrics tables, 0 for the journey half's
 // narrative text. Before this, internal/report and internal/journey each
 // carried their own independently-written pctStr with this same
 // multiply-and-format line — one at 1 decimal, one at 0 — and a comment in
@@ -78,8 +78,8 @@ func FmtPercent(f float64, decimals int) string {
 }
 
 // FmtTokens renders a token count for a dense Markdown table cell
-// (K/M/B suffix, no space, no unit letter below 1000) — `vmr report`'s
-// per-cell metrics tables and `vmr story`'s narrative tables both want this
+// (K/M/B suffix, no space, no unit letter below 1000) — the macro report's
+// per-cell metrics tables and the journey half's narrative tables both want this
 // same compact bare-number shape. Before this, internal/report/metrics.go
 // and internal/journey/render_md.go each carried their own independently
 // written fmtTokens with this same threshold logic, drifted apart only by
@@ -105,7 +105,7 @@ func FmtTokens(n int64) string {
 }
 
 // FmtTokensPlain renders a token count with a space-separated unit letter
-// ("500 T", "1.2 KT", "1.5 MT") — `vmr report`'s detail.go facts line wants
+// ("500 T", "1.2 KT", "1.5 MT") — `vmr analyze`'s detail.go facts line wants
 // each value visually self-labeled rather than relying on a table header,
 // unlike FmtTokens' bare-number table-cell shape. This is a genuinely
 // different format from FmtTokens (not just a formatting accident), so it

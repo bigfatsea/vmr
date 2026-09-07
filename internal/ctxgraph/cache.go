@@ -70,9 +70,9 @@ type CachedFile struct {
 	// (its cache.go's fileFacts, marshaled) — opaque to this package on
 	// purpose: ctxgraph knows the shared cache file's shape (so it can
 	// round-trip this field on every read/write, including from
-	// `vmr story`, which never populates or reads it), not
+	// the journey half, which never populates or reads it), not
 	// report-specific bucketing semantics. nil/absent means "no facts
-	// cached yet for this file" (e.g. only `vmr story` has scanned it so
+	// cached yet for this file" (e.g. only the journey half has scanned it so
 	// far, or report support predates this file's cache entry).
 	Facts json.RawMessage `json:"facts,omitempty"`
 }
@@ -136,7 +136,7 @@ type fileCacheResult struct {
 // splitting/stitching need to see the whole graph to be correct (same
 // reason a narrower file selection based on a Journey id's own embedded
 // timestamp isn't safe — see docs/VirtualModelRouter_Design_v4_Analytics.md's
-// vmr-stories.json section), so this only ever skips the expensive
+// journeys/index.json section), so this only ever skips the expensive
 // per-file parse step, never any file from the graph itself.
 //
 // prior may be nil (no cache yet — everything is a miss, identical to
@@ -204,7 +204,7 @@ func ScanCached(paths []string, prior *FileCache) (*Graph, *FileCache, error) {
 // scanCachedFile resolves one path: a hash match against prior reuses its
 // cached Manifests, anything else falls through to a fresh scanFile. A
 // cache hit whose Manifests contain a nil element (a hand-edited or
-// truncated-write-corrupted vmr-requests.json/vmr-stories.json can
+// truncated-write-corrupted requests/index.json/journeys/index.json can
 // syntactically decode a `null` array entry without erroring) is treated
 // as a miss rather than trusted as-is — buildGraph's sort dereferences
 // every element, so a nil here would panic the whole scan instead of

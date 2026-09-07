@@ -337,7 +337,7 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 // (needed only by ingestEndpoints, so not part of rec2 itself).
 func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
 	if st.excludeClientTags[rc.clientKey] {
-		// Self-analysis traffic (P6.4): vmr story's own -llm-addr calls
+		// Self-analysis traffic (P6.4): `vmr analyze`'s own -llm-addr calls
 		// route back through this same instance and land in the audit
 		// log like any other request — but their cost/tokens are the
 		// analysis tool's own overhead, not the workload being analyzed,

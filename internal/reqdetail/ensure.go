@@ -30,8 +30,8 @@ import (
 // Reading and comparing the fingerprint
 // (readRenderFingerprint) replaces that assumption with an actual check,
 // while keeping the property the callers rely on — the filename itself needs no
-// I/O to compute — so this is what lets both `vmr report` (every record,
-// in one pass) and a future per-Journey caller (only the records it
+// I/O to compute — so this is what lets both the macro report half (every record,
+// in one pass) and a journey caller (only the records it
 // touches) call this same function and never race or duplicate work.
 //
 // evidenceDir, when non-empty, is where this record's system prompt and

@@ -612,10 +612,10 @@ func replayHeaders(h http.Header) http.Header {
 }
 
 // writeReplayRecord appends one audit.Record describing this replay to
-// path, independent of the main audit chain (`vmr report` never sees it
+// path, independent of the main audit chain (`vmr analyze` never sees it
 // unless the caller explicitly points a glob at it). Field layout mirrors
 // what a live request produces (server.go/router.go), so a replay record
-// reads correctly through the same tools (jq, vmr report, another vmr
+// reads correctly through the same tools (jq, vmr analyze, another vmr
 // replay): Client.Request.Body is the pre-rewrite body actually replayed
 // (virtual model name intact, exactly like live traffic — NOT ep.Model's
 // rewritten outBody, which belongs on the Attempt instead); Client.Response

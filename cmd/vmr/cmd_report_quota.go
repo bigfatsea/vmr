@@ -1,6 +1,6 @@
 // Ver 2026-08-22, by Sonnet 5
 
-// `vmr report`'s §2.5 quota-vs-consumption sub-table: resolving each
+// `vmr analyze`'s §2.5 quota-vs-consumption sub-table: resolving each
 // config.yaml provider's declared quota.limits[] against live state read
 // from vmr-quota.json into the report.ProviderQuotaRef shape
 // buildProviderQuotaRows consumes. Split out of cmd_report.go per
@@ -26,7 +26,7 @@ import (
 // or live quota is unavailable without failing report generation.
 func buildProviderQuotas(cfg *config.Config, loadErr error, configPath string, tw io.Writer, now time.Time) (map[string][]report.ProviderQuotaRef, string) {
 	if loadErr != nil {
-		// cmdReport already printed one unified warning for cfgErr — a
+		// runReport already printed one unified warning for cfgErr — a
 		// second, near-identical one here would just repeat it.
 		// configPath is kept in the signature purely so this function's
 		// doc comment / callers stay symmetric with buildPricing's.

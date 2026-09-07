@@ -177,7 +177,7 @@ func TestRenderJourneyIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 }
 
 // TestRenderJourneyIndexMarkdown_ListOnlyNote: when no row has been rendered
-// (bare `vmr story` / -list-only), the index precedes its table with a note
+// (bare -list-only / list mode), the index precedes its table with a note
 // that the Tasks/Rendered columns are deliberately blank — a reader
 // shouldn't have to guess whether a column of "—" is missing data (问题 31).
 // A run that did render (or carried prior Tasks/Rendered forward) omits it.

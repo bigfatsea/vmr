@@ -1,10 +1,10 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Package i18n holds the two-language (English/Chinese) text vmr report and
-// vmr story render into their Markdown/CLI output. It is a zero-dependency
+// Package i18n holds the two-language (English/Chinese) text `vmr analyze`
+// renders into its Markdown/CLI output. It is a zero-dependency
 // leaf package, same tier as internal/core and internal/fmtutil: it
 // declares no import on internal/config, internal/router, internal/server,
-// internal/report, or internal/journey, so report and story can depend on it
+// internal/report, or internal/journey, so both macro report and journey halves can depend on it
 // without violating internal/archtest's import boundaries,
 // and cmd/vmr can depend on it to parse -lang/report.yaml without either of
 // them needing to know about configuration at all.
@@ -23,7 +23,7 @@ import (
 	"strings"
 )
 
-// Lang selects vmr report/vmr story's output language. The zero value is
+// Lang selects `vmr analyze`'s output language. The zero value is
 // EN, so any call site not yet updated during incremental migration keeps
 // behaving as English by construction.
 type Lang uint8

@@ -443,7 +443,7 @@ func TestPricing_PricingTable_AlwaysAvailable(t *testing.T) {
 // figure, not the raw declared number. This is the layer a pricing
 // resolution edge case actually manifested at historically ("label one
 // currency, compute in another") — a regression here would silently ship
-// a wrong number in every vmr report run.
+// a wrong number in every vmr analyze run.
 func TestPricing_Resolver_EndToEnd_CurrencyConversion(t *testing.T) {
 	yaml := pricingCfg("exchange_rate: {CNY: 7.1}\n", `pricing:
   currency: CNY

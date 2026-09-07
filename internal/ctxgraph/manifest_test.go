@@ -145,7 +145,7 @@ func TestBuildManifest_ResponsesTopLevelInstructions(t *testing.T) {
 		t.Errorf("MsgIdx = %v, want [1]", m.MsgIdx)
 	}
 	if m.SessKey == "" {
-		t.Error("SessKey should not be empty — this is the actual grouping signal vmr report/story rely on")
+		t.Error("SessKey should not be empty — this is the actual grouping signal vmr analyze relies on")
 	}
 }
 
@@ -153,7 +153,7 @@ func TestBuildManifest_ResponsesTopLevelInstructions(t *testing.T) {
 // the same Responses-protocol conversation (second turn resends the first
 // turn's input plus a follow-up, the way agent clients always resend full
 // history) land in the same SessKey bucket — the concrete, user-visible
-// behavior "vmr report/vmr story can't group Responses traffic into
+// behavior "vmr analyze can't group Responses traffic into
 // sessions" was about.
 func TestBuildManifest_ResponsesSameConversationSameSessKey(t *testing.T) {
 	t.Parallel()

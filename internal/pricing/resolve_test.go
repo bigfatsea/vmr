@@ -344,7 +344,7 @@ func TestResolve_StackedDiscounts_ComposeMultiplicatively(t *testing.T) {
 	}
 }
 
-// --- Complete: the incompleteness gate vmr report's $ estimate labeling uses ---
+// --- Complete: the incompleteness gate vmr analyze's $ estimate labeling uses ---
 
 func TestComplete_NilSpec(t *testing.T) {
 	if ok, _, _ := Complete(nil); ok {

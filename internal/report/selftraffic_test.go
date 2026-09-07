@@ -14,7 +14,7 @@ import (
 
 // selfTrafficFixtureRecords returns two records that differ only in
 // client_key_tag: "workload" (the thing being analyzed) and "vmrstory"
-// (a stand-in for vmr story -llm-addr's own self-analysis traffic).
+// (a stand-in for vmr analyze -llm-addr's own self-analysis traffic).
 func selfTrafficFixtureRecords() []map[string]any {
 	mk := func(ts time.Time, tag string) map[string]any {
 		return map[string]any{

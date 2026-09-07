@@ -15,7 +15,7 @@
 // - A component absent from the source JSON is OMITTED from the output
 // row entirely — never written as 0.0. internal/pricing.Rate depends on
 // this distinction (nil = unknown, *float64(0) = explicitly free) to keep
-// `vmr report`'s $ estimates honest: an unknown component is rendered as
+// `vmr analyze`'s $ estimates honest: an unknown component is rendered as
 // "rate incomplete" rather than silently treated as $0, and an explicit
 // 0.0 is a real "this provider genuinely doesn't charge for it" claim that
 // shows up in the total (see internal/report/cost.go's CostRateIncomplete).
