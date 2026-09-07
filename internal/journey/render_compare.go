@@ -25,6 +25,9 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	t := i18n.Compare(lang)
 
 	w("%s", t.Title)
+	if cmp.Partial {
+		w("> ⚠️ %s\n\n", t.PartialBanner)
+	}
 	renderComparisonSummaryCard(w, cmp, t)
 	w("%s", t.SideBlock("A", cmp.A.ID, escapeHTML(cmp.A.Title), cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
 	w("%s", t.SideBlock("B", cmp.B.ID, escapeHTML(cmp.B.Title), cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))

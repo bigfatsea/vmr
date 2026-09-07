@@ -264,12 +264,12 @@
             <div class="tape">
               <div class="tape-side a">
                 <h3>${aRef.Title || aRef.title || aRef.ID || 'A'}</h3>
-                <div class="meta">${aRef.ID || aRef.id || ''} · ${aRef.Steps || aRef.steps || 0} steps · ${aRef.ToolCalls || aRef.tool_calls || 0} tool calls</div>
+                <div class="meta">${aRef.ID || aRef.id || ''} · ${aRef.Steps || aRef.steps || 0} steps · ${aRef.ToolCalls || aRef.tool_calls || 0} tool calls${(aRef.Partial || aRef.partial) ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
                 <div class="meta"><a href="journey-viewer.html#data=journeys/details/${aRef.ID || aRef.id}.json">open A →</a></div>
               </div>
               <div class="tape-side b">
                 <h3>${bRef.Title || bRef.title || bRef.ID || 'B'}</h3>
-                <div class="meta">${bRef.ID || bRef.id || ''} · ${bRef.Steps || bRef.steps || 0} steps · ${bRef.ToolCalls || bRef.tool_calls || 0} tool calls</div>
+                <div class="meta">${bRef.ID || bRef.id || ''} · ${bRef.Steps || bRef.steps || 0} steps · ${bRef.ToolCalls || bRef.tool_calls || 0} tool calls${(bRef.Partial || bRef.partial) ? ' · <span style="color:var(--amber)">⚠️ partial</span>' : ''}</div>
                 <div class="meta"><a href="journey-viewer.html#data=journeys/details/${bRef.ID || bRef.id}.json">open B →</a></div>
               </div>
             </div>

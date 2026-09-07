@@ -23,6 +23,8 @@ type CompareItem struct {
 	Filename string             `json:"filename"`
 	Markdown string             `json:"markdown"`
 	HTML     string             `json:"html,omitempty"`
+	// Partial marks a head-truncated side (D19: data, not filename suffix).
+	Partial  bool               `json:"partial,omitempty"`
 	A        journey.JourneyRef `json:"a_journey"`
 	B        journey.JourneyRef `json:"b_journey"`
 }
@@ -66,8 +68,9 @@ func RebuildComparesIndex(comparesDir string) error {
 		}
 
 		var cmp struct {
-			A journey.JourneyRef `json:"a_journey"`
-			B journey.JourneyRef `json:"b_journey"`
+			A       journey.JourneyRef `json:"a_journey"`
+			B       journey.JourneyRef `json:"b_journey"`
+			Partial bool               `json:"partial"`
 		}
 		if err := json.Unmarshal(data, &cmp); err != nil {
 			continue
@@ -77,6 +80,7 @@ func RebuildComparesIndex(comparesDir string) error {
 		item := CompareItem{
 			Filename: name,
 			Markdown: mdName,
+			Partial:  cmp.Partial,
 			A:        cmp.A,
 			B:        cmp.B,
 		}
@@ -151,6 +155,12 @@ func renderComparesIndexMarkdown(items []CompareItem) string {
 
 		sideA := formatSide(item.A)
 		sideB := formatSide(item.B)
+		if item.A.Partial {
+			sideA += " ⚠️ partial"
+		}
+		if item.B.Partial {
+			sideB += " ⚠️ partial"
+		}
 
 		links := fmt.Sprintf("[%s](%s)", item.Markdown, item.Markdown)
 		if item.HTML != "" {

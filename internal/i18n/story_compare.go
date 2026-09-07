@@ -19,6 +19,10 @@ import (
 // CompareText is render_compare.go's text, in one language.
 type CompareText struct {
 	Title                          string
+	// PartialBanner is the ⚠️ line shown when either side is head-truncated
+	// (D19: the "-partial" filename suffix is retired; partiality lives as
+	// the Comparison's Partial field and this banner).
+	PartialBanner                  string
 	SummaryCard                    func(items []string) string
 	SummaryNotableTop              func(items string) string
 	SummaryDivergence              func(index, aSeq, bSeq int) string
@@ -89,6 +93,7 @@ func Compare(lang Lang) CompareText {
 	if lang == ZH {
 		return CompareText{
 			Title: "# Journey 对比：A vs B\n\n",
+			PartialBanner: "有一侧或两侧 Journey 的开头被所加载的文件范围截断，受影响一方展示的只是可见部分。",
 			SummaryCard: func(items []string) string {
 				var b strings.Builder
 				b.WriteString("> **对比摘要**：\n")
@@ -214,6 +219,7 @@ func Compare(lang Lang) CompareText {
 	}
 	return CompareText{
 		Title: "# Journey Comparison: A vs B\n\n",
+		PartialBanner: "One or both journeys are head-truncated by the loaded file range; the affected side shows only its visible part.",
 		SummaryCard: func(items []string) string {
 			var b strings.Builder
 			b.WriteString("> **Comparison Summary**:\n")

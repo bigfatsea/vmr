@@ -486,8 +486,10 @@ func TestCmdStory_CompareUnknownID(t *testing.T) {
 
 // TestCmdStory_ComparePartialGating covers compareJourneys' own
 // -include-partial gate: a partial-head candidate on either side must be
-// rejected the same way a single -journey render is, and accepted (with the
-// "-partial" filename suffix) once -include-partial is passed.
+// rejected the same way a single -journey render is, and accepted once
+// -include-partial is passed — with partiality carried as data (D19): no
+// "-partial" filename suffix, a partial:true field in the JSON, a banner in
+// the .md, and a partial mark in compares/index.md.
 func TestCmdStory_ComparePartialGating(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := storyMsg("system", "sys")
@@ -538,8 +540,56 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 			t.Fatalf("cmdAnalyze -compare with -include-partial: %v", err)
 		}
 	})
-	if !strings.Contains(out, "-partial.md") {
-		t.Errorf("comparison output should carry the -partial suffix when a side is partial-head:\n%s", out)
+	if !strings.Contains(out, "compare-") || !strings.Contains(out, ".md") {
+		t.Errorf("comparison output should mention the written compare files:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "-partial") {
+			t.Errorf("compare filename must not carry the retired -partial suffix (D19): %s", line)
+		}
+	}
+
+	// Partiality rides as data: JSON field, .md banner, index mark.
+	comparesDir := filepath.Join(outDir, "compares")
+	entries, err := os.ReadDir(comparesDir)
+	if err != nil {
+		t.Fatalf("compares dir: %v", err)
+	}
+	var cmpJSONName string
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "compare-") && strings.HasSuffix(e.Name(), ".json") {
+			cmpJSONName = e.Name()
+		}
+	}
+	if cmpJSONName == "" {
+		t.Fatalf("no compare-*.json written: %v", entries)
+	}
+	cmpData, err := os.ReadFile(filepath.Join(comparesDir, cmpJSONName))
+	if err != nil {
+		t.Fatalf("read compare json: %v", err)
+	}
+	var cmp struct {
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(cmpData, &cmp); err != nil {
+		t.Fatalf("unmarshal compare json: %v", err)
+	}
+	if !cmp.Partial {
+		t.Error("compare json should carry partial:true when a side is head-truncated")
+	}
+	cmpMD, err := os.ReadFile(filepath.Join(comparesDir, strings.TrimSuffix(cmpJSONName, ".json")+".md"))
+	if err != nil {
+		t.Fatalf("read compare md: %v", err)
+	}
+	if !strings.Contains(string(cmpMD), "truncated") {
+		t.Errorf("compare md should carry the partial banner:\n%.200s", cmpMD)
+	}
+	indexMD, err := os.ReadFile(filepath.Join(comparesDir, "index.md"))
+	if err != nil {
+		t.Fatalf("read compares/index.md: %v", err)
+	}
+	if !strings.Contains(string(indexMD), "partial") {
+		t.Errorf("compares/index.md should mark the partial side:\n%s", indexMD)
 	}
 }
 

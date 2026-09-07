@@ -299,8 +299,9 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 // JSON pair — the same .md+.json convention writeJourneyFile uses for a
 // single Journey. Either side being partial-head gates on -include-partial
 // exactly like a single-journey render (an unstable ID is still unstable
-// when it's one half of a comparison), and the output filename picks up the
-// same "-partial" self-disclosure suffix if either side is.
+// when it's one half of a comparison); partiality itself rides as data —
+// the Comparison's Partial field plus the .md banner (D19: no filename
+// suffix).
 func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
@@ -324,6 +325,12 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err != nil {
 		return err
 	}
+	// Stamp partiality onto the built Journeys before anything derives a
+	// Summary or filename from them: IsPartialHead's verdict lived only in
+	// these locals, so the compare path's own side JSONs and the Comparison's
+	// Partial field silently lost the fact (D19 makes the field the carrier).
+	jA.Partial = partialA
+	jB.Partial = partialB
 	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
 	cmp := story.Compare(sA, sB, lang)
 	// ReportFile points at each side's own journey report; the comparison
@@ -376,9 +383,6 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 
 	base := "compare-" + jA.ID + "-vs-" + jB.ID
-	if partialA || partialB {
-		base += "-partial"
-	}
 	jsonPath := filepath.Join(comparesDir, base+".json")
 	data, err := json.MarshalIndent(cmp, "", "  ")
 	if err != nil {

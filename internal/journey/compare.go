@@ -44,6 +44,11 @@ type JourneyRef struct {
 	Steps      int    `json:"steps"`
 	ToolCalls  int    `json:"tool_calls"`
 	ReportFile string `json:"report_file,omitempty"`
+	// Partial is D19's data-carried replacement for the retired "-partial"
+	// filename suffix: this side's head was truncated by the loaded file
+	// range. It rides on the ref so compares/index and the .md banner can
+	// mark partiality without re-reading the side's own journey JSON.
+	Partial bool `json:"partial,omitempty"`
 }
 
 func journeyRef(s JourneySummary) JourneyRef {
@@ -52,7 +57,7 @@ func journeyRef(s JourneySummary) JourneyRef {
 		steps += len(tk.Steps)
 	}
 	ref := JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To,
-		Steps: steps, ToolCalls: s.Metrics.ToolCallCount}
+		Steps: steps, ToolCalls: s.Metrics.ToolCallCount, Partial: s.Partial}
 	if s.ID != "" {
 		ref.ReportFile = JourneyReportFile(s.ID, s.Partial)
 	}
@@ -67,6 +72,11 @@ type Comparison struct {
 	B     JourneyRef      `json:"b_journey"`
 	Rows  []MetricDiff    `json:"rows"`
 	Tools []ToolShareDiff `json:"tools"` // union of both sides' tool names, A's Count-desc order first then B-only names
+
+	// Partial is true when either side is head-truncated (D19: partiality is
+	// a property of the loaded range, carried as data instead of a filename
+	// suffix); which side is told by A.Partial / B.Partial.
+	Partial bool `json:"partial,omitempty"`
 
 	// Extras holds rule-derived facts beyond Compare's own Metrics diff:
 	// endpoint/cache/system-prompt/final-context/duration/deliverable —
@@ -93,7 +103,7 @@ func Compare(a, b JourneySummary, lang i18n.Lang) Comparison {
 	for i, spec := range metricSpecs {
 		rows[i] = metricDiff(spec.Code, i18n.MetricLabel(lang, string(spec.Code)), spec.Kind, spec.Value(ma), spec.Value(mb))
 	}
-	return Comparison{A: journeyRef(a), B: journeyRef(b), Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
+	return Comparison{A: journeyRef(a), B: journeyRef(b), Partial: a.Partial || b.Partial, Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }
 
 // toolShareDiff merges two Journeys' tool-call distributions by name: A's
