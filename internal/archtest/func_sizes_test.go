@@ -51,9 +51,9 @@ var funcLineExemptions = map[string]int{
 	// linear happy path. Long because they are compositions, not algorithms —
 	// splitting them tends to produce helpers with one caller and no
 	// independent meaning.
-	"internal/diagnose/diagnose.go:Run":    190,
-	"internal/replay/replay.go:Run":        160,
-	"cmd/vmr/cmd_start.go:cmdStart":        160,
+	"internal/diagnose/diagnose.go:Run":      190,
+	"internal/replay/replay.go:Run":          160,
+	"cmd/vmr/cmd_start.go:cmdStart":          160,
 	"cmd/vmr/cmd_journey.go:compareJourneys": 125,
 	// cmdReport/cmdStory/cmdAnalyze themselves stay below the default limit
 	// once P9.1 (CLI convergence) pulled their linear pipelines out into
