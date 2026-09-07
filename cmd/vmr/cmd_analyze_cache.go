@@ -40,10 +40,40 @@ func analyzeModeString(r *analyzeRun) string {
 	}
 }
 
+// configHasQuotaLimits reports whether any provider declares a quota limit —
+// i.e. whether §2.5 / finance.json's provider_quotas will render at all.
+func configHasQuotaLimits(r *analyzeRun) bool {
+	if r.cfg == nil {
+		return false
+	}
+	for _, p := range r.cfg.Providers {
+		if p.Quota != nil && len(p.Quota.Limits) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func computeTargetL2(r *analyzeRun, mode string) ([32]byte, bool) {
 	inHashes, err := report.ComputeInputHashes(r.paths)
 	if err != nil || len(inHashes) == 0 {
 		return [32]byte{}, false
+	}
+	// NEW-D: when the config carries quota limits, §2.5 and finance.json's
+	// provider_quotas are a function of <log_dir>/vmr-quota.json — a live
+	// counter file the routing half rewrites on every charged request, plus
+	// wall-clock-derived period progress. It changes rendered numbers exactly
+	// like the audit inputs do (§7.2's "does it change any persisted value"
+	// test), so its content must invalidate L2. File absent => nothing
+	// folded; a later appearance flips the digest, which is correct (the
+	// report gains the live column).
+	if r.cfg != nil && r.cfg.LogDir != "" && configHasQuotaLimits(r) {
+		qp := filepath.Join(r.cfg.LogDir, "vmr-quota.json")
+		if _, statErr := os.Stat(qp); statErr == nil {
+			if qh, hErr := report.ComputeInputHashes([]string{qp}); hErr == nil && len(qh) == 1 {
+				inHashes = append(inHashes, qh[0])
+			}
+		}
 	}
 	pricingFP := resolvePricingFingerprint(r.cfg, r.exchangeRate)
 	// LLM identity rides the params fingerprint only on the modes that

@@ -7,11 +7,13 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/config"
 	"vmr/internal/i18n"
 	"vmr/internal/journey"
 	"vmr/internal/report"
@@ -554,5 +556,94 @@ func TestAnalyzeCache_ZoomArtifactMissingRebuilt(t *testing.T) {
 
 	if _, err := os.Stat(jJSON); err != nil {
 		t.Fatalf("N-B4 failure: journey JSON was not rebuilt when missing on L2 hit: %v", err)
+	}
+}
+
+// TestAnalyzeCache_QuotaJSONInvalidatesL2 pins NEW-D: §2.5 / finance.json's
+// provider_quotas are a function of <log_dir>/vmr-quota.json (a live counter
+// file the routing half rewrites on every charged request). It changes
+// rendered numbers exactly like the audit inputs do, so its content must
+// fold into the L2 digest — otherwise an L2 hit on the same logs serves a
+// frozen quota snapshot. Only folded when the config actually declares a
+// quota limit (so a quota-less config never sees a spurious invalidation).
+func TestAnalyzeCache_QuotaJSONInvalidatesL2(t *testing.T) {
+	path1 := crossCheckFixture(t)
+	logDir := t.TempDir()
+	quotaPath := filepath.Join(logDir, "vmr-quota.json")
+	writeQuota := func(requests int) {
+		body := `{"version":1,"accounts":{"p1":{"requests/1mo":{"period_start":1785000000,"counters":{"fresh":0,"cache_read":0,"cache_write":0,"out":0,"requests":` +
+			strconv.Itoa(requests) + `},"estimated":0}}}}` + "\n"
+		if err := os.WriteFile(quotaPath, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfgQuota := "listen: 127.0.0.1:8800\nlog_dir: " + logDir + `
+providers:
+  - name: p1
+    base_url: {openai-completions: "https://api.example.com"}
+    api_key: "sk-test"
+    quota:
+      limits:
+        - metric: requests
+          every: 1mo
+          since: 2026-07-22
+          amount: 18000
+models:
+  coding:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [mod1]
+`
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(cfgQuota), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, cfgErr := config.Load(cfgPath)
+	if cfgErr != nil {
+		t.Fatalf("config.Load: %v", cfgErr)
+	}
+
+	run := &analyzeRun{paths: []string{path1}, outDir: t.TempDir(), lang: i18n.EN, cfg: cfg}
+
+	writeQuota(10)
+	d1, ok := computeTargetL2(run, "default")
+	if !ok {
+		t.Fatal("computeTargetL2 not ok (quota v1)")
+	}
+	writeQuota(9000) // the routing half burned more of the plan
+	d2, ok := computeTargetL2(run, "default")
+	if !ok {
+		t.Fatal("computeTargetL2 not ok (quota v2)")
+	}
+	if d1 == d2 {
+		t.Fatalf("vmr-quota.json content change did not invalidate the L2 digest — §2.5 would serve a stale snapshot on the next L2 hit")
+	}
+
+	// Negative: a config with NO quota limits must ignore the quota file
+	// entirely (no spurious invalidation).
+	cfgNoQuota := strings.Replace(cfgQuota, `    quota:
+      limits:
+        - metric: requests
+          every: 1mo
+          since: 2026-07-22
+          amount: 18000
+`, "", 1)
+	noQPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(noQPath, []byte(cfgNoQuota), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgNoQ, err := config.Load(noQPath)
+	if err != nil {
+		t.Fatalf("config.Load (no quota): %v", err)
+	}
+	runNoQ := &analyzeRun{paths: []string{path1}, outDir: t.TempDir(), lang: i18n.EN, cfg: cfgNoQ}
+	writeQuota(1)
+	n1, _ := computeTargetL2(runNoQ, "default")
+	writeQuota(99999)
+	n2, _ := computeTargetL2(runNoQ, "default")
+	if n1 != n2 {
+		t.Fatalf("quota-less config: vmr-quota.json change must NOT affect the L2 digest")
 	}
 }
