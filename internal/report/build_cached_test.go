@@ -174,7 +174,7 @@ func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 // TestSaveCacheDir_LoadCacheDir_RoundTrip for that half now.
 func TestWriteRequestsJSON_RoundTripsRows(t *testing.T) {
 	dir := t.TempDir()
-	rows := []RequestRow{{TS: "2026-07-24T00:00:00Z", Outcome: "ok"}, {TS: "2026-07-24T00:01:00Z", Outcome: "error"}}
+	rows := []RequestRow{{TS: 1753315200000, Outcome: "ok"}, {TS: 1753315260000, Outcome: "error"}}
 
 	outPath := filepath.Join(dir, "vmr-requests.json")
 	n, err := WriteRequestsJSON(rows, outPath)

@@ -201,7 +201,7 @@ func goldenFixture() *Report2 {
 			From: "2026-07-24T10:00:00+08:00", To: "2026-07-24T10:02:00+08:00",
 			TrafficStats: fixedStats(1, 1, 0, 10_000, 8_000, 2_000)},
 	)
-	rep.requests = []RequestRow{{Req: "a.jsonl:3", TS: rep.Meta.From}}
+	rep.requests = []RequestRow{{Req: "a.jsonl:3", TS: 1753318800000}}
 	return rep
 }
 

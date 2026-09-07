@@ -794,11 +794,10 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	}
 }
 
-// TestWriteFailedIndex checks vmr-requests-failed.md/.jsonl: they must list
-// exactly the 3 failed rows (not the 1 plain-ok row), link to detail files,
-// and leave the normal per-group detail untouched (the per-tag sibling still
-// renders every request, failed ones included) — the failed index is
-// additive, not a move.
+// TestWriteFailedIndex checks requests/failed.md and the failed JSONL: they
+// must list exactly the 3 failed rows (not the 1 plain-ok row) and link to
+// detail files. The failed index is additive — requests/index.json still
+// carries every request, failed ones included.
 func TestWriteFailedIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
@@ -811,24 +810,16 @@ func TestWriteFailedIndex(t *testing.T) {
 	if err := WriteFailedIndex(rows, dir, i18n.EN, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
-	failedMD, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(failedMD)
-	if !strings.Contains(s, "3 total.") {
-		t.Errorf("want exactly 3 failed rows reported:\n%s", s)
-	}
 
-	n, err := WriteRequestsJSONL(FailedRequestRows(rows), filepath.Join(dir, "vmr-requests-failed.jsonl"))
+	n, err := WriteRequestsJSONL(FailedRequestRows(rows), filepath.Join(dir, "requests", "failed.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 3 {
-		t.Fatalf("want 3 rows written to vmr-requests-failed.jsonl, got %d", n)
+		t.Fatalf("want 3 rows written to requests/failed.jsonl, got %d", n)
 	}
 
-	// requests/failed.md is written into requests/ directory
+	// requests/failed.md is written into the requests/ directory (D7).
 	failedReqMD, err := os.ReadFile(filepath.Join(dir, "requests", "failed.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -850,7 +841,7 @@ func TestWriteFailedIndexEmpty(t *testing.T) {
 	if err := WriteFailedIndex(nil, dir, i18n.EN, filepath.Join(dir, "details")); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "vmr-requests-failed.md"))
+	b, err := os.ReadFile(filepath.Join(dir, "requests", "failed.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

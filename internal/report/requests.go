@@ -137,27 +137,17 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 	return os.WriteFile(filepath.Join(targetDir, "index.json"), data, 0o600)
 }
 
-// fmtDisplayFull renders a RequestRow.TS (RFC3339, source offset) as
-// "2026-07-24 00:17:58" in fmtutil.DisplayZone (the system default
-// timezone), regardless of the record's own embedded offset. Falls back to
-// a raw cut when the timestamp doesn't parse (defensive; Build always
-// writes RFC3339).
+// fmtDisplayFull renders an RFC3339 timestamp (CompactionRow.TS, the
+// Meta.From/To window bounds) as "2026-07-24 00:17:58" in
+// fmtutil.DisplayZone (the system default timezone), regardless of the
+// value's own embedded offset. Falls back to a raw cut when the timestamp
+// doesn't parse (defensive; Build always writes RFC3339).
 func fmtDisplayFull(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		return cut(ts, 19)
 	}
 	return t.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
-}
-
-// fmtDisplayTime is fmtDisplayFull but time-only ("00:17:58"), for per-turn table
-// cells where the enclosing session/task header already carries the date.
-func fmtDisplayTime(ts string) string {
-	t, err := time.Parse(time.RFC3339, ts)
-	if err != nil {
-		return cut(ts, 19)
-	}
-	return t.In(fmtutil.DisplayZone).Format("15:04:05")
 }
 
 func orDashModel(m string) string {

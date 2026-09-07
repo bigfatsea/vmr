@@ -43,10 +43,10 @@ func clusterFailedRequests(failed []RequestRow) (clusters int, maxCount int, max
 	var list []cluster
 	var cur cluster
 	for _, r := range failed {
-		t, err := time.Parse(time.RFC3339, r.TS)
-		if err != nil {
+		if r.TS == 0 {
 			continue
 		}
+		t := time.UnixMilli(r.TS)
 		if len(cur.rows) == 0 {
 			cur = cluster{start: t, end: t, rows: []RequestRow{r}}
 			continue
@@ -104,23 +104,17 @@ func clusterFailedRequests(failed []RequestRow) (clusters int, maxCount int, max
 	return
 }
 
-// WriteFailedIndex writes vmr-requests-failed.md: a flat, time-ordered index
-// of every failed request (FailedRequestRows), each row's "文件" column a
+// WriteFailedIndex writes requests/failed.md: a flat, time-ordered index of
+// every failed request (FailedRequestRows), each row's "文件" column a
 // detailCell (a details/*.md link when the target actually exists on disk,
 // else the req coordinate — see detailCell's own doc comment, P13.4). This
-// is a dedicated error-analysis index — it does not remove or alter failed
-// requests anywhere else; vmr-requests.md and every per-group sibling keep
-// listing them exactly as before.
+// is the one human-readable request document D7 kept: triage is the case
+// where you should not have to open a browser first.
 func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir string) error {
 	detailSet := buildDetailFileSet(detailDir)
 	t := i18n.Requests(lang)
 	failed := FailedRequestRows(rows)
 	sort.SliceStable(failed, func(i, j int) bool {
-		ti, erri := time.Parse(time.RFC3339, failed[i].TS)
-		tj, errj := time.Parse(time.RFC3339, failed[j].TS)
-		if erri == nil && errj == nil {
-			return ti.Before(tj)
-		}
 		return failed[i].TS < failed[j].TS
 	})
 
@@ -137,13 +131,7 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 	}
 	outPath := filepath.Join(targetDir, "failed.md")
 	if len(failed) == 0 {
-		if err := os.WriteFile(outPath, []byte(b.String()), 0o600); err != nil {
-			return err
-		}
-		if targetDir != dir {
-			_ = os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), []byte(b.String()), 0o600)
-		}
-		return nil
+		return os.WriteFile(outPath, []byte(b.String()), 0o600)
 	}
 	clusters, maxCount, maxSpan, maxClasses := clusterFailedRequests(failed)
 	if clusters > 1 || (clusters == 1 && maxCount > 1) {
@@ -152,15 +140,8 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 	w("%s", t.FailedTableHeader)
 	for _, r := range failed {
 		w("| %s | %s | %s/%s | %s | %s | %s |\n",
-			fmtDisplayFull(r.TS), sessTaskCell(r), r.Protocol, orDashModel(r.Model),
+			r.TSDisplay, sessTaskCell(r), r.Protocol, orDashModel(r.Model),
 			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
 	}
-	content := []byte(b.String())
-	if err := os.WriteFile(outPath, content, 0o600); err != nil {
-		return err
-	}
-	if targetDir != dir {
-		_ = os.WriteFile(filepath.Join(dir, "vmr-requests-failed.md"), content, 0o600)
-	}
-	return nil
+	return os.WriteFile(outPath, []byte(b.String()), 0o600)
 }

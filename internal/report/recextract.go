@@ -21,7 +21,7 @@ import (
 // buildRequestRow maps a rec2 to its per-request export row.
 func buildRequestRow(rc *rec2) RequestRow {
 	rr := RequestRow{
-		TS:         rc.ts.Format("2006-01-02T15:04:05Z07:00"),
+		TS:         rc.ts.UnixMilli(),
 		TSDisplay:  rc.ts.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"),
 		Session:    rc.sessionID,
 		Task:       rc.taskID,
