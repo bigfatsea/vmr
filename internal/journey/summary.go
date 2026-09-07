@@ -10,6 +10,7 @@ package journey
 import (
 	"time"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -26,10 +27,15 @@ import (
 // Journey. A rendering need that isn't on this shape is a data-layer gap,
 // not a viewmodel problem.
 type JourneySummary struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	From        time.Time `json:"from"`
-	To          time.Time `json:"to"`
+	ID    string    `json:"id"`
+	Title string    `json:"title"`
+	From  time.Time `json:"from"`
+	To    time.Time `json:"to"`
+	// FromDisplay/ToDisplay are From/To in fmtutil.DisplayZone (§5.6: the
+	// frontend shows these verbatim, no timezone math). From/To stay the
+	// machine form.
+	FromDisplay string    `json:"from_display,omitempty"`
+	ToDisplay   string    `json:"to_display,omitempty"`
 	Partial     bool      `json:"partial,omitempty"`
 	Metrics     Metrics   `json:"metrics"`
 	Findings    []Finding `json:"findings,omitempty"`
@@ -97,6 +103,12 @@ func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, c
 		Structure: s,
 		Bodies:    s.Bodies,
 		Cost:      cost,
+	}
+	if !j.From.IsZero() {
+		sum.FromDisplay = j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
+	}
+	if !j.To.IsZero() {
+		sum.ToDisplay = j.To.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
 	}
 	// The two cross-Step facts the renderer needs that BuildStructure's
 	// per-Step projection can't see: the head lineage's unresolved break,

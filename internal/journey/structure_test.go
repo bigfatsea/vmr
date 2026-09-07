@@ -662,6 +662,60 @@ func TestBuildStructure_TruncationLimits(t *testing.T) {
 	}
 }
 
+// TestJourneySummary_TimePointsCarryDisplayForm is §9's journey-side dual-time
+// guard: every absolute instant journey-viewer.html renders — a Step's TS and
+// the Journey's From/To — must serialize with a DisplayZone-formatted
+// companion so the frontend does no timezone math (§5.6, §11.1 #4).
+func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys := msg("system", "sys")
+	u1 := msg("user", "start")
+	r1 := mkRecWithUsage(at(0), []any{sys, u1}, "ok", 100, 10)
+	r2 := mkRecWithUsage(at(5), []any{sys, u1, msg("assistant", "ok"), msg("user", "more")}, "ok", 120, 15)
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
+
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"from_display", "to_display"} {
+		var s string
+		if err := json.Unmarshal(top[k], &s); err != nil || s == "" {
+			t.Errorf("JourneySummary.%s missing or empty (%s)", k, top[k])
+		}
+	}
+
+	var parsed JourneySummary
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	stepsSeen := 0
+	for _, task := range parsed.Structure.Tasks {
+		for _, s := range task.Steps {
+			stepsSeen++
+			if s.TS.IsZero() {
+				continue
+			}
+			if s.TSDisplay == "" {
+				t.Errorf("step seq %d has a TS but no ts_display", s.Seq)
+			}
+		}
+	}
+	if stepsSeen == 0 {
+		t.Fatal("fixture produced no steps — guard is vacuous")
+	}
+}
+
 // TestJourneyReportFile_Normalization tests D19 / §1.1 filename normalization.
 func TestJourneyReportFile_Normalization(t *testing.T) {
 	cases := []struct {

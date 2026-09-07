@@ -29,6 +29,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 )
 
 // maxBodyExcerptChars is the uniform 3000-character data-layer truncation cap
@@ -157,6 +158,10 @@ type StepStructure struct {
 	Seq int       `json:"seq"`
 	Req string    `json:"req,omitempty"`
 	TS  time.Time `json:"ts"`
+	// TSDisplay is TS rendered in fmtutil.DisplayZone (§5.6: the frontend
+	// shows this verbatim and never converts a timezone). journey-viewer.html
+	// reads it; TS stays the machine form.
+	TSDisplay string `json:"ts_display,omitempty"`
 	// Model/Protocol/Outcome are Manifest.Model/Protocol/Outcome verbatim —
 	// Model (the virtual model name) and Outcome are what
 	// reqdetail.FileName needs to recompute this Step's detail-page name
@@ -377,6 +382,9 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore, repeats
 	if s.Manifest != nil {
 		ss.Req = s.Manifest.Req
 		ss.TS = s.Manifest.TS
+		if !s.Manifest.TS.IsZero() {
+			ss.TSDisplay = s.Manifest.TS.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
+		}
 		ss.Endpoint = s.Manifest.Endpoint
 		ss.Model = s.Manifest.Model
 		ss.Protocol = s.Manifest.Protocol
