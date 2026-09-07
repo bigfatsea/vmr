@@ -115,7 +115,7 @@
 
 1. `49e316d` — fix(analyze): sweep orphan journeys on L2-hit full runs; refresh stale ownership comments (包含 F1, F2 及缓存代码拆分)
 2. `8663dee` — feat(compare): carry partiality as data, retire the -partial filename suffix (D19) (T1 落实)
-3. 待提交 — refactor(analytics): eradicate legacy story/corpus symbols and filenames (T2 落实)
+3. `9e11b22` — refactor(analytics): eradicate legacy story/corpus symbols and filenames (T2 落实)
 
 ### 与前轮 review 的关系
 
