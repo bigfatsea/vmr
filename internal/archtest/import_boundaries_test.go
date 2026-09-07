@@ -204,6 +204,7 @@ var forbiddenImports = map[string][]string{
 // in the tree.
 var zeroInternalDepPackages = []string{
 	"vmr/internal/buildinfo",
+	"vmr/internal/digest",
 	"vmr/internal/core",
 	"vmr/internal/fmtutil",
 	"vmr/internal/i18n",

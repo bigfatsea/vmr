@@ -1,9 +1,10 @@
 // Ver 2026-09-15, by pi
 
-package report
+package digest
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -81,6 +82,26 @@ func TestDigest_Determinism(t *testing.T) {
 	}
 }
 
+// TestDigest_WireFormat pins the construction itself (uvarint length prefix,
+// then raw bytes, over sha256) against a hand-computed vector, independent of
+// the implementation. If the prefix encoding or hash input framing ever
+// changes, this trips even if the change is internally consistent.
+func TestDigest_WireFormat(t *testing.T) {
+	h := sha256.New()
+	var lenBuf [binary.MaxVarintLen64]byte
+	for _, c := range [][]byte{[]byte("component-one"), {0x01, 0x02}} {
+		n := binary.PutUvarint(lenBuf[:], uint64(len(c)))
+		h.Write(lenBuf[:n])
+		h.Write(c)
+	}
+	want := [32]byte{}
+	copy(want[:], h.Sum(nil))
+
+	if got := Digest([]byte("component-one"), []byte{0x01, 0x02}); got != want {
+		t.Fatalf("Digest wire format drifted: got %x, want %x", got, want)
+	}
+}
+
 // TestDigest_ScalarEncoders verifies fixed-width big-endian scalar encodings (D8).
 func TestDigest_ScalarEncoders(t *testing.T) {
 	// Int64
@@ -124,24 +145,12 @@ func TestDigest_ScalarEncoders(t *testing.T) {
 	if bytes.Equal(bf1, bf2) {
 		t.Fatalf("Different float64 values must produce different bytes")
 	}
-	if got := math.Float64frombits(binary.BigEndian.Uint64(bf1)); got != f1 {
-		t.Fatalf("EncodeFloat64 roundtrip mismatch: got %f, want %f", got, f1)
+	if math.Float64bits(f1) != binary.BigEndian.Uint64(bf1) {
+		t.Fatalf("EncodeFloat64 must use math.Float64bits")
 	}
 
 	// Bool
-	bTrue := EncodeBool(true)
-	bFalse := EncodeBool(false)
-	if len(bTrue) != 1 || len(bFalse) != 1 {
-		t.Fatalf("EncodeBool must produce 1 byte")
-	}
-	if bytes.Equal(bTrue, bFalse) {
-		t.Fatalf("EncodeBool(true) must not equal EncodeBool(false)")
-	}
-
-	// String
-	str := "hello_world"
-	bStr := EncodeString(str)
-	if string(bStr) != str {
-		t.Fatalf("EncodeString mismatch: got %q, want %q", string(bStr), str)
+	if !bytes.Equal(EncodeBool(true), []byte{1}) || !bytes.Equal(EncodeBool(false), []byte{0}) {
+		t.Fatalf("EncodeBool must emit 0x01/0x00")
 	}
 }

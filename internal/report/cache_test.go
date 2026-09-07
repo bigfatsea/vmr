@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"vmr/internal/digest"
 
 	"vmr/internal/pricing"
 )
@@ -145,12 +146,12 @@ func TestComputeAnalysisParamsFingerprint(t *testing.T) {
 // TestComputeL2L3Digest_RendererVersionOrthogonality verifies row 5 of the invalidation matrix:
 // RendererVersion bump changes L3 but leaves L2 unchanged (§7.4).
 func TestComputeL2L3Digest_RendererVersionOrthogonality(t *testing.T) {
-	in1 := Digest([]byte("input1"))
-	in2 := Digest([]byte("input2"))
+	in1 := digest.Digest([]byte("input1"))
+	in2 := digest.Digest([]byte("input2"))
 	inHashes := [][]byte{in1[:], in2[:]}
-	pricingFP := Digest([]byte("pricing"))
-	paramsFP := Digest([]byte("params"))
-	vmFP := Digest([]byte("vm_slices"))
+	pricingFP := digest.Digest([]byte("pricing"))
+	paramsFP := digest.Digest([]byte("params"))
+	vmFP := digest.Digest([]byte("vm_slices"))
 
 	l2V1 := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])
 	l2V2 := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])

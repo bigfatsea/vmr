@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"vmr/internal/ctxgraph"
+	"vmr/internal/digest"
 	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 )
@@ -87,35 +88,35 @@ type AnalysisParams struct {
 // top-level exchange rates, and standard table generation stamp (D8 / §7.2).
 func ComputePricingFingerprint(standardGen string, exchangeRates map[string]float64, policies map[string]pricing.ProviderPolicy) []byte {
 	var components [][]byte
-	components = append(components, EncodeString(standardGen))
+	components = append(components, digest.EncodeString(standardGen))
 
 	// Exchange rates: sorted by currency code
 	ccys := fmtutil.SortedKeys(exchangeRates)
-	components = append(components, EncodeInt64(int64(len(ccys))))
+	components = append(components, digest.EncodeInt64(int64(len(ccys))))
 	for _, ccy := range ccys {
-		components = append(components, EncodeString(strings.ToUpper(ccy)))
-		components = append(components, EncodeFloat64(exchangeRates[ccy]))
+		components = append(components, digest.EncodeString(strings.ToUpper(ccy)))
+		components = append(components, digest.EncodeFloat64(exchangeRates[ccy]))
 	}
 
 	// Provider pricing policies: sorted by provider name
 	pNames := fmtutil.SortedKeys(policies)
-	components = append(components, EncodeInt64(int64(len(pNames))))
+	components = append(components, digest.EncodeInt64(int64(len(pNames))))
 	for _, pName := range pNames {
 		policy := policies[pName]
-		components = append(components, EncodeString(pName))
+		components = append(components, digest.EncodeString(pName))
 
 		// Aliases
 		aliases := fmtutil.SortedKeys(policy.Aliases)
-		components = append(components, EncodeInt64(int64(len(aliases))))
+		components = append(components, digest.EncodeInt64(int64(len(aliases))))
 		for _, a := range aliases {
-			components = append(components, EncodeString(a))
-			components = append(components, EncodeString(policy.Aliases[a]))
+			components = append(components, digest.EncodeString(a))
+			components = append(components, digest.EncodeString(policy.Aliases[a]))
 		}
 
 		// Overrides in declared rule order (first-match-wins)
-		components = append(components, EncodeInt64(int64(len(policy.Overrides))))
+		components = append(components, digest.EncodeInt64(int64(len(policy.Overrides))))
 		for _, ov := range policy.Overrides {
-			components = append(components, EncodeString(ov.Model))
+			components = append(components, digest.EncodeString(ov.Model))
 			components = append(components, encodeOptFloat64(ov.Discount))
 			components = append(components,
 				encodeOptFloat64(ov.Explicit.InFresh),
@@ -126,7 +127,7 @@ func ComputePricingFingerprint(standardGen string, exchangeRates map[string]floa
 		}
 	}
 
-	d := Digest(components...)
+	d := digest.Digest(components...)
 	return d[:]
 }
 
@@ -146,60 +147,60 @@ func encodeOptFloat64(v *float64) []byte {
 func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 	var components [][]byte
 	components = append(components,
-		EncodeString(p.Lang),
-		EncodeString(p.TaskProfile),
-		EncodeBool(p.IncludePartial),
-		EncodeBool(p.IncludeSelfTraffic),
+		digest.EncodeString(p.Lang),
+		digest.EncodeString(p.TaskProfile),
+		digest.EncodeBool(p.IncludePartial),
+		digest.EncodeBool(p.IncludeSelfTraffic),
 	)
 
 	// Sorted self-traffic tags
 	sortedTags := make([]string, len(p.SelfTrafficTags))
 	copy(sortedTags, p.SelfTrafficTags)
 	sort.Strings(sortedTags)
-	components = append(components, EncodeInt64(int64(len(sortedTags))))
+	components = append(components, digest.EncodeInt64(int64(len(sortedTags))))
 	for _, tag := range sortedTags {
-		components = append(components, EncodeString(tag))
+		components = append(components, digest.EncodeString(tag))
 	}
 
 	components = append(components,
-		EncodeString(p.DisplayCCY),
-		EncodeString(p.LLMSelfTag),
-		EncodeString(p.LLMAddr),
-		EncodeString(p.LLMModel),
-		EncodeBool(p.RenderAll),
-		EncodeBool(p.Details),
-		EncodeString(p.Mode),
-		EncodeString(p.From),
-		EncodeString(p.To),
+		digest.EncodeString(p.DisplayCCY),
+		digest.EncodeString(p.LLMSelfTag),
+		digest.EncodeString(p.LLMAddr),
+		digest.EncodeString(p.LLMModel),
+		digest.EncodeBool(p.RenderAll),
+		digest.EncodeBool(p.Details),
+		digest.EncodeString(p.Mode),
+		digest.EncodeString(p.From),
+		digest.EncodeString(p.To),
 	)
 
-	d := Digest(components...)
+	d := digest.Digest(components...)
 	return d[:]
 }
 
 // ComputeL2Digest computes the product-level L2 data cache digest (§7.1, §7.2):
-// Digest(输入文件哈希按序…, 配置指纹, 格式版本, 分析参数).
+// digest.Digest(输入文件哈希按序…, 配置指纹, 格式版本, 分析参数).
 func ComputeL2Digest(inputHashes [][]byte, pricingFP []byte, formatVersion int, paramsFP []byte) [32]byte {
 	var components [][]byte
-	components = append(components, EncodeInt64(int64(len(inputHashes))))
+	components = append(components, digest.EncodeInt64(int64(len(inputHashes))))
 	for _, h := range inputHashes {
 		components = append(components, h)
 	}
 	components = append(components, pricingFP)
-	components = append(components, EncodeInt64(int64(formatVersion)))
+	components = append(components, digest.EncodeInt64(int64(formatVersion)))
 	components = append(components, paramsFP)
-	return Digest(components...)
+	return digest.Digest(components...)
 }
 
 // ComputeVMFingerprint computes the deterministic SHA-256 fingerprint over
 // on-disk JSON slices that feed ViewModels.
 func ComputeVMFingerprint(sliceHashes [][]byte) [32]byte {
 	var components [][]byte
-	components = append(components, EncodeInt64(int64(len(sliceHashes))))
+	components = append(components, digest.EncodeInt64(int64(len(sliceHashes))))
 	for _, h := range sliceHashes {
 		components = append(components, h)
 	}
-	return Digest(components...)
+	return digest.Digest(components...)
 }
 
 // ComputeVMFingerprintFromManifest constructs the VM data fingerprint by hashing
@@ -236,9 +237,9 @@ func ComputeVMFingerprintFromManifest(outDir string) ([32]byte, error) {
 }
 
 // ComputeL3Digest computes the presentation-layer L3 cache digest (§7.1, §7.2):
-// Digest(ViewModel 指纹, 渲染器版本, 语言).
+// digest.Digest(ViewModel 指纹, 渲染器版本, 语言).
 func ComputeL3Digest(vmFP []byte, rendererVersion int, lang string) [32]byte {
-	return Digest(vmFP, EncodeInt64(int64(rendererVersion)), EncodeString(lang))
+	return digest.Digest(vmFP, digest.EncodeInt64(int64(rendererVersion)), digest.EncodeString(lang))
 }
 
 // CachePath returns the full path to the cache fingerprint record.
