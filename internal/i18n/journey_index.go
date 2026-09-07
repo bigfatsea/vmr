@@ -1,6 +1,6 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Pairs with internal/journey/journeyindex.go (vmr-stories.md).
+// Pairs with internal/journey/journeyindex.go (journeys/index.md).
 package i18n
 
 import "strconv"
@@ -14,7 +14,7 @@ type JourneyIndexText struct {
 	Footer           func(n int) string
 	NoCandidatesNote string
 	// ListOnlyNote precedes the table when this run rendered no Journey
-	// (-list-only / bare `vmr story`) — the Tasks/Rendered columns are
+	// (-list-only / bare `vmr analyze`) — the Tasks/Rendered columns are
 	// blank for every row and Steps shows the request count.
 	ListOnlyNote        string
 	SelfTrafficActive   func(excluded int) string
@@ -36,7 +36,7 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 				return "\n> ⚠ = 断头 Journey（开头截断，需 `-include-partial` 渲染）。\n\n共 " + strconv.Itoa(n) + " 个候选 journey。用 `-journey <id前缀>` 渲染其中一个，或 `-render-all` 全部渲染。\n"
 			},
 			NoCandidatesNote: "没有候选 journey。\n",
-			ListOnlyNote:     "> 本次运行未渲染任何 Journey（`-list-only` / 直接 `vmr story`）：`任务`、`已渲染` 两列留空，`轮数` 显示请求数。用 `-render-all` 或 `-journey <id前缀>` 渲染后这些列才会填充。\n\n",
+			ListOnlyNote:     "> 本次运行未渲染任何 Journey（`-list-only` / 直接 `vmr analyze`）：`任务`、`已渲染` 两列留空，`轮数` 显示请求数。用 `-render-all` 或 `-journey <id前缀>` 渲染后这些列才会填充。\n\n",
 			SelfTrafficActive: func(excluded int) string {
 				return "> 自指流量排除：已启用（排除 " + strconv.Itoa(excluded) + " 条候选）。\n\n"
 			},
@@ -55,7 +55,7 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 			return "\n> ⚠ = head-truncated journey (pass `-include-partial` to render).\n\n" + strconv.Itoa(n) + " candidate journey(s). Use `-journey <id-prefix>` to render one, or `-render-all` for all of them.\n"
 		},
 		NoCandidatesNote: "No candidate journeys.\n",
-		ListOnlyNote:     "> This run rendered no journeys (`-list-only` / bare `vmr story`): the Tasks and Rendered columns are blank for every row and Steps shows the request count. Render with `-render-all` or `-journey <id-prefix>` to populate them.\n\n",
+		ListOnlyNote:     "> This run rendered no journeys (`-list-only` / bare `vmr analyze`): the Tasks and Rendered columns are blank for every row and Steps shows the request count. Render with `-render-all` or `-journey <id-prefix>` to populate them.\n\n",
 		SelfTrafficActive: func(excluded int) string {
 			return "> Self-traffic exclusion: active (" + strconv.Itoa(excluded) + " candidate(s) removed).\n\n"
 		},

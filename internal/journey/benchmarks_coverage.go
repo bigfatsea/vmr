@@ -32,21 +32,21 @@ import (
 // silent, a different failure mode this list doesn't claim to cover).
 // BenchmarkSections/JourneySections name views that read the same signal but
 // aren't FindingCode/MetricCode-keyed — free text since there's no code to
-// key them by. BenchmarkSections only exist in -corpus output
+// key them by. BenchmarkSections only exist in -benchmark output
 // (ContextRotBucket.ErrorRate/ErrorStepCount, ToolSequencePattern.ErrorRate);
 // JourneySections only exist in a single journey's own report/JSON (the
 // decision spine's ❌/↩️ tool-result badge, structure.json's
 // ToolCalls[].ResultError).
 var anthropicOnlyCoverage = struct {
-	Findings        []FindingCode
-	Metrics         []MetricCode
-	BenchmarkSections  []string
-	JourneySections []string
+	Findings          []FindingCode
+	Metrics           []MetricCode
+	BenchmarkSections []string
+	JourneySections   []string
 }{
-	Findings:        []FindingCode{FindingUnadaptedRetry, FindingUnverifiedSuccess},
-	Metrics:         []MetricCode{MetricErrorRecoveryCount},
-	BenchmarkSections:  []string{"Context Rot error rate", "Tool Sequence error rate"},
-	JourneySections: []string{"decision spine's tool-result ❌ badge", "structure.json's ToolCalls[].ResultError"},
+	Findings:          []FindingCode{FindingUnadaptedRetry, FindingUnverifiedSuccess},
+	Metrics:           []MetricCode{MetricErrorRecoveryCount},
+	BenchmarkSections: []string{"Context Rot error rate", "Tool Sequence error rate"},
+	JourneySections:   []string{"decision spine's tool-result ❌ badge", "structure.json's ToolCalls[].ResultError"},
 }
 
 // anthropicCoverageNote renders the disclosure line, or "" when
@@ -72,7 +72,7 @@ func anthropicCoverageNote(protocolShare map[string]float64, t i18n.BenchmarksTe
 
 // journeyAnthropicCoverageNote is anthropicCoverageNote's per-journey
 // counterpart (P14.2 follow-up — an independent review, 2026-08-21, found
-// scoping this disclosure to -corpus only left it unreachable from the
+// scoping this disclosure to -benchmark only left it unreachable from the
 // default suite, the path most readers actually use). Fires only when j
 // has NO anthropic-messages Steps at all — unlike the corpus note's "not
 // literally 100%" rule, a single journey's traffic is normally not

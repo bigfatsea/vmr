@@ -211,7 +211,7 @@ type GroupComparison struct {
 // entirely rather than shown with a misleadingly precise-looking number.
 const benchmarkMinGroupSize = 3
 
-// BenchmarkStats is the corpus layer's entire output — vmr-story-corpus.json's shape.
+// BenchmarkStats is the corpus layer's entire output — journeys/benchmarks.json's shape.
 type BenchmarkStats struct {
 	JourneyCount     int                         `json:"journey_count"`
 	MetricDist       map[MetricCode]Distribution `json:"metric_distributions"`

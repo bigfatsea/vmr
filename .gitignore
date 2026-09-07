@@ -16,7 +16,7 @@ skills-lock.json
 # variant, including an accidental "config.mba copy.yaml"-style duplicate)
 /config.mba*.yaml
 
-# vmr report/vmr story sidecar config — may hold a plaintext llm_key
+# vmr analyze sidecar config — may hold a plaintext llm_key
 # (use report.example.yaml as template)
 /report.yaml
 
@@ -47,12 +47,15 @@ _review
 # ~/.vmr/logs/vmr-quota.json, already covered by /logs/ below
 /vmr-quota.json
 
-# Generated reports (details/ carries full conversation bodies — never commit)
-/vmr-report.json
+# Generated reports at the repo root (a stray `vmr analyze -o .`; the
+# normal output dir is ./reports/, covered below). These carry full
+# conversation bodies — never commit.
 /vmr-report.md
-/vmr-requests.md
-/vmr-requests-*.md
-/details/
+/manifest.json
+/macro/
+/requests/
+/journeys/
+/compares/
 /archived/
 /sample_reports/
 

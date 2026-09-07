@@ -62,14 +62,14 @@ func journeyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 	}
 }
 
-// TestCmdStory_ListAndRender exercises the `vmr story` CLI end to end — a
+// TestCmdAnalyze_ListAndRender exercises the `vmr story` CLI end to end — a
 // path flagged as untested: internal/journey's own
 // tests cover Build/RenderMarkdown directly, but nothing exercised
 // cmd_journey.go's flag parsing, candidate listing (batched PreviewTitles),
 // or the -journey render-to-file path. Two records sharing the same opening
 // user message form one 2-manifest lineage — the minimum ListCandidates
 // will offer as a journey.
-func TestCmdStory_ListAndRender(t *testing.T) {
+func TestCmdAnalyze_ListAndRender(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "调研一下 A 股新股打新收益")
@@ -178,11 +178,11 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	}
 }
 
-// TestCmdStory_RenderAll covers -render-all: two independent candidate
+// TestCmdAnalyze_RenderAll covers -render-all: two independent candidate
 // lineages must both be rendered in one pass, with no -journey id needed
 // (design-doc review follow-up: picking an id by hand for every journey was
 // the friction this flag removes).
-func TestCmdStory_RenderAll(t *testing.T) {
+func TestCmdAnalyze_RenderAll(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 
@@ -230,11 +230,11 @@ func TestCmdStory_RenderAll(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyCommaSeparatedList covers -journey id1,id2: both
+// TestCmdAnalyze_JourneyCommaSeparatedList covers -journey id1,id2: both
 // journeys must render, batched through the same renderJourneys path
 // -render-all uses (proven by the "N journey(s) rendered to" summary line,
 // distinct from single-journey render's own RenderedNote wording).
-func TestCmdStory_JourneyCommaSeparatedList(t *testing.T) {
+func TestCmdAnalyze_JourneyCommaSeparatedList(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -253,11 +253,11 @@ func TestCmdStory_JourneyCommaSeparatedList(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyWildcardMatchesMultiple covers -journey '*' style
+// TestCmdAnalyze_JourneyWildcardMatchesMultiple covers -journey '*' style
 // globbing: a pattern with no exact-prefix relationship to either id (a
 // wildcard match against the id's suffix, which prefix matching alone could
 // never express) must still resolve and batch-render every match.
-func TestCmdStory_JourneyWildcardMatchesMultiple(t *testing.T) {
+func TestCmdAnalyze_JourneyWildcardMatchesMultiple(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -276,12 +276,12 @@ func TestCmdStory_JourneyWildcardMatchesMultiple(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyWildcardMatchesOne covers a glob that pins down
+// TestCmdAnalyze_JourneyWildcardMatchesOne covers a glob that pins down
 // exactly one journey (by its content-addressed suffix, which a plain
 // prefix can't select on) — it must still take the single-journey render
 // path (RenderedNote's "(N tasks, N turns)" wording, not the batched
 // summary), same as passing the full id directly.
-func TestCmdStory_JourneyWildcardMatchesOne(t *testing.T) {
+func TestCmdAnalyze_JourneyWildcardMatchesOne(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 	pattern := "*" + idA[len(idA)-8:]
@@ -299,10 +299,10 @@ func TestCmdStory_JourneyWildcardMatchesOne(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneySelectorNoMatchErrors covers the per-token "fail loud"
+// TestCmdAnalyze_JourneySelectorNoMatchErrors covers the per-token "fail loud"
 // contract: one real id plus one bogus token must error, not silently
 // render only the real match.
-func TestCmdStory_JourneySelectorNoMatchErrors(t *testing.T) {
+func TestCmdAnalyze_JourneySelectorNoMatchErrors(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
@@ -317,10 +317,10 @@ func TestCmdStory_JourneySelectorNoMatchErrors(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyMultiMatchRejectsLLM covers the same "-llm-addr wants
+// TestCmdAnalyze_JourneyMultiMatchRejectsLLM covers the same "-llm-addr wants
 // exactly one journey" rule -render-all/-corpus already enforce, extended to
 // a -journey selector that resolves to more than one match.
-func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
+func TestCmdAnalyze_JourneyMultiMatchRejectsLLM(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -332,11 +332,11 @@ func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
 	}
 }
 
-// TestCmdStory_Compare covers Differential analysis: -compare id1,id2 resolves
+// TestCmdAnalyze_Compare covers Differential analysis: -compare id1,id2 resolves
 // two candidate journeys by id prefix and writes one comparison
 // Markdown+JSON pair. Journey B's much larger model time should surface as
 // a notable row.
-func TestCmdStory_Compare(t *testing.T) {
+func TestCmdAnalyze_Compare(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 
@@ -441,10 +441,10 @@ func extrasSources(cmp journey.Comparison) []string {
 	return cmp.Extras.Sources
 }
 
-// TestCmdStory_CompareRequiresTwoIDs covers the usage error when -compare
+// TestCmdAnalyze_CompareRequiresTwoIDs covers the usage error when -compare
 // isn't given exactly two comma-separated ids (missing second id, or a
 // trailing/leading empty one from a stray comma).
-func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
+func TestCmdAnalyze_CompareRequiresTwoIDs(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "hello")
@@ -463,11 +463,11 @@ func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CompareUnknownID covers -compare id1,id2 reporting which side
+// TestCmdAnalyze_CompareUnknownID covers -compare id1,id2 reporting which side
 // failed to resolve when an id prefix doesn't match any candidate — the
 // error must name whether it's the first or second id, not just "no journey
 // found".
-func TestCmdStory_CompareUnknownID(t *testing.T) {
+func TestCmdAnalyze_CompareUnknownID(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "hello")
@@ -484,19 +484,19 @@ func TestCmdStory_CompareUnknownID(t *testing.T) {
 	}
 }
 
-// TestCmdStory_ComparePartialGating covers compareJourneys' own
+// TestCmdAnalyze_ComparePartialGating covers compareJourneys' own
 // -include-partial gate: a partial-head candidate on either side must be
 // rejected the same way a single -journey render is, and accepted once
 // -include-partial is passed — with partiality carried as data (D19): no
 // "-partial" filename suffix, a partial:true field in the JSON, a banner in
 // the .md, and a partial mark in compares/index.md.
-func TestCmdStory_ComparePartialGating(t *testing.T) {
+func TestCmdAnalyze_ComparePartialGating(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 
 	// Partial candidate: looks mid-conversation already (>2 non-system keys)
 	// within the first lines of the only loaded file — same fixture shape as
-	// TestCmdStory_PartialHeadFilenameSuffix.
+	// TestCmdAnalyze_PartialHeadFilenameSuffix.
 	u1 := journeyMsg("user", "第一轮指令")
 	a1 := journeyMsg("assistant", "第一轮回复")
 	u2 := journeyMsg("user", "第二轮追问")
@@ -593,11 +593,11 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 	}
 }
 
-// TestCmdStory_ShowUngrouped covers -show-ungrouped: a record with no
+// TestCmdAnalyze_ShowUngrouped covers -show-ungrouped: a record with no
 // non-system messages and no metadata.user_id gets no SessKey at all
 // (ctxgraph.Graph.Ungrouped), and -show-ungrouped must print its source
 // location.
-func TestCmdStory_ShowUngrouped(t *testing.T) {
+func TestCmdAnalyze_ShowUngrouped(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sysOnly := journeyRec(at(0), []any{journeyMsg("system", "sys, nothing else")}, journeySSE("ok"))
 	path := writeJourneyJSONL(t, []audit.Record{sysOnly})
@@ -616,16 +616,16 @@ func TestCmdStory_ShowUngrouped(t *testing.T) {
 	}
 }
 
-// TestCmdStory_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr story`
+// TestCmdAnalyze_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr story`
 // with no positional args is a usage error, not a silent no-op.
-func TestCmdStory_NoInputFiles(t *testing.T) {
+func TestCmdAnalyze_NoInputFiles(t *testing.T) {
 	if err := cmdAnalyze([]string{}); err == nil {
 		t.Error("cmdStory with no input files should return an error")
 	}
 }
 
-// TestCmdStory_UnknownJourney covers the -journey-with-no-match error path.
-func TestCmdStory_UnknownJourney(t *testing.T) {
+// TestCmdAnalyze_UnknownJourney covers the -journey-with-no-match error path.
+func TestCmdAnalyze_UnknownJourney(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "hello")
@@ -642,14 +642,14 @@ func TestCmdStory_UnknownJourney(t *testing.T) {
 	}
 }
 
-// TestCmdStory_PartialHeadFilenameSuffix covers the fix: a
+// TestCmdAnalyze_PartialHeadFilenameSuffix covers the fix: a
 // head-truncated Journey's rendered filename must self-disclose that its ID
 // isn't stable, via a "-partial" suffix, without requiring the reader to
 // open the file and find the warning line first. The first record already
 // carries a multi-turn-looking manifest (sys + 2 user/assistant pairs) at
 // line 0 of the only loaded file — journey.IsPartialHead's signal for "this
 // conversation's real opening lives outside the loaded range".
-func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
+func TestCmdAnalyze_PartialHeadFilenameSuffix(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "第一轮指令")
@@ -744,7 +744,7 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 // writeTwoCandidateJourneys builds a minimal two-journey audit log (same
-// shape TestCmdStory_Compare uses) and returns its path plus both journeys'
+// shape TestCmdAnalyze_Compare uses) and returns its path plus both journeys'
 // ids, resolved by listing once — shared setup for the -llm-* CLI tests
 // below, which only care about the compare/LLM plumbing, not journey
 // construction itself.
@@ -788,9 +788,9 @@ func writeTwoCandidateJourneys(t *testing.T, outDir string) (path, idA, idB stri
 	return path, idA, idB
 }
 
-// TestCmdStory_LLMFlagValidation covers resolveLLMOptions' guard rails: the
+// TestCmdAnalyze_LLMFlagValidation covers resolveLLMOptions' guard rails: the
 // -llm-* flag combinations that must be rejected before anything is scanned.
-func TestCmdStory_LLMFlagValidation(t *testing.T) {
+func TestCmdAnalyze_LLMFlagValidation(t *testing.T) {
 	path, idA, idB := writeTwoCandidateJourneys(t, filepath.Join(t.TempDir(), "out"))
 	compareArgs := []string{"-compare", idA + "," + idB, path}
 
@@ -836,12 +836,12 @@ func TestCmdStory_LLMFlagValidation(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CompareLLMDryRun covers -llm-dry-run: it must print a size
+// TestCmdAnalyze_CompareLLMDryRun covers -llm-dry-run: it must print a size
 // estimate and return before writing anything, and must never dial the
 // given address (127.0.0.1:1 refuses every connection on virtually every
 // system — if the dry run actually tried to connect, this test would fail
 // with a connection-refused error surfacing as a non-nil return).
-func TestCmdStory_CompareLLMDryRun(t *testing.T) {
+func TestCmdAnalyze_CompareLLMDryRun(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -868,10 +868,10 @@ func TestCmdStory_CompareLLMDryRun(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CompareWithLLM covers the full path: a real (mock) VMR
+// TestCmdAnalyze_CompareWithLLM covers the full path: a real (mock) VMR
 // endpoint, the rendered .md gaining the "## LLM Interpretation" section with the
 // mock's reply, and a cache file appearing under stories/.llm-cache.
-func TestCmdStory_CompareWithLLM(t *testing.T) {
+func TestCmdAnalyze_CompareWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
@@ -908,13 +908,13 @@ func TestCmdStory_CompareWithLLM(t *testing.T) {
 	}
 }
 
-// TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching covers the explicit
+// TestCmdAnalyze_NoLLMCacheDirConfiguredMeansNoCaching covers the explicit
 // behavior change: -llm-cache-dir has no implicit default (unlike the old
 // hardcoded {out}/stories/.llm-cache) — with neither the flag nor
 // report.yaml's llm_cache_dir set, an -llm-addr call must still succeed
 // (the LLM section renders) but must leave no .llm-cache directory behind
 // anywhere under outDir.
-func TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
+func TestCmdAnalyze_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
@@ -944,12 +944,12 @@ func TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 	}
 }
 
-// TestCmdStory_ReportYamlProvidesLLMDefaults covers report.yaml's
+// TestCmdAnalyze_ReportYamlProvidesLLMDefaults covers report.yaml's
 // llm_addr/llm_model/llm_cache_dir feeding -journey's LLM interpretation
 // layer when the corresponding -llm-* flags aren't passed at all — the same
 // merge order TestCmdReport_ReportYamlDefaultsOutputAndDetails covers for
 // -o/-details.
-func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
+func TestCmdAnalyze_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
@@ -987,16 +987,16 @@ func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	}
 }
 
-// TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths is a regression test
+// TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths is a regression test
 // for a real bug: report.yaml's llm_addr is meant as a standing convenience
-// default for -journey/-compare (see TestCmdStory_ReportYamlProvidesLLMDefaults),
+// default for -journey/-compare (see TestCmdAnalyze_ReportYamlProvidesLLMDefaults),
 // but the -render-all/-corpus/multi-match-journey rejection used to trigger
 // on llmOpts.Addr being non-empty at all — which made it fire off of
 // report.yaml's default even though -llm-addr was never passed on the
 // command line, so anyone with an llm_addr configured for convenience could
 // no longer run a plain batch render. The guard must key off whether
 // -llm-addr was explicitly passed (flagPassed), not merely resolved.
-func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
+func TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -1039,12 +1039,12 @@ func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 	})
 }
 
-// TestCmdStory_Corpus covers -corpus: two independent candidate journeys
+// TestCmdAnalyze_Corpus covers -corpus: two independent candidate journeys
 // must produce vmr-story-corpus.md + .json under {outDir}/stories, and the
 // "no candidates" path (an audit log that groups into zero lineages at all)
 // must return without error and without writing either file, matching
 // renderBenchmarks' own len(toRender)==0 early return.
-func TestCmdStory_Corpus(t *testing.T) {
+func TestCmdAnalyze_Corpus(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, _, _ := writeTwoCandidateJourneys(t, outDir)
 
@@ -1080,16 +1080,16 @@ func TestCmdStory_Corpus(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CorpusNoCandidates covers renderBenchmarks' own early return when
+// TestCmdAnalyze_CorpusNoCandidates covers renderBenchmarks' own early return when
 // there are zero candidate journeys to analyze (here: a single record with
 // no non-system messages, which ctxgraph groups into Ungrouped rather than
-// any Lineage at all — same fixture shape as TestCmdStory_ShowUngrouped).
+// any Lineage at all — same fixture shape as TestCmdAnalyze_ShowUngrouped).
 // The command must not error, and must not write vmr-story-corpus.md/.json
 // (nothing to analyze) — but vmr-stories.json/.md still get written, same
 // as every other invocation (an empty candidate list is still a real,
 // worth-recording result, unlike -llm-dry-run's "should I even run this"
 // pure query, which is why that one still leaves no directory at all).
-func TestCmdStory_CorpusNoCandidates(t *testing.T) {
+func TestCmdAnalyze_CorpusNoCandidates(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
 	sysOnly := journeyRec(at(0), []any{journeyMsg("system", "sys, nothing else")}, journeySSE("ok"))
 	path := writeJourneyJSONL(t, []audit.Record{sysOnly})
@@ -1145,12 +1145,12 @@ func TestCmdAnalyze_BenchmarkExclusivity(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyWithLLM mirrors TestCmdStory_CompareWithLLM but for
+// TestCmdAnalyze_JourneyWithLLM mirrors TestCmdAnalyze_CompareWithLLM but for
 // -journey: a real (mock) VMR endpoint, the rendered journey .md gaining the
 // "## LLM Interpretation" section with the mock's reply, the rendered
 // journey .json gaining populated llm_findings, and a cache file
 // appearing under stories/.llm-cache.
-func TestCmdStory_JourneyWithLLM(t *testing.T) {
+func TestCmdAnalyze_JourneyWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
@@ -1234,9 +1234,9 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyWithRealLLM tests against a live LLM endpoint configured
+// TestCmdAnalyze_JourneyWithRealLLM tests against a live LLM endpoint configured
 // in report.yaml when available and reachable, gracefully skipping otherwise.
-func TestCmdStory_JourneyWithRealLLM(t *testing.T) {
+func TestCmdAnalyze_JourneyWithRealLLM(t *testing.T) {
 	reportYamlPath := filepath.Join("..", "..", "report.yaml")
 	configData, err := os.ReadFile(reportYamlPath)
 	if err != nil {
@@ -1282,11 +1282,11 @@ func TestCmdStory_JourneyWithRealLLM(t *testing.T) {
 	}
 }
 
-// TestCmdStory_JourneyLLMDryRun mirrors TestCmdStory_CompareLLMDryRun but
+// TestCmdAnalyze_JourneyLLMDryRun mirrors TestCmdAnalyze_CompareLLMDryRun but
 // for -journey: -llm-dry-run must print a size estimate and return before
 // writing anything (including reports/stories/ itself), and must never dial
 // the given address.
-func TestCmdStory_JourneyLLMDryRun(t *testing.T) {
+func TestCmdAnalyze_JourneyLLMDryRun(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, _ := writeTwoCandidateJourneys(t, outDir)
 
@@ -1306,11 +1306,11 @@ func TestCmdStory_JourneyLLMDryRun(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CompareLLMFailureDegrades covers design doc C.7's "the whole
+// TestCmdAnalyze_CompareLLMFailureDegrades covers design doc C.7's "the whole
 // layer degrades away" rule: an unreachable -llm-addr must not fail the
 // -compare command — the .md/.json still get written, just without the LLM
 // section, and a warning goes to stderr.
-func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
+func TestCmdAnalyze_CompareLLMFailureDegrades(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
 
@@ -1338,14 +1338,14 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 	}
 }
 
-// TestCmdStory_BatchRendersIncludeCost pins Problem 3: default-suite,
+// TestCmdAnalyze_BatchRendersIncludeCost pins Problem 3: default-suite,
 // -render-all and multi-target -journey batch rendering previously passed a
 // nil cost to writeJourneyFile (on the historical misconception that pricing
 // was a zoom-in only feature), leaving every batch-rendered journey-*.md/.json
 // without its estimated cost and creating a data gap between the macro
 // report and the journey cards. Batch rendering now threads the resolver,
 // and this test asserts both .md and .json carry resolved cost.
-func TestCmdStory_BatchRendersIncludeCost(t *testing.T) {
+func TestCmdAnalyze_BatchRendersIncludeCost(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 9, 1, 10, min, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u := journeyMsg("user", "批量套件必须包含成本")

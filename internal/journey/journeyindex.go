@@ -1,15 +1,15 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// vmr-stories.json/.md: a file-hash-keyed parse cache (see
+// journeys/index.json/.md: a file-hash-keyed parse cache (see
 // ctxgraph.FileCache/ScanCached) that doubles as the candidate-Journey
-// listing `vmr story` used to only ever print to stdout. One document, not
-// a cache file plus a separate index file — both need the exact same
-// underlying fact (which files does Journey X depend on), and the JSON was
-// already the machine-data layer before this (vmr-stories.md is the human
-// one, same split vmr-requests.json/.md already established) — see
-// docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-stories.json section
-// for the full reasoning (including why this stops at file-level caching
-// rather than a narrower, per-Journey file selection).
+// listing `vmr analyze` prints to stdout. One document, not a cache file
+// plus a separate index file — both need the exact same underlying fact
+// (which files does Journey X depend on), and the JSON was already the
+// machine-data layer before this (index.md is the human one, same split
+// requests/index.json vs the request-browser page already established) —
+// see the analytics design doc's journey index section for the full
+// reasoning (including why this stops at file-level caching rather than a
+// narrower, per-Journey file selection).
 package journey
 
 import (
@@ -29,7 +29,7 @@ import (
 // only (see classifyJourney in candidates.go). CategoryTask is an explicit
 // value, not the zero value — a real task (the common case) is the one
 // consumers most need to be able to filter on, so it serializes into
-// vmr-stories.json like the other three rather than relying on field
+// journeys/index.json like the other three rather than relying on field
 // absence to mean "task" (P7.4: JSON readers no longer need to know that
 // convention).
 type JourneyCategory string
@@ -59,7 +59,7 @@ func IsNoiseCategory(cat JourneyCategory) bool {
 // Title/Partial/Stitched/Files are cheap — derivable from the chain alone,
 // recomputed on every run. Tasks/Steps/Rendered are only known once the
 // full story.Journey has actually been built at least once (-journey/
-// -render-all/-compare/-corpus, never the bare listing pass, which
+// -render-all/-compare/-benchmark, never the bare listing pass, which
 // deliberately stays cheap — see PreviewTitles) — a row with Requests > 0
 // but Tasks == 0 simply hasn't been built yet, not an empty Journey.
 type JourneyIndexRow struct {
@@ -90,7 +90,7 @@ type JourneyIndexRow struct {
 	Category JourneyCategory `json:"category"`
 }
 
-// JourneyIndex is vmr-stories.json's whole shape: just Journeys. The parse
+// JourneyIndex is journeys/index.json's whole shape: just Journeys. The parse
 // cache used to live here too, as a "files" section — it's since moved to
 // its own content-hash-sharded directory shared with internal/report
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.cache/parse — one level
@@ -101,13 +101,13 @@ type JourneyIndex struct {
 	// purely as a convenience — every cmdStory branch already threads idx
 	// through to saveJourneyIndex, so riding along here saves plumbing it as
 	// a second parameter everywhere. Never serialized into
-	// vmr-stories.json (json:"-"): saveJourneyIndex persists it separately,
+	// journeys/index.json (json:"-"): saveJourneyIndex persists it separately,
 	// via ctxgraph.SaveCacheDir, at the same point it saves idx itself.
 	Cache *ctxgraph.FileCache `json:"-"`
 	// SelfTraffic records whether this run excluded vmr's own -llm-addr
 	// self-analysis traffic and how many candidates that removed — set in
 	// setupJourneyRun, rendered as a one-line disclosure at the top of
-	// vmr-stories.md. Rides along on idx for the same reason Cache does.
+	// journeys/index.md. Rides along on idx for the same reason Cache does.
 	// json:"-": a run-time fact about this invocation, not index content.
 	SelfTraffic *SelfTrafficStatus `json:"-"`
 }
@@ -115,7 +115,7 @@ type JourneyIndex struct {
 // SelfTrafficStatus is the "was self-traffic excluded" disclosure (P6.4).
 // Two runs with different report.yaml (one carrying llm_key, one not) list
 // different candidate populations; without this line a reader diffing two
-// vmr-stories.md files reads that as the data changing (问题 4 / R6a-2).
+// journeys/index.md files reads that as the data changing (问题 4 / R6a-2).
 type SelfTrafficStatus struct {
 	Active   bool // an exclusion tag set was configured and applied
 	Excluded int  // candidates dropped by it
@@ -230,7 +230,7 @@ func MergeJourneyIndexRows(fresh []JourneyIndexRow, prior []JourneyIndexRow) []J
 // exactly the files the two Journeys being compared were built from, never
 // the full set of files this run happened to load (that would list every
 // unrelated Journey's log file too — see docs/VirtualModelRouter_Design_v4_Analytics.md's
-// vmr-stories.json section on why the index exists at all). An id with no
+// journeys/index.json section on why the index exists at all). An id with no
 // matching row (shouldn't happen — every id passed here was itself resolved
 // from idx's own candidate set moments earlier) simply contributes nothing.
 func SourceFiles(idx *JourneyIndex, ids ...string) []string {
@@ -258,7 +258,7 @@ func SourceFiles(idx *JourneyIndex, ids ...string) []string {
 	return files
 }
 
-// RenderJourneyIndexMarkdown renders vmr-stories.md — a pure, human-facing
+// RenderJourneyIndexMarkdown renders journeys/index.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
 // Rows are split by IsNoiseCategory: task/cron/subagent are real
 // work and stay in the main, always-expanded table; only heartbeat is
@@ -268,7 +268,7 @@ func SourceFiles(idx *JourneyIndex, ids ...string) []string {
 // <details> block below it, so the landing page's first screen is
 // dominated by real work. An earlier version of this split also folded
 // subagent, which hid the single largest journey in the corpus.
-// vmr-stories.json (the machine layer) is unaffected — it lists every row
+// journeys/index.json (the machine layer) is unaffected — it lists every row
 // with no such split, per this project's "machine layer never makes
 // editorial cuts" rule.
 func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
@@ -290,7 +290,7 @@ func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
 		b.WriteString(t.NoCandidatesNote)
 		return b.String()
 	}
-	// -list-only / bare `vmr story`: no Journey was materialized this run,
+	// -list-only / bare `vmr analyze`: no Journey was materialized this run,
 	// so Tasks/Rendered are blank for every row and Steps falls back to the
 	// request count. Say so once, up front, rather than leave a reader to
 	// read a column of "—" as missing data. A prior run's carried-forward

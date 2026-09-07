@@ -591,7 +591,7 @@ type RequestRow struct {
 
 	// Req is this record's stable cross-command coordinate
 	// (ctxgraph.ReqCoord: CanonicalPath(Path) + ":" + Line) — the join key
-	// external tooling (or a future vmr-stories.json cross-reference) uses
+	// external tooling (or a future journeys/index.json cross-reference) uses
 	// to identify "the same audit record" regardless of which command
 	// produced this row or how its input paths were spelled.
 	Req string `json:"req,omitempty"`

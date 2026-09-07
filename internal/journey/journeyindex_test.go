@@ -110,18 +110,18 @@ func TestMergeJourneyIndexRows_FreshBuiltFieldsWinOverPrior(t *testing.T) {
 	}
 }
 
-// TestStoryIndex_SaveLoadRoundTrip covers Save/LoadJourneyIndex's remaining
+// TestJourneyIndex_SaveLoadRoundTrip covers Save/LoadJourneyIndex's remaining
 // job — Journeys only; the parse cache used to round-trip through this
 // same file (a "files" section) but has since moved to its own
 // content-hash-sharded directory (see ctxgraph's own
 // TestSaveCacheDir_LoadCacheDir_RoundTrip) and Cache's json:"-" tag.
-func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
+func TestJourneyIndex_SaveLoadRoundTrip(t *testing.T) {
 	chain := twoStepChain(t)
 	idx := &JourneyIndex{
 		Cache:    &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{"x": {Hash: "deadbeef"}}},
 		Journeys: []JourneyIndexRow{BuildJourneyIndexRow(chain, "t", false)},
 	}
-	path := filepath.Join(t.TempDir(), "vmr-stories.json")
+	path := filepath.Join(t.TempDir(), "index.json")
 	if err := idx.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(data), "deadbeef") {
-		t.Error("vmr-stories.json should not embed Cache's content (json:\"-\")")
+		t.Error("journeys/index.json should not embed Cache's content (json:\"-\")")
 	}
 	got := LoadJourneyIndex(path)
 	if len(got.Journeys) != 1 || got.Journeys[0].ID != idx.Journeys[0].ID {
@@ -141,15 +141,15 @@ func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestLoadStoryIndex_MissingFileReturnsEmpty(t *testing.T) {
+func TestLoadJourneyIndex_MissingFileReturnsEmpty(t *testing.T) {
 	idx := LoadJourneyIndex(filepath.Join(t.TempDir(), "does-not-exist.json"))
 	if idx == nil || len(idx.Journeys) != 0 {
 		t.Errorf("expected an empty, non-nil index for a missing file, got %+v", idx)
 	}
 }
 
-func TestLoadStoryIndex_CorruptFileDegradesToEmpty(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vmr-stories.json")
+func TestLoadJourneyIndex_CorruptFileDegradesToEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "index.json")
 	if err := os.WriteFile(path, []byte("{not valid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +159,7 @@ func TestLoadStoryIndex_CorruptFileDegradesToEmpty(t *testing.T) {
 	}
 }
 
-func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
+func TestRenderJourneyIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	empty := RenderJourneyIndexMarkdown(nil, i18n.EN)
 	if empty == "" {
 		t.Error("empty render should still produce a title/note, not an empty string")
@@ -176,12 +176,12 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_ListOnlyNote: when no row has been rendered
+// TestRenderJourneyIndexMarkdown_ListOnlyNote: when no row has been rendered
 // (bare `vmr story` / -list-only), the index precedes its table with a note
 // that the Tasks/Rendered columns are deliberately blank — a reader
 // shouldn't have to guess whether a column of "—" is missing data (问题 31).
 // A run that did render (or carried prior Tasks/Rendered forward) omits it.
-func TestRenderStoryIndexMarkdown_ListOnlyNote(t *testing.T) {
+func TestRenderJourneyIndexMarkdown_ListOnlyNote(t *testing.T) {
 	chain := twoStepChain(t)
 
 	listOnly := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
@@ -197,10 +197,10 @@ func TestRenderStoryIndexMarkdown_ListOnlyNote(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_SelfTrafficLine: vmr-stories.md always
+// TestRenderJourneyIndexMarkdown_SelfTrafficLine: journeys/index.md always
 // states whether self-traffic exclusion was active, so two runs with
 // different report.yaml are visibly not the same population (问题 4 / R6a-2).
-func TestRenderStoryIndexMarkdown_SelfTrafficLine(t *testing.T) {
+func TestRenderJourneyIndexMarkdown_SelfTrafficLine(t *testing.T) {
 	rows := []JourneyIndexRow{BuildJourneyIndexRow(twoStepChain(t), "x", false)}
 
 	active := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{Active: true, Excluded: 16}}, i18n.EN)
@@ -219,13 +219,13 @@ func TestRenderStoryIndexMarkdown_SelfTrafficLine(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded: cron and
+// TestRenderJourneyIndexMarkdown_OnlyHeartbeatFolded: cron and
 // subagent candidates stay in the main table alongside task (real-corpus
 // measurement found both categories had double-digit-request candidates,
 // including the single largest journey in the corpus, so folding them away
 // as noise hid legitimate work); only heartbeat goes into the collapsed
 // block.
-func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
+func TestRenderJourneyIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 	rows := []JourneyIndexRow{
 		{ID: "j-task", Category: CategoryTask, Title: "task row", Requests: 1},
 		{ID: "j-cron", Category: CategoryCron, Title: "cron row", Requests: 1},
@@ -251,14 +251,14 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 	}
 }
 
-// TestRenderStoryIndexMarkdown_EscapesTitle locks in a later-found fix:
+// TestRenderJourneyIndexMarkdown_EscapesTitle locks in a later-found fix:
 // a Journey title containing a literal "|" written straight into
 // this table's cells doesn't just lose content the way an unescaped
 // "<!--" does — it splits into extra columns and corrupts that row (and
-// visually, everything after it) in vmr-stories.md, the primary
+// visually, everything after it) in journeys/index.md, the primary
 // navigation surface. A real task instruction quoting a shell pipe
 // ("ps aux | grep vmr") is a completely ordinary way to trigger this.
-func TestRenderStoryIndexMarkdown_EscapesTitle(t *testing.T) {
+func TestRenderJourneyIndexMarkdown_EscapesTitle(t *testing.T) {
 	row := JourneyIndexRow{ID: "l-deadbeef", Title: "ps aux | grep vmr <!-- keywords -->", Requests: 1}
 	md := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: []JourneyIndexRow{row}}, i18n.EN)
 

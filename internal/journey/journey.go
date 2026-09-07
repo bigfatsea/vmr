@@ -1,6 +1,6 @@
 // Ver 2026-07-29 23:30, by Sonnet 5
 
-// Package story turns one internal/ctxgraph.Lineage into a readable
+// Package journey turns one internal/ctxgraph.Lineage into a readable
 // narrative: a sequence of user-instruction Tasks, each a sequence of
 // request/response Steps, plus a globally de-duplicated Event stream
 // (reading only the final request's message list misses 26%-99% of what
@@ -637,7 +637,7 @@ func buildCompactionInfo(predRec *audit.Record, predManifest, curManifest *ctxgr
 // it's formatted straight off the manifest's own parsed time.Time, which
 // carries whatever offset the audit record was written with (e.g. +08:00
 // for a China-local server). That offset is a property of the data, not of
-// whichever machine later runs `vmr story`, so two machines processing the
+// whichever machine later runs `vmr analyze`, so two machines processing the
 // same audit files still derive the identical id string — the "stable
 // across independent runs" property this id needs — while the digits a
 // human sees are the same local wall-clock time the record was captured

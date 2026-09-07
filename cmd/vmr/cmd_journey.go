@@ -124,7 +124,7 @@ func journeyPatternMatches(id, pattern string) bool {
 // of tokens, each an id/id-prefix or a shell-style glob (see
 // journeyPatternMatches) — into the matching candidate set: every token's
 // matches are merged and de-duplicated, returned in candidate (i.e.
-// chronological listing) order, same order -render-all/-corpus already
+// chronological listing) order, same order -render-all/-benchmark already
 // use. Every token must match at least one candidate, else the whole
 // selector errors — same "fail loud on what looks like a typo" stance the
 // single-id form always had, now applied per token so `-journey
@@ -162,7 +162,7 @@ func resolveJourneySelector(cands []*ctxgraph.Lineage, ids []string, selector st
 }
 
 // listJourneys prints the candidate listing (unchanged stdout format) and,
-// as of the vmr-stories.json change, also persists it — idx's rows already
+// as of the journeys/index.json change, also persists it — idx's rows already
 // carry everything this needs (id, mark info, request count, time range,
 // title), computed once and shared with the index, so this
 // function no longer touches ctxgraph/journey.PreviewTitles itself.
@@ -546,7 +546,7 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 
 // renderBenchmarks builds every non-partial candidate journey (same
 // batched BuildAll path renderAllJourneys uses) and compute/write corpus-
-// level statistics (vmr-story-corpus.md/.json) instead of per-Journey
+// level statistics (journeys/benchmarks.{md,json}) instead of per-Journey
 // files. Journeys are built here only to feed ComputeBenchmarkStats — none of
 // them are individually rendered or written to disk by this path.
 func renderBenchmarks(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *journey.JourneyIndex) error {

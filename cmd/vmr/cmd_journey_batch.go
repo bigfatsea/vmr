@@ -17,7 +17,7 @@ import "vmr/internal/ctxgraph"
 // resent history while twenty heartbeat candidates together are under a
 // megabyte, so a fixed count gave a wildly variable peak. 160 MiB (decode
 // amplification ~1.4x plus transient parse garbage) keeps a batch's
-// working set a few hundred MB, measured to hold full-corpus -corpus and
+// working set a few hundred MB, measured to hold full-corpus -benchmark and
 // -render-all peak RSS under ~2 GB. A candidate bigger than the whole
 // budget still forms its own batch — a Journey is never split.
 const renderBatchBudgetBytes = 160 << 20

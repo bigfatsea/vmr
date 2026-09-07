@@ -1,11 +1,11 @@
 // Ver 2026-08-20 17:10, by Sonnet 5
 
-// Self-traffic exclusion (P6.4): `vmr story -llm-addr`'s interpretation
+// Self-traffic exclusion (P6.4): `vmr analyze -llm-addr`'s interpretation
 // calls route back through this same VMR instance and land in the audit
 // log like any other request. Their cost/tokens are the analysis tool's
 // own overhead, not the workload being analyzed — the architecture doc's
 // §9 risk #1 calls this out by name: it pollutes both `vmr report`'s cost
-// report and `vmr story -corpus`'s aggregate stats.
+// report and `vmr analyze -benchmark`'s aggregate stats.
 //
 // The identification rule is defined exactly once, here, and consumed by
 // both cmd_report.go (internal/report's excludeClientTags) and
