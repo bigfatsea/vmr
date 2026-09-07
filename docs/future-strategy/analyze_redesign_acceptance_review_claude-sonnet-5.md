@@ -439,4 +439,73 @@ Phase A 结论：方案 D1–D21 + Phase 1–4 实质正确落地，仅 2 项**�
 
 ## 第六部分 · Phase C —— 概念/术语迁移的全项目彻底清理
 
-（执行中回填 —— action plan 见 6.1，逐项处置见 6.2，验证与最终重生见 6.3）
+**触发**：Phase A/B 反复暴露"退役术语泄漏"（NEW-B `story half`、NEW-F `Corpus`、N-B2 `VMR Story Index`、
+N9/T-A 多轮"已完成"声称却仍有残留）。用户要求做一次**全项目、按概念分类、彻底根治**的清理，
+不再零敲碎打。
+
+### 6.1 Action Plan：本次大改动的概念/术语/API 迁移全清单
+
+> 方法：先列出 `050ad25..HEAD` 引入的**每一处概念/命名/路径/flag/API 迁移**，再逐项全仓 `rg`，
+> 把命中分三桶：**A 直接替换**（命令/路径/文件名/符号/flag 语境指向退役物）、
+> **B 保留**（合法的通用词义——`corpus`=语料/数据集、`story`=叙事、描述迁移本身的设计/评审文档、CHANGELOG 与 KNOWN_ISSUES 的"已闭环"trail）、
+> **C 局部重写**（措辞过时、非单 token 可替换的段落）。
+
+| # | 退役概念 / 命名 / API | 现行 | 保留语境（桶 B） |
+|---|---|---|---|
+| M-01 | `Story` / `story` / `stories/` / `vmr-stories.*`（L3 概念） | `Journey` / `journeys/` / `journeys/index.*` | "story" 作叙事/场景的通用词；设计与评审文档描述旧态 |
+| M-02 | `vmr story`（子命令）/ `-story-only`（flag） | `vmr analyze` / `-journey-only` | — |
+| M-03 | `corpus` / `Corpus` / `vmr-story-corpus.*` / `corpus.go` / `-corpus`（L4 概念+flag+文件） | `Journey Benchmarks` / `journeys/benchmarks.*` / `benchmarks.go` / `-benchmark` | "corpus" 作"语料/数据集"（calibration corpus、real corpus、this corpus …）——统计学正确用词 |
+| M-04 | `vmr report`（子命令）/ `vmr-report.json`（单体） | `vmr analyze` / `macro/*.json` 切片 | `internal/report` 包名、`vmr-report.md` 文件名**保留**；描述单体删除的注释保留 |
+| M-05 | `vmr-requests.md` / `-<tag>.md` / `-cron-*.md` / `vmr-requests.json` / `vmr-requests-failed.*` | `requests/index.json` + `request-browser.html` / `requests/failed.*` | 描述"整族删除"的注释与文档保留 |
+| M-06 | `details/` / `evidence/`（顶层） | `requests/details/` / `requests/evidence/` | — |
+| M-07 | `.parse-cache/` | `.cache/parse/` | KNOWN_ISSUES "2026-09-03 已闭环" trail 条目 |
+| M-08 | 详单文件名 `<ts>_<virt>_..._<h8>.md` | `r-<ts>_..._<h8>.md` | — |
+| M-09 | `-partial` 文件名后缀 | 取消（JSON 字段 + banner + 索引行） | — |
+| M-10 | 工具配对 `Matched bool` | 三级 `match`（`exact`/`normalized`/`positional`） | — |
+| M-11 | `section_*.go` / `render_doc.go` / `render_*.go`（report 渲染层）/ `story_render.go` | `viewmodel_*.go` + `viewmodel.go` 固定序列化器 / `i18n/journey_render.go` | — |
+| M-12 | `render_html*.go` / `render_compare_html.go` / `toolwaste_html.go` / `story/assets/` / `-html` / `-redact` | dashboard 骨架页 / `internal/dashboard/assets/` | 描述废弃的 CHANGELOG/设计文档保留 |
+| M-13 | `structureExcerptChars`（别名）/ `Format`（常量，vs `ManifestFormat`） | `maxBodyExcerptChars` / `ManifestFormat`（`Format` 为别名并注明） | — |
+| M-14 | `internal/report/digest.go` + `internal/journey/digest.go`（双份） | `internal/digest` 叶子包 | `internal/journey/digest.go` 作为 `ComputeJourneyDigest` 组合层保留 |
+| M-15 | LLM 解读 `.md` append + `strings.Index("## LLM ")` 刮取 | `llm_interpretation` / `llm_divergence` JSON 字段 | 描述旧 hack 已删的注释保留 |
+| M-16 | `-from` / `-to`（方案文案幻影，从未实现） | 文件 glob + 输入内容哈希 | 方案 §7.2 已加注记 |
+| M-17 | `TestCmdStory_*` / `TestCmdAnalyze_Corpus*` | `TestCmdAnalyze_*` / `_Benchmark*` | — |
+| M-18 | API：`RenderMarkdown(*Journey)` / `NewJourneySummary(...)` 旧签名 / `RenderLLMSection(string)` | `RenderMarkdownFromSummary(*JourneySummary)` / 6-参构造 / `RenderLLMSection(*LLMInterpretation, lang)` | — |
+| M-19 | 标识符：`stories` 形参 / `StoriesLinkLine` i18n 字段 / `errors.New("story: …")` | `journeysLink` / `JourneyIndexLinkLine` / `errors.New("journey: …")` | — |
+
+### 6.2 逐项处置执行记录
+
+> 方法：`git ls-files | rg` 全仓逐 token 扫描（排除 `.git`、`_tmp`/`_review`/`_eval`/`archived`、
+> `docs/tasks/`、其余 future-strategy 战略/评审文档、CHANGELOG 与 KNOWN_ISSUES 的"已闭环"trail、
+> 生成产物目录、日志）。命中按 A（替换）/ B（保留合法词义）/ C（局部重写）分桶。
+> 每批改完 `go build ./... && go test ./... && gofmt -l`，全绿再提交。
+
+| 批次 | commit | 范围 | 处置摘要 |
+|---|---|---|---|
+| 6-1 用户面 | `0b2474f` | `report.example.yaml`/`.zh`、`config.example.yaml`/`.zh`、`vmr.sh`、`cmd_replay.go`、`README`/`.zh`、`benchmarks.html` | `report.example` 整体改写为单一 `vmr analyze` 入口 + 现行产物文件名；`.zh` sidecar 补回缺失的 `self_traffic_client_tags` 字段。`config.example` `api_keys` 注释：tag 不再自动写 `vmr-requests-<tag>.md`，改述为落 `requests/index.json` 的 `client_key`。`vmr.sh`：`report`/`story` 从 `-c` 注入白名单与 usage 移除。`cmd_replay.go` `-ts`/`-req` help：`vmr-requests.json` → `requests/index.json`。README/benchmarks.html：`corpus` → `benchmark`/`journeys`。 |
+| 6-2 H1 术语 | `e18dba8`（Phase B 内） | `i18n/journey_benchmarks.go`、`benchmarks_test.go` | `# Journey Corpus Report` / `# Journey 语料统计报告` → `# Journey Benchmarks` / `# Journey 基准统计报告`；测试断言与报错串同步。 |
+| 6-3 存活标识符 | `c8bb4e4` | `internal/journey/candidates.go`、`i18n/report_doc.go`、`report/viewmodel_doc.go`(+golden test)、`journey/benchmarks*.go`、`ctxgraph/golden_test.go`、`report/factscache_test.go`、`cmd/vmr/*_test.go` | `errors.New("story: …")` → `"journey: …"`（2 处存活错误串）；`i18n.StoriesLinkLine` → `JourneyIndexLinkLine`、report ViewModel `stories` 形参 → `journeyIdx`；`corpus.go` → `benchmarks.go`（文件引用）；`.parse-cache` → `.cache/parse`；`{out}/stories/.llm-cache` → `.llm-cache`；测试符号 `TestComputeCorpusStats`/`TestRenderCorpusMarkdown` → `*Benchmark*`、`Test*RunsStoryHalfOnly` → `*RunsJourneyHalfOnly`、`TestCostBasis_ReportAndStory*` → `*ReportAndJourney*`、`TestE2E_Story{RenderAll,Compare}*` → `*Journey*`、`TestCmdAnalyze_ReportLinksStoriesOnFirstCall` → `*ReportLinksJourneyIndexOnFirstCall`。Core.md `vmr replay` 节：`vmr report`/`vmr-requests.*`/`vmr-stories.json` → `vmr analyze`/切片。 |
+| 6-4 注释扫描 | `efa2c06` | ~40 个 `.go` 文件的注释 / test-message / test-symbol | `story` 作退役 L3 概念 → `journey`（half 描述、包限定引用 `story.X` → `journey.X`、`i18n.Story` → `i18n.Journey`、"story design specification" → "journey design specification"、`report`/`story` 半区对 → `report`/`journey`）；`vmr-requests.json` → `requests/index.json`；`vmr-report.json`（作存活引用）→ `macro/summary.json` 或"macro 切片"；`journey-<id>.{json,md}` → `j-<id>.{json,md}`。保留：`corpus`/`语料` 的"数据集"词义、`story` 的叙事/场景/负载内容词义。 |
+| 6-5 设计文档 | `05ab9db` | `VirtualModelRouter_Design_v4_{Core,Quota,Strategy,Analytics}.md`、`KNOWN_ISSUES.md`、`loadtest/README.md` | 退役子命令 `vmr report`/`vmr story` → `vmr analyze`；`-corpus` → `-benchmark`；`-story-only` → `-journey-only`；`internal/story` → `internal/journey`；`corpus.go` → `benchmarks.go`；`语料级统计` → `基准统计`；`ComputeCorpusStats`/`corpusMin*` → `ComputeBenchmarkStats`/`benchmarkMin*`；`report`/`story` 半区对 → `report`/`journey`。保留：2.79 "已随别名删除闭环" trail 条（有意按设计命名退役别名）、每处"数据集"义的 `corpus`/`语料`。 |
+| 6-6 收尾残余 | `bdbc94c` + `8cf1fe8` + `cfe5e0a` | `section_*.go` 注释引用、`render_doc.go` 过渡注释、config/pricing yaml 裸 `vmr report`、Core.md 引言 + vmr.sh 节、`fmtutil.go`、`_eval/calibrate_p1b.go` | `section_<x>.go` → `viewmodel_<x>.go`（`rows.go`/`metrics.go`/`aggregate_test.go`/`viewmodel_efficiency.go`；Quota.md `section_quota.go` → `viewmodel_quota.go`）；`viewmodel_doc.go` 删去指向已删 `render_doc.go` 的"字节等价过渡期"陈旧注释；KNOWN_ISSUES `setupStoryRun` → `setupJourneyRun`、`vmr-stories.json` → `journeys/index.json`；config.example/mock + `internal/pricing/*.yaml` 注释里裸 `vmr report` → `vmr analyze`；Core.md 引言指针改为"单一入口 `vmr analyze`（`internal/{report,journey,ctxgraph,chatmsg}` + `cmd_analyze.go`）"，vmr.sh 节 `-c` 注入清单更新为 `start\|check\|status\|diagnose\|smoke\|replay\|analyze`；`fmtutil.go` 与 `_eval` 校准脚本去 `story` 别名。`i18n/report_doc.go` 结构体字段随 `JourneyIndexLinkLine` 更名 gofmt 重对齐（`cfe5e0a`）。 |
+| 6-7 CHANGELOG | （随本轮）| `CHANGELOG.md` `[Unreleased]` | `Fixed` 段补 3 条：benchmarks H1、`analyze (journey half)` 错误串、user-facing 文档/`vmr.sh`/`vmr replay` help 术语归一。 |
+
+**M-01..M-19 覆盖度**：M-08（`r-` 前缀）/ M-09（`-partial`）/ M-10（三级 `match`）/ M-13（`maxBodyExcerptChars`/`ManifestFormat`）/
+M-14（`internal/digest`）/ M-15（`llm_interpretation`）/ M-16（`-from/-to` 注记）/ M-18（API 签名）在 Phase A 已核实**代码层无残留**，Phase C 无需再动。
+M-02/M-03/M-04/M-05/M-06/M-07/M-11/M-12/M-17/M-19 的**文档、注释、配置模板、测试符号残留**由本轮 6-1..6-7 清理。
+
+### 6.3 验证与最终产物重生
+
+- `go build ./...` / `go vet ./...` / `go test ./...`：**全绿（38 包）**；`go test -race`（report/journey/dashboard/i18n/ctxgraph/cmd/archtest）全绿、零 data race。
+- `gofmt -l .`：仅 `cmd/vmr/cmd_journey_setup.go` 一个文件（Go 1.26.5 尾随注释对齐；`go.mod` 声明 1.25.1，CI 用 1.25——**Phase C 未触碰此文件**，属既有 N14，留待"Go 1.26 升级"专项）。
+- `./vmr check -c config.yaml`：通过。四份 `*.example*.yaml` 语法有效，`report.example.yaml` 经 `-report-config` 实跑加载确认（`meta.report_config_path` 命中）。
+- **全仓退役 token 终扫**：`vmr report`/`vmr story`（命令）、`-corpus`/`-story-only`（flag）、`internal/story`/`stories/`/`vmr-stories`/`vmr-story-corpus`、`.parse-cache` 在核心代码 + 当前态文档 + 配置模板中**零命中**（仅 KNOWN_ISSUES §2.79 一条按设计保留退役别名名字作为 trail）。剩余 `story`/`corpus` 全部为合法词义（叙事/场景/负载内容、calibration/audit/real corpus = 数据集）。
+- **最终产物干净重生**（`reports/` + `reports-en/`，clean 二进制含全部 Phase B/C 修复）：
+  - 数据集：`logs/vmr-audit-2026-08-{22,23,24,25}.jsonl.zst`（1577 records / 46 candidate journeys / 40 rendered / 1521 请求）
+  - `reports/`：默认套件（zh，`-details`）+ `-benchmark` + 1 组真实 LLM `-journey` + 1 组真实 LLM `-compare`（2×2 real calls）+ `-render-only` 逐字节等价校验通过
+  - `reports-en/`：默认套件 + `-benchmark`（`-lang en`，无 LLM/compare/journey zoom）
+  - **产物 chrome 复核**：`# VMR 用量报告` / `# VMR Journey 索引` / `# Journey 基准统计报告`（zh）· `# Journey Benchmarks`（en）· `# VMR 失败请求索引` · `# Journey 对照索引` —— 全部现行术语，无 `VMR Story` / `Journey Corpus` / `语料统计报告` / `vmr-requests.md` 链接。
+  - journey `.md` 导航链接 **1459/1459 可解析**（N-B1 持续闭环）。
+  - 看板 Node 沙箱：切片契约全命中、`success_rate` 全精度、`FmtCurrency` 币种感知、`versionBehavior` 三分支正常。
+  - **注**：`reports/requests/details/*.md` 的正文里出现的 `vmr report` / `.parse-cache` 等字样是 **8 月 22–25 日 Agent 真实对话内容**（这几天 Agent 正在开发 vmr 本身）——byte-faithful passthrough content，不是渲染层残留。
+
+**Phase C 结论**：本次大改动引入的所有概念/命名/路径/flag/API 迁移（M-01..M-19），其在**代码、当前态设计文档、配置模板、测试符号**中的残留已全部清理，`go test ./...` + `-race` 全绿，最终产物 chrome 干净。历史 trail（CHANGELOG、KNOWN_ISSUES 已闭环列表、评审/设计记录文档）按纪律原样保留。**根治完成。**

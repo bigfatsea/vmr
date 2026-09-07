@@ -31,6 +31,9 @@ commits and design docs hold the full reasoning.
 
 ### Fixed
 - journey `.md` per-step "→ detail" links and the System Prompt evidence links now resolve: they were built as `../details/` and `../evidence/`, which point inside `journeys/details/` and 404; the detail and evidence files are at `requests/details/` and `requests/evidence/`, i.e. `../../requests/...` from the journey report (same fix the report back-link already had). `journeys/index.md`'s heading is "VMR Journey Index" (was "VMR Story Index" — the retired term); `requests/failed.md`'s intro no longer points at the deleted `vmr-requests-<tag>.md` family
+- `journeys/benchmarks.md` heading is "Journey Benchmarks" / "Journey 基准统计报告" (was "Journey Corpus Report" / "Journey 语料统计报告" — the corpus→benchmark rename had reached the filename, the flag and the package but not the rendered H1)
+- `dispatchDefaultSuite`'s error wrap says `analyze (journey half)`, not the retired `analyze (story half)`
+- `report.example.yaml`/`.zh` and the `config.example.yaml`/`.zh` `api_keys` note describe the single `vmr analyze` entry point and the current product filenames (`journeys/`, `requests/details/`, `journeys/benchmarks.md`); the `.zh` sidecar example regains the `self_traffic_client_tags` field it was missing. `vmr.sh` drops `report`/`story` from its `-c`-injection allowlist and usage line. `vmr replay -ts`/`-req` help and the design docs point at `requests/index.json` / `journeys/index.json` instead of the deleted `vmr-requests.json` / `vmr-stories.json`
 
 ### Added
 - dashboard amounts render in the slices' own currency: the macro amounts are already converted Go-side to the currency `-currency`/report.yaml selects, `macro/finance.json` carries that code in `pricing.currency`, and the dashboard picks the matching symbol (`$`/`¥`/`€`/`£`; an unmapped code prefixes as the code itself)
