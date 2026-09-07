@@ -4,7 +4,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"vmr/internal/ctxgraph"
@@ -44,12 +43,6 @@ func setupJourneyRun(paths []string, outDir string, includeSelfTraffic bool, llm
 	// branch below reaches its own normal write point).
 	journeysDir := filepath.Join(outDir, "journeys")
 	indexPath := filepath.Join(journeysDir, "index.json")
-	if _, err := os.Stat(indexPath); err != nil {
-		legacyPath := filepath.Join(outDir, "stories", "vmr-stories.json")
-		if _, err := os.Stat(legacyPath); err == nil {
-			indexPath = legacyPath
-		}
-	}
 	prior := journey.LoadJourneyIndex(indexPath)
 	cacheDir := filepath.Join(outDir, ".cache", "parse") // shared with the report half — see cmd_report.go
 	priorCache := ctxgraph.LoadCacheDir(cacheDir)
