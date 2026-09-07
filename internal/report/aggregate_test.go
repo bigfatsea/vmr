@@ -753,7 +753,7 @@ func TestEndpointNormCounts(t *testing.T) {
 	}
 }
 
-// TestRenderReliabilityQuirkSection covers section_reliability.go's render
+// TestRenderReliabilityQuirkSection covers viewmodel_reliability.go's render
 // side: the "Quirk Fix × Endpoint" table must appear (with the endpoint,
 // marker, and a rate derived from EndpointRow.OK, not Attempts) when at
 // least one EndpointRow.NormCounts entry is non-zero, and must be entirely
@@ -1426,7 +1426,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 // TestRenderCompactionsTSConvertsToDisplayZone proves the §6.7 Compaction
 // table's TS column goes through fmtutil.DisplayZone like every other
 // human-facing timestamp in this package, rather than a raw cut() of the
-// record's own embedded offset (regression: section_compaction.go's
+// record's own embedded offset (regression: viewmodel_compaction.go's
 // renderCompactions used to call cut(c.TS, 19), which showed the source
 // offset verbatim and never converted at all).
 func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {

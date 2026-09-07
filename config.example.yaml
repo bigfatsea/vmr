@@ -138,12 +138,12 @@ listen: 127.0.0.1:8800
 # exchange_rate: a global "1 USD = X <code>" map. It has exactly two
 # consumers, and NEITHER is on the request path: ① normalizing a provider's
 # own providers[].pricing.rates (below) into USD once at load time, when
-# that provider's pricing.currency isn't USD; ② vmr report's -currency
+# that provider's pricing.currency isn't USD; ② vmr analyze's -currency
 # display conversion. A built-in default table already covers common
 # currencies (see docs/VirtualModelRouter_Design_v4_Quota.md) — you only
 # need an entry here to override that default or to add a currency it
 # doesn't cover. Skippable entirely if every provider's pricing.currency is
-# USD (or unset) and you never pass -currency to vmr report.
+# USD (or unset) and you never pass -currency to vmr analyze.
 # exchange_rate:
 #   CNY: 7.1
 
@@ -223,7 +223,7 @@ providers:
     # amount MUST be calibrated to what VMR ITSELF OBSERVES, not the plan's
     # marketing number: some vendors bill "one user turn" as a single unit
     # while an agentic client (tool calls, retries) turns that into a dozen-plus
-    # real HTTP requests vmr sees — set amount from your own `vmr report`
+    # real HTTP requests vmr sees — set amount from your own `vmr analyze`
     # numbers (or a few days of /status's quota section) once traffic is
     # flowing, not from the vendor's published quota.
     # quota:
@@ -256,7 +256,7 @@ providers:
     #       # Use this for a Credits-style account whose discount ratio (e.g.
     #       # cache reads cost a fraction of fresh input) is uniform across
     #       # all its models; if the ratio instead varies BY MODEL, price the
-    #       # difference in providers[].pricing (below) for vmr report's $
+    #       # difference in providers[].pricing (below) for vmr analyze's $
     #       # estimates, and express the budget itself in tokens here.
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
     #       # To reuse one set across several windows, anchor the field on its

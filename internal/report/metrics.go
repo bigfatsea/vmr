@@ -446,7 +446,7 @@ func buildFindingsForJSON(rep *Report2) []Finding {
 // already pins that), so this can never select a different set of Codes
 // than the English default did — only their rendered text changes.
 //
-// section_efficiency.go's own Markdown renderer deliberately does NOT read
+// viewmodel_efficiency.go's own Markdown renderer deliberately does NOT read
 // rep.Efficiency after this runs — it keeps computing its own independent
 // buildFindings(rep, lang) call, so Markdown rendering never depends on
 // whether (or when) a caller happened to call LocalizeEfficiency first.

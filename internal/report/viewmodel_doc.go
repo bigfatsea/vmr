@@ -4,8 +4,7 @@
 // own: the H1 + meta header, §0's summary table and auto highlights, §8's
 // link section, the appendix (as the report-level Disclaimers/Footnotes),
 // and the assembly of the full MacroReportVM. Pairs with
-// internal/i18n/report_doc.go. The legacy counterparts live in
-// render_doc.go until the byte-equivalence transition window closes.
+// internal/i18n/report_doc.go.
 package report
 
 import (

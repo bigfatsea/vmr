@@ -181,7 +181,7 @@
 - **可能方案**：按审计日志的时间局部性分自然日分桶，跨日即时释放原始切片。
 - **为什么仍待定**：report 半边这个量级目前仍跑得完（约 1.6GB / 1.5 万条，16GB 机器有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错。**触发条件：单次 `report`/`analyze` 宏观半边语料 > 约 3 万条，或该半边峰值 RSS > 4GB**。
 - **一处已做的收窄**：`ctxgraph/stitch.go` blob 倒排索引 `map[Hash]map[int]bool` → `map[Hash][]int`（去掉数百万单元素小 map 头开销），只降常数、不改分桶前提。
-- **相关未做项（warm-path，登记待触发）**：语料不变、只渲染单个 journey 时，`setupStoryRun` 仍无条件全量 `ScanCached` + `buildGraph` + `StitchGraph`。窄路径需给 `vmr-stories.json` 的 `JourneyIndexRow` 补 `stitch_edges`（每条 lineage 的前驱边持久化，按内容寻址 `LineageID` 重放，避开 tie-break 不确定性）+ 一条陈旧性闸 warm path。触发条件同上（语料 > 约 3 万条，或大语料上反复 `-journey` 调查）。
+- **相关未做项（warm-path，登记待触发）**：语料不变、只渲染单个 journey 时，`setupJourneyRun` 仍无条件全量 `ScanCached` + `buildGraph` + `StitchGraph`。窄路径需给 `journeys/index.json` 的 `JourneyIndexRow` 补 `stitch_edges`（每条 lineage 的前驱边持久化，按内容寻址 `LineageID` 重放，避开 tie-break 不确定性）+ 一条陈旧性闸 warm path。触发条件同上（语料 > 约 3 万条，或大语料上反复 `-journey` 调查）。
 
 
 #### 2.1 [低，已部分闭环] `vmr analyze` 多文件输入：会话分析那一趟（`collect()`）仍未缓存（含原 1.23）

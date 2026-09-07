@@ -124,10 +124,10 @@ listen: 127.0.0.1:8800
 # exchange_rate：一张通用的"1 美元 = X <货币代码>"映射表。它只有两个消费者，
 # 且都不在运行态：① 把某个 provider 用非美元书写的 providers[].pricing.rates
 # （见下方）归一为 USD（仅当该 provider 的 pricing.currency 不是 USD 时才需要）；
-# ② vmr report 的 -currency 展示折算。内置默认汇率表已覆盖常见货币（见
+# ② vmr analyze 的 -currency 展示折算。内置默认汇率表已覆盖常见货币（见
 # docs/VirtualModelRouter_Design_v4_Quota.md）——只有需要覆盖默认值，或用到
 # 默认表没有的货币时才需要写这里。如果每个 provider 的 pricing.currency 都是
-# USD（或不写），且从不给 vmr report 传 -currency，这一整块可以完全省略。
+# USD（或不写），且从不给 vmr analyze 传 -currency，这一整块可以完全省略。
 # exchange_rate:
 #   CNY: 7.1
 
@@ -195,7 +195,7 @@ providers:
     # amount 必须按 VMR 自己实际观测到的口径来校准，不能照抄套餐的宣传数字：
     # 有些厂商把"一次用户交互"计成一个单位，但一个 agent 类客户端（带工具调用、
     # 重试）会把它变成十几次甚至更多真实的 HTTP 请求，vmr 看到的是这些真实请求
-    # ——等流量真的跑起来之后，用你自己 `vmr report` 的数字（或者
+    # ——等流量真的跑起来之后，用你自己 `vmr analyze` 的数字（或者
     # /status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
     # quota:
     #   limits:
@@ -222,7 +222,7 @@ providers:
     #       # tokens 时才有意义（也只有这种情况下配置校验才会接受它）。当账号自己
     #       # Credits 制的折算比例（比如缓存命中读只算新鲜输入的一部分价格）在所
     #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，把差异写
-    #       # 进下面的 providers[].pricing（供 vmr report 估算 $），预算本身依然
+    #       # 进下面的 providers[].pricing（供 vmr analyze 估算 $），预算本身依然
     #       # 用 tokens 表达。
     #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
     #       # 想在多条窗口间复用同一套，就在第一次出现处锚定、后面别名引用（优先
@@ -246,7 +246,7 @@ providers:
     #       # 和一个具名条目写在一起是加载期错误（通配符已经覆盖了它）。
     #       # /status 只展示真的产生过计费的模型各一行，不是每条 Limit 一行。
 
-  # providers[].pricing：完全可选，只用来帮 vmr report/vmr analyze 的 $ 估算
+  # providers[].pricing：完全可选，只用来帮 vmr analyze 的 $ 估算
   # 与 vmr check 的展示更精确——绝不影响请求路径、路由或配额（见
   # docs/VirtualModelRouter_Design_v4_Quota.md 的"定价"一节）。不
   # 配置也会有一份内置标准价目表生效；这个块只声明"这个账号跟标准表不一样

@@ -3,14 +3,14 @@
 # Built-in default "1 USD = X <code>" exchange-rate table — a convenience
 # fallback for the top-level exchange_rate: block in config.yaml, not an
 # accounting-grade source: rates drift daily, this table doesn't. It exists
-# so a deployment that only cares about a rough $ estimate in vmr report (or
+# so a deployment that only cares about a rough $ estimate in vmr analyze (or
 # a provider whose pricing.currency isn't USD) doesn't have to look up and
 # type in a rate just to get started — see
 # docs/future-strategy/pricing_architecture_simplification_plan.md §2.3.
 #
 # A currency the user declares in their own top-level exchange_rate: block
 # always wins over the value here (see pricing.EffectiveExchangeRate). A
-# currency named anywhere (a provider's pricing.currency, vmr report's
+# currency named anywhere (a provider's pricing.currency, vmr analyze's
 # -currency flag) that has no entry here AND no user override is a load-time
 # error — this table is a fallback, never a reason to guess.
 #

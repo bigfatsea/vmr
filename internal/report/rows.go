@@ -469,7 +469,7 @@ type SessionRow struct {
 	//
 	// No compaction_chain field: it was declared here (omitempty []string)
 	// and never written by anything, so it could only render as absent. The
-	// chain itself IS reported — section_sessions.go's renderCompactionChains
+	// chain itself IS reported — viewmodel_sessions.go's renderCompactionChains
 	// walks ContinuedFrom across rows at render time rather than
 	// materializing a per-row copy, which is why no accumulator for it was
 	// ever missed. Same reasoning as the messages fields on Row above.
@@ -530,7 +530,7 @@ type Finding struct {
 	// language (LocalizeEfficiency) before the slices are written, so
 	// the persisted JSON follows -lang like the Markdown does. Markdown
 	// rendering computes its own separate localized copy rather than
-	// reading this struct post-overwrite — see section_efficiency.go.
+	// reading this struct post-overwrite — see viewmodel_efficiency.go.
 	Finding    string `json:"finding"`
 	Metric     string `json:"metric"`
 	Value      string `json:"value"`

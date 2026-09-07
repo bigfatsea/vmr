@@ -8,7 +8,7 @@
 // This builder does NOT read rep.Efficiency even when it already holds
 // localized copy: Markdown's language correctness must not depend on
 // WriteJSON having run first with this exact lang (see
-// section_efficiency.go for the full reasoning, mirrored here).
+// viewmodel_efficiency.go for the full reasoning, mirrored here).
 package report
 
 import (

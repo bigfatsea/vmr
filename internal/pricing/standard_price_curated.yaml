@@ -534,7 +534,7 @@ rates:
   # stays at 2 of 4 components on purpose; it will keep rendering as an
   # incomplete-rate estimate (CostRateIncomplete) without an account-level
   # providers[].pricing.rates entry supplying cache figures from elsewhere
-  # (e.g. a negotiated contract), but it still turns `vmr report`'s $
+  # (e.g. a negotiated contract), but it still turns `vmr analyze`'s $
   # estimate for this provider from "nothing at all" into a real (if
   # partial) number.
   - key: hunyuan/hunyuan-a13b
