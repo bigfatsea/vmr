@@ -373,7 +373,7 @@ func resolveStitch(l *Lineage, byIdx map[int]*Lineage, blobLineages map[Hash][]i
 // then to the smaller Idx as a final total-ordering tie-break. Without
 // this, two runs over the same input could pick different predecessors
 // among equally-scored candidates — silently violating "idempotent, same
-// input -> same output" (an explicit invariant) and, downstream, story's
+// input -> same output" (an explicit invariant) and, downstream, journey's
 // content-addressed Journey ids. Caught by running StitchGraph 5x over the
 // real corpus and diffing PredIdx per lineage — not by any unit test (a
 // synthetic fixture is too small to ever produce a real tie by chance).

@@ -83,7 +83,7 @@ func TestResolveInputPaths_NoArgsAndNoConfig(t *testing.T) {
 // TestResolveInputPaths_NoArgsAndEmptyLogDir covers the case where the
 // config loads fine but its log_dir has no vmr-audit-* files yet (a fresh
 // instance that hasn't logged anything) — still a clear error, not an
-// empty-but-successful report/story.
+// empty-but-successful report/journey.
 func TestResolveInputPaths_NoArgsAndEmptyLogDir(t *testing.T) {
 	dir := t.TempDir()
 	logDir := filepath.Join(dir, "logs")

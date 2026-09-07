@@ -59,7 +59,7 @@ func (z zstdReadCloser) Close() error {
 // LineAt returns the raw bytes of path's 1-based logical line — the same
 // counting ForEachLine already uses (a too-long skipped line still advances
 // the counter, so this stays aligned with whatever wrote the line number a
-// caller is passing in, e.g. a ctxgraph coordinate or vmr-requests.json's
+// caller is passing in, e.g. a ctxgraph coordinate or requests/index.json's
 // own row order). It does not unmarshal: callers decode into whatever shape
 // they need (a full audit.Record for a "read" consumer, a partial view for
 // replay). Unlike ForEachLine's callers elsewhere, line 0 is not special

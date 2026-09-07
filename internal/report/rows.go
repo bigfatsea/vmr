@@ -66,7 +66,7 @@ type Report2 struct {
 	CostCoverage                  *CostCoverage       `json:"cost_coverage,omitempty"`
 	Highlights                    []string            `json:"highlights,omitempty"`
 
-	// requests is the per-request export (vmr-requests.json). Unexported so
+	// requests is the per-request export (requests/index.json). Unexported so
 	// it stays OUT of the aggregate slices (macro/* is aggregate-only); exposed via
 	// RequestRows() for the jsonl writer + index renderer.
 	requests []RequestRow
@@ -100,7 +100,7 @@ type Meta struct {
 	DetailsEnabled bool `json:"details_enabled,omitempty"`
 	// SelfTrafficExcluded is how many records this run's self-traffic
 	// exclusion (P6.4) skipped from every aggregation bucket — vmr
-	// story's own -llm-addr calls routed back through this instance, not
+	// journey's own -llm-addr calls routed back through this instance, not
 	// the workload actually being analyzed. Counted, never silently
 	// dropped; 0 when no exclusion tags were configured or none matched.
 	SelfTrafficExcluded int `json:"self_traffic_excluded,omitempty"`
@@ -108,7 +108,7 @@ type Meta struct {
 	// configured and applied this run — distinct from SelfTrafficExcluded > 0,
 	// which also needs the window to actually contain matching records. The
 	// appendix disclosure keys off this so "configured, nothing matched"
-	// isn't reported as "not configured" (and doesn't contradict the story
+	// isn't reported as "not configured" (and doesn't contradict the journey
 	// half's own disclosure on the same run).
 	SelfTrafficExclusionActive bool `json:"self_traffic_exclusion_active,omitempty"`
 
@@ -438,7 +438,7 @@ type WorkloadRow struct {
 type SessionRow struct {
 	// ID is the underlying Lineage's content-addressed identity
 	// ("l-<hash8>", see SessionInfo.ID's doc comment) — stable across
-	// independent runs/subsets, joinable against story's
+	// independent runs/subsets, joinable against journey's
 	// JourneyIndexRow.Lineages by set membership. Alias is the old
 	// run-scoped s%02d label, kept only for human scannability within
 	// this one report; never use it as a lookup key (P6.1).
@@ -554,7 +554,7 @@ const (
 	FindingProviderQuotaExhaustion FindingCode = "provider_quota_exhaustion"
 )
 
-// RequestRow is one row of vmr-requests.json's "requests" field: the per-request drill-down
+// RequestRow is one row of requests/index.json's "requests" field: the per-request drill-down
 // backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;
 // unavailable signals are omitted rather than fabricated.
 type RequestRow struct {

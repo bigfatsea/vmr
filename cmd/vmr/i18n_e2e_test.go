@@ -151,7 +151,7 @@ func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 // test doesn't have to chdir): language: zh with no -lang flag at all must
 // still switch the output language — the whole point of report.yaml being
 // auto-loaded rather than requiring -lang on every invocation. Checks both
-// vmr-report.md and vmr-report.json's efficiency[] (P8) — cmd_report.go
+// vmr-report.md and macro/summary.json's efficiency[] (P8) — cmd_report.go
 // resolves lang exactly once (resolveLanguage) and feeds that same value to
 // both LocalizeEfficiency and Markdown, so a report.yaml-only language
 // choice reaches the JSON output the same way -lang does; this pins that
@@ -176,7 +176,7 @@ func TestE2E_ReportConfigFileZh(t *testing.T) {
 		if f.Code == "tool_schema_waste" {
 			found = true
 			if f.Finding != "工具 schema 浪费" {
-				t.Errorf("report.yaml language: zh should also localize vmr-report.json's efficiency[].finding, got %q", f.Finding)
+				t.Errorf("report.yaml language: zh should also localize macro/summary.json's efficiency[].finding, got %q", f.Finding)
 			}
 		}
 	}
@@ -434,7 +434,7 @@ func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 // TestE2E_ReportLangFlagZh_EfficiencyFollowsLang and
 // TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang each individually can't
 // provide: one test function asserting all three JSON outputs
-// (vmr-report.json, journey-<id>.json, compare-*.json) are in Chinese
+// (macro/summary.json, j-<id>.json, compare-*.json) are in Chinese
 // under the SAME -lang zh run, so a future regression in any one of them
 // surfaces here instead of only in an isolated per-output test (P8,
 // json_lang_policy_plan_sonnet-5.md §3.5 — "each package's own tests
@@ -444,7 +444,7 @@ func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 // same-run language agreement, not that the three outputs describe the
 // same data.
 func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
-	// vmr-report.json: efficiency[].finding.
+	// macro/summary.json: efficiency[].finding.
 	reportPath := e2eReportFixture(t)
 	reportOut := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", reportOut, reportPath}); err != nil {
@@ -456,15 +456,15 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 		if f.Code == "tool_schema_waste" {
 			foundReport = true
 			if f.Finding != "工具 schema 浪费" {
-				t.Errorf("vmr-report.json efficiency[].finding = %q, want %q", f.Finding, "工具 schema 浪费")
+				t.Errorf("macro/summary.json efficiency[].finding = %q, want %q", f.Finding, "工具 schema 浪费")
 			}
 		}
 	}
 	if !foundReport {
-		t.Fatal("vmr-report.json: expected tool_schema_waste finding")
+		t.Fatal("macro/summary.json: expected tool_schema_waste finding")
 	}
 
-	// journey-<id>.json: parses cleanly under -lang zh — its narrative
+	// j-<id>.json: parses cleanly under -lang zh — its narrative
 	// fields already followed lang before P8 (TestE2E_JourneyRenderAllLangZh
 	// covers the Markdown side); this just confirms it's still true
 	// alongside the other two outputs in the same run.

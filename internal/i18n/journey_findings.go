@@ -4,13 +4,13 @@
 // "suspect list" findings (design doc's "候选/嫌疑清单，不是判决").
 // Findings text is localized in the target language (for both
 // journey-<id>.md and journey-<id>.json), while FindingCode
-// (story.FindingCode) is the stable identifier and never varies by language.
+// (journey.FindingCode) is the stable identifier and never varies by language.
 package i18n
 
 import "strconv"
 
 // JourneyFindingText is one Step-level finding's localized parts — mirrors
-// report's FindingText but without a Metric field (a story Finding is
+// report's FindingText but without a Metric field (a journey Finding is
 // located by StepSeq, not by a report metric name).
 type JourneyFindingText struct {
 	Finding, Evidence, Action string

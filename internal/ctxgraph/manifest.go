@@ -83,7 +83,7 @@ type Manifest struct {
 
 	// Bytes is this record's decompressed JSON line length — set by
 	// scanFile, not BuildManifest (only the scan loop has the raw line in
-	// scope). The byte-budget batching in cmd/vmr's story rendering sums
+	// scope). The byte-budget batching in cmd/vmr's journey rendering sums
 	// this across a candidate's manifests to bound how much a single
 	// BuildAll batch will pull into memory (FetchRecords decodes ~this many
 	// bytes per wanted line), replacing an untuned "N candidates per batch"
@@ -166,7 +166,7 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		// Shared implementation with report's own degraded estimate
 		// (Facts.EstimatedTokens when the router already computed one, a
 		// body-size estimate otherwise) — see chatmsg.EstimateDegradedTokens
-		// for why one function and not two: report and story must price the
+		// for why one function and not two: report and journey must price the
 		// same record on the same basis, and a compile-time shared call is
 		// the only way that can't drift.
 		var respBody any

@@ -124,7 +124,7 @@ type ReqInfo struct {
 	// commands hand reqdetail the identical (m, prev) pair and render the
 	// byte-identical page. Derived from the lineage directly, NOT from
 	// the attached-record chain: a compaction-tagged record excluded from
-	// s.Recs still counts here, exactly as it does on story's side.
+	// s.Recs still counts here, exactly as it does on journey's side.
 	prevManifest *ctxgraph.Manifest
 	tailPrev     []string // previews of the last tailPrevKeep messages
 	// realUsers: absolute msg idx → previewed real user instruction. Held for
@@ -156,7 +156,7 @@ type SessionInfo struct {
 	// (Lineage.LineageID(), "l-<hash8>") — a Session IS one Lineage (see
 	// group's own doc comment), so it reuses that unit's identity rather
 	// than inventing a run-scoped one. This is also what makes a report's
-	// session row and a story JourneyIndexRow.Lineages entry joinable by
+	// session row and a journey JourneyIndexRow.Lineages entry joinable by
 	// set membership instead of a cross-command hash-and-compare (see
 	// DevPlan P6.1 / architecture doc §7.3b).
 	ID string
@@ -213,12 +213,12 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 // nil. prof is the taskseg.Profile collect() uses to recognize real user
 // instructions, a deliberate no-reply skip, and a framework-specific chat_id —
 // resolved once at cmd/vmr's composition root (see resolveTaskProfile), not
-// decided independently by report and story.
+// decided independently by report and journey.
 //
 // The file-hash-keyed cache (ctxgraph.FileCache/ScanCached) covers only the
 // ctxgraph.Scan pass. The analyzeFile pass below — report's own per-request
 // parse into ReqInfo — is NOT cached and reparses every file on every call;
-// see docs/VirtualModelRouter_Design_v4_Analytics.md's vmr-requests.json
+// see docs/VirtualModelRouter_Design_v4_Analytics.md's requests/index.json
 // section for why only the ctxgraph.Manifest-based half is.
 //
 // Per-file work runs on a bounded worker pool (analysisWorkerCount): collect()

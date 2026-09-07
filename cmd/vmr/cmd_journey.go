@@ -641,7 +641,7 @@ func ensureComparesDir(outDir string) (string, error) {
 }
 
 // journeyBaseName returns the base filename (without .md/.json extension)
-// for j - the stem shared by both artifacts, derived from story's
+// for j - the stem shared by both artifacts, derived from journey's
 // JourneyReportFile (the single naming source of truth) by dropping the
 // canonical .md extension.
 func journeyBaseName(j *journey.Journey) string {

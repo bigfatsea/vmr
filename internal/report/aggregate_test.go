@@ -441,7 +441,7 @@ rates:
 
 // TestWriteRequestsJSONL covers WriteRequestsJSONL as a generic row writer.
 // The only production caller today is vmr-requests-failed.jsonl (see
-// cmd_report.go) — vmr-requests.json, the main per-request export, is
+// cmd_report.go) — requests/index.json, the main per-request export, is
 // WriteRequestsJSON (no "L"), a different function with its own
 // "files" cache section. The filename below is deliberately generic
 // (not vmr-requests-failed.jsonl) so this test doesn't imply the function

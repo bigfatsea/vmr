@@ -51,7 +51,7 @@ func TestBuildJourneyIndexRow_CheapFields(t *testing.T) {
 		t.Errorf("Files[0] = %q, want %q (CanonicalPath, matching req's coordinate spelling)", row.Files[0], want)
 	}
 	// Not built yet — the caller (renderJourney etc.) fills these in only
-	// once story.BuildChain has actually run.
+	// once journey.BuildChain has actually run.
 	if row.Tasks != 0 || row.Steps != 0 || row.Rendered != "" {
 		t.Errorf("expected zero-value Tasks/Steps/Rendered before a full build, got %+v", row)
 	}

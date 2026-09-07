@@ -60,7 +60,7 @@ type detailJob struct {
 // during session analysis (group(), session.go) straight from ctxgraph's
 // lineage — the same prev internal/journey's Step.PrevManifest carries, which
 // is what keeps the two commands' pages byte-identical. A Lineage's first
-// record has nil prevManifest; there is no Parent fallback — story's
+// record has nil prevManifest; there is no Parent fallback — journey's
 // Step.PrevManifest has none either, so adding one here would let the two
 // commands' renderFingerprint diverge for the same record (see
 // detailJob's own doc comment above).

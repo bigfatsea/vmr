@@ -59,7 +59,7 @@ func crossCheckFixture(t *testing.T) string {
 func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 	path := crossCheckFixture(t)
 	root := t.TempDir()
-	journeyOut := filepath.Join(root, "story-out")
+	journeyOut := filepath.Join(root, "journey-out")
 	reportOut := filepath.Join(root, "report-out")
 
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-journey-only", "-render-all", "-o", journeyOut, path}) }); err != nil {
@@ -73,7 +73,7 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 	reportDetails := filepath.Join(reportOut, "requests", "details")
 	entries, err := os.ReadDir(journeyDetails)
 	if err != nil {
-		t.Fatalf("ReadDir(story details): %v", err)
+		t.Fatalf("ReadDir(journey details): %v", err)
 	}
 	if len(entries) != 6 {
 		t.Fatalf("materialized %d detail pages, want 6 (one per record)", len(entries))
@@ -83,7 +83,7 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 	for _, e := range entries {
 		journeyBody, err := os.ReadFile(filepath.Join(journeyDetails, e.Name()))
 		if err != nil {
-			t.Fatalf("reading story detail %s: %v", e.Name(), err)
+			t.Fatalf("reading journey detail %s: %v", e.Name(), err)
 		}
 		reportPath := filepath.Join(reportDetails, e.Name())
 		reportBody, err := os.ReadFile(reportPath)
@@ -94,7 +94,7 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 		}
 		if string(journeyBody) != string(reportBody) {
 			t.Errorf("detail page %s differs between journey and report -details — this is exactly "+
-				"the P2 byte-identical invariant breaking:\n--- story ---\n%s\n--- report ---\n%s",
+				"the P2 byte-identical invariant breaking:\n--- journey ---\n%s\n--- report ---\n%s",
 				e.Name(), journeyBody, reportBody)
 		}
 		compared++

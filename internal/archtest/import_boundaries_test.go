@@ -95,7 +95,7 @@ var forbiddenImports = map[string][]string{
 	// so it could be fuzzed at the pure io.Reader level, independent of
 	// Router/Snapshot) sits below router in the routing half, the same
 	// "shared leaf, consumer never imports back" shape as taskseg below
-	// report/story: router.go/quota.go depend on it (Wrap/NormalizerStream),
+	// report/journey: router.go/quota.go depend on it (Wrap/NormalizerStream),
 	// and it depending back on router or server would be a real import
 	// cycle, not just a layering preference. The list below is broader than
 	// just the direct-cycle risk (router/server) for the same reason
@@ -120,8 +120,8 @@ var forbiddenImports = map[string][]string{
 	// taskseg (agent-dialect Profile plus, since the architecture review's B3
 	// batch, the session/task-segmentation primitives built on it —
 	// real-instruction indexing, new-task detection, task titling) is the
-	// shared leaf both report's session.go and story's journey.go depend on
-	// — B2 merged what used to be story's own private internal/journey/profile
+	// shared leaf both report's session.go and journey's journey.go depend on
+	// — B2 merged what used to be journey's own private internal/journey/profile
 	// package with a byte-identical copy report carried in session.go, B3
 	// converged the two packages' independent session/task-boundary
 	// algorithms the same way. Neither consumer may depend back on it, or
@@ -146,7 +146,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/quota",
 	},
 	// chatmsg is the one message/SSE/usage parser ctxgraph, taskseg, report
-	// and story all share (CLAUDE.md's module map), and both the ctxgraph and
+	// and journey all share (CLAUDE.md's module map), and both the ctxgraph and
 	// taskseg entries above justify their own rules by citing "chatmsg's own
 	// zero-dependency-on-consumers rule" — which, until this entry, did not
 	// exist as a check anywhere. It really does sit at the bottom (its only
@@ -164,7 +164,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/taskseg",
 	},
 	// reqdetail is the shared detail-rendering leaf imported by both report
-	// and story — it must not import either consumer back, nor any runtime
+	// and journey — it must not import either consumer back, nor any runtime
 	// routing package.
 	"vmr/internal/reqdetail": {
 		"vmr/internal/router",
@@ -253,7 +253,7 @@ func TestArchitecture_ImportBoundaries(t *testing.T) {
 				// Deliberately generic: this message used to assert the
 				// analysis-half rule ("only depends on the audit schema,
 				// never on the routing runtime"), which was true when the
-				// table held only report/ctxgraph/story — it now also holds
+				// table held only report/ctxgraph/journey — it now also holds
 				// routing-half rules (adapter, router, respnorm), where that
 				// sentence was actively misleading. The per-entry reason
 				// lives in forbiddenImports' own comments, which is where a

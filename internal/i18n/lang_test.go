@@ -98,7 +98,7 @@ func TestBundlesHaveNoEmptyStrings(t *testing.T) {
 // TestBundleConstructorsCompleteness uses AST inspection over internal/i18n/*.go
 // to ensure that every top-level constructor func Xxx(lang Lang) ...Text is
 // registered in bundleConstructors. This guarantees the bundle registry cannot
-// quietly drift when new report/story sections or text bundles are added.
+// quietly drift when new report/journey sections or text bundles are added.
 func TestBundleConstructorsCompleteness(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {

@@ -36,7 +36,7 @@ func TestPctStr64_BeyondInt32Range(t *testing.T) {
 // TestDetailCell_LinksOnlyWhenFileActuallyExists: the "文件" column's
 // judgment is whether the
 // target actually exists on disk right now, not whether some flag was
-// passed this run — since vmr analyze can have one half (story, batch
+// passed this run — since vmr analyze can have one half (journey, batch
 // materializing under -render-all) write details/ while the report half's
 // own -details flag stays false, or vice versa. detailCell itself takes
 // the pre-built set (buildDetailFileSet, P13.4's F-02 follow-up) rather

@@ -1,7 +1,7 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Corpus-level statistics — "一批 Journey 里找出反复出现的行为
-// 倾向" (the story design specification's
+// Benchmark statistics — "一批 Journey 里找出反复出现的行为
+// 倾向" (the journey design specification's
 // corpus-level statistics section), built directly on data this package
 // already computes per-Journey (Metrics, Finding) — no new collection, no
 // LLM, pure descriptive statistics. Three deliberate limits, all straight

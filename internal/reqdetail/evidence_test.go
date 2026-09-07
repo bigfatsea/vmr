@@ -108,7 +108,7 @@ func TestEnsureSysPromptEvidence_ContentMatchesFilenameHash(t *testing.T) {
 
 // TestSysPromptEvidenceFileName_MatchesEnsureSysPromptEvidence locks down
 // the contract SysPromptEvidenceFileName exists for: a caller holding only a
-// Manifest's SysHash (no rec) — a story spine Step's future "→ system
+// Manifest's SysHash (no rec) — a journey spine Step's future "→ system
 // prompt" link — must be able to compute the exact filename
 // EnsureSysPromptEvidence actually wrote, without re-deriving this
 // package's private hash/naming convention.

@@ -14,7 +14,7 @@ import (
 // still needs after buildFrom drops the full Record: modelusage.go reads
 // every distinct (Provider, Model) any attempt touched, render_spine.go
 // reads len() for its "failed over" marker. The routing-half
-// detail (URLs, request/response bodies, timing) never had a story
+// detail (URLs, request/response bodies, timing) never had a journey
 // consumer.
 type AttemptFact struct {
 	Provider string

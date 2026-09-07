@@ -44,7 +44,7 @@ func escapeCell(s string) string {
 	return reqdetail.EscapeCell(s)
 }
 
-// pctStr is story's local 0-decimal alias for fmtutil.FmtPercent.
+// pctStr is journey's local 0-decimal alias for fmtutil.FmtPercent.
 func pctStr(f float64) string {
 	return fmtutil.FmtPercent(f, 0)
 }

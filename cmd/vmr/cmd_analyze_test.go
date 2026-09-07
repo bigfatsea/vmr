@@ -69,13 +69,13 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_ReportLinksStoriesOnFirstCall locks in the story-before-
+// TestCmdAnalyze_ReportLinksJourneyIndexOnFirstCall locks in the journey-before-
 // report ordering inside cmdAnalyze: vmr-report.md must link to
 // journeys/index.md (P6.2a) after a SINGLE `vmr analyze` call, not
 // only from a second run onward — the ordering choice cmd_analyze.go's
 // own comment explains (report.Markdown only links the index when it
 // already exists at render time).
-func TestCmdAnalyze_ReportLinksStoriesOnFirstCall(t *testing.T) {
+func TestCmdAnalyze_ReportLinksJourneyIndexOnFirstCall(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 20, 11, m, 0, 0, time.UTC) }
 	sys := journeyMsg("system", "sys")
 	u1 := journeyMsg("user", "ordering fixture opening instruction")
@@ -94,7 +94,7 @@ func TestCmdAnalyze_ReportLinksStoriesOnFirstCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "journeys/index.md") {
-		t.Error("vmr-report.md doesn't link journeys/index.md after a single analyze call — story must run before report")
+		t.Error("vmr-report.md doesn't link journeys/index.md after a single analyze call — journey must run before report")
 	}
 }
 
@@ -499,7 +499,7 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 }
 
 // TestCmdAnalyze_JourneySelectorRunsJourneyHalfOnly covers P9.1: a zoom
-// selector routes into that one story-side view and does NOT also run the
+// selector routes into that one journey-side view and does NOT also run the
 // macro report half — behavior is equivalent to the targeted zoom mode, not
 // the default suite with an extra filter.
 func TestCmdAnalyze_JourneySelectorRunsJourneyHalfOnly(t *testing.T) {
@@ -755,7 +755,7 @@ func TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite(t *testing.T) {
 // take an explicit -llm-key override, cmd_report.go had no such flag and
 // only ever read report.yaml's llm_key) is closed by the unified flag set
 // — an -llm-key passed to `vmr analyze` (not present in report.yaml at
-// all) must exclude the same self-traffic candidate from BOTH the story
+// all) must exclude the same self-traffic candidate from BOTH the journey
 // half's candidate list and the report half's totals, since cmdAnalyze
 // resolves llmKey once and feeds it to both setupJourneyRun and runReport's
 // excludeClientTags.

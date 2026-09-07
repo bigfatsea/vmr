@@ -68,7 +68,7 @@ func ResetUnrecognizedShapeCounts() {
 // portion of In (see this type's own doc comment). Floored rather than
 // left negative: that would require an upstream usage object whose
 // reported cache components exceed its reported total, and every consumer
-// of this value (quota charging, report/story cache-efficiency metrics)
+// of this value (quota charging, report/journey cache-efficiency metrics)
 // needs a non-negative token count. This was independently hand-written at
 // four call sites (internal/router/quota.go's tokenCharge,
 // internal/report/{cost,sticky}.go, internal/journey/render_md.go) before

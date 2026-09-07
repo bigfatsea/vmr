@@ -99,16 +99,16 @@ func (l *Lineage) RootHash() Hash {
 
 // lineageIDCodeLen mirrors internal/journey's idCodeLen (deriveID) — same
 // 8-hex-char prefix convention, kept as an independent constant here since
-// ctxgraph is a leaf package and must not depend on story for it.
+// ctxgraph is a leaf package and must not depend on journey for it.
 const lineageIDCodeLen = 8
 
 // LineageID is l's stable identity: "l-" plus an 8-hex-char prefix of a
 // hash over the root manifest's content AND its own arrival timestamp. A
-// Lineage IS the structural unit report's SessionInfo and story's Journey
+// Lineage IS the structural unit report's SessionInfo and journey's Journey
 // each already treat as "one session" (report: one SessionInfo per
-// Lineage; story: a Journey is a chain of these) — this gives that unit
+// Lineage; journey: a Journey is a chain of these) — this gives that unit
 // the single identity both halves should reference instead of each
-// inventing their own (report's run-scoped s%02d, story's own per-Journey
+// inventing their own (report's run-scoped s%02d, journey's own per-Journey
 // hash).
 //
 // Deliberately NOT just RootHash's own prefix (an earlier version of this

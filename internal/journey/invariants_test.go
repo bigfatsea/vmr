@@ -65,7 +65,7 @@ func manyToolCallRecords(n int) []audit.Record {
 // against one real record (57/57), never turned into a test that fails the
 // build if the invariant is ever violated. Runs chatmsg.CheckToolPairing
 // over every manifest a real Build() produces (re-fetching each Step's
-// record by its manifest coordinate — the same body story.Build fed into
+// record by its manifest coordinate — the same body journey.Build fed into
 // rendering), so this also guards against any future change to
 // Build/chatmsg accidentally introducing a mismatch.
 func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {

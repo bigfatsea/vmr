@@ -26,10 +26,10 @@ type RealUsers map[int]string
 
 // IndexRealUsers scans msgs once, calling prof.RealUserText for every
 // user-role message and storing Preview of what it returns. report's
-// collect() and story's buildFrom() each call this exactly once per
+// collect() and journey's buildFrom() each call this exactly once per
 // request, in their own main per-request scan, and pass the result down to
 // HasNewInstruction/LastInstruction/a stitch-boundary title lookup instead
-// of re-scanning for each — story used to rerun the same regex up to 2-3
+// of re-scanning for each — journey used to rerun the same regex up to 2-3
 // times per request this way.
 //
 // Why Preview here and not in the consumers (B3 stored the raw text and
@@ -43,7 +43,7 @@ type RealUsers map[int]string
 // returns a SUBSLICE of the message (Go substrings share the backing
 // array), which pins the whole original message even when the useful part
 // is one line. No consumer ever wanted the raw text — all three of them
-// (LastInstruction, FirstInstruction, story's stitch-boundary title) Preview
+// (LastInstruction, FirstInstruction, journey's stitch-boundary title) Preview
 // it immediately, and HasNewInstruction reads only the keys.
 func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int) RealUsers {
 	ru := RealUsers{}
@@ -60,7 +60,7 @@ func IndexRealUsers(prof Profile, msgs []chatmsg.Message, rawMsgs []any, off int
 
 // ManifestKeySet is m's Keys as a set — the prevKeys shape
 // HasNewInstruction wants, built once by whichever caller has just
-// classified this manifest against its parent (report's attach(), story's
+// classified this manifest against its parent (report's attach(), journey's
 // buildFrom()) rather than each repeating the same small loop. m may be
 // nil (no parent manifest to compare against), matching HasNewInstruction's
 // own documented nil-prevKeys contract.
@@ -120,7 +120,7 @@ func LastInstruction(ru RealUsers, deltaStart int) string {
 // most-recent turn. "" when ru is empty. Reads an already-built RealUsers
 // index rather than re-scanning a message list, the same single-index
 // discipline IndexRealUsers exists to enforce: report's sessionTitle,
-// story's Journey title, and story's cheap PreviewTitle path each used to
+// journey's Journey title, and journey's cheap PreviewTitle path each used to
 // hand-roll this same earliest-index search independently.
 func FirstInstruction(ru RealUsers) string {
 	best := -1
@@ -136,7 +136,7 @@ func FirstInstruction(ru RealUsers) string {
 }
 
 // IsNewTask is the one task-boundary rule both report's session.go and
-// story's journey.go apply: a trace-id change always opens a new task (a
+// journey's journey.go apply: a trace-id change always opens a new task (a
 // new client-side request chain, independent of message content);
 // otherwise a genuinely new real user instruction does — UNLESS the
 // previous turn ended in a deliberate no-reply (prevNoReply), in which case
@@ -149,8 +149,8 @@ func IsNewTask(traceChanged, prevNoReply, hasNewInstr bool) bool {
 // fallback as a parameter instead of importing internal/i18n: report's one
 // full-corpus analysis pass runs once, not once per language (its fallback
 // is a fixed English placeholder — re-running the pass per language just
-// for a rare placeholder string isn't worth it), while story passes its own
-// localized i18n.Story(lang).ToolLoopTitle. taskseg stays a leaf that
+// for a rare placeholder string isn't worth it), while journey passes its own
+// localized i18n.Journey(lang).ToolLoopTitle. taskseg stays a leaf that
 // doesn't depend on the rendering layer either way.
 func TaskTitle(newInstruction, fallback string) string {
 	if newInstruction != "" {

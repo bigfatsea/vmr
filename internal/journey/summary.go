@@ -1,6 +1,6 @@
 // Ver 2026-09-15, by pi
 
-// JourneySummary — journey-<id>.json's shape and its one constructor. Split
+// JourneySummary — j-<id>.json's shape and its one constructor. Split
 // out of metrics.go (whose archtest budget it was crowding) so the summary's
 // own growth — it must stay a rendering-complete, self-contained projection
 // of a Journey (viewmodel.go renders j-<id>.md from it alone) — never again
@@ -14,8 +14,8 @@ import (
 	"vmr/internal/i18n"
 )
 
-// JourneySummary is journey-<id>.json's shape (design doc: "输出同时落
-// journey-<id>.json，供第 4 步的对比模块直接消费") — a Journey's identity
+// JourneySummary is j-<id>.json's shape (design doc: "输出同时落
+// j-<id>.json，供第 4 步的对比模块直接消费") — a Journey's identity
 // plus its Metrics profile and rule-derived Findings, so Phase 4d's
 // comparison module can diff two Journeys without re-parsing Markdown.
 //
@@ -73,7 +73,7 @@ type JourneySummary struct {
 // in the specified target language. The finding Code fields remain stable
 // canonical identifiers across languages, while human-readable Finding/Action
 // texts follow lang, keeping .json and .md outputs fully aligned —
-// compare-*.json's MetricDiff.Label and vmr-report.json's efficiency[]
+// compare-*.json's MetricDiff.Label and macro/summary.json's efficiency[]
 // follow the same lang-follows-everywhere policy (P8,
 // docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.5).
 //

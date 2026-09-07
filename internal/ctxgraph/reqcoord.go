@@ -42,7 +42,7 @@ func ReqCoord(path string, line int) string {
 }
 
 // ParseReqCoord splits a "basename:line" coordinate (as published in
-// vmr-requests.json's "req" field or a Manifest's Req) back into its two
+// requests/index.json's "req" field or a Manifest's Req) back into its two
 // parts. It does not resolve basename to a real filesystem path — Req is
 // an identity string, never an I/O path (see CanonicalPath's doc comment);
 // the caller must supply the real path separately (typically an existing

@@ -221,7 +221,7 @@ func detailDirHasFiles(dir string) bool {
 // though it hasn't flushed to disk yet at the point runReport reads this);
 // the OR checks for detail pages a DIFFERENT half of the same `vmr
 // analyze` invocation already wrote and flushed before this command ever
-// started — story's batch materialization under -render-all (P13.1). A
+// started — journey's batch materialization under -render-all (P13.1). A
 // flag-only check goes stale the moment two halves of one invocation can
 // populate details/ independently.
 func detailsPresentFor(detailsOn bool, detailDir string) bool {

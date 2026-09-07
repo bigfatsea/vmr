@@ -621,7 +621,7 @@ func TestLoadRecordByTS_MatchesBothNanosecondAndMillisecondForms(t *testing.T) {
 
 	// A millisecond-truncated ts, e.g. one a user hand-copied and rounded —
 	// loadRecordByTS matches at millisecond resolution, coarser than
-	// vmr-requests.json's own whole-second "ts" column actually needs (see
+	// requests/index.json's own whole-second "ts" column actually needs (see
 	// aggregate.go's buildRequestRow), so this must still resolve uniquely.
 	milli := ts.Format("2006-01-02T15:04:05.000Z07:00")
 	rv, _, err = loadRecordByTS(auditPath, milli)

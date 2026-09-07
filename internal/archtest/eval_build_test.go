@@ -14,7 +14,7 @@ import (
 // pattern (a leading underscore, same as a leading dot), so it is invisible
 // to `go build ./...`, `go test ./...`, and `go vet ./...` alike. That
 // exclusion is exactly what P11 relied on to argue ctxgraph.Scan and
-// story.Build are live code (they're _eval/calibrate_p1b.go's real
+// journey.Build are live code (they're _eval/calibrate_p1b.go's real
 // production calls, not dead) — but the same blind spot means nothing
 // verifies _eval/calibrate_p1b.go itself still compiles. Without this test,
 // a signature change to either function breaks _eval/calibrate_p1b.go

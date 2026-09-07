@@ -318,7 +318,7 @@ func TestCmdAnalyze_JourneySelectorNoMatchErrors(t *testing.T) {
 }
 
 // TestCmdAnalyze_JourneyMultiMatchRejectsLLM covers the same "-llm-addr wants
-// exactly one journey" rule -render-all/-corpus already enforce, extended to
+// exactly one journey" rule -render-all/-benchmark already enforce, extended to
 // a -journey selector that resolves to more than one match.
 func TestCmdAnalyze_JourneyMultiMatchRejectsLLM(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
@@ -990,7 +990,7 @@ func TestCmdAnalyze_ReportYamlProvidesLLMDefaults(t *testing.T) {
 // TestCmdAnalyze_ReportYamlLLMAddrDoesNotBlockBatchPaths is a regression test
 // for a real bug: report.yaml's llm_addr is meant as a standing convenience
 // default for -journey/-compare (see TestCmdAnalyze_ReportYamlProvidesLLMDefaults),
-// but the -render-all/-corpus/multi-match-journey rejection used to trigger
+// but the -render-all/-benchmark/multi-match-journey rejection used to trigger
 // on llmOpts.Addr being non-empty at all — which made it fire off of
 // report.yaml's default even though -llm-addr was never passed on the
 // command line, so anyone with an llm_addr configured for convenience could

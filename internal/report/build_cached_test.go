@@ -176,7 +176,7 @@ func TestWriteRequestsJSON_RoundTripsRows(t *testing.T) {
 	dir := t.TempDir()
 	rows := []RequestRow{{TS: 1753315200000, Outcome: "ok"}, {TS: 1753315260000, Outcome: "error"}}
 
-	outPath := filepath.Join(dir, "vmr-requests.json")
+	outPath := filepath.Join(dir, "requests/index.json")
 	n, err := WriteRequestsJSON(rows, outPath)
 	if err != nil {
 		t.Fatalf("WriteRequestsJSON: %v", err)
@@ -191,7 +191,7 @@ func TestWriteRequestsJSON_RoundTripsRows(t *testing.T) {
 	}
 	var idx RequestsIndex
 	if err := json.Unmarshal(data, &idx); err != nil {
-		t.Fatalf("vmr-requests.json is not valid JSON: %v\n%s", err, data)
+		t.Fatalf("requests-index.json is not valid JSON: %v\n%s", err, data)
 	}
 	if len(idx.Requests) != 2 {
 		t.Errorf("got %d requests, want 2", len(idx.Requests))

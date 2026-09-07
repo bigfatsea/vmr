@@ -31,7 +31,7 @@ import (
 
 // Options configures one replay run. There are three ways to pick which
 // record within AuditPath to replay — Req (a "basename:line" coordinate,
-// as published in vmr-requests.json's "req" field or a Manifest's Req), TS
+// as published in requests/index.json's "req" field or a Manifest's Req), TS
 // (an exact-enough timestamp match), or Line (a raw line number, the least
 // ergonomic but zero-ambiguity fallback) — and they're mutually exclusive;
 // Run validates that. Print short-circuits everything below record
@@ -451,7 +451,7 @@ func runPrint(opts Options, stdout io.Writer) error {
 }
 
 // loadRecordByTS scans path for the record whose arrival timestamp matches
-// ts at millisecond resolution — coarser than `vmr-requests.json`'s own
+// ts at millisecond resolution — coarser than `requests/index.json`'s own
 // "ts" column actually needs (whole-second precision, see aggregate.go's
 // buildRequestRow), so a value copied from either that file or the raw
 // audit.jsonl's full nanosecond "ts" field locates the same record.

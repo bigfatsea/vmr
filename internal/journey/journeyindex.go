@@ -58,7 +58,7 @@ func IsNoiseCategory(cat JourneyCategory) bool {
 // JourneyIndexRow is one candidate Journey's row. Requests/Client/Start/End/
 // Title/Partial/Stitched/Files are cheap — derivable from the chain alone,
 // recomputed on every run. Tasks/Steps/Rendered are only known once the
-// full story.Journey has actually been built at least once (-journey/
+// full journey.Journey has actually been built at least once (-journey/
 // -render-all/-compare/-benchmark, never the bare listing pass, which
 // deliberately stays cheap — see PreviewTitles) — a row with Requests > 0
 // but Tasks == 0 simply hasn't been built yet, not an empty Journey.
@@ -78,7 +78,7 @@ type JourneyIndexRow struct {
 	// Lineages is every ctxgraph.Lineage.LineageID() this Journey's chain
 	// is built from (P6.1) — report's SessionRow.ID uses the same
 	// identity for the single Lineage it represents, so "does report
-	// session X belong to story Journey Y" becomes a set-membership check
+	// session X belong to journey Y" becomes a set-membership check
 	// against this slice instead of a cross-command hash-and-compare.
 	Lineages []string `json:"lineages,omitempty"`
 	// Category classifies this candidate by title content markers alone

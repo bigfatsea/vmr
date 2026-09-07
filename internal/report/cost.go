@@ -47,7 +47,7 @@ func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, b
 	}
 	// RateForEndpoint splits the label itself (strict ":", the same
 	// split core.SplitEndpointLabel accepts plus the legacy "/" form
-	// deliberately excluded here) — the one shared entry point story's
+	// deliberately excluded here) — the one shared entry point journey's
 	// ComputeJourneyCost also prices through, so the two halves can't
 	// drift on how a label becomes a provider+model. A legacy "/"-joined
 	// label still resolves to nothing and is silently skipped, exactly as

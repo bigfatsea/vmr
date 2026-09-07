@@ -93,7 +93,7 @@ const (
 	// endpoint is unhealthy. Switch WITHOUT health penalty, same treatment
 	// as ErrContent/ErrContextLimit. Deliberately NOT folded into
 	// ErrContextLimit: the audit label should say which of the two request-
-	// shape rejection families fired, and report/story bucket error_classes
+	// shape rejection families fired, and report/journey bucket error_classes
 	// by these exact strings.
 	ErrQuirk
 

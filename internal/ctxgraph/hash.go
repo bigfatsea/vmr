@@ -11,7 +11,7 @@
 // evidence this design is calibrated against.
 //
 // This package must not depend on vmr/internal/{router,server,config,report,
-// story} — see internal/archtest's import boundary test. It depends only on
+// journey} — see internal/archtest's import boundary test. It depends only on
 // {audit, chatmsg} to read records and parse chat bodies.
 package ctxgraph
 

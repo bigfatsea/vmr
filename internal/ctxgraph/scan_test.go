@@ -134,7 +134,7 @@ func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
 	// this is really asserting the wrapper doesn't accidentally collapse
 	// that distinction (e.g. by truncating to a length short enough to
 	// collide) and that the format is what callers (report's SessionInfo,
-	// story's JourneyIndexRow) will depend on.
+	// journey's JourneyIndexRow) will depend on.
 	if first.LineageID() == second.LineageID() {
 		t.Error("LineageID should differ: it wraps RootHash, which already differs for these two lineages")
 	}
@@ -149,7 +149,7 @@ func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
 // TestLineageID_ContentAddressed proves the id is a pure function of the
 // root manifest's content (SysHash/Keys), independent of everything else
 // on the Lineage (Idx, SessKey, later manifests) — the property report's
-// SessionInfo.ID and story's JourneyIndexRow.Lineages both need: the same
+// SessionInfo.ID and journey's JourneyIndexRow.Lineages both need: the same
 // underlying conversation must resolve to the same id across independent
 // scans/subsets, not just within one run's Idx assignment order.
 func TestLineageID_ContentAddressed(t *testing.T) {

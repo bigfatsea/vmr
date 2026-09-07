@@ -6,7 +6,7 @@ package taskseg
 
 import "vmr/internal/chatmsg"
 
-// Profile defines agent-specific segmentation conventions used by report and story.
+// Profile defines agent-specific segmentation conventions used by report and journey.
 type Profile interface {
 	Name() string
 	// RealUserText reports whether a user-role message is an actual

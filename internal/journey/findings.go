@@ -4,7 +4,7 @@
 // the same Finding/FindingCode shape internal/report's buildFindings already
 // uses for its own efficiency-findings table (stable, never-localized Code; narrative text
 // separate; each finding names a suggested Action), applied one level down:
-// a report Finding is a row of aggregate statistics, a story Finding points
+// a report Finding is a row of aggregate statistics, a journey Finding points
 // at one specific Step. The two types are deliberately NOT shared —
 // internal/archtest forbids internal/journey from depending on internal/report
 // (and vice versa), and the two are different shapes anyway (aggregate row
@@ -13,7 +13,7 @@
 // Every detector here is pure rule/structure matching — no LLM call, no
 // judgment about WHY something happened, only THAT a structural pattern
 // matched. Findings are explicitly a "candidate/suspect list, not a verdict"
-// (the story design specification's
+// (the journey design specification's
 // candidate-list framing): wording is "detected N suspected occurrences, recommend manual
 // review", never "the agent made a mistake here".
 package journey
@@ -63,10 +63,9 @@ type Finding struct {
 	// EvidenceAnchor contains a verbatim excerpt from the transcript that triggered the finding.
 	EvidenceAnchor string `json:"evidence_anchor,omitempty"`
 	// Finding/Evidence/Action are narrative text, localized per the lang
-	// ComputeFindings was called with. journey-<id>.json and
-	// journey-<id>.md are both built from the same target-lang call
-	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's vmr-report.json
-	// matches, via cmd_report.go's report.LocalizeEfficiency call before
+	// ComputeFindings was called with. j-<id>.json and
+	// j-<id>.md are both built from the same target-lang call
+	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's macro slices	// matches, via cmd_report.go's report.LocalizeEfficiency call before
 	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
 	// do NOT follow lang — see docs/future-strategy/analyze_architecture_redesign_opus-5.md
 	// §5.5 for the reasoning.
@@ -104,10 +103,10 @@ const (
 // sorted candidate list. Selection (which Steps match, which Code, which
 // RelatedSeq) never depends on lang — only the Finding/Evidence/Action text
 // does; TestComputeFindingsIsDeterministic locks this in, since
-// journey-<id>.json and the rendered Markdown must never disagree on WHICH
+// j-<id>.json and the rendered Markdown must never disagree on WHICH
 // Steps got flagged, regardless of which lang either was built with (see
 // the Finding struct's own doc comment for the still-open question of
-// whether journey-<id>.json's *text* should track lang or stay fixed EN).
+// whether j-<id>.json's *text* should track lang or stay fixed EN).
 func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
 	tx := i18n.JourneyFindings(lang)
 	steps := journeySteps(j)

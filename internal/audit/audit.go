@@ -89,7 +89,7 @@ type Record struct {
 // UnmarshalJSON normalizes legacy protocol names when reading historical
 // audit records: pre-2026-08 logs wrote "openai"/"anthropic" where the
 // current enum is "openai-completions"/"anthropic-messages". This is the
-// one compatibility chokepoint — the analytics half (report/story/reqdetail/
+// one compatibility chokepoint — the analytics half (report/journey/reqdetail/
 // ctxgraph) decodes into audit.Record, so normalizing here covers every
 // analytics read path. Write paths construct Record directly and are
 // unaffected.

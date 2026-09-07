@@ -3,9 +3,9 @@
 // Pairs with internal/journey/render_compare.go (compare-*.md) and the 14
 // behavior-profile metric labels internal/journey/compare.go's Compare
 // produces. MetricLabel takes the metric code as a plain string (not
-// story.MetricCode) — internal/i18n must not import internal/journey (it
+// journey.MetricCode) — internal/i18n must not import internal/journey (it
 // would invert the dependency direction the design doc and archtest
-// require: story depends on i18n, never the reverse); MetricCode's
+// require: journey depends on i18n, never the reverse); MetricCode's
 // underlying type is already a plain string, so callers pass
 // string(diff.Metric).
 package i18n
@@ -343,7 +343,7 @@ func Compare(lang Lang) CompareText {
 }
 
 // MetricLabel returns code's localized display label — the static lookup
-// story.RenderComparisonMarkdown uses instead of recomputing anything (see
+// journey.RenderComparisonMarkdown uses instead of recomputing anything (see
 // this file's package comment): code is a MetricDiff.Metric value's
 // underlying string, never a language-dependent value itself.
 func MetricLabel(lang Lang, code string) string {
