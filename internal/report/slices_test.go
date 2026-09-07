@@ -616,6 +616,45 @@ func TestManifest_PartialMacroSetRejected(t *testing.T) {
 			t.Errorf("ValidateManifest rejected a valid macro-free snapshot: %v", err)
 		}
 	})
+
+	t.Run("BuildManifest with rep=nil preserves existing snapshot provenance", func(t *testing.T) {
+		dir := t.TempDir()
+		// 1. Initial snapshot with provenance
+		initial := &Manifest{
+			Format:      ManifestFormat,
+			TimeRange:   [2]string{"2026-08-24T00:00:00Z", "2026-08-24T23:59:59Z"},
+			Inputs:      []InputFile{{Path: "logs/audit.jsonl", SHA256: "abc"}},
+			Footnotes:   map[string]string{"note": "text"},
+			Disclaimers: []string{"disc"},
+		}
+		if err := WriteManifest(dir, initial); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "journeys"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, SliceJourneysIndex), []byte(`{"journeys":[]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		// 2. Zoom run (rep == nil) builds manifest
+		updated, err := BuildManifest(dir, nil, i18n.EN)
+		if err != nil {
+			t.Fatalf("BuildManifest(nil): %v", err)
+		}
+		if updated.TimeRange != initial.TimeRange {
+			t.Errorf("TimeRange = %v, want %v", updated.TimeRange, initial.TimeRange)
+		}
+		if len(updated.Inputs) != 1 || updated.Inputs[0].Path != "logs/audit.jsonl" {
+			t.Errorf("Inputs = %v, want preserved inputs", updated.Inputs)
+		}
+		if updated.Footnotes["note"] != "text" {
+			t.Errorf("Footnotes = %v, want preserved footnotes", updated.Footnotes)
+		}
+		if len(updated.Disclaimers) != 1 || updated.Disclaimers[0] != "disc" {
+			t.Errorf("Disclaimers = %v, want preserved disclaimers", updated.Disclaimers)
+		}
+	})
 }
 
 // TestConfidenceFields verifies that TokensCoveragePct and DurLowN are correctly

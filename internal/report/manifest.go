@@ -187,6 +187,7 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 	now := time.Now()
 	var timeRange [2]string
 	var inputs []InputFile
+	footnotes, disclaimers := BuildFootnotesAndDisclaimers(rep, lang)
 	if rep != nil {
 		timeRange = [2]string{rep.Meta.From, rep.Meta.To}
 		for _, in := range rep.Meta.Inputs {
@@ -195,6 +196,18 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 				Path:   in,
 				SHA256: sha,
 			})
+		}
+	} else if existing, err := ReadManifest(dir); err == nil && existing != nil {
+		// When rep == nil (zoom / benchmark / compare runs updating an existing snapshot),
+		// preserve the provenance metadata (timeRange, inputs, footnotes, disclaimers)
+		// from the existing manifest if present.
+		timeRange = existing.TimeRange
+		inputs = existing.Inputs
+		if len(existing.Footnotes) > 0 {
+			footnotes = existing.Footnotes
+		}
+		if len(existing.Disclaimers) > 0 {
+			disclaimers = existing.Disclaimers
 		}
 	}
 
@@ -224,8 +237,6 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 		}
 	}
 
-	footnotes, disclaimers := BuildFootnotesAndDisclaimers(rep, lang)
-
 	m := &Manifest{
 		Format:      ManifestFormat,
 		GeneratedAt: NewTimePoint(now),
@@ -238,6 +249,20 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 		Disclaimers: disclaimers,
 	}
 	return m, nil
+}
+
+// ReadManifest loads dir/manifest.json without validating each slice's sha256.
+func ReadManifest(dir string) (*Manifest, error) {
+	manifestPath := filepath.Join(dir, "manifest.json")
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	var m Manifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // WriteManifest writes m to <dir>/manifest.json atomically via CreateTemp + Rename (0600).

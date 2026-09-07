@@ -69,7 +69,6 @@ type DocText struct {
 	// not AppendixSelfTrafficNotExcluded.
 	AppendixSelfTrafficExcluded    func(n int) string
 	AppendixSelfTrafficNotExcluded string
-	AppendixClientReconciliation   func(clients string) string
 }
 
 // Doc returns viewmodel_doc.go's text for lang.
@@ -147,12 +146,9 @@ func Doc(lang Lang) DocText {
 			AppendixNoPricing:  "未配置定价时不显示 $。",
 			AppendixSlowThresh: func(sec int) string { return "- 慢请求阈值: " + strconv.Itoa(sec) + "s\n" },
 			AppendixSelfTrafficExcluded: func(n int) string {
-				return "- 自指流量: 排除已启用，本次从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr story -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
+				return "- 自指流量: 排除已启用，本次从全部统计中排除 " + strconv.Itoa(n) + " 条 `vmr analyze -llm-addr` 自身产生的分析请求（`-include-self-traffic` 可关闭）。\n"
 			},
 			AppendixSelfTrafficNotExcluded: "- 自指流量: 未启用排除（未配置排除标识 `llm_key` 或 `self_traffic_client_tags`）。\n",
-			AppendixClientReconciliation: func(clients string) string {
-				return "- 客户端对账: 成本/负载表中存在但未独立生成 sibling 文件的客户端（仅含单发定时任务，已并入 cron 汇总）：" + clients + "。\n"
-			},
 		}
 	}
 	return DocText{
@@ -227,11 +223,8 @@ func Doc(lang Lang) DocText {
 		AppendixNoPricing:  "No $ figures shown when pricing isn't configured.",
 		AppendixSlowThresh: func(sec int) string { return "- Slow-request threshold: " + strconv.Itoa(sec) + "s\n" },
 		AppendixSelfTrafficExcluded: func(n int) string {
-			return "- Self-traffic: exclusion active; " + strconv.Itoa(n) + " analysis request(s) from `vmr story -llm-addr` itself removed from every total (disable with `-include-self-traffic`).\n"
+			return "- Self-traffic: exclusion active; " + strconv.Itoa(n) + " analysis request(s) from `vmr analyze -llm-addr` itself removed from every total (disable with `-include-self-traffic`).\n"
 		},
 		AppendixSelfTrafficNotExcluded: "- Self-traffic: exclusion not active (no `llm_key` or `self_traffic_client_tags` configured).\n",
-		AppendixClientReconciliation: func(clients string) string {
-			return "- Client reconciliation: clients present in cost/workload tables without a standalone sibling file (single-shot scheduled traffic only, rolled into cron files): " + clients + ".\n"
-		},
 	}
 }

@@ -1288,11 +1288,7 @@ const (
   "Footnotes": [
     {
       "ID": "self-traffic",
-      "Text": "- Self-traffic: exclusion active; 2 analysis request(s) from ` + "`" + `vmr story -llm-addr` + "`" + ` itself removed from every total (disable with ` + "`" + `-include-self-traffic` + "`" + `).\n"
-    },
-    {
-      "ID": "client-reconciliation",
-      "Text": "- Client reconciliation: clients present in cost/workload tables without a standalone sibling file (single-shot scheduled traffic only, rolled into cron files): claw-a.\n"
+      "Text": "- Self-traffic: exclusion active; 2 analysis request(s) from ` + "`" + `vmr analyze -llm-addr` + "`" + ` itself removed from every total (disable with ` + "`" + `-include-self-traffic` + "`" + `).\n"
     }
   ]
 }
@@ -2576,11 +2572,7 @@ const (
   "Footnotes": [
     {
       "ID": "self-traffic",
-      "Text": "- 自指流量: 排除已启用，本次从全部统计中排除 2 条 ` + "`" + `vmr story -llm-addr` + "`" + ` 自身产生的分析请求（` + "`" + `-include-self-traffic` + "`" + ` 可关闭）。\n"
-    },
-    {
-      "ID": "client-reconciliation",
-      "Text": "- 客户端对账: 成本/负载表中存在但未独立生成 sibling 文件的客户端（仅含单发定时任务，已并入 cron 汇总）：claw-a。\n"
+      "Text": "- 自指流量: 排除已启用，本次从全部统计中排除 2 条 ` + "`" + `vmr analyze -llm-addr` + "`" + ` 自身产生的分析请求（` + "`" + `-include-self-traffic` + "`" + ` 可关闭）。\n"
     }
   ]
 }

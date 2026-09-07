@@ -368,16 +368,5 @@ func vmAppendixClosing(rep *Report2, lang i18n.Lang) ([]string, []FootnoteVM) {
 	} else {
 		footnotes = append(footnotes, FootnoteVM{ID: "self-traffic", Text: t.AppendixSelfTrafficNotExcluded})
 	}
-	// Every client with traffic is listed here (D7 removed the per-client index files).
-	var missingSiblings []string
-	for _, c := range rep.ByClient {
-		if c.ClientKey != "" {
-			missingSiblings = append(missingSiblings, c.ClientKey)
-		}
-	}
-	if len(missingSiblings) > 0 {
-		footnotes = append(footnotes, FootnoteVM{ID: "client-reconciliation",
-			Text: t.AppendixClientReconciliation(strings.Join(missingSiblings, ", "))})
-	}
 	return disclaimers, footnotes
 }
