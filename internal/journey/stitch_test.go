@@ -183,7 +183,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Errorf("Journey.ID = %q, want it to contain the chain head's start time %q", j.ID, wantStart)
 	}
 
-	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil)
+	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil, nil)
 	md := RenderMarkdownFromSummary(&sum, i18n.EN, false, true)
 	for _, want := range []string{
 		"🧵 **Stitched from an earlier fragment**",

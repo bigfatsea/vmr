@@ -177,7 +177,7 @@ func jsonRoundTripSummary(t *testing.T, s JourneySummary) *JourneySummary {
 // at the VM layer, where the block list is inspectable.
 func TestVM_MatchConsistentWithSpineRendering(t *testing.T) {
 	j := vmEquivalenceFixture(t)
-	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
+	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil, nil)
 	vm := BuildJourneyVM(&summary, i18n.EN, false, true)
 
 	wantPaired, wantPositional := 0, 0
@@ -220,7 +220,7 @@ func TestVM_MatchConsistentWithSpineRendering(t *testing.T) {
 // layer: every Step of every Task appears in the spine, tool-calling or not.
 func TestVM_SpineRendersEveryStep(t *testing.T) {
 	j := vmEquivalenceFixture(t)
-	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
+	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil, nil)
 	vm := BuildJourneyVM(&summary, i18n.EN, false, true)
 
 	spine := make(map[int]bool)

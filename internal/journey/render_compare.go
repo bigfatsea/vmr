@@ -69,6 +69,16 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 		renderSources(w, cmp.Extras.Sources, t)
 	}
 
+	// The interpretation layer's persisted sections, last — overall first,
+	// then the divergence-point reading. A nil or failed record renders
+	// nothing, reproducing exactly the old caller-side append's byte layout
+	// ("\n" before each present section) from the JSON records alone (§3.6).
+	for _, rec := range []*LLMInterpretation{cmp.LLMInterpretation, cmp.LLMDivergence} {
+		if sec := RenderLLMSection(rec, lang); sec != "" {
+			w("\n%s", sec)
+		}
+	}
+
 	return b.String()
 }
 

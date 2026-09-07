@@ -407,10 +407,16 @@ func truncateForError(b []byte) string {
 }
 
 // InterpretResult is Interpret's outcome — Text is "" whenever Err != nil,
-// so a caller can always check Err first without inspecting Text.
+// so a caller can always check Err first without inspecting Text. Duration
+// is the whole call's wall-clock elapsed (cache hit included — a hit is
+// near-zero by construction, a live call carries retries' backoff too);
+// it rides on the result, not only in an error path, because the persisted
+// llm_interpretation record (§3.6's 模型/耗时/状态/正文) wants it on both
+// outcomes.
 type InterpretResult struct {
-	Text   string
-	Cached bool
+	Text     string
+	Cached   bool
+	Duration time.Duration
 }
 
 // Interpret runs the interpretation layer for one evidence pack: check the
@@ -418,7 +424,10 @@ type InterpretResult struct {
 // failure (cache I/O aside — a cache miss is not a failure) is returned as
 // an error and the caller is expected to treat it as "no LLM section this
 // run", per design doc C.7 — this function itself never panics or retries.
-func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T, lang i18n.Lang) (InterpretResult, error) {
+func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T, lang i18n.Lang) (res InterpretResult, err error) {
+	start := time.Now()
+	defer func() { res.Duration = time.Since(start) }()
+
 	if !opts.Enabled() {
 		return InterpretResult{}, fmt.Errorf("LLM interpretation layer not enabled (no -llm-addr)")
 	}
@@ -651,30 +660,4 @@ func mdThematicBreak(ln string) bool {
 		}
 	}
 	return n >= 3
-}
-
-// RenderLLMSection wraps res.Text (or, on failure, a short explanatory note)
-// with the "this is interpretation, not fact" banner — always rendered as
-// its own clearly separated section, never blended into the fact-layer
-// sections above it. scope distinguishes this section's title from
-// another LLM section in the SAME document — pass "" when this is the
-// only one (renderJourney's single call); -compare's two calls (the
-// overall comparison, and — only when a divergence point was found — a
-// second, separately-cached call scoped to just that point) must each
-// pass their own non-empty scope, or both would render under the
-// byte-identical heading "## LLM 解读（模型：X）" with nothing in the
-// document's own outline to tell a reader they're two different sections
-// covering two different things, not one section pasted in twice.
-func RenderLLMSection(opts LLMOptions, res InterpretResult, lang i18n.Lang, scope string) string {
-	t := i18n.LLM(lang)
-	var b strings.Builder
-	b.WriteString(t.SectionTitle(opts.Model, scope))
-	b.WriteString(t.SectionDisclaimer(opts.Model))
-	if res.Cached {
-		b.WriteString(t.CachedNote)
-	}
-	b.WriteString("\n")
-	b.WriteString(downgradeHeadingLevels(res.Text))
-	b.WriteString("\n")
-	return b.String()
 }

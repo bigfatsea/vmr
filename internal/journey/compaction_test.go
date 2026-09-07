@@ -170,7 +170,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	// is the only thing a human (or the compare/LLM evidence pack) ever
 	// reads, so it needs its own assertion, not just CompactionInfo's field
 	// values.
-	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil)
+	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil, nil)
 	md := RenderMarkdownFromSummary(&sum, i18n.EN, false, true)
 	for _, want := range []string{"Information loss", "README.md", "AGENTS.md"} {
 		if !strings.Contains(md, want) {

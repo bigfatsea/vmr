@@ -113,7 +113,7 @@
   - `-render-only` 只能靠 `strings.Index(oldData, "\n## LLM ")` 从旧 `.md` 里**刮回**解读段（`cmd_render_only.go:94-97, 137-140`）——这正是方案说要"杜绝的旁路拼接"。
   - 当前功能未坏（hack 生效），但脆弱。记录待裁决（N2）。
 
-**结论：C5 部分完成**（bodies/三级 match/截断/守卫全部达标；`llm_interpretation` 入 JSON 未落地，仍是旁路拼接 → N2）。
+**结论：C5 已全部完成**（第四轮落实：bodies/三级 match/截断/守卫达标之外，`llm_interpretation` 已入 JSON，旁路拼接已删除——见第四部分、第十部分 N2/C5 专项落地记录）。
 
 ---
 
@@ -286,7 +286,7 @@
 | C2 | 领域切片拆分 D1/D2 | **已全部完成** |
 | C3 | 补齐渲染期现算 7 类事实 | **部分完成** |
 | C4 | 提交顺序 / manifest 准入 / orphan 清扫 D20 | **已全部完成** |
-| C5 | Journey JSON 自包含 D18 | **部分完成** |
+| C5 | Journey JSON 自包含 D18 | **已全部完成**（第四轮补齐 `llm_interpretation`，见第十部分） |
 | C6 | 人读请求索引删除 D7 / compares 索引 D21 | **部分完成** |
 | C7 | 目标目录拓扑 D16/D17 | **已全部完成** |
 | C8 | ViewModel 双轨 / 单一渲染路径 D3/D4/D5/D10/D11/D12 | **部分完成** |
@@ -319,8 +319,8 @@
 
 - **问题描述**：`-llm-addr` 的解读结果（模型/耗时/状态/正文）只 append 到 `j-<id>.md`，不进 `j-<id>.json`。`-render-only` 靠 `strings.Index(oldData, "\n## LLM ")` 从旧 `.md` 刮回。方案 §3.6 明确要求它落 JSON 的 `llm_interpretation` 字段以"彻底杜绝旁路拼接"。
 - **根因分析**：`JourneySummary` 在 P4 阶段设计时只考虑了 Metrics/Findings/Structure，`llm_findings`（检测器结果）后来补上了，但"整段解读叙事"（`RenderLLMSection` 的输出）一直被当作渲染期产物 append 到 `.md`。`writeJourneyFile` 先写 JSON 再渲染 MD 再 append `llmSection` 的顺序，天然把 `llmSection` 排除在 JSON 之外。
-- **建议方案**：给 `JourneySummary` 加 `LLMInterpretation *InterpretResult json:"llm_interpretation,omitempty"`（含 model / duration / status / body / scope），`NewJourneySummary` 多接一个参数，`writeJourneyFile` 把 `res` 而非渲染好的 `llmSection` 存进去；viewmodel 侧从该字段渲染 `## LLM` 段；删掉 `cmd_render_only.go` 两处 `strings.Index` hack。compare 侧（`Comparison` JSON + `RenderComparisonMarkdown`）同构处理。
-- **ROI**：中等工作量（1 个结构字段 + 3~4 处 threading + viewmodel 渲染 + compare 对称 + 删 hack）。当前 hack 功能未坏，所以**不紧急**；但它是方案点名要消除的东西，且 hack 对 `## ` 标题格式敏感（一旦本地化标题改字就断）。ROI 中等，建议纳入下一轮。
+- **建议方案**（✅ 已在第四轮落实，见第十部分）：给 `JourneySummary` 加 `LLMInterpretation *LLMInterpretation json:"llm_interpretation,omitempty"`（含 model / duration / status / body / scope），`NewJourneySummary` 多接一个参数，`writeJourneyFile` 把 `res` 而非渲染好的 `llmSection` 存进去；viewmodel 侧从该字段渲染 `## LLM` 段；删掉 `cmd_render_only.go` 两处 `strings.Index` hack。compare 侧（`Comparison` JSON + `RenderComparisonMarkdown`）同构处理。
+- **ROI**：（已兑现）1 个结构字段 + 构造器 + 3 处 threading + viewmodel 渲染 + compare 对称 + 删 hack。
 
 ##### C6 — 旧请求索引渲染死代码（部分完成，N3）
 
@@ -351,7 +351,7 @@
 | # | 问题 | 严重度 | 处置 |
 |---|---|---|---|
 | N1 | `common.js` 未部署 → 所有看板页渲染失败 | **高（看板整体不可用）** | **已直接解决** |
-| N2 | `llm_interpretation` 未入 journey JSON，`-render-only` 靠字符串刮取旧 md | 中 | 未解决（待裁决，见 C5） |
+| N2 | `llm_interpretation` 未入 journey JSON，`-render-only` 靠字符串刮取旧 md | 中 | ✅ **已解决**（第四轮，见第十部分） |
 | N3 | `requests.go` ~250 行旧渲染死代码 + `report_requests.go` 死文案 | 中 | 未解决（待裁决，见 C6） |
 | N4 | 渲染产物中 `stories/` 失效链接（会话表、journey 回链、report 回链层级错） | 中（失效链接） | **已直接解决** |
 | N5 | `compares/index.md` 硬编码英文，不跟随语言 | 中 | 未解决（待裁决，见 C6） |
@@ -492,7 +492,7 @@
 | **C3 / C13#4 / N1完整 / C12**（时间双字段收敛 + §9 守卫） | "完整方案"落实 | ✅ **基本完成**（一处经论证缩小） | `de50ce4` + `d85858c` |
 | **N9 / C1**（注释与命名清理） | 建议方案落实 | ✅ **完成主体**（低价值残留见 4.3） | `ad7d18d` + `fdfad15` + `21859b3` |
 | **N10 / C9**（看板 chrome 本地化） | 按建议处理（推荐英文统一） | ⚠️ **暂缓**（并入 N15） | — |
-| **N2 / C5**（journey `llm_interpretation` 入 JSON） | 用户本轮未列入 | 保留未做 | — |
+| **N2 / C5**（journey `llm_interpretation` 入 JSON） | 用户本轮未列入 | ✅ **已在第四轮完成**（见第十部分） | `见第十部分` |
 
 ### 4.2 C3 完整方案：一处缩小及其理由
 
@@ -570,7 +570,7 @@
 ## 第八部分：仍待用户裁决 / 后续任务
 
 1. ~~**N15 看板补完盘**（5 个页面字段审计 + 渲染测试 + N10 chrome）~~ —— ✅ **已在第三轮全部完成**。
-2. **N2 / C5**（journey `llm_interpretation` 入 JSON）—— 本轮用户未列入；仍是方案 §3.6 点名要消除的旁路拼接。
+2. ~~**N2 / C5**（journey `llm_interpretation` 入 JSON）—— 本轮用户未列入；仍是方案 §3.6 点名要消除的旁路拼接。~~ —— ✅ **已在第四轮完成**（见第十部分）。
 3. **C3 SessionRow 收敛**（约 15 行）—— 若不认可 4.2 的缩小理由。
 4. **N9 leaf 包注释残留**（低优）—— `vmr story` / `vmr report` 作命令名的约 100+ 处注释。
 5. **N11**（配置指纹字段核对）/ **N12**（方案 §7.2 `-from/-to` 术语脚注）—— 观察/文档项。
@@ -645,3 +645,61 @@
 - **现状分析**：分析半区已针对此类配置损坏做了优雅降级（$ estimates 降级为仅使用标准价目表，不使用账户覆盖），不会导致崩溃。但说明本地的 `config.yaml` 存在旧语法或格式不合规的 endpoint group 声明。
 - **处置建议**：建议后续对当前工作区的 `config.yaml` 模型路由组配置进行格式校验与规整，避免定价层降级。
 
+
+---
+
+## 第十部分：第四轮（N2/C5 专项 — `llm_interpretation` 入 JSON）
+
+**触发**：用户指示按 C5 建议方案处理 N2，本轮只处理 N2/C5。
+执行编排与进度见 `_review/N2_C5_EXECUTION_REPORT.md`。
+
+### 10.1 落地内容
+
+**数据层（`internal/journey`）**
+
+- `InterpretResult` 补 `Duration` 字段；`Interpret` 以 named return + defer 计时（含重试退避的总耗时），成功与失败两条路径都带得出耗时。
+- 新增持久化 record 类型 `LLMInterpretation`（新文件 `llm_interpretation.go`，llm.go 超出 archtest 行数预算后按指引拆出）：`model` / `scope`（规范 token：`""`｜`overall`｜`divergence`，渲染期经 i18n 查本地化标签——JSON 不存本地化文案）/ `status`（`ok`｜`failed`）/ `error` / `duration_ms` / `cached` / `text`（模型原文；`downgradeHeadingLevels` 保持渲染层决策）。
+- `NewLLMInterpretation(opts, res, err, scope)` 是唯一构造点；**失败调用也入 JSON**（`status: "failed"` + error 原因）——方案「模型、耗时、状态与正文」中"状态"二字的兑现：JSON 对"尝试过但失败"保持诚实。
+- `JourneySummary.LLMInterpretation`（`json:"llm_interpretation,omitempty"`）；`NewJourneySummary` 加第 6 参（延续"一个构造器"纪律，全部调用点同步）。
+- `Comparison` 加 `LLMInterpretation`（整体）+ `LLMDivergence`（分叉点）两字段，与 `.md` 的两段一一对应；`compareJourneys` 在 marshal 前挂上，JSON 先写后渲染。
+- `RenderLLMSection` 签名收敛为按 record 渲染：`(rec *LLMInterpretation, lang)`——nil / failed 一律渲染空串（与全量运行"失败即无段落"的行为一致，render-only 字节等价不破）。数据层/渲染层同源，杜绝"两个调用点各自拼"复发。
+
+**渲染层**
+
+- `JourneyVM` 增 `LLM []VMBlock` 段（文档末尾、Findings 之后），`buildVMLLM` 从 `s.LLMInterpretation` 渲染，字节布局与旧 append（`"\n" + 段落`）完全一致。
+- `RenderComparisonMarkdown` 末尾按 record 渲染 overall → divergence 两段，同样的 `"\n"` 前缀布局。
+
+**cmd 接线**
+
+- `writeJourneyFile` 参数 `llmSection string` → `llmInterp *LLMInterpretation`，删 md append；`renderJourney` / `compareLLMSections`（改名 `compareLLMRecords`，返回两个 record）/ `compareJourneys` 同步。
+- **删除 `cmd_render_only.go` 两处 `strings.Index(oldData, "\n## LLM ")` 旁路刮取 hack**——`-render-only` 的 journey/compare `.md` 现在是各自 JSON 的纯函数（§3.6「彻底杜绝旁路拼接」兑现）。
+
+### 10.2 守卫测试（替代旧 hack 的回归面）
+
+| 守卫 | 位置 |
+|---|---|
+| record JSON round-trip 渲染逐字节一致（EN/ZH × 3 scope） | `internal/journey/llm_interpretation_record_test.go` |
+| ok/failed 两态构造映射 | 同上 |
+| viewmodel：无 record 无段落；有 record 段落在文档末尾；failed 不渲染 | 同上 |
+| `RenderComparisonMarkdown`：两段顺序、`"\n"` 前缀布局、failed overall 跳过 | 同上 |
+| cmd E2E：mock LLM 全链路——`j-<id>.json` 落 record、`.md` 渲染段落、**刮掉 `.md` 的 LLM 段后 `-render-only -no-cache` 从 JSON 逐字节恢复**（旧 hack 下刮掉的段落会永久丢失） | `cmd/vmr/cmd_journey_llm_interpretation_test.go` |
+| cmd E2E：LLM 调用失败 → JSON 记 `failed` + error、`.md` 无段落、render-only 不改 `.md` | 同上 |
+| cmd E2E：`-compare` 双 record 落 JSON、`.md` 段落数与 record 对应、render-only 逐字节恢复 | 同上 |
+
+### 10.3 验证结果
+
+- `go build` / `go vet` / `go test ./...`：全绿（38 包）；`go test -race ./internal/{journey,report,dashboard,i18n}/... ./cmd/vmr/...`：全绿；`go test ./internal/archtest/...`：通过（llm.go 拆分后行数预算恢复达标）；`gofmt`：本轮文件 clean。
+- **真实日志端到端**（`logs/vmr-audit-2026-08-24.jsonl.zst`，mock LLM server @ 127.0.0.1:18999）：
+  - **无 LLM 路径零漂移**：新旧二进制全量 analyze 产物 `diff -rq` 仅 `manifest.json` 的 `generated_at` 不同，其余逐字节一致。
+  - `-journey <id> -llm-addr`：`j-<id>.json` 落 `llm_interpretation`（status ok / model agent / duration_ms / 原文含 "## 自有标题" 场景），`.md` 渲染 `## LLM 解读（模型：agent）` 段；刮掉 `.md` 段落后 `-render-only -no-cache` **逐字节恢复**。
+  - `-compare idA,idB -llm-addr`：`llm_interpretation` + `llm_divergence` 双 record 落 JSON，`.md` 渲染两段，render-only 逐字节恢复。旧二进制对照基线确认旧版 JSON 无任何 llm 字段（旁路拼接）。
+- `-render-only` 的 L3 暖缓存命中为 no-op（既有缓存设计）：守卫测试均带 `-no-cache` 走真实渲染路径。
+
+### 10.4 本轮新发现与记录
+
+- **N18（低，观察）**：`-render-only` 在 L3 缓存命中时直接信任磁盘产物为当前（`tryRenderOnlyL3Cache` no-op 返回）——用户手工删改 `.md` 后 warm render-only 不会修复，需 `-no-cache`。属 L3「该 renderer+lang 已渲染过」的既有语义，非本轮引入；N2 落地后它对 LLM 段的暴露面与其它段落一致，无需改动，仅记录以免后续误判为回归。
+- **N19（低，兼容性说明，非缺陷）**：旧二进制产出的快照（JSON 无 `llm_interpretation`、`.md` 靠 append 携带 LLM 段）在新二进制上 `-render-only` 会**丢弃**该段落——JSON 里没有数据就无法渲染，这正是 §8.1「无兼容期」的既定立场（CHANGELOG 已记 Breaking）；旧快照如需保留解读段落，用旧版渲染或重跑 `-journey -llm-addr`。
+
+### 10.5 commit
+
+（见 git log；主体为一个 feat commit：journey `llm_interpretation`/`llm_divergence` 入 JSON + viewmodel/compare 渲染 + 删两处刮取 hack + 守卫测试 + UserGuide 双语 + CHANGELOG。）

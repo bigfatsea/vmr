@@ -40,6 +40,11 @@ type JourneySummary struct {
 	Metrics     Metrics   `json:"metrics"`
 	Findings    []Finding `json:"findings,omitempty"`
 	LLMFindings []Finding `json:"llm_findings,omitempty"`
+	// LLMInterpretation is the single-journey interpretation layer's persisted
+	// outcome (§3.6: 模型/耗时/状态/正文 — see LLMInterpretation). The .md's LLM
+	// section renders from this field, so -render-only reproduces it from the
+	// JSON alone; nil when -llm-addr wasn't given or the call wasn't attempted.
+	LLMInterpretation *LLMInterpretation `json:"llm_interpretation,omitempty"`
 	// Structure is the complete Task/Step/Event/ToolCall skeleton — the
 	// machine-readable counterpart to the human-readable fact-layer
 	// (render_md.go's renderStep), P4 (see structure.go's doc comment).
@@ -79,15 +84,16 @@ type JourneySummary struct {
 // Millisecond-scale waste, not worth a second entry point for; noted here
 // so it reads as a known, accepted cost rather than an oversight.
 func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
-	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil, nil)
+	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil, nil, nil)
 }
 
 // NewJourneySummary is JourneySummary's one constructor, shared by Summarize
-// (which always computes its own Metrics/Findings and never sets
-// llmFindings) and cmd/vmr's writeJourneyFile (which already has
-// Metrics/Findings computed by its caller — see Summarize's doc comment on
-// why re-deriving them here would cost double — and additionally has
-// llmFindings to attach, which Summarize's own signature has no room for).
+// (which always computes its own Metrics/Findings and never sets llmFindings
+// or the interpretation record) and cmd/vmr's writeJourneyFile (which already
+// has Metrics/Findings computed by its caller — see Summarize's doc comment
+// on why re-deriving them here would cost double — and additionally has
+// llmFindings and the -llm-addr interpretation record to attach, which
+// Summarize's own signature has no room for).
 // Before this existed, writeJourneyFile built its own separate
 // JourneySummary{} literal — the exact "same construction, two hand-written
 // copies" pattern this project has already been bitten by once (P2's
@@ -95,14 +101,15 @@ func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
 // Summarize's literal and, for one build, silently left writeJourneyFile's
 // copy without it. One constructor is what keeps that from recurring the
 // next time JourneySummary gains a field.
-func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, cost *CostFact) JourneySummary {
+func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, cost *CostFact, llmInterp *LLMInterpretation) JourneySummary {
 	s := BuildStructure(j)
 	sum := JourneySummary{
 		ID: j.ID, Title: j.Title, From: j.From, To: j.To, Partial: j.Partial,
 		Metrics: m, Findings: findings, LLMFindings: llmFindings,
-		Structure: s,
-		Bodies:    s.Bodies,
-		Cost:      cost,
+		Structure:         s,
+		Bodies:            s.Bodies,
+		Cost:              cost,
+		LLMInterpretation: llmInterp,
 	}
 	if !j.From.IsZero() {
 		sum.FromDisplay = j.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")

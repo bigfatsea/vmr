@@ -89,13 +89,11 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 				continue
 			}
 			outPath := filepath.Join(journeysDir, "details", base+".md")
+			// The .md is a pure function of the .json (§3.6) — the old
+			// "scrape the appended LLM section from the previous .md"
+			// bypass-splice is gone: the interpretation renders from the
+			// record the JSON itself carries.
 			journeyMD := journey.RenderMarkdownFromSummary(&s, lang, reportMDExists, linkDetails)
-			// Preserve appended LLM interpretation section if present in existing file
-			if oldData, err := os.ReadFile(outPath); err == nil {
-				if idx := strings.Index(string(oldData), "\n## LLM "); idx >= 0 {
-					journeyMD += string(oldData[idx:])
-				}
-			}
 			if err := os.WriteFile(outPath, []byte(journeyMD), 0o600); err != nil {
 				return fmt.Errorf("write journey md %s: %w", base, err)
 			}
@@ -133,13 +131,11 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 					continue
 				}
 				cmpMDPath := filepath.Join(comparesDir, strings.TrimSuffix(entry.Name(), ".json")+".md")
-				cmpMD := journey.RenderComparisonMarkdown(cmp, lang)
-				if oldData, err := os.ReadFile(cmpMDPath); err == nil {
-					if idx := strings.Index(string(oldData), "\n## LLM "); idx >= 0 {
-						cmpMD += string(oldData[idx:])
-					}
+				// Same §3.6 rule as the journey .md above: the LLM sections
+				// render from compare-*.json's own records — no scraping.
+				if err := os.WriteFile(cmpMDPath, []byte(journey.RenderComparisonMarkdown(cmp, lang)), 0o600); err != nil {
+					return fmt.Errorf("write compare md %s: %w", entry.Name(), err)
 				}
-				_ = os.WriteFile(cmpMDPath, []byte(cmpMD), 0o600)
 			}
 		}
 		_ = RebuildComparesIndex(comparesDir, lang)

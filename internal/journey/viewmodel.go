@@ -72,6 +72,7 @@ type JourneyVM struct {
 	Spine      []VMBlock `json:"spine,omitempty"`      // the decision spine incl. final deliverable
 	Timeline   []VMBlock `json:"timeline,omitempty"`   // tool-call timeline
 	Findings   []VMBlock `json:"findings,omitempty"`   // findings section
+	LLM        []VMBlock `json:"llm,omitempty"`        // -llm-addr interpretation section, last (§3.6: rendered from s.LLMInterpretation)
 }
 
 func vmTextBlock(text string) VMBlock { return VMBlock{Kind: vmText, Text: text} }
@@ -116,6 +117,7 @@ func SerializeJourneyVM(vm *JourneyVM) string {
 	write(vm.Spine)
 	write(vm.Timeline)
 	write(vm.Findings)
+	write(vm.LLM)
 	return b.String()
 }
 
@@ -141,5 +143,20 @@ func BuildJourneyVM(s *JourneySummary, lang i18n.Lang, reportMDExists, linkDetai
 		Spine:      buildVMSpine(s, lang, linkDetails),
 		Timeline:   buildVMTimeline(s, lang),
 		Findings:   buildVMFindings(s, lang),
+		LLM:        buildVMLLM(s, lang),
 	}
+}
+
+// buildVMLLM renders the persisted -llm-addr interpretation record (§3.6) as
+// the document's last section — the same "\n" + RenderLLMSection block the
+// old writeJourneyFile/compareJourneys append produced, now a pure function
+// of the JSON so -render-only reproduces it without scraping the old .md.
+// A nil or failed record contributes no block (the full run also left the
+// section out), keeping D11 byte-equivalence exact.
+func buildVMLLM(s *JourneySummary, lang i18n.Lang) []VMBlock {
+	sec := RenderLLMSection(s.LLMInterpretation, lang)
+	if sec == "" {
+		return nil
+	}
+	return []VMBlock{vmTextBlock("\n" + sec)}
 }

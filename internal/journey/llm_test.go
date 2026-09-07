@@ -317,8 +317,7 @@ func TestInterpret_CacheKeyIncludesModel(t *testing.T) {
 }
 
 func TestRenderLLMSection(t *testing.T) {
-	opts := LLMOptions{Model: "agent"}
-	md := RenderLLMSection(opts, InterpretResult{Text: "一句话结论：测试。", Cached: false}, i18n.EN, "")
+	md := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "一句话结论：测试。"}, i18n.EN)
 	for _, want := range []string{"## LLM Interpretation", "agent", "not the fact layer", "一句话结论：测试。"} {
 		if !strings.Contains(md, want) {
 			t.Errorf("RenderLLMSection missing %q:\n%s", want, md)
@@ -328,9 +327,20 @@ func TestRenderLLMSection(t *testing.T) {
 		t.Error("uncached result should not claim a cache hit")
 	}
 
-	cachedMD := RenderLLMSection(opts, InterpretResult{Text: "x", Cached: true}, i18n.EN, "")
+	cachedMD := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "x", Cached: true}, i18n.EN)
 	if !strings.Contains(cachedMD, "cache hit") {
 		t.Error("cached result should say so")
+	}
+
+	// A nil or failed record renders nothing — the full run also left the
+	// .md without a section in those cases (§3.6's render-from-JSON contract
+	// must hold for both outcomes).
+	if got := RenderLLMSection(nil, i18n.EN); got != "" {
+		t.Errorf("nil record = %q, want empty", got)
+	}
+	failed := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusFailed, Error: "boom"}, i18n.EN)
+	if failed != "" {
+		t.Errorf("failed record = %q, want empty", failed)
 	}
 }
 
@@ -425,9 +435,8 @@ func TestDowngradeHeadingLevels(t *testing.T) {
 // outline look like the same section pasted in twice even though the
 // content differs.
 func TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument(t *testing.T) {
-	opts := LLMOptions{Model: "agent"}
-	overall := RenderLLMSection(opts, InterpretResult{Text: "overall text"}, i18n.EN, i18n.LLM(i18n.EN).ScopeOverall)
-	divergence := RenderLLMSection(opts, InterpretResult{Text: "divergence text"}, i18n.EN, i18n.LLM(i18n.EN).ScopeDivergence)
+	overall := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "overall text", Scope: LLMScopeOverall}, i18n.EN)
+	divergence := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "divergence text", Scope: LLMScopeDivergence}, i18n.EN)
 
 	overallTitle := strings.SplitN(overall, "\n", 2)[0]
 	divergenceTitle := strings.SplitN(divergence, "\n", 2)[0]
@@ -444,7 +453,7 @@ func TestRenderLLMSection_ScopeDistinguishesTwoSectionsInOneDocument(t *testing.
 	// scope "" (renderJourney's single-section document) keeps the plain,
 	// unlabeled title — no behavior change for the case that was never
 	// ambiguous in the first place.
-	plain := RenderLLMSection(opts, InterpretResult{Text: "x"}, i18n.EN, "")
+	plain := RenderLLMSection(&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "x"}, i18n.EN)
 	plainTitle := strings.SplitN(plain, "\n", 2)[0]
 	if strings.Contains(plainTitle, "·") {
 		t.Errorf("plain (scope-less) title = %q, must not carry a scope separator", plainTitle)

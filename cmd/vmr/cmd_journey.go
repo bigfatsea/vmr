@@ -253,7 +253,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return err
 	}
 
-	var llmSection string
+	var llmInterp *journey.LLMInterpretation
 	var llmFindings []journey.Finding
 	if llmOpts.Addr != "" {
 		if findingsLLM, err := journey.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(findingsLLM) > 0 {
@@ -272,19 +272,20 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		res, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
-		} else {
-			// scope "": renderJourney's document only ever has one LLM
-			// section (unlike -compare, there's no second, divergence-
-			// scoped call to disambiguate it from).
-			llmSection = journey.RenderLLMSection(llmOpts.LLMOptions, res, lang, "")
 		}
+		// Recorded even on failure (status "failed") — the persisted record
+		// is what j-<id>.json and the .md's rendered section both come from
+		// (§3.6), and a failed attempt is worth seeing in the JSON too.
+		// scope "": this document only ever has one LLM section (unlike
+		// -compare, there's no second, divergence-scoped call).
+		llmInterp = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, "")
 	}
 
 	cost := journey.ComputeJourneyCost(j, priceRes, ccy)
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	// true: a single named -journey target, not a batch scope (P13.1).
-	outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, llmSection, llmFindings, prof, detailDir, evidenceDir, &cost, true, nil)
+	outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, llmInterp, llmFindings, prof, detailDir, evidenceDir, &cost, true, nil)
 	if err != nil {
 		return err
 	}
@@ -375,7 +376,9 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 
-	llmSection := compareLLMSections(jA, jB, cmp, extras, llmOpts, lang)
+	llmOverall, llmDiv := compareLLMRecords(jA, jB, cmp, extras, llmOpts, lang)
+	cmp.LLMInterpretation = llmOverall
+	cmp.LLMDivergence = llmDiv
 
 	comparesDir, err := ensureComparesDir(outDir)
 	if err != nil {
@@ -402,11 +405,9 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 
 	mdPath := filepath.Join(comparesDir, base+".md")
-	md := journey.RenderComparisonMarkdown(diskCmp, lang)
-	if llmSection != "" {
-		md += "\n" + llmSection
-	}
-	if err := os.WriteFile(mdPath, []byte(md), 0o600); err != nil {
+	// The LLM sections render inside RenderComparisonMarkdown from the two
+	// records this JSON now carries — no post-render append (§3.6).
+	if err := os.WriteFile(mdPath, []byte(journey.RenderComparisonMarkdown(diskCmp, lang)), 0o600); err != nil {
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
@@ -415,42 +416,36 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	return saveJourneyIndex(idx, outDir, lang)
 }
 
-// compareLLMSections runs the overall and divergence LLM interpretation
+// compareLLMRecords runs the overall and divergence LLM interpretation
 // calls for -compare, degrading gracefully on failure without failing the
-// command. Returns the Markdown section for the .md report from the same
-// two calls.
-func compareLLMSections(jA, jB *journey.Journey, cmp journey.Comparison, extras journey.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
+// command. Returns both calls' persisted records (nil when -llm-addr is off
+// or, for the divergence call, no divergence point was found) — the caller
+// stamps them on the Comparison before it's marshaled, so compare-*.json is
+// what the .md's LLM sections render from (§3.6).
+func compareLLMRecords(jA, jB *journey.Journey, cmp journey.Comparison, extras journey.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) (overall, div *journey.LLMInterpretation) {
 	if llmOpts.Addr == "" {
-		return ""
+		return nil, nil
 	}
-	var llmSection string
 	pack := journey.BuildEvidencePack(jA, jB, cmp, lang)
 	chars := pack.EstimateChars()
 	fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
 	res, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
-	} else {
-		llmSection = journey.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
 	}
+	overall = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, journey.LLMScopeOverall)
 
 	if extras.Divergence.Found {
 		divPack := journey.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
 		divChars := divPack.EstimateChars()
 		fmt.Fprintf(os.Stderr, "calling %s (model=%s) for the divergence point: evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, divChars, divChars/4)
-		divRes, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
-		} else {
-			divSection := journey.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
-			if llmSection != "" {
-				llmSection += "\n" + divSection
-			} else {
-				llmSection = divSection
-			}
+		divRes, divErr := journey.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
+		if divErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", divErr)
 		}
+		div = journey.NewLLMInterpretation(llmOpts.LLMOptions, divRes, divErr, journey.LLMScopeDivergence)
 	}
-	return llmSection
+	return overall, div
 }
 
 // renderJourneys renders every given candidate (skipping partial-head ones
@@ -515,7 +510,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 			cost := journey.ComputeJourneyCost(j, priceRes, ccy)
 			// batchRecs: EnsureJourneyDetails reuses this batch's already-
 			// decompressed records instead of re-reading the source files.
-			outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
+			outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, nil, nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
 			if err != nil {
 				return err
 			}
@@ -669,11 +664,11 @@ func ensureJourneyFile(j *journey.Journey, journeysDir string, lang i18n.Lang, p
 	findings := journey.ComputeFindings(j, lang)
 	// true: both -compare sides are user-named targets, same as a single
 	// -journey render (P13.1) — not a batch scope.
-	_, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true, nil)
+	_, err := writeJourneyFile(j, m, findings, journeysDir, lang, nil, nil, prof, detailDir, evidenceDir, cost, true, nil)
 	return err
 }
 
-func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.Finding, journeysDir string, lang i18n.Lang, llmSection string, llmFindings []journey.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *journey.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
+func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.Finding, journeysDir string, lang i18n.Lang, llmInterp *journey.LLMInterpretation, llmFindings []journey.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *journey.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
 	detailsDir := filepath.Join(journeysDir, "details")
 	if err := os.MkdirAll(detailsDir, 0o700); err != nil {
 		return "", err
@@ -685,7 +680,7 @@ func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.
 	}
 
 	jsonPath := filepath.Join(detailsDir, base+".json")
-	summary := journey.NewJourneySummary(j, m, findings, llmFindings, cost)
+	summary := journey.NewJourneySummary(j, m, findings, llmFindings, cost, llmInterp)
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return "", err
@@ -705,10 +700,9 @@ func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.
 
 	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(journeysDir), "vmr-report.md"))
 	linkDetails := materializeDetails || detailDirHasFiles(detailDir)
+	// The LLM section renders inside the VM from summary.LLMInterpretation —
+	// this .md is a pure function of the .json written above (§3.6).
 	md := journey.RenderMarkdownFromSummary(&s, lang, reportMDErr == nil, linkDetails)
-	if llmSection != "" {
-		md += "\n" + llmSection
-	}
 	if err := os.WriteFile(outPath, []byte(md), 0o600); err != nil {
 		return "", err
 	}

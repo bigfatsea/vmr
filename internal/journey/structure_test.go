@@ -208,7 +208,7 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 
 	m := ComputeMetrics(j)
 	findings := ComputeFindings(j, i18n.EN)
-	summary := NewJourneySummary(j, m, findings, nil, nil)
+	summary := NewJourneySummary(j, m, findings, nil, nil, nil)
 
 	// Publish exactly what j-<id>.json publishes: marshal, write to disk,
 	// read the file back, unmarshal. Everything below this line sees only
@@ -250,7 +250,7 @@ func TestBuildStructure_BodiesNoOrphansNoDangling(t *testing.T) {
 			} else {
 				j = vmEquivalenceFixture(t)
 			}
-			summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
+			summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil, nil)
 
 			referenced := map[string]bool{}
 			addRef := func(ref, what string) {
@@ -299,8 +299,8 @@ func TestBuildStructure_VolumeBoundedByStepsNotProseLength(t *testing.T) {
 	small := buildJourneyWithArgsLen(t, 20)
 	huge := buildJourneyWithArgsLen(t, 200000) // two orders of magnitude beyond structureExcerptChars
 
-	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small, i18n.EN), nil, nil)
-	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge, i18n.EN), nil, nil)
+	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small, i18n.EN), nil, nil, nil)
+	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge, i18n.EN), nil, nil, nil)
 
 	smallJSON, err := json.Marshal(smallSummary)
 	if err != nil {
@@ -678,7 +678,7 @@ func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil)
+	summary := NewJourneySummary(j, ComputeMetrics(j), nil, nil, nil, nil)
 
 	raw, err := json.Marshal(summary)
 	if err != nil {

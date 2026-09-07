@@ -101,7 +101,7 @@ func TestGoldenMarkdown(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}
-			summary := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), nil, nil)
+			summary := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, tc.lang), nil, nil, nil)
 			vm := BuildJourneyVM(&summary, tc.lang, false, true)
 
 			vmGot, err := json.MarshalIndent(vm, "", "  ")

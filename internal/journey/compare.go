@@ -88,6 +88,18 @@ type Comparison struct {
 	// empty table — Extras is always an addition, never a requirement for a
 	// valid Comparison.
 	Extras *ComparisonExtras `json:"extras,omitempty"`
+
+	// LLMInterpretation / LLMDivergence are the interpretation layer's two
+	// possible persisted calls — the overall comparison, and (only when a
+	// divergence point was found) the divergence-point reading. Both render
+	// from these fields (RenderComparisonMarkdown's trailing LLM sections),
+	// so compare-*.md is a pure function of compare-*.json — §3.6's
+	// "彻底杜绝旁路拼接", the compare-side counterpart of JourneySummary's
+	// llm_interpretation. nil when -llm-addr wasn't given or the call
+	// wasn't attempted; a failed call is recorded (Status "failed") and
+	// renders nothing.
+	LLMInterpretation *LLMInterpretation `json:"llm_interpretation,omitempty"`
+	LLMDivergence     *LLMInterpretation `json:"llm_divergence,omitempty"`
 }
 
 // Compare diffs a and b's Metrics — the whole of Phase 4d ("两份剖面做差就是对比报告的骨架"). Order is fixed:

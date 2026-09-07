@@ -56,7 +56,7 @@ func TestJourneyIndicatorSet_MatchMD(t *testing.T) {
 	j, m, f := metricTestJourney(t)
 	lang := i18n.EN
 
-	sum := NewJourneySummary(j, m, f, nil, nil)
+	sum := NewJourneySummary(j, m, f, nil, nil, nil)
 	md := RenderMarkdownFromSummary(&sum, lang, false, true)
 
 	wantCodes := make(map[string]bool, len(journeyMetrics))
