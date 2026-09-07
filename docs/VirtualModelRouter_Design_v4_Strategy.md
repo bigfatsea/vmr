@@ -18,7 +18,7 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 * **目标用户画像**：**100 人以内的中小型 AI 研发团队、AI 创业项目与重度 Agent 架构师**。此类团队采购了多家厂商的 Token-Plan / Coding-Plan 以降低成本，急需在不修改代码的前提下实现多订阅聚合、防锁死、防 Prefix-Cache 失效，同时具备轻量级、无 DB 依赖的 Agent 执行诊断能力。
 * **双核一体两面架构**：
   1. **In-Flight Passthrough Router**：极轻量代理层，支持 OpenAI / Anthropic / OpenAI Responses 协议双向原样透传。支持基于 Session Affinity 的 Prefix-Cache 保护、错误类型感知的 Failover、以及基于本地消耗累计的 Token-Plan 额度平衡调度。实测在 150 req/s 下，除图片降采样外的每个场景 p95 路由开销都低于 10ms（压测脚手架见仓库 `loadtest/`）。
-  2. **Post-Flight Agent Forensics**：基于两层忠实 Raw Byte Audit Log，提供零埋点的 Agent 执行故事还原（`vmr story`）、跨 Run 行为差异对比（`vmr story -compare`）与一键二进制重放（`vmr replay`）。
+  2. **Post-Flight Agent Forensics**：基于两层忠实 Raw Byte Audit Log，提供零埋点的 Agent 执行叙事还原（`vmr analyze`）、跨 Run 行为差异对比（`vmr analyze -compare`）与一键二进制重放（`vmr replay`）。
   3. **模块间松耦合**：路由与诊断分析模块在逻辑和运行态完全独立，仅以标准 JSONL/zstd 格式的 Audit Log 作为唯一数据契约。
 
 ---
@@ -61,13 +61,13 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 | **协议处理方式** | 强行转为 OpenAI 格式 | 强行转为 OpenAI 格式 | 统一中间格式转换 | 仅捕获 SDK 层 Payload | 通常仅覆盖单一厂商原生协议，不做多协议透传 | **字节忠实透传 (Byte-Faithful Passthrough)，保留厂商特有字段** |
 | **Prefix-Cache 保护** | ❌ 无状态/随机轮询，极易摧毁 Cache | ⚠️ 部分支持基础 Session Affinity | ❌ 无状态路由，不支持自备账号 Cache 优化 | N/A (仅观测，不参与路由) | ✅ 局限于单一厂商内的多账号级 Sticky（这是它们存在的初衷） | **✅ 原生 Session-Sticky (System Prompt + First Msg 哈希绑定)** |
 | **Token-Plan 水位调度** | ❌ 仅感知下游虚拟扣费，不感知上游额度 | ❌ 无针对 Token-Plan 配额平滑调度的逻辑 | ❌ 不支持带入用户自备 Token-Plan 额度池 | N/A (仅观测) | ✅ 部分支持同厂商多账号轮转，但无法跨厂商统一调度 | **✅ 本地用量累计 (Response Usage) + 按周期配速 (Headroom Pacing) 的水位调度** |
-| **执行诊断与对比** | ❌ 仅有基础日志 | ⚠️ 简单日志与 Cost 统计 | ❌ 仅有 HTTP 调用日志 | ✅ 强大的链路 Trace，但无 1-Click Replay | ❌ 基本没有，多为纯转发脚本 | **✅ 步骤级 Story 还原 (`vmr story`) + 跨 Run 差异对比 (`compare`) + 1-Click Replay** |
+| **执行诊断与对比** | ❌ 仅有基础日志 | ⚠️ 简单日志与 Cost 统计 | ❌ 仅有 HTTP 调用日志 | ✅ 强大的链路 Trace，但无 1-Click Replay | ❌ 基本没有，多为纯转发脚本 | **✅ 步骤级叙事还原 (`vmr analyze`) + 跨 Run 差异对比 (`compare`) + 1-Click Replay** |
 
 ### 3.3 总结 VMR 的差异化壁垒
 1. **相较于普通网关**：VMR 懂 Agent 的 Prefix-Cache 价值，引入了 Session-Sticky 锁定，并补充了基于本地 Response 消耗累计的 Token-Plan 水位平滑调度。
 2. **相较于重型网关**：VMR 保持单二进制极简运维，无数据库负担，遵循 Byte-Faithful Passthrough 原则。
-3. **相较于代码埋点观测工具**：VMR 在网络代理层实现"零埋点"抓取忠实的底层 Byte，并提供专属的 `vmr story` 与 `vmr replay`。
-4. **相较于订阅额度聚合中继工具**：这类工具通常只解决单一厂商内的多账号轮转，VMR 是跨厂商、跨协议的统一池化，并原生带有 `vmr story`/`vmr report` 的执行取证与成本归因能力，而这类工具通常止步于纯转发。
+3. **相较于代码埋点观测工具**：VMR 在网络代理层实现"零埋点"抓取忠实的底层 Byte，并提供专属的 `vmr analyze` 与 `vmr replay`。
+4. **相较于订阅额度聚合中继工具**：这类工具通常只解决单一厂商内的多账号轮转，VMR 是跨厂商、跨协议的统一池化，并原生带有 `vmr analyze` 的执行取证与成本归因能力，而这类工具通常止步于纯转发。
 
 ---
 
@@ -98,7 +98,7 @@ VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略，但*
 
 "企业同时采购多家厂商 Token-Plan，对内给员工/业务线共享调度"这类细分需求里，"共享调度"（Provider 级配速分流）和"按人可见性/归因"是两件事，本方案第一阶段只解决前者。路由层面无法做到、也不必做到按员工/业务线的实时限流——这需要在请求路径上引入下游身份维度的配额状态，比 Provider 级水位调度重得多，应作为独立范围评估，不与本阶段混淆。
 
-但"按人可见性"第一阶段就能低成本交付：VMR 的 `server` 层已经把每个下游 API Key 映射为 `ClientKeyTag`（`Cfg.APIKeys` → `audit.KeyTag`），逐请求写进审计日志，`vmr report`/`vmr story` 已经能按这个 tag 分组统计。也就是说"每个员工/业务线消耗了多少、逼近哪个套餐的额度上限"这类事后可见性，直接复用现有数据契约即可交付，不需要为此新增一套采集机制。
+但"按人可见性"第一阶段就能低成本交付：VMR 的 `server` 层已经把每个下游 API Key 映射为 `ClientKeyTag`（`Cfg.APIKeys` → `audit.KeyTag`），逐请求写进审计日志，`vmr analyze` 已经能按这个 tag 分组统计。也就是说"每个员工/业务线消耗了多少、逼近哪个套餐的额度上限"这类事后可见性，直接复用现有数据契约即可交付，不需要为此新增一套采集机制。
 
 ---
 
@@ -110,8 +110,8 @@ VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略，但*
 
 按"精度阶梯"分批交付，而不是横向拆"配置/计量/决策"三层各做一半——每一批都是端到端可上线的垂直切片，且严格遵守"先只观测、后再决策"：先跑几天纯计量、拿 `/status` 对着厂商控制台核对准确，确认可信后再打开真正影响路由的那一步。
 
-### Analytics 侧：Agent Story 与 Audit 丰富化
+### Analytics 侧：Agent 叙事与 Audit 丰富化
 
-1. 保持 `vmr analyze -journey`/`-compare`（`vmr story`/`vmr story -compare` 是过渡别名）这条分析指令独立高效——**不因为 Router 侧引入额度状态就去耦合它**，`ctxgraph`/`chatmsg` 是两侧共用的解析层，`report`/`story` 仍是审计日志的只读离线消费者。
-2. 在 `vmr report` 的用量报告中追加基于 Token-Plan 本地额度的消耗进度与预测看板。
-3. 复用现有 `ClientKeyTag`，在 `report`/`story` 中新增按员工/业务线的套餐消耗占比与成本归因视图（见 4.3），把"多人共享调度"的可见性需求用既有数据契约交付，不新增采集机制。
+1. 保持 `vmr analyze -journey`/`-compare` 这条分析指令独立高效——**不因为 Router 侧引入额度状态就去耦合它**，`ctxgraph`/`chatmsg` 是两侧共用的解析层，`report`/`journey` 仍是审计日志的只读离线消费者。
+2. 在 `vmr analyze` 的用量报告中追加基于 Token-Plan 本地额度的消耗进度与预测看板。
+3. 复用现有 `ClientKeyTag`，在 `report`/`journey` 中新增按员工/业务线的套餐消耗占比与成本归因视图（见 4.3），把"多人共享调度"的可见性需求用既有数据契约交付，不新增采集机制。

@@ -20,15 +20,15 @@
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
 - **§2 分布**：高危 0；中危 3（`2.2`/`2.17`/`2.18`），其余均为低危。
-- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr report` §2/§2.5 与 `vmr story`）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进单锁原子写、`/status` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。
+- **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr analyze` §2/§2.5 与 journey 半区）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进单锁原子写、`/status` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——cost 计费热路径改为折叠字段直读，override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界（该优化本身已于 2026-09-06 被 §2.89 记录的整体删除取代，见下）。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
-- **2026-09-06 已闭环**（Pricing 架构极简化重构）：`metric: cost`、两层定价热路径挂点（原挂在 `core.Endpoint` 上的折叠费率字段）、其折叠函数、`quota.Counters` 的 cost 分量与其原子写方法整体删除（§2.89 更新记录）；顶层 `pricing:` 块（`currency`/`exchange_rate`/`supplement`/`standard`）删除，改为顶层 `exchange_rate:` + `providers[].pricing.{currency,aliases,rates}`（原 `map`/`overrides` 改名）二层模型；`internal/pricing` 新增内置默认汇率表（`standard_exchange_rate.yaml`）。路由半区从此零价格、零币种；定价解析完全下沉到离线 `vmr report`/`vmr analyze`。Breaking change，详见 `CHANGELOG` `[Unreleased]` 的迁移指引。
-- **2026-09-05 已闭环**（T1/T2b/T3/T4 多 Agent 批次）：`imgprep` 递归下钻 Anthropic `tool_result` 嵌套图片；`reqdetail` 角色归属走 `chatmsg.ExtractReasoning`（三级回退）、`ctxgraph` 新增官方单条消息散列入口 `HashMsgJSON` 并让 story 前导系统哈希归位；`ctxgraph` 解析缓存改按内容哈希为 key、删除 mtime 消歧；`buildCandidates` 新增健康过滤 last-resort（候选全空时释放退避最浅的半开端点，见 §2.85）。详见 `CHANGELOG` `[Unreleased]` 及下文 §1.4/§2.85 对应条目更新。
+- **2026-09-06 已闭环**（Pricing 架构极简化重构）：`metric: cost`、两层定价热路径挂点（原挂在 `core.Endpoint` 上的折叠费率字段）、其折叠函数、`quota.Counters` 的 cost 分量与其原子写方法整体删除（§2.89 更新记录）；顶层 `pricing:` 块（`currency`/`exchange_rate`/`supplement`/`standard`）删除，改为顶层 `exchange_rate:` + `providers[].pricing.{currency,aliases,rates}`（原 `map`/`overrides` 改名）二层模型；`internal/pricing` 新增内置默认汇率表（`standard_exchange_rate.yaml`）。路由半区从此零价格、零币种；定价解析完全下沉到离线 `vmr analyze`。Breaking change，详见 `CHANGELOG` `[Unreleased]` 的迁移指引。
+- **2026-09-05 已闭环**（T1/T2b/T3/T4 多 Agent 批次）：`imgprep` 递归下钻 Anthropic `tool_result` 嵌套图片；`reqdetail` 角色归属走 `chatmsg.ExtractReasoning`（三级回退）、`ctxgraph` 新增官方单条消息散列入口 `HashMsgJSON` 并让 journey 前导系统哈希归位；`ctxgraph` 解析缓存改按内容哈希为 key、删除 mtime 消歧；`buildCandidates` 新增健康过滤 last-resort（候选全空时释放退避最浅的半开端点，见 §2.85）。详见 `CHANGELOG` `[Unreleased]` 及下文 §1.4/§2.85 对应条目更新。
 - **2026-09-05 已闭环**（独立复核发现，quota role 展示层）：`/status`/`vmr status`/`vmr check` 的 bucket/gate `role=` 判定收敛到单一函数 `internal/quota.Role(limits, li, model)`，按行的 Scope 选 judging set——共享行（`model==""`）收窄成"同样覆盖全体模型的 Limit"（排除限定列表 Limit：它只为自己点名的模型竞争，混合 Scope 且该列表周期更长时，旧的全量视角会把共享池错标成闸，而受害的正是没有专属行的模型）；`vmr check` 对限定单个具名模型的 Limit 现在也按该模型的 `applicableLimits` 精确计算（不再是全量近似）——只有通配 `["*"]` 或列出多个模型的 Limit 仍是全量近似 + note 指向 `/status`（结构性：一条静态行给不出对多个模型各自不同的正确答案）。同时把 `Role` 的桶身份判定从字段值相等改成按 `limits` 原始下标比较——共享池与一条 metric/period/amount/since 恰好全等的通配 Limit（合法配置，不撞校验）用值判等无法区分，会被一起误标成桶。均为纯展示修正，非混合 Scope 且非该值巧合相等的配置零变化，路由/计费/评分零影响。详见 `CHANGELOG` `[Unreleased]`、`internal/quota/score_test.go`（`TestRole_*`）、`internal/router/quota_multilimit_test.go`、`cmd/vmr/cmd_check_quota_test.go`。
 - **2026-09-04 已闭环**：`ScoreForLimits` 闸归并二值化（原 §2.88，N3 裁决采纳「闸 = 带安全余量的厂商限流本地代理」语义：活着的闸不参与评分，烧断的闸归零沉底到窗口重置；旧 `min(1, raw)` 硬封顶把带闸账号的桶抢跑加分压死在 ≤1.0 的病灶随之消除）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-03 已闭环**：一批三方 review 核实后的小修（错误分类补 `error.code`、config 加载期禁 provider 名冒号 / 校验 strategy、keyless 自建上游按地址分级、探针仅 2xx 扣配额、anthropic 损坏图片仍计入 `HasImage`、`.parse-cache` mtime 消歧、md/html 行为指标统一、LLM detector 并发限时、`metric:cost` estimated 口径分侧等），详见 `CHANGELOG` `[Unreleased]`。删除的 §2 条目：`2.65`/`2.71`/`2.72`/`2.76`/`2.78`/`2.81`/`2.82`/`2.83`/`2.84`。
 - **2026-09（早于本轮）已闭环**：`standard_price_curated.yaml` 别名指向空 key 致 `LoadStandard` 失败（原 §2.87，commit `2e5d9cd` 恢复 `rates:` 段）。
-- **2026-08 已闭环**：`vmr analyze -corpus` 全量语料约 43GB → 约 2.4GB（`story.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
+- **2026-08 已闭环**：`vmr analyze -benchmark` 全量语料约 43GB → 约 2.4GB（`journey.Step` 不再持有 `audit.Record` + 字节预算分批），见 §2.2。
 
 ---
 
@@ -56,7 +56,7 @@
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
 - **`copyFlush` 的 goroutine + channel 流水线**：避免在底层连接层设全局 Deadline 破坏 TLS/Header 超时语义。
-- **客户端取消时不停止计费**：上游已生成的 token 厂商照收，路由侧照收才与账单对齐；改成不计费会让 `vmr report` 系统性低估消耗。取消的**传播**（中止上游连接）已通过 `BuildRequest(r.Context(), …)` 自动完成；取消的**检测/归类**（`router` 标 attempt、`server` 标审计 `Outcome` 为 `canceled`，消除误计为成功）需 `copyFlush` select 一次 `ctx.Done()`。
+- **客户端取消时不停止计费**：上游已生成的 token 厂商照收，路由侧照收才与账单对齐；改成不计费会让 `vmr analyze` 系统性低估消耗。取消的**传播**（中止上游连接）已通过 `BuildRequest(r.Context(), …)` 自动完成；取消的**检测/归类**（`router` 标 attempt、`server` 标审计 `Outcome` 为 `canceled`，消除误计为成功）需 `copyFlush` select 一次 `ctx.Done()`。
 - **`respnorm.Read` 等待更多字节时返回 `(0, nil)`**：唯一消费方 `copyFlush` 显式处理；改成内部阻塞循环会让 idle 看门狗失去以读取为粒度的心跳。
 - **`respnorm` 的 usage sniffing 不外移为 `router` 侧装饰器**：装饰器要在转发热路径每 chunk 多付一次接口调用；当前实现搭 `ingest` 已有的 per-chunk 循环，零额外开销。理由在 `internal/respnorm` 包注释末尾。
 - **`respnorm` 的观测标记 `crlf_framing_suspected` / `thinking_process_pattern_detected` 不删**：字节未改动，只往审计 `norm` 串加一个标记，看似无消费者——实则被 `internal/reqdetail` 详单页逐条叙述，`thinking_process_pattern_detected` 另进 `internal/report` 的 `diagnosticNormMarker` → `EndpointRow.NormCounts`，作为「剥离规则是否失效」的跨请求频率预警。这是在用的低成本预警，不是死代码。
@@ -80,10 +80,10 @@
 - **CLI 与 Server 版本必须匹配，不一致直接报错不做兼容**：单二进制、可随时重启，`vmr status` 与 `vmr start` 理应同版本——不一致说明升级没走完，报错正是暴露它。`json.RawMessage` 式兼容层只覆盖一个滚动升级窗口却永久留在代码里，违反 KISS。曾为「旧 server 缺失新 key」保留的 `serving *bool` 兜底已作为死代码删除（`instance.config` 由 string 改 object 后即不可达）——版本必须匹配的原则不再留任何字段级例外。
 - **`/status` 的 `instance.base_urls` 回显请求自身地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status` 就广告什么地址，这正是客户端该填的值。纯展示、不参与鉴权或路由，Host 可伪造无安全影响；刻意不做 `X-Forwarded-Host` 解析。
 - **`base_url` 内嵌凭据在加载期报错，而不是在审计侧脱敏**：`base_url` 是自由字符串，`https://u:p@host` 或 `?api_key=...` 会原样进 `Attempt.URL` 落盘——审计脱敏只覆盖 header，这是脱敏模型的唯一旁路。在源头消灭比运行期脱敏正确：脱敏是永远追不全的黑名单。**适用于**：固定的凭据键名清单（`api_key`/`token`/`secret`/`password` 等）与 userinfo 段。**不适用于**：自定义网关用非常规键名承载凭据的情形——刻意不做"值看起来像 key"的启发式判断，那会误杀 `api-version` 这类合法参数。错误信息只回显键名，绝不回显值。
-- **价目表的数值防线建在 `pricing.ParseTable`，不下沉到 `internal/config`**：`ParseTable` 是标准/curated 表的唯一解析入口（外部 supplement 文件已删除，见 §1.0），config.yaml 的 `providers[].pricing.rates` 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关，config 不重复校验 pricing 的解析结果。NaN/±Inf/负费率一律加载期硬错误——定价与配额自 Pricing 架构极简化重构（决策 6）起彻底解耦，一条脏费率的影响面已收窄到只污染离线 `vmr report`/`vmr analyze` 的 $ 估算，不再可能触达 `quota.Counters`（该结构自身也已不含任何价格分量）。
+- **价目表的数值防线建在 `pricing.ParseTable`，不下沉到 `internal/config`**：`ParseTable` 是标准/curated 表的唯一解析入口（外部 supplement 文件已删除，见 §1.0），config.yaml 的 `providers[].pricing.rates` 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关，config 不重复校验 pricing 的解析结果。NaN/±Inf/负费率一律加载期硬错误——定价与配额自 Pricing 架构极简化重构（决策 6）起彻底解耦，一条脏费率的影响面已收窄到只污染离线 `vmr analyze` 的 $ 估算，不再可能触达 `quota.Counters`（该结构自身也已不含任何价格分量）。
 - **`report.yaml` 解析失败是硬错误退出，文件不存在才是静默 no-op**：严格解析（`KnownFields`）配上软降级是最坏组合——一个键名笔误会静默关掉**全部** report.yaml 设置，包括自流量排除（分析工具自己的开销于是混进被分析的工作负载）。文件不存在是合法的"未配置"（多数运行本就没有 report.yaml）；显式 `-report-config` 指向的文件不存在则报错，那是用户自己给的指针。报表头另有一行写明本次实际应用的配置文件路径（`Meta.ReportConfigPath`）——"没找到 report.yaml"和"本来就没有"在产物上必须可区分。
 - **环境变量未定义时静默展开为空串，不支持 `${VAR:-default}`**：保持配置解析简单明确，默认值在 YAML 里显式写出。
-- **`internal/config` 的二层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但这是 Quota 设计文档决策表明文选定的方案——只让 `cmd/vmr/cmd_report.go` 一侧另行解析、config 侧完全不校验会导致两份实现各自推断、容易漂移，是已否决的备选。后置到 `BuildSnapshot` 还会摧毁「费率行四分量全给或全不给、`aliases` 目标必须存在」这些加载期校验——它们的价值就在于**加载期**能立刻报错，而不是等 `vmr report`/`vmr check` 跑一次才发现打错的字。
+- **`internal/config` 的二层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但这是 Quota 设计文档决策表明文选定的方案——只让 `cmd/vmr/cmd_report.go` 一侧另行解析、config 侧完全不校验会导致两份实现各自推断、容易漂移，是已否决的备选。后置到 `BuildSnapshot` 还会摧毁「费率行四分量全给或全不给、`aliases` 目标必须存在」这些加载期校验——它们的价值就在于**加载期**能立刻报错，而不是等 `vmr analyze`/`vmr check` 跑一次才发现打错的字。
 - **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的命名形态不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.aliases`/`rates` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与第 ④ 步 substring 匹配同型的极小概率误匹配，可用 `pricing.aliases` 先钉（优先级更高）。
 - **多协议适配器（`adapter/{openai,anthropic,openairesponses}`）保持独立子包**：三协议底层已有真实分叉（Anthropic 529 特判、Responses 顶层 `input` 数组与 `RewriteInputRoles`、`x-api-key` vs `Authorization`）；独立子包支持编译期 `init()` 注册与独立单测，新增协议零侵入。合并成参数化结构体只是把多态改写为字符串 `if` 分支。
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
@@ -99,16 +99,16 @@
 - **`vmr status -addr` 回退读取本地 config 的 `api_keys[0]` 并发送到目标地址**：`-addr` 显式指向别的实例时，把本地 key 当 Bearer 发过去。设计意图是让 `./vmr.sh ps` 对本机多实例免手工传 key；只发 key、不进 URL 或日志。目标地址是使用者自己敲的，不是网络层漏洞。
 - **看板（`/status.html` / `/log.html`）把 API key 存 `localStorage`，静态外壳免鉴权直出**：外壳不含数据，数据请求走 `s.auth()`；key 只在浏览器本地持久化，不进 URL、不进服务端日志。所有配置派生字符串内插进 `innerHTML` 前均 `esc()` HTML 转义。`/log` 输出 `text/plain` 而非 SSE/JSONL（源头已是格式化文本）；无查询参数（回放窗口固定 512 行缓冲）。
 - **`/help.html` / `/help.zh.html` 的 Agent 配置片段在浏览器就地装配，不做服务端模板渲染**：`/help` 按架构必须公开免鉴权，服务端渲染会逼它强制鉴权、或让服务端拿不到用户 Key。API Key 复用 `localStorage['vmr_status_key']`。服务端下发的 HTML 保留写死默认值（`coding` / `claude`、200k context、`high` effort），保证无 JS / 未鉴权时也自洽。四点取舍：max-output 预算按 context 分档经验估计（VMR 无模型级元数据）；片段一律 vision-on（空 capabilities = 不受约束）；四个列表型生成器只枚举 `openai-completions` 模型；无浏览器 JS 测试基建，`TestHelpPage_SnippetFillEngine` 只做构建期字符串守卫。
-- **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `story.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
+- **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `journey.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
 - **持续性故障的日志按"错误文本相同"去重，不做事件级审计**：quota flush 失败（磁盘满、权限变更）与时钟回退都是持续性的，10 秒一次刷屏会淹没日志。flush 侧按错误文本去重（首次 + 每 10 次，附连续失败计数），时钟回退侧每进程最多一条 WARN。**已知代价**：两种错误交替出现时 flush 侧不去重（每 tick 一条——但交替本身就是有效信号）；时钟"回退→恢复→再回退"的第二次不再 WARN。**边界**：需要回退事件级审计的话，这里要换成带去抖窗口的计数器。
 - **`vmr-quota.json` 的结构损坏整文件拒绝，绝不部分采纳**：静默丢掉一个 provider 的账本比报错更危险。版本戳不匹配、nil account map、null bucket 三者任一即视为损坏，由调用方 WARN + 从零开始——与既有的语法损坏路径同构。`version` 字段从"写而不校验"改为真正的门：有版本戳却不校验比没有更危险，下一个人会以为"有版本号所以安全"。
 - **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而“不等即重置”会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
-- **原子写只做文件级 Sync，不做目录 fsync**：全仓的 CreateTemp+Rename 站点（quota 账本、audit 压缩、ctxgraph `.cache/parse`、reqdetail 证据、story LLM 缓存）都不 fsync 父目录——掉电时 rename 的目录项可能未持久化，最近一次落盘可能丢失或回退。刻意取舍：丢失代价分别是“统计计数回退到上次 flush”（quota，文件级 Sync 已做）与“缓存 miss 重算”（其余站点，多数连文件级 Sync 都没做，靠读取侧的哈希/schema 校验把半写内容兜成 miss），全部落在各自 best-effort 契约内；而目录 fsync 每次落盘多一次系统调用，换来的只是把丢失窗口从“最近一个 flush 间隔”缩到零。若未来某站点升级为“不许丢”的契约（如计费级账本），在该站点单独补目录 fsync，而不是全仓统一加。
+- **原子写只做文件级 Sync，不做目录 fsync**：全仓的 CreateTemp+Rename 站点（quota 账本、audit 压缩、ctxgraph `.cache/parse`、reqdetail 证据、journey LLM 缓存）都不 fsync 父目录——掉电时 rename 的目录项可能未持久化，最近一次落盘可能丢失或回退。刻意取舍：丢失代价分别是“统计计数回退到上次 flush”（quota，文件级 Sync 已做）与“缓存 miss 重算”（其余站点，多数连文件级 Sync 都没做，靠读取侧的哈希/schema 校验把半写内容兜成 miss），全部落在各自 best-effort 契约内；而目录 fsync 每次落盘多一次系统调用，换来的只是把丢失窗口从“最近一个 flush 间隔”缩到零。若未来某站点升级为“不许丢”的契约（如计费级账本），在该站点单独补目录 fsync，而不是全仓统一加。
 - **`fmtutil.DisplayZone` 保持裸 `var`，不封装线程安全访问器**：生产代码零写入点——全仓写入全在 `_test.go` 且相关测试无 `t.Parallel()`，`-race` 全绿。「让测试能确定性覆盖」本就是它存在的理由之一。
 - **尤其不做「`prof == nil` 就回退到 `Generic`」这类静默兜底**：`OpenClawAware` 与 `Generic` 给出不同的任务标题与边界，静默换一个 Profile 会产出一份错误但看起来正常的分析结果，比 panic 难查。
 - **`.cache/parse/` 不做分片孤儿回收 GC**（原 1.27）：`ctxgraph.SaveCacheDir` 只增量写入当前存在的分片，不主动删旧 hash 孤儿分片。缓存是完全可再生的派生产物，`vmr analyze` 可从空缓存目录冷启动。触发条件：`.cache/parse/` 体积超过同批压缩审计日志总体积（当前实测 51MB vs 177MB），或升级后异常磁盘占用；在那之前「整目录删除重建」比任何 GC 更简单可靠。**2026-09-05 修正**：`FileCache` 现按内容哈希（`HashFile` 的 sha256）为 key，分片文件名与 map key 对齐——孤儿分片只是多占磁盘、永不扰乱缓存命中（mtime 消歧与字典序覆盖问题随旧 key 一并消失），GC 取舍不变。
 - **`.cache/parse/` 分片文件名 = 内容哈希 = `FileCache` 的 map key，三者对齐**：文件名=内容哈希使同名冲突天然不可能（两份不同内容各得各的分片）。2026-09-05 前 map key 是内嵌 `CanonicalPath`（与文件名刻意不对齐，「从路径反查分片」需遍历读内嵌字段）；现直接按内容哈希索引，反查代价取消，但 `LoadCacheDir` 仍是 best-effort 全扫描契约不变。运维侧想按路径定位分片时 grep 分片内嵌 `CanonicalPath` 即可。**结果取舍**：两个不同路径、内容相同的审计文件（备份副本与原件同批扫描）共享同一 cache entry，且共享 Manifests 的 `Path` 绑定为 last-writer 的路径拼写——功能正确（相同内容经任一路径取回一致），但不保证指向最早扫到的路径。
-- **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参--只有单条下钻、`-compare`、`-render-all` 传 `true`;默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标(`Manifest.Req` 的纯函数),不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`:`vmr analyze` 先跑 story 半区(可能已批量物化)再跑 report 半区,纯 flag 判据会谎报「没写详单」或反之--改查 `r.DetailFile` 是否真实存在(一次 `os.ReadDir` 建 set)。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」,人为改回无条件物化当场失败。这条纪律反复退化过四次,这次靠测试锁死。
+- **默认分析套件不物化 `details/`，`report` 的「文件」列判据是文件存在性而非 `-details` flag**：`writeJourneyFile` / `renderJourneys` / `renderAllJourneys` 带 `materializeDetails` 入参--只有单条下钻、`-compare`、`-render-all` 传 `true`;默认套件的脊柱「→ detail」与 sysprompt 指针渲染成行内 `文件:行` 坐标(`Manifest.Req` 的纯函数),不写盘、不留 404 链接。`report.detailCell` 因此不能只看本次的 `-details`:`vmr analyze` 先跑 journey 半区(可能已批量物化)再跑 report 半区,纯 flag 判据会谎报「没写详单」或反之--改查 `r.DetailFile` 是否真实存在(一次 `os.ReadDir` 建 set)。常驻守卫测试盯着「默认套件 `details/` 为 0、指针是坐标非链接」,人为改回无条件物化当场失败。这条纪律反复退化过四次,这次靠测试锁死。
 
 ### 1.4 包边界与依赖
 
@@ -148,11 +148,11 @@
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
 - **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
 - **不自建 Markdown→HTML 的渲染层**（2026-09 收敛，原 journey 侧的 mdlite 微渲染器已随自包含 HTML 退役删除）：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。已知瑕疵 §2.51 随之失去载体。
-- **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`story.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
+- **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`journey.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
 - **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
 - **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗候选预过滤出局，最强者仅作诊断兜底**：旧规则豁免同桶候选的理由是“用户可以走开几天再回来接同一个 anchor”——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。2026-09 收敛为**淘汰优先于排序**（与 `strategy` 包 `Condition`/`Dimension` 分离同型）：超窗候选不参与赢家竞争，避免「高分超窗者先赢再降级」遮蔽窗内合法前驱；仅当过滤后无任何窗内候选时，最强超窗者作为降级 `AmbiguousMatch` 边保留供人查看——真的走开三天回来接着聊的人不会消失进 `NoPredecessorFound`。
 - **消息内容哈希剥离 Anthropic 的 `cache_control` 标记**：`cache_control` 是缓存控制元数据，不是对话内容；客户端逐轮移动缓存断点会改变哈希，把一次纯 Append 误判成内容编辑，整条 lineage 谱系失真。**证据状态要如实说**：机制已从代码确认（`hashJSON` 对原始消息对象全字段哈希，标记确实进哈希输入），但本机语料太小（36KB / 1 条 anthropic 记录 / 0 条 `cache_control` 命中），**按协议拆 Append 比例无法产生统计意义，未能从语料实证**。剥离本身严格更正确，故仍实施。**已知副作用**：消息内容载荷里键名恰为 `cache_control` 的（如工具结果回显）也会被剥离——只影响哈希与 lineage 判定，不影响存储内容与渲染。
-- **详情页在 `report` 与 `story` 之间字节一致，靠的是两侧传入同一个 `(record, manifest, prev)` 三元组 + 指纹携带 `m`/`prev` 身份**：只做其中一半都不够。`report` 侧曾在 `group()` 里对 compaction 记录先 `continue` 再赋值 manifest，于是它的 manifest 恒为 nil，而 `story` 侧传的是真实 manifest；渲染指纹只含 lang/evidence，于是同名文件**先写者赢**——用户拿到哪个版本取决于先跑 `vmr report` 还是 `vmr story`。补上 manifest 消除差异源，指纹折入身份防同类复发。
+- **详情页在 `report` 与 `journey` 之间字节一致，靠的是两侧传入同一个 `(record, manifest, prev)` 三元组 + 指纹携带 `m`/`prev` 身份**：只做其中一半都不够。`report` 侧曾在 `group()` 里对 compaction 记录先 `continue` 再赋值 manifest，于是它的 manifest 恒为 nil，而 `journey` 侧传的是真实 manifest；渲染指纹只含 lang/evidence，于是同名文件**先写者赢**——用户拿到哪个版本取决于渲染顺序（`report` 侧与 `journey` 侧谁先写）。补上 manifest 消除差异源，指纹折入身份防同类复发。
 - **`archtest` 的文档守卫不扩展到 review 报告类文档**：守卫只覆盖 `CLAUDE.md`、设计文档、本文件与用户指南。review 报告会正当地讨论已删除的文件与「建议新增的 XXX 函数」。真正的风险（一份陈旧 review 被当施工依据）**用定位而非机制解决**：权威的当前状态清单只有本文件。
 - **`archtest` 不加圈复杂度检查**：一次只加一个守卫。函数长度预算落地不久，确认不够用之前不引入第二个。
 - **`buildinfo` 只输出 VCS commit 哈希，不人工编造语义化版本**：如实反映构建来源。
@@ -173,10 +173,10 @@
 
 ### A. 分析半区 · 大语料规模（内存与耗时）
 
-#### 2.2 [中] `vmr report` / `vmr analyze` 全内存聚合的记录量上限
+#### 2.2 [中] `vmr analyze` 全内存聚合的记录量上限
 
 - **现状**：`AnalyzeSessions` 常驻全部记录关键信息 + 原始耗时/延迟/Token 样本切片（算真实百分位）。实测万级记录即 GB 级 RSS（`report` 单跑约 1.4GB / 1.1 万条；`analyze` 组合路径约 3.75GB / 1.5 万条）——原文「千万级约数百 MB」是量级判断错误，已作废。
-- **story 半边曾是更大的来源，已消除**：`story.Step` 曾持有完整 `audit.Record`，让每 request 重发全历史的 O(N²) 原始字节钉在对象图里——`vmr analyze -corpus` 因此在全量语料上峰值约 43GB（16GB 机器 swap thrashing 假死）。2026-08 改动：`Step` 只保留 `buildFrom` 预提取的事实，不再持有记录；`-corpus`/`-render-all` 改为按 `Manifest.Bytes` 字节预算分批构建。实测（43 文件 / 约 12.4GB 解压）`-corpus` 峰值 RSS 从约 43GB 降到约 2.4GB、`-render-all` 从 4.1GB 到 1.9GB（详见 `CHANGELOG` [Unreleased]）。全部 Journey 常驻只剩约 300MB，与语料量解耦。
+- **journey 半边曾是更大的来源，已消除**：`journey.Step` 曾持有完整 `audit.Record`，让每 request 重发全历史的 O(N²) 原始字节钉在对象图里——`vmr analyze -benchmark` 因此在全量语料上峰值约 43GB（16GB 机器 swap thrashing 假死）。2026-08 改动：`Step` 只保留 `buildFrom` 预提取的事实，不再持有记录；`-benchmark`/`-render-all` 改为按 `Manifest.Bytes` 字节预算分批构建。实测（43 文件 / 约 12.4GB 解压）`-benchmark` 峰值 RSS 从约 43GB 降到约 2.4GB、`-render-all` 从 4.1GB 到 1.9GB（详见 `CHANGELOG` [Unreleased]）。全部 Journey 常驻只剩约 300MB，与语料量解耦。
 - **剩下的**：report 半边的 `AnalyzeSessions` 样本切片仍是全内存（未触及本次改动）。
 - **可能方案**：按审计日志的时间局部性分自然日分桶，跨日即时释放原始切片。
 - **为什么仍待定**：report 半边这个量级目前仍跑得完（约 1.6GB / 1.5 万条，16GB 机器有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错。**触发条件：单次 `report`/`analyze` 宏观半边语料 > 约 3 万条，或该半边峰值 RSS > 4GB**。
@@ -184,25 +184,25 @@
 - **相关未做项（warm-path，登记待触发）**：语料不变、只渲染单个 journey 时，`setupStoryRun` 仍无条件全量 `ScanCached` + `buildGraph` + `StitchGraph`。窄路径需给 `vmr-stories.json` 的 `JourneyIndexRow` 补 `stitch_edges`（每条 lineage 的前驱边持久化，按内容寻址 `LineageID` 重放，避开 tie-break 不确定性）+ 一条陈旧性闸 warm path。触发条件同上（语料 > 约 3 万条，或大语料上反复 `-journey` 调查）。
 
 
-#### 2.1 [低，已部分闭环] `vmr report` 多文件输入：会话分析那一趟（`collect()`）仍未缓存（含原 1.23）
+#### 2.1 [低，已部分闭环] `vmr analyze` 多文件输入：会话分析那一趟（`collect()`）仍未缓存（含原 1.23）
 
 - **现状**：`report.Build`/`BuildCached` 跑三趟扫描——① `ctxgraph.ScanCached`（manifest，已缓存）② `collect()`（会话/任务分组用的每记录特征）**未缓存，每次全量重跑** ③ `aggState.scanFiles`（指标聚合，P3.6 已接 `factscache.go` 缓存）。③ 接缓存后真实语料实测热耗时 5.2×，但 ② 未缓存使热耗时离个位数秒仍有差距。
 - **为什么不顺手做**：`collect()` 产出（`ReqInfo`）直接喂 `group()`/`ctxgraph.StitchGraph` 做会话/任务边界判定，正确性敏感度高于纯指标聚合（算错是把不相关对话缝到同一 Journey）。
 - **触发条件**：投入前先补一套对等的 cold/warm 一致性测试（参照 `TestBuildCached_WarmMatchesBuild`）。
 
 
-#### 2.55 [低，登记待触发] `story` 的 `BuildAll` 仍先把一批的全部记录物化成 map
+#### 2.55 [低，登记待触发] `journey` 的 `BuildAll` 仍先把一批的全部记录物化成 map
 
 - **现状**：2026-08 改动让 `Step` 不再持有 `audit.Record`，全部 Journey 常驻降到约 300MB；但 `BuildAll` 内部仍 `FetchRecords` 把一批（字节预算 ~160MiB 原始）的记录一次性收进 `map[Loc]*audit.Record` 再 `buildFrom`，这个 map 是每批的瞬时峰值来源（约几百 MB）。
 - **可能方案**：全流式——`FetchRecords` 的 map 也不要，逐条喂给 builder。要求把 `buildFrom` 从「拿到全部记录后遍历」改成「按到达顺序 feed」，并处理并发扫文件的乱序（Event 的 `FirstStepSeq` 需按 seq 事后归并）。改动量比本次大一个量级。
-- **触发条件**：语料再涨约 5 倍，或需要在 8GB 以下机器上跑全量 `-corpus`/`-render-all`。
+- **触发条件**：语料再涨约 5 倍，或需要在 8GB 以下机器上跑全量 `-benchmark`/`-render-all`。
 
 
 #### 2.56 [低，登记待触发] 一次 `vmr analyze` 至少把全量语料解压三遍
 
 - **现状**：`.cache/parse` 只覆盖 `ctxgraph` 的 manifest 扫描。`PreviewTitles`（全部候选根记录）、每批 `BuildAll` 的 `FetchRecords`、report 半边的 `analyzeFile`（§2.1）各自独立全量解压一遍——全量语料上是 `-render-all` 约 500s 耗时的主要来源。**2026-09-07 补充**：产物级 L2 缓存落地后，输入未变时这套重复解压整体被跳过（`-no-cache` 可退回全量对照）；本条针对的仍是冷启动/输入变化后的那一次全量计算。
 - **相关**：`FetchRecords` 的接口形状（返回全量 map）天然逼调用方驻留全部；`PreviewTitles` 是纯提取（读一条、取一句标题、丢弃），可顺手切 `ctxgraph.ForEachRecord`，消掉一个约 600MB 的瞬时峰值。
-- **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `story` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.cache/parse` 从几 MB 涨到约 160MB，且该 cache 是 report 半边共享的。跨包契约 + 双半边影响。
+- **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `journey` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.cache/parse` 从几 MB 涨到约 160MB，且该 cache 是 report 半区共享的。跨包契约 + 双半边影响。
 - **触发条件**：内存不再是瓶颈后，时间成为首要痛点时单独立项。
 
 
@@ -215,7 +215,7 @@
 #### 2.3 [低，决定不做] `chatmsg` 离线解析路径的 `map[string]any` 分配
 
 - **现状**：`internal/chatmsg` 43 处 `map[string]any`，全在离线消息/SSE/usage 解析路径。转发热路径实测零命中。
-- **决定不做**：2026-08 内存分析在真实语料上直接测了这一层——`audit.Record` 反序列化后的 live heap 相对原始 JSON 字节只放大 **1.40x**（审计记录绝大部分是长文本对话正文，`string` 只有 16 字节 header，结构开销被文本稀释）。把 `Body` 从 `any` 改成 `json.RawMessage` 延迟解析最多省 29%，不改变量级，却要改动 `story`/`report`/`reqdetail`/`chatmsg` 里几十处 `.(map[string]any)` 断言——投入产出比最差。story 半边的内存问题另有真因（见 §2.2），已单独解决。
+- **决定不做**：2026-08 内存分析在真实语料上直接测了这一层——`audit.Record` 反序列化后的 live heap 相对原始 JSON 字节只放大 **1.40x**（审计记录绝大部分是长文本对话正文，`string` 只有 16 字节 header，结构开销被文本稀释）。把 `Body` 从 `any` 改成 `json.RawMessage` 延迟解析最多省 29%，不改变量级，却要改动 `journey`/`report`/`reqdetail`/`chatmsg` 里几十处 `.(map[string]any)` 断言——投入产出比最差。journey 半边的内存问题另有真因（见 §2.2），已单独解决。
 - **触发条件**：真实 profile 显示某个离线聚合路径的时间/内存确由 `map[string]any` 分配主导（当前证据相反）。
 
 #### 2.69 [低，登记待触发] `searchableTranscript` 大语料下 O(N²) 全量物化
@@ -229,8 +229,8 @@
 
 #### 2.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 corpus 均值
 
-- **现状**：`internal/journey/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -corpus` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
-- **当前缓解**：`-corpus` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」（2026-08-31）。只是免责，没动根因。
+- **现状**：`internal/journey/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -benchmark` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
+- **当前缓解**：`-benchmark` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」（2026-08-31）。只是免责，没动根因。
 - **可能方案**：对单间隙设上限（如 > 1h 归 idle/unknown 而非 agent 执行）。需改指标语义 + 更新 Analytics 设计文档的时间拆分定义 + 差分测试。
 - **触发条件**：脚注被证明不够（读者仍据 Mean 下结论），或要把 `NetWorkingMS` / `ModelToToolRatio` 当硬指标用。
 
@@ -267,7 +267,7 @@
 #### 2.64 [低] 「上下文有效利用率」在语料级呈现双峰退化
 
 - **现状**：`internal/journey/metrics.go` 计算的「上下文有效利用率」（Context Utilization）在实际语料（111 个样本）中高度双峰退化：约 21% 样本值为 0（无工具调用或单轮任务），约 32% 样本值为 1.0（全工具结果均被后续轮次不同程度引用），中间值稀疏。导致语料统计中的「均值 70% / 中位数 95%」缺乏统计区分度，HTML 看板的「100%」亦难以提供有效洞察。
-- **当前缓解**：`vmr analyze -corpus` 统计时需结合分布形状（P10/P50/P90 及两端样本数）共同解读；暂不重定义指标语义以维护 v1-complete 稳定性。
+- **当前缓解**：`vmr analyze -benchmark` 统计时需结合分布形状（P10/P50/P90 及两端样本数）共同解读；暂不重定义指标语义以维护 v1-complete 稳定性。
 - **可能方案**：细化有效引用粒度（如按实体引用率加权或按 token 深度衰减）或按任务类别（含/不含工具调用）分桶展示。
 - **触发条件**：后续版本计划重构行为指标语义时统一评估。
 
@@ -284,7 +284,7 @@
 
 #### 2.68 [低，登记待触发] crosscheck 夹具没有 body-sniffed 的 compaction 记录，字节一致性靠指纹机制间接保证
 
-- **现状**：`cmd/vmr/cmd_story_report_crosscheck_test.go` 的夹具里没有 summarization（compaction）请求，因此“report 与 story 对同一条 compaction 记录渲染逐字节相同的 detail 页”（R72）在该端到端测试里没有直擦形态的覆盖——实际由 report 侧单元测试（`session_compaction_manifest_test.go`）加指纹机制（`renderFingerprint` 折入 m/prev 身份）间接保证。
+- **现状**：`cmd/vmr/cmd_journey_report_crosscheck_test.go` 的夹具里没有 summarization（compaction）请求，因此“report 与 journey 对同一条 compaction 记录渲染逐字节相同的 detail 页”（R72）在该端到端测试里没有直擦形态的覆盖——实际由 report 侧单元测试（`session_compaction_manifest_test.go`）加指纹机制（`renderFingerprint` 折入 m/prev 身份）间接保证。
 - **触发条件**：语料出现真实的 compaction 记录后，往 crosscheck 夹具补一条 body-sniffed summarization 记录，让字节一致性有端到端直证。在那之前不构成已知失真——两条直接测试已钉住机制本身。
 
 #### 2.70 [低，登记待触发] `buildRec2` 的 (path, line) join 依赖审计日志追加不变性，无时间戳交叉校验
@@ -323,7 +323,7 @@
 - **为什么待定**：主观展示密度判断，四个标记都按需渲染，健康报表一个都不出现。真实报表读起来觉得吵了再动（`◇` 是最可能降级为纯 JSON 字段的候选）。
 
 
-#### 2.7 [低] `vmr report` §2 成本表结构化透传 `CostEstimateEst`（方案 ②）
+#### 2.7 [低] `vmr analyze` §2 成本表结构化透传 `CostEstimateEst`（方案 ②）
 
 - **现状**：方案 ①（Markdown 口径提示脚注）已闭环。方案 ② 要给 `Row`/`ClientRow` 补 `CostEstimateEst`、改 `rows.go`/`accumulateCost`/渲染层三处，并再次改 macro 切片的形状。
 - **为什么待定**：无明确外部程序消费需求前遵循 YAGNI。
@@ -342,7 +342,7 @@
 
 #### 2.73 [低-中，暂不做] LLM 自由文本的 `<`/`>` 未净化即进 `.md` 产物
 
-- **现状**：`sanitizeMDStruct`（`story/llm.go`）只处理 Markdown **结构**破坏（反引号/竖线/行首标记），不处理 `<`/`>`。LLM 判别器输出的类 HTML 片段会原样进入 `.md` 文件。
+- **现状**：`sanitizeMDStruct`（`journey/llm.go`）只处理 Markdown **结构**破坏（反引号/竖线/行首标记），不处理 `<`/`>`。LLM 判别器输出的类 HTML 片段会原样进入 `.md` 文件。
 - **为什么暂不做**：产物是本地文件，不是 web 渲染面（HTML 侧转义已由 `mdlite` 全量覆盖，`<script>` 进不去）；Markdown 阅读器对裸 `<...>` 的降级仅是显示瑕疵。
 - **触发条件**：产物开始被 web 化渲染，或出现把 `.md` 直接转 HTML 的新消费方——届时在转换层做 HTML 转义，而不是提前在数据层碰文本。
 
@@ -358,14 +358,14 @@
 
 #### 2.60 [低，需独立设计] 缺跨时间窗对比分析
 
-- **现状**：`-journey` 单条、`-compare` 双条、`-corpus` 跨 journey 统计，宏观报表是单时间窗快照——没有「同一指标 7 月 vs 8 月」或「某改动实施后改进多少」的视图。§5 有按日活动、§2 有按日成本，原料在，缺的是双窗口并排 + 环比。
-- **可能方案**：`vmr analyze -compare-period A..B vs C..D`，复用现有 `report` 聚合跑两遍 + 一个 diff 渲染层（形态类似 `story` 的 compare）。「客户 × 月成本矩阵」是同一维度的子集。不要往宏观报表里塞趋势——会让本就长的报表更长。
+- **现状**：`-journey` 单条、`-compare` 双条、`-benchmark` 跨 journey 统计，宏观报表是单时间窗快照——没有「同一指标 7 月 vs 8 月」或「某改动实施后改进多少」的视图。§5 有按日活动、§2 有按日成本，原料在，缺的是双窗口并排 + 环比。
+- **可能方案**：`vmr analyze -compare-period A..B vs C..D`，复用现有 `report` 聚合跑两遍 + 一个 diff 渲染层（形态类似 `journey` 的 compare）。「客户 × 月成本矩阵」是同一维度的子集。不要往宏观报表里塞趋势——会让本就长的报表更长。
 - **触发条件**：需要量化某次路由/配置改动的效果，或客户成本要按月分摊。立项前先写设计草案。
 
 
 #### 2.13 [低] 额度燃尽看板未交付
 
-- **现状**：`vmr report` 已有额度与消耗对照子表，更进一步的长期燃尽曲线与预测看板未实现。属产品路线，不与技术债并列排期。
+- **现状**：`vmr analyze` 已有额度与消耗对照子表，更进一步的长期燃尽曲线与预测看板未实现。属产品路线，不与技术债并列排期。
 
 #### 2.93 [低] 跨运行累积产物的语言混排（render-only 重渲染时）
 
@@ -406,7 +406,7 @@
 #### 2.89 [已作废 2026-09-06] `core.Endpoint` 的定价挂点持 `*PricingSpec`，热路径每笔 cost 请求重跑一次链式解析
 
 - **作废原因**：这条条目描述的整套机制（`metric: cost`、`core.Endpoint` 上的折叠费率字段、其折叠函数、`Counters` 的 cost 分量与其原子写方法）已被 pricing 架构极简化重构（决策 6）整体删除，不是继续优化——路由半区从此**零价格、零币种**，连"折叠一次"这个优化对象本身都不存在了。原 2026-09-05 记录的"折叠进 `Endpoint` 专属字段"优化因此被完全绕过，不再是当前状态的一部分。
-- **现状**：`core.Endpoint` 不再有 `PricingRate` 字段，`core.PricingSpec` 不再有 `Currency` 字段，`internal/pricing` 不再有 `FoldSpec`/`ResolveOptions.ExchangeRateToTarget`。定价解析完全下沉到离线的 `vmr report`/`vmr analyze`（`internal/pricing.Resolver`），路由/配额/审计日志都不再消费任何价格数据；KNOWN_ISSUES §1.0 的红线（价目表不进实时路由热路径）因此从"靠纪律守住"变成"结构上已不存在的东西"。详见 `docs/VirtualModelRouter_Design_v4_Quota.md` §7/§9 与 `CHANGELOG` `[Unreleased]`。
+- **现状**：`core.Endpoint` 不再有 `PricingRate` 字段，`core.PricingSpec` 不再有 `Currency` 字段，`internal/pricing` 不再有 `FoldSpec`/`ResolveOptions.ExchangeRateToTarget`。定价解析完全下沉到离线的 `vmr analyze`（`internal/pricing.Resolver`），路由/配额/审计日志都不再消费任何价格数据；KNOWN_ISSUES §1.0 的红线（价目表不进实时路由热路径）因此从"靠纪律守住"变成"结构上已不存在的东西"。详见 `docs/VirtualModelRouter_Design_v4_Quota.md` §7/§9 与 `CHANGELOG` `[Unreleased]`。
 
 #### 2.91 [低，决定不做 2026-09-05] `Registry.rollbackWarned` 是进程级一次性 latch，误触发后真实时钟回退永久静默
 
@@ -443,7 +443,7 @@
 
 #### 2.9 [低] 探针请求绕过审计日志
 
-- **现状**：`internal/router/probe.go` 的健康探活请求不写 `audit.Record`，`vmr report` 看不到探活消耗。
+- **现状**：`internal/router/probe.go` 的健康探活请求不写 `audit.Record`，`vmr analyze` 看不到探活消耗。
 - **为什么待定**：探活消耗极低；且需先明确探针流量在报表中的呈现口径，避免污染业务 SLO 统计。
 
 
@@ -489,7 +489,7 @@
 
 #### 2.79 [已随别名删除闭环] 弃用别名 `vmr story` 的 flag 校验宽于 `vmr analyze`
 
-- **已闭环**：`vmr report`/`vmr story` 两个子命令别名已随 analyze 架构重构整体拆除（`vmr analyze` 是唯一分析入口），本条描述的别名层 flag 漂移随之不存在。
+- **已闭环**：`vmr analyze` 两个子命令别名已随 analyze 架构重构整体拆除（`vmr analyze` 是唯一分析入口），本条描述的别名层 flag 漂移随之不存在。
 
 #### 2.80 [低] `sysinfo` 把系统调用失败折叠成 0，违反「missing is not zero」
 

@@ -221,7 +221,7 @@ vmr analyze -journey j-a,j-b | -journey 'j-openclaw-*' | -journey 'j-a-*,j-b-*' 
 # （会对每个 Journey 各打一次 LLM 调用，费用不可控）：
 vmr analyze -journey <恰好命中一个的id前缀或通配符>|-compare id1,id2 [-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]] ...
 
-# -benchmark：语料级统计（§3.9），不接 -journey/-render-all/-compare：
+# -benchmark：基准统计（§3.9），不接 -journey/-render-all/-compare：
 vmr analyze -benchmark [-o dir] [file|glob]...
 ```
 
@@ -230,7 +230,7 @@ vmr analyze -benchmark [-o dir] [file|glob]...
 - **`-list-only`**：列出全部候选 Journey（id、任务数、轮数、时间范围、标题预览），写 `journeys/index.{json,md}`，不渲染任何叙事。`-journey` 接受逗号分隔的多个 id/id 前缀/`path.Match` 风格通配符，合并去重后渲染全部匹配——只匹配到一个走单 Journey 渲染路径，匹配到多个则复用批处理路径（`renderJourneys`）。任一 token 一个都没匹配上，整个命令报错（不静默丢弃），避免拼错的 token 被悄悄漏掉。
 - **`-render-all`**：把默认套件的预渲染范围放宽到物化全部非断头候选（含 heartbeat），共享一次性的批量文件读取（不是逐候选各扫一遍源文件）。
 - **`-compare <id1,id2>`**：两个 Journey 的行为剖面对比（逗号分隔的两个 id 或 id 前缀），见"双 Journey 对比"节；`-llm-addr` 给了才追加可选的 LLM 解读小节（含分叉点解读）。
-- **`-benchmark`**：语料级统计（§3.9），跨全部非断头候选，产出 `journeys/benchmarks.{json,md}`；不接 `-llm-addr`。
+- **`-benchmark`**：基准统计（§3.9），跨全部非断头候选，产出 `journeys/benchmarks.{json,md}`；不接 `-llm-addr`。
 - **`-include-partial`**：默认跳过"断头"候选——头部 manifest 看起来像是从更早的、未加载进本次输入范围的历史续接而来（启发式：非冷启动形态的消息数 + 位于最早输入文件的开头若干行）；显式传入才渲染。断头候选的 `partial` 状态落为 JSON 字段 + `.md` 顶部 banner + 索引行标记三处——它的 ID 本身依赖"最早可见的 manifest"，加载了更多历史文件后 ID 会变化；这个不稳定性**不编进文件名**（`-partial` 后缀已废弃：partial 是本次加载范围的函数，而 ID 与加载范围无关，两者不该焊在一个字符串里），打开正文或索引即见警示。
 - **`-show-ungrouped`**：打印无法归组的记录（既无 `metadata.user_id` 也无非 system 消息可锚定）的源位置，用于排查。
 
@@ -362,13 +362,13 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 | Agent 的内部状态 | 计划、记忆检索、循环检测等不体现在消息列表里的逻辑，只能从行为反推 |
 | 跨 SessKey 桶、零字面重合的历史重写 | `ctxgraph.StitchGraph` 的哈希倒排索引在这种情况下没有信号可用（§3.1）——宏观半区的独立文本匹配能覆盖一部分，但不是全部；叙事半区目前没有对应的兜底信号，这类 Journey 会渲染成一个确认无前驱的断头 |
 
-### 3.9 语料级统计（7.1/7.2，`corpus.go`）
+### 3.9 基准统计（7.1/7.2，`benchmarks.go`）
 
-`vmr analyze -benchmark [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建走和 `-render-all` 同一条按字节预算分批的路径（`cmd/vmr` 的 `batchByBytes`：每批累计 `Manifest.Bytes` ≤ ~160 MiB，一批的回捞工作集用完即释放，再取下一批）；每个构建好的 Journey 只剩约 1% 的叙事结构，几百个累积起来仍是数百 MB，全部交给 `ComputeCorpusStats`。产出 `journeys/benchmarks.md`/`.json`，落在 `{out}/journeys/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
+`vmr analyze -benchmark [-o dir]` 把"两两对比"扩展到"一批"——不是比较 A 和 B，是从几十到几百个 Journey 里找反复出现的行为倾向。批量构建走和 `-render-all` 同一条按字节预算分批的路径（`cmd/vmr` 的 `batchByBytes`：每批累计 `Manifest.Bytes` ≤ ~160 MiB，一批的回捞工作集用完即释放，再取下一批）；每个构建好的 Journey 只剩约 1% 的叙事结构，几百个累积起来仍是数百 MB，全部交给 `ComputeBenchmarkStats`。产出 `journeys/benchmarks.md`/`.json`，落在 `{out}/journeys/` 目录。三条纪律直接从设计文档继承，不是本节新提出：
 
-- **相关性只报效应量**：`ComputeCorpusStats` 对九项指标 + 模型切换次数共 13 个数值字段（按模型的 token 拆分仍不含在内——同样是列表型，进不了这套只吃标量的机制）两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
+- **相关性只报效应量**：`ComputeBenchmarkStats` 对九项指标 + 模型切换次数共 13 个数值字段（按模型的 token 拆分仍不含在内——同样是列表型，进不了这套只吃标量的机制）两两算 Spearman 秩相关（非 Pearson——不假设线性/正态），只报 `rho`，不报 p 值/显著性——当前语料规模（几十到一两百个 Journey）撑不住严格显著性检验，报 p 值只会制造虚假确定性。Markdown 只显示按 `|rho|` 降序的前 15 条（同 §7 "工具形态浪费 Top-5" 的惯例），完整列表在 JSON；真实语料上曾出现 48 条过阈值的相关性，不截断的话读起来是噪声不是信号，且相当一部分是同类时间指标之间的机械关系（如"净工作时长 = 模型时间 + Agent 侧执行时间"），本身就不是新信息。
 - **无成功/失败标签**：VMR 零埋点前提意味着结构性拿不到任务是否真正达成目标的信号——`GroupComparison`（7.2，按 `Finding.Code` 分组比较净工作时长中位数）比较的是"耗时"这一个代理指标，不是效果；每处输出都明确写"不是确定性结论"。
-- **样本量门槛，不是静默阈值**：`corpusMinCorrelationN`（5）、`corpusMinGroupSize`（3，双侧）——低于门槛的 Finding 分组对比不是不显示就算了，`SkippedGroupComparisons` 字段显式列出被跳过的 Code，Markdown 也渲染成一句"因样本不足跳过"，不是悄悄消失。
+- **样本量门槛，不是静默阈值**：`benchmarkMinCorrelationN`（5）、`benchmarkMinGroupSize`（3，双侧）——低于门槛的 Finding 分组对比不是不显示就算了，`SkippedGroupComparisons` 字段显式列出被跳过的 Code，Markdown 也渲染成一句"因样本不足跳过"，不是悄悄消失。
 
 真实语料验证（137 个候选 Journey）：`exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%，双双越过 `notableRelThreshold`（30%，复用 `compare.go` 已有阈值）——这是这批语料上第一个"某类 Finding 确实伴随更长耗时"的数据支撑，而不是纯粹的直觉；同时也如实验证了 §2.5 的顾虑本身成立：直接列出全部相关性会是一张 48 行的表，Top-15 截断是必要的可读性处理，不是可选项。
 
@@ -464,9 +464,9 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 才需要填，多数部署留空即可。每种模式（默认套件、`-journey`、`-compare`、`-benchmark`）都默认排除，
 `-include-self-traffic` 关闭；summary.json `meta.self_traffic_excluded` 如实记录排除了多少条。
 
-**`vmr analyze`**：单一分析入口（`vmr report`/`vmr story` 过渡别名已整体删除，不留兼容），一套 flag 集合是两个旧命令曾经各自拥有的 flag 的并集。
+**`vmr analyze`**：单一分析入口（`vmr report` / `vmr story` 过渡别名已整体删除，不留兼容），一套 flag 集合是两个旧命令曾经各自拥有的 flag 的并集。
 - **变焦与子集模式（互斥选择器）**：
-  - `-journey`/`-compare`/`-benchmark`：单任务叙事、成对对比、语料统计——选中其一时**只跑叙事半区对应视图，不跑宏观报表**；
+  - `-journey`/`-compare`/`-benchmark`：单任务叙事、成对对比、基准统计——选中其一时**只跑叙事半区对应视图，不跑宏观报表**；
   - `-macro-only`：**仅运行宏观聚合报表**；
   - `-list-only`：**仅生成候选索引与列表**，不执行任何 Journey 渲染；
   - `-journey-only`：**仅运行叙事套件**，不生成宏观报表（与 `-macro-only` 不同，可与 `-render-all` 组合）。
@@ -477,7 +477,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
   - `-details`：显式为所有被渲染的 Step 物化全量 `details/*.md` 文件（默认按需懒加载生成，见 §2.5）。
 
 各模式在 `cmd/vmr` 内部共享同一套执行函数（`runReport`/`setupJourneyRun` 及既有的 `renderJourney`/
-`renderAllJourneys`/`compareJourneys`/`corpusStats`），`cmdAnalyze` 本身只做 flag 解析与按选择器
+`renderAllJourneys`/`compareJourneys`/`runBenchmark`），`cmdAnalyze` 本身只做 flag 解析与按选择器
 路由，不重新实现任何渲染或聚合逻辑——`internal/report`/`internal/journey` 互不 import，`cmd/vmr`
 依旧是唯一同时看到两半区的组合根。
 
@@ -541,7 +541,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 - **一次隐藏断裂案例**：某会话内部 20 轮纯追加（cover 0.60→0.97）之后突然 79 条消息骤降到 4 条（cover=0.25）——同一开场白锚点原样保留，是"anchor 存活型"Contract 编辑的真实样本，也是 §3.2 那条历史缺陷的实证来源。
 - **一致性验证**：752 个会话中 718 个与单个 lineage 一一对应，34 个被 `ctxgraph` 正确切成多段（对应上面的隐藏断裂类型）；lineage 缝合在同一语料上 68 个断裂中 62 个成功缝合、6 个正确识别为"疑似同源"未缝合、0 个跨桶时间窗违规。
 - **F9 因果配对不变量**：全语料 406534 个 `tool_call`/`tool_result` 配对，零孤儿。
-- **Finding 检测器（137 个候选 Journey 校准）**：九条规则层检测器提交前均在真实语料上跑过校准（§3.5a），修复四处真实假阳性/精度问题；语料级统计验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
+- **Finding 检测器（137 个候选 Journey 校准）**：九条规则层检测器提交前均在真实语料上跑过校准（§3.5a），修复四处真实假阳性/精度问题；基准统计验证出 `exact_repeat_tool_call`/`plan_execution_misalignment` 命中组的净工作时长中位数比未命中组高 34%/38%。
 
 ## 7. 已知限制、暂不处理的事项
 
@@ -558,7 +558,7 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 
 以下模块设计上互不依赖，可以任意挑选、任意顺序实现，不阻塞彼此：
 
-- ~~LLM 解读层~~：已实现（§3.5c 单 Journey、§3.7 `-compare` 整体解读 + 分叉点解读）。唯一还剩的部分：语料级统计（§3.9）暂无对应的 LLM 叙述层——"把统计上有支撑的模式翻译成人话"这一步还没做。
+- ~~LLM 解读层~~：已实现（§3.5c 单 Journey、§3.7 `-compare` 整体解读 + 分叉点解读）。唯一还剩的部分：基准统计（§3.9）暂无对应的 LLM 叙述层——"把统计上有支撑的模式翻译成人话"这一步还没做。
 - ~~HTML 单文件看板 + 脱敏~~：已废弃（自包含渲染器移除，`-html`/`-redact` 随之删除）——由每次 analyze 幂等刷新的骨架页 + fetch 形态替代，见 §3.4 的看板骨架页段。
 - **Subagent 树**：Event 模型已预留 `parent_step_id` 挂载点，渲染层预留分支，但识别信号（system blob 与主 Journey 同源、时间窗完整嵌套在某次工具调用之间、其输出 blob 出现在主 Journey 后续 tool_result 里）尚未验证过命中率。开工前先跑采样脚本验证这三条信号在现有语料上是否成立——不预先假定这套判据有效。
 
