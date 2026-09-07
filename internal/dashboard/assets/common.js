@@ -342,8 +342,8 @@ function svgHeatmap({
   height = 90
 }) {
   const counts = Array.from({ length: 24 }, (_, i) => {
-    const item = hours.find(h => Number(h.hour ?? h.Hour ?? i) === i);
-    return item ? (Number(item.count ?? item.Requests ?? item.requests ?? item.TokensIn ?? 0)) : 0;
+    const item = hours.find(h => Number(h.hour ?? i) === i);
+    return item ? (Number(item.count ?? item.requests ?? item.tokens_in ?? 0)) : 0;
   });
 
   const maxVal = Math.max(...counts, 1);
@@ -391,16 +391,16 @@ function svgLatencyPlot({
   const plotW = width - pLeft - pRight;
   const plotH = height - pTop - pBottom;
 
-  const data = endpoints.filter(e => (e.P50MS || e.P90MS || e.P99MS || e.p50_ms || e.p90_ms || e.p99_ms || e.DurMS || e.dur_ms));
+  const data = endpoints.filter(e => (e.dur_ms_p50 || e.dur_ms_p95 || e.dur_ms_max || e.p50_ms || e.p90_ms || e.p99_ms || e.dur_ms));
   if (data.length === 0) {
     return `<div class="chart-empty">No latency metrics recorded</div>`;
   }
 
   const items = data.map(d => {
-    const p50 = Number(d.P50MS || d.p50_ms || (d.DurMS ? d.DurMS * 0.7 : 0));
-    const p90 = Number(d.P90MS || d.p90_ms || d.DurMS || d.dur_ms || 0);
-    const p99 = Number(d.P99MS || d.p99_ms || (d.DurMS ? d.DurMS * 1.3 : 0));
-    const label = d.Endpoint || d.endpoint || d.Model || d.model || 'unknown';
+    const p50 = Number(d.dur_ms_p50 || d.p50_ms || (d.dur_ms ? d.dur_ms * 0.7 : 0));
+    const p90 = Number(d.dur_ms_p95 || d.p90_ms || d.dur_ms || 0);
+    const p99 = Number(d.dur_ms_max || d.p99_ms || (d.dur_ms ? d.dur_ms * 1.3 : 0));
+    const label = d.endpoint || d.model || 'unknown';
     return { label, p50, p90, p99 };
   });
 
