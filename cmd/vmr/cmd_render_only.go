@@ -42,8 +42,8 @@ func runRenderOnly(outDir string, requestedLang string, langPassed bool) error {
 // renderAllFromDisk renders all resident human-readable Markdown products from on-disk JSON (§5.4).
 // Shared by -render-only and full analyze runs (D11).
 func renderAllFromDisk(outDir string, lang i18n.Lang) error {
-	// 1. vmr-report.md (if vmr-report.json exists)
-	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.json")); err == nil {
+	// 1. vmr-report.md (if the macro slice set exists)
+	if _, err := os.Stat(filepath.Join(outDir, report.SliceMacroSummary)); err == nil {
 		if err := renderMacroReportFromDisk(outDir, lang); err != nil {
 			return fmt.Errorf("render macro report: %w", err)
 		}

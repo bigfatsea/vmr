@@ -7,8 +7,6 @@
 package report
 
 import (
-	"encoding/json"
-	"os"
 	"sort"
 	"time"
 
@@ -57,20 +55,6 @@ func buildRequestRow(rc *rec2) RequestRow {
 	rr.UsageInOK = rc.usageInOK
 	rr.UsageOutOK = rc.usageOutOK
 	return rr
-}
-
-// WriteJSON writes the aggregate report JSON (vmr-report.json). Per-request
-// rows are NOT included (they live in vmr-requests.json). Call
-// LocalizeEfficiency(rep, lang) first if rep.Efficiency should reflect the
-// report's actual display language — WriteJSON serializes rep exactly as
-// given, it never localizes anything itself; a caller that skips
-// LocalizeEfficiency gets Build's English default silently, with no error.
-func WriteJSON(rep *Report2, path string) error {
-	data, err := json.MarshalIndent(rep, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, append(data, '\n'), 0o600)
 }
 
 // sortRows sorts Row slices by the given key ("model" or "date").

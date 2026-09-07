@@ -68,11 +68,32 @@ func BuildCostCoverage(rep *Report2) CostCoverage {
 }
 
 // SummarySlice is the macro/summary.json schema (§3.2): headline traffic,
-// success rate, spend, findings, and opening highlights.
+// success rate, spend, findings, opening highlights, and the provenance
+// facts the macro Markdown rebuild needs (D2: with the monolithic
+// vmr-report.json gone, the slices are the only persisted macro data).
 type SummarySlice struct {
-	Overall    Row       `json:"overall"`
-	Efficiency []Finding `json:"efficiency,omitempty"`
-	Highlights []string  `json:"highlights,omitempty"`
+	Overall    Row          `json:"overall"`
+	Efficiency []Finding    `json:"efficiency,omitempty"`
+	Highlights []string     `json:"highlights,omitempty"`
+	Meta       *SummaryMeta `json:"meta,omitempty"`
+}
+
+// SummaryMeta carries the report provenance facts that manifest.json
+// deliberately does not hold (§8.2: the manifest carries no metric
+// values — not even record counts). Inputs, window, format version,
+// footnotes and disclaimers live on the manifest; everything else the
+// §0–§8 renderer reads off Report2.Meta lives here.
+type SummaryMeta struct {
+	Records                    int    `json:"records"`
+	ParseErrors                int    `json:"parse_errors"`
+	SlowThreshold              int    `json:"slow_threshold_ms"`
+	PercentileMethod           string `json:"percentile_method"`
+	DetailsEnabled             bool   `json:"details_enabled,omitempty"`
+	SelfTrafficExcluded        int    `json:"self_traffic_excluded,omitempty"`
+	SelfTrafficExclusionActive bool   `json:"self_traffic_exclusion_active,omitempty"`
+	ReportConfigPath           string `json:"report_config_path,omitempty"`
+	QuotaJSONPath              string `json:"quota_json_path,omitempty"`
+	QuotaInputOutsideLogDir    bool   `json:"quota_input_outside_log_dir,omitempty"`
 }
 
 // FinanceSlice is the macro/finance.json schema (§3.2): cost attribution by
@@ -85,6 +106,10 @@ type FinanceSlice struct {
 	ProviderQuotaSkippedAttempts  int                `json:"provider_quota_skipped_attempts,omitempty"`
 	ProviderQuotaSkippedProviders []string           `json:"provider_quota_skipped_providers,omitempty"`
 	CostCoverage                  CostCoverage       `json:"cost_coverage"`
+	// Pricing restores the $-estimate metadata (currency, standard-table
+	// stamp, override count) for the markdown rebuild — the cost facts'
+	// provenance belongs with the cost slice.
+	Pricing *Pricing `json:"pricing,omitempty"`
 }
 
 // ReliabilitySlice is the macro/reliability.json schema (§3.2): endpoint
@@ -128,6 +153,18 @@ func BuildSummarySlice(r *Report2, lang i18n.Lang) SummarySlice {
 		Overall:    r.Overall,
 		Efficiency: findings,
 		Highlights: hl,
+		Meta: &SummaryMeta{
+			Records:                    r.Meta.Records,
+			ParseErrors:                r.Meta.ParseErrors,
+			SlowThreshold:              r.Meta.SlowThreshold,
+			PercentileMethod:           r.Meta.PercentileMethod,
+			DetailsEnabled:             r.Meta.DetailsEnabled,
+			SelfTrafficExcluded:        r.Meta.SelfTrafficExcluded,
+			SelfTrafficExclusionActive: r.Meta.SelfTrafficExclusionActive,
+			ReportConfigPath:           r.Meta.ReportConfigPath,
+			QuotaJSONPath:              r.Meta.QuotaJSONPath,
+			QuotaInputOutsideLogDir:    r.Meta.QuotaInputOutsideLogDir,
+		},
 	}
 }
 
@@ -144,6 +181,7 @@ func BuildFinanceSlice(r *Report2) FinanceSlice {
 		ProviderQuotaSkippedAttempts:  r.ProviderQuotaSkippedAttempts,
 		ProviderQuotaSkippedProviders: r.ProviderQuotaSkippedProviders,
 		CostCoverage:                  BuildCostCoverage(r),
+		Pricing:                       r.Pricing,
 	}
 }
 

@@ -424,7 +424,7 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 // Build itself makes (aggregate.go), so this is Report2.Efficiency's
 // language-agnostic default: a deterministic baseline Build computes
 // without needing a lang parameter. cmd_report.go overwrites it with the
-// report's actual display language before writing vmr-report.json — see
+// the report's actual display language — see
 // LocalizeEfficiency, below. Kept as its own named function (not an inline
 // i18n.EN literal at the call site) so aggregate.go's own call site never
 // needs to import internal/i18n itself — see that file's line-count budget
@@ -436,7 +436,7 @@ func buildFindingsForJSON(rep *Report2) []Finding {
 // LocalizeEfficiency recomputes rep.Efficiency in lang, overwriting the
 // English default Build/BuildCached always populate internally
 // (buildFindingsForJSON) — call this once, after Build/BuildCached
-// returns, before WriteJSON, so vmr-report.json's efficiency[] narrative
+// returns, before the slices are written, so their efficiency[] narrative
 // fields match the language the accompanying Markdown will render in.
 // Build/BuildCached deliberately stay language-agnostic (no lang
 // parameter) — see json_lang_policy_plan_sonnet-5.md §3.1 for why this

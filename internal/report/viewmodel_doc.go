@@ -10,6 +10,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,16 +77,94 @@ func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLin
 	return MacroMarkdown(rep, lang, stories, journeyLink)
 }
 
-// LoadReport reads vmr-report.json from dir, and if requests/index.json is
-// present, restores rep.requests from RequestsIndex.
+// LoadReport assembles the macro report's in-memory shape from the on-disk
+// slice set (D2/D11: with the monolithic vmr-report.json gone, the slices
+// are the only persisted macro data, so the markdown rebuild reads exactly
+// what a -render-only run reads). The manifest contributes the provenance
+// facts that live there by design (inputs, window, format version);
+// summary.json's meta carries the rest; finance.json restores the pricing
+// metadata. requests/index.json, when present, restores rep.requests.
 func LoadReport(dir string) (*Report2, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "vmr-report.json"))
+	m, err := ValidateManifest(dir)
 	if err != nil {
+		return nil, fmt.Errorf("validate manifest: %w", err)
+	}
+	readSlice := func(rel string, v any) error {
+		data, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		if err := json.Unmarshal(data, v); err != nil {
+			return fmt.Errorf("parse %s: %w", rel, err)
+		}
+		return nil
+	}
+	var sum SummarySlice
+	if err := readSlice(SliceMacroSummary, &sum); err != nil {
 		return nil, err
 	}
-	var rep Report2
-	if err := json.Unmarshal(data, &rep); err != nil {
+	var fin FinanceSlice
+	if err := readSlice(SliceMacroFinance, &fin); err != nil {
 		return nil, err
+	}
+	var rel ReliabilitySlice
+	if err := readSlice(SliceMacroReliability, &rel); err != nil {
+		return nil, err
+	}
+	var wks WorkloadsSlice
+	if err := readSlice(SliceMacroWorkloads, &wks); err != nil {
+		return nil, err
+	}
+	var ctxEff ContextEfficiencySlice
+	if err := readSlice(SliceMacroContextEfficiency, &ctxEff); err != nil {
+		return nil, err
+	}
+
+	inputs := make([]string, 0, len(m.Inputs))
+	for _, in := range m.Inputs {
+		inputs = append(inputs, in.Path)
+	}
+	rep := &Report2{
+		Pricing:                       fin.Pricing,
+		Overall:                       sum.Overall,
+		Efficiency:                    sum.Efficiency,
+		ByModel:                       fin.ByModel,
+		ByClient:                      fin.ByClient,
+		Providers:                     fin.Providers,
+		ProviderQuotas:                fin.ProviderQuotas,
+		ProviderQuotaSkippedAttempts:  fin.ProviderQuotaSkippedAttempts,
+		ProviderQuotaSkippedProviders: fin.ProviderQuotaSkippedProviders,
+		Endpoints:                     rel.Endpoints,
+		EndpointsAll:                  rel.EndpointsAll,
+		Sticky:                        rel.Sticky,
+		ByDate:                        wks.ByDate,
+		Hours:                         wks.Hours,
+		HoursOfDay:                    wks.HoursOfDay,
+		Workloads:                     wks.Workloads,
+		ClientEndpoints:               wks.ClientEndpoints,
+		Sessions:                      ctxEff.Sessions,
+		Compactions:                   ctxEff.Compactions,
+		Tools:                         ctxEff.Tools,
+	}
+	rep.Meta = Meta{
+		Format:      m.Format,
+		Inputs:      inputs,
+		From:        m.TimeRange[0],
+		To:          m.TimeRange[1],
+		Footnotes:   m.Footnotes,
+		Disclaimers: m.Disclaimers,
+	}
+	if sum.Meta != nil {
+		rep.Meta.Records = sum.Meta.Records
+		rep.Meta.ParseErrors = sum.Meta.ParseErrors
+		rep.Meta.SlowThreshold = sum.Meta.SlowThreshold
+		rep.Meta.PercentileMethod = sum.Meta.PercentileMethod
+		rep.Meta.DetailsEnabled = sum.Meta.DetailsEnabled
+		rep.Meta.SelfTrafficExcluded = sum.Meta.SelfTrafficExcluded
+		rep.Meta.SelfTrafficExclusionActive = sum.Meta.SelfTrafficExclusionActive
+		rep.Meta.ReportConfigPath = sum.Meta.ReportConfigPath
+		rep.Meta.QuotaJSONPath = sum.Meta.QuotaJSONPath
+		rep.Meta.QuotaInputOutsideLogDir = sum.Meta.QuotaInputOutsideLogDir
 	}
 	reqPath := filepath.Join(dir, "requests", "index.json")
 	if reqData, err := os.ReadFile(reqPath); err == nil {
@@ -94,7 +173,7 @@ func LoadReport(dir string) (*Report2, error) {
 			rep.requests = idx.Requests
 		}
 	}
-	return &rep, nil
+	return rep, nil
 }
 
 // vmMetaHeader builds the blocks between the H1 and §0: the data-source

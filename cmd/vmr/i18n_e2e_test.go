@@ -61,7 +61,7 @@ func e2eReportFixture(t *testing.T) string {
 	return path
 }
 
-// reportEfficiencyJSON is the slice of vmr-report.json this test needs —
+// reportEfficiencyJSON is the slice of macro/summary.json this test needs —
 // deliberately narrow (not report.Report2) so this test breaks only when
 // the actual fields it checks change shape, not on every unrelated schema
 // addition.
@@ -74,7 +74,7 @@ type reportEfficiencyJSON struct {
 
 func readReportJSON(t *testing.T, outDir string) reportEfficiencyJSON {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(outDir, "vmr-report.json"))
+	data, err := os.ReadFile(filepath.Join(outDir, "macro", "summary.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestE2E_ReportDefaultsToEnglish(t *testing.T) {
 }
 
 // TestE2E_ReportLangFlagZh_EfficiencyFollowsLang covers -lang zh end to
-// end: vmr-report.md AND vmr-report.json's efficiency[].finding must both
+// end: vmr-report.md AND macro/summary.json's efficiency[].finding must both
 // switch to Chinese (P8, docs/VirtualModelRouter_Design_v4_Analytics.md
 // §4.3 — Build always computes the English default internally, but
 // cmd_report.go calls report.LocalizeEfficiency(rep, lang) before
@@ -143,7 +143,7 @@ func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("fixture should trigger the tool_schema_waste finding (code missing from vmr-report.json entirely)")
+		t.Fatal("fixture should trigger the tool_schema_waste finding (code missing from macro/summary.json entirely)")
 	}
 }
 

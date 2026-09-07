@@ -1,12 +1,12 @@
 // Ver 2026-07-29 23:55, by Sonnet 5
 
 // The report's data shape: every struct that Build fills in and that both
-// renderers (vmr-report.md and vmr-report.json) read back out. Split out of
+// renderers (vmr-report.md, rebuilt from the slices) read back out. Split out of
 // aggregate.go so that file is about the aggregation pass itself — a new
 // metric adds a field here and an accumulator there, without either concern
 // having to be read through the other.
 //
-// These types ARE the vmr-report.json schema: the JSON tags below are the
+// These types are the aggregate's in-memory shape and the row schema the
 // public contract, not an implementation detail.
 package report
 
@@ -16,9 +16,10 @@ import (
 	"vmr/internal/core"
 )
 
-// Format is the aggregate report's JSON structure version. 11 continues the legacy
-// sequence (10 = redesigned layout) and marks the domain-sliced layout (§3.2, D2).
-const Format = 11
+// Format is the aggregate report's structure version — the same version
+// unit as the snapshot manifest (§8.1: 整套产物一个版本单位), so it is an
+// alias, never an independently bumped number.
+const Format = ManifestFormat
 
 // SlowThresholdMS is the default "unbearably slow" cutoff for slow_requests
 // (V2 C-family / F-family). 30s matches the V2 spec.
@@ -58,7 +59,7 @@ type Report2 struct {
 	Highlights                    []string            `json:"highlights,omitempty"`
 
 	// requests is the per-request export (vmr-requests.json). Unexported so
-	// it stays OUT of vmr-report.json (which is aggregate-only); exposed via
+	// it stays OUT of the aggregate slices (macro/* is aggregate-only); exposed via
 	// RequestRows() for the jsonl writer + index renderer.
 	requests []RequestRow
 }
@@ -518,7 +519,7 @@ type Finding struct {
 	// Finding/Value/Implicated/Action are narrative text. Build populates
 	// them with the English default (buildFindingsForJSON); cmd_report.go
 	// overwrites Report2.Efficiency with the report's actual display
-	// language (LocalizeEfficiency) before writing vmr-report.json, so
+	// language (LocalizeEfficiency) before the slices are written, so
 	// the persisted JSON follows -lang like the Markdown does. Markdown
 	// rendering computes its own separate localized copy rather than
 	// reading this struct post-overwrite — see section_efficiency.go.
@@ -701,7 +702,7 @@ type ProviderRow struct {
 // with the live-file enumeration, which is more machinery than the current
 // benefit (a table row you'd see one report run earlier) justifies.
 //
-// ProviderRow.Quota itself only ever round-trips into vmr-report.json now
+// ProviderRow.Quota itself only ever round-trips through the finance slice now
 // — the Markdown main table renders no quota column at all, to
 // avoid the exact duplication this type used to produce: the same Amount
 // shown twice, through two different formatters, sometimes as two

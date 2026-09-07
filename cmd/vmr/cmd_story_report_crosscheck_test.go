@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 	"time"
 
@@ -105,13 +104,6 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 	}
 }
 
-// generatedAtRE strips vmr-report.json's Meta.generated_at wall-clock
-// timestamp — the one field two independent runs of the same command are
-// never byte-identical on (see runReport's own now := time.Now()) — before
-// comparing two report.json bodies produced by separate cmdReport/
-// cmdAnalyze invocations a few milliseconds apart.
-var generatedAtRE = regexp.MustCompile(`"generated_at": "[^"]*"`)
-
 // dirFileNames lists the base names of every file directly under dir
 // (non-recursive — both fixtures here are flat single-level outputs, so
 // nesting would only hide a real filename mismatch behind a deeper walk).
@@ -153,10 +145,6 @@ func assertDirsByteIdentical(t *testing.T, gotDir, wantDir string) {
 		want, err := os.ReadFile(filepath.Join(wantDir, name))
 		if err != nil {
 			t.Fatalf("%s exists in gotDir but not wantDir: %v", name, err)
-		}
-		if name == "vmr-report.json" {
-			got = generatedAtRE.ReplaceAll(got, nil)
-			want = generatedAtRE.ReplaceAll(want, nil)
 		}
 		if string(got) != string(want) {
 			t.Errorf("%s differs:\n--- got ---\n%s\n--- want ---\n%s", name, got, want)
@@ -284,7 +272,7 @@ func TestCmdAnalyze_RenderAllAlone_NeverWritesReportHalf(t *testing.T) {
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", journeyOut, "-journey-only", "-render-all", path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -journey-only -render-all: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", "requests/index.json"} {
+	for _, name := range []string{"vmr-report.md", filepath.Join("macro", "summary.json"), "requests/index.json"} {
 		if _, err := os.Stat(filepath.Join(journeyOut, name)); !os.IsNotExist(err) {
 			t.Errorf("`-journey-only -render-all` should never write %s (report half), stat err = %v", name, err)
 		}
@@ -361,19 +349,19 @@ func TestCmdReport_LLMKeyMatchesAnalyzeMacroOnly(t *testing.T) {
 
 	loadMeta := func(dir string) int {
 		t.Helper()
-		body, err := os.ReadFile(filepath.Join(dir, "vmr-report.json"))
+		body, err := os.ReadFile(filepath.Join(dir, "macro", "summary.json"))
 		if err != nil {
-			t.Fatalf("reading vmr-report.json: %v", err)
+			t.Fatalf("reading macro/summary.json: %v", err)
 		}
-		var rep struct {
+		var sum struct {
 			Meta struct {
 				SelfTrafficExcluded int `json:"self_traffic_excluded"`
 			} `json:"meta"`
 		}
-		if err := json.Unmarshal(body, &rep); err != nil {
-			t.Fatalf("unmarshal vmr-report.json: %v", err)
+		if err := json.Unmarshal(body, &sum); err != nil {
+			t.Fatalf("unmarshal macro/summary.json: %v", err)
 		}
-		return rep.Meta.SelfTrafficExcluded
+		return sum.Meta.SelfTrafficExcluded
 	}
 
 	root := t.TempDir()

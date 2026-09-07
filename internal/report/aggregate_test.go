@@ -228,28 +228,32 @@ func TestMarkdownAndJSON(t *testing.T) {
 	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Pay-As-You-Go Equivalent Cost", "## §8 Request Detail Index"}) {
 		t.Fatalf("Markdown missing expected sections")
 	}
-	// JSON roundtrip preserves fields but not the unexported requests slice.
-	jsonPath := filepath.Join(dir, "vmr-report.json")
-	if err := WriteJSON(rep, jsonPath); err != nil {
+	// Slice roundtrip preserves fields but not the unexported requests slice:
+	// the slices + manifest are the only persisted macro data, so the rebuild
+	// must reproduce everything the renderer reads (D2/D11).
+	if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(jsonPath)
+	m, err := BuildManifest(dir, rep, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var parsed Report2
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if err := WriteManifest(dir, m); err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Meta.Format != Format {
-		t.Fatalf("format want %d got %d", Format, parsed.Meta.Format)
+	parsed, err := LoadReport(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Meta.Format != ManifestFormat {
+		t.Fatalf("format want %d got %d", ManifestFormat, parsed.Meta.Format)
 	}
 	if parsed.Meta.Records != 5 {
-		t.Fatalf("json records want 5 got %d", parsed.Meta.Records)
+		t.Fatalf("slice records want 5 got %d", parsed.Meta.Records)
 	}
-	// verify unexported requests is NOT in JSON
+	// verify unexported requests is NOT in the slices
 	if len(parsed.RequestRows()) != 0 {
-		t.Fatalf("requests should not be in aggregate JSON")
+		t.Fatalf("requests should not be in the macro slices")
 	}
 }
 

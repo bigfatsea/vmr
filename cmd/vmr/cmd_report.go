@@ -176,9 +176,10 @@ func allPathsOutsideDir(paths []string, dir string) bool {
 }
 
 // runReport aggregates audit JSONL into internal/report's output:
-// vmr-report.json/.md, macro/*.json, requests/index.json, requests/
-// failed.jsonl/.md (error-analysis index: outcome == error|canceled plus
-// ok-but-truncated), and one requests/details/*.md+.json per request.
+// the five macro/*.json slices + manifest.json (D2 — there is no
+// monolithic aggregate JSON), vmr-report.md, requests/index.json,
+// requests/failed.jsonl/.md (error-analysis index: outcome == error|canceled
+// plus ok-but-truncated), and one requests/details/*.md per request.
 // Inputs may freely mix live plain .jsonl files and .jsonl.zst files that
 // the audit logger's housekeeping sweep has since compressed
 // (internal/report decompresses transparently) — e.g.
@@ -193,7 +194,7 @@ func allPathsOutsideDir(paths []string, dir string) bool {
 // third read of the audit source for detail export. Build's own
 // success/failure never depends on this: a detail-write failure surfaces
 // only when the returned *report.DetailWriter's Close is checked, well
-// after vmr-report.json/md are already safely on disk.
+// after the macro slices are already safely on disk.
 func setupDetailWriter(outDir string, detailsOn bool, lang i18n.Lang, tw io.Writer) (dw *report.DetailWriter, detailDir string, onRecord func(*audit.Record, *report.ReqInfo), err error) {
 	detailDir = filepath.Join(outDir, "requests", "details")
 	if !detailsOn {
@@ -310,10 +311,6 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	rep.Meta.ReportConfigPath = opts.reportConfigPath
 	rep.Meta.DetailsEnabled = detailsPresentFor(opts.detailsOn, detailDir) // see its own doc comment
 	report.LocalizeEfficiency(rep, opts.lang)
-	jsonPath := filepath.Join(opts.outDir, "vmr-report.json")
-	if err := report.WriteJSON(rep, jsonPath); err != nil {
-		return nil, err
-	}
 	if err := report.WriteMacroSlices(opts.outDir, rep, opts.lang); err != nil {
 		return nil, err
 	}
@@ -340,7 +337,6 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 		return nil, fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, len(rows))
-
 	// Failed-requests index: a dedicated error-analysis view (outcome ==
 	// error|canceled, plus ok-but-truncated), each row linking to its
 	// details/*.md. Purely additive — every other report/requests output
@@ -354,13 +350,23 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", failedJSONLPath, nFailed)
 
+	// Manifest before rendering (D2/D11): the manifest stamps exactly the
+	// slice set, all of which is on disk by this point — and the macro
+	// Markdown rebuild reads the manifest (inputs, window, format) plus the
+	// slices, so it must exist before any renderer runs. The admission
+	// guarantee is untouched: manifest is still written after every stamped
+	// artifact and before any reader, including vmr's own renderers.
+	if err := writeReportManifest(opts.outDir, rep, opts.lang); err != nil {
+		return nil, err
+	}
+
 	// Single render path from disk JSON (D11): render vmr-report.md and requests/failed.md
 	if err := renderMacroReportFromDisk(opts.outDir, opts.lang); err != nil {
 		return nil, fmt.Errorf("render macro report: %w", err)
 	}
 	mdPath := filepath.Join(opts.outDir, "vmr-report.md")
 	fmt.Fprintf(tw, "%d records (%d parse errors) from %d file(s)\n%s\n%s\n",
-		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), jsonPath, mdPath)
+		rep.Meta.Records, rep.Meta.ParseErrors, len(paths), opts.outDir+"/macro/*.json + manifest.json", mdPath)
 
 	if err := renderFailedIndexFromDisk(requestsDir, opts.lang, detailDir); err != nil {
 		return nil, fmt.Errorf("failed-requests index: %w", err)
@@ -369,8 +375,24 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	return rep, nil
 }
 
-// renderMacroReportFromDisk reads vmr-report.json and requests/index.json from
-// outDir, builds the MacroReportVM, and serializes it to vmr-report.md (D11).
+// writeReportManifest builds and commits the snapshot manifest (§3.4).
+// Used by the report half's own exit so the manifest exists before the
+// markdown renderers read it; zoom modes commit theirs in finishAnalyze
+// instead, which skips re-committing when the report half already did.
+func writeReportManifest(outDir string, rep *report.Report2, lang i18n.Lang) error {
+	manifest, err := report.BuildManifest(outDir, rep, lang)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
+		return nil
+	}
+	if err := report.WriteManifest(outDir, manifest); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
+	}
+	return nil
+}
+
+// renderMacroReportFromDisk reads the manifest plus the five macro slices from
+// outDir, builds the MacroReportVM, and serializes it to vmr-report.md (D2/D11).
 func renderMacroReportFromDisk(outDir string, lang i18n.Lang) error {
 	rep, err := report.LoadReport(outDir)
 	if err != nil {

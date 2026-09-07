@@ -321,8 +321,15 @@ func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
 	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares")); err != nil {
 		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 	}
-	if err := commitManifest(r, rep); err != nil {
-		return err
+	// rep != nil means the report half ran and already committed the manifest
+	// itself — it must exist before that half's markdown renderers read it
+	// (cmd_report.go's writeReportManifest); re-committing here would only
+	// bump generated_at. Zoom/list/benchmark/journey-only runs commit here:
+	// their journeys/index.json rewrite is the last stamped artifact.
+	if rep == nil {
+		if err := commitManifest(r, rep); err != nil {
+			return err
+		}
 	}
 	recordPostAnalyzeCache(r)
 	return nil
@@ -519,7 +526,7 @@ func bindAnalyzeCLIFlags(fs *flag.FlagSet) *analyzeCLIFlags {
 		macroOnlyFlag:      fs.Bool("macro-only", false, "default suite only: run just the macro report half — no candidate scan, no journey rendering, no journeys/ output. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-list-only/-journey-only"),
 		renderOnlyFlag:     fs.Bool("render-only", false, "re-render all resident human-readable Markdown products from existing on-disk JSON without re-aggregating audit logs"),
 		listOnlyFlag:       fs.Bool("list-only", false, "default suite only: list candidate journeys without rendering any of them — writes journeys/index.{md,json} listing every candidate, but no j-*.md. Mutually exclusive with -journey/-compare/-benchmark/-render-all/-macro-only/-journey-only/-details"),
-		journeyOnlyFlag:    fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.{json,md}/macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only"),
+		journeyOnlyFlag:    fs.Bool("journey-only", false, "default suite only: run just the journey half, skipping the macro report — no vmr-report.md or macro/* written. Composes with -render-all; alone, equivalent to default suite's non-noise scope without the macro report. Mutually exclusive with -journey/-compare/-benchmark/-macro-only/-list-only"),
 		detailsFlag:        fs.Bool("details", false, "also render one Markdown file per request into {out}/details/ (default: false — the requests index links to each record's detail filename regardless, computed without needing the file to exist)"),
 		currencyFlag:       fs.String("currency", "", "display currency for $ cost estimates, e.g. CNY|JPY"),
 		includePartialFlag: fs.Bool("include-partial", false, "also render journeys whose head looks truncated by the loaded file range (default: report.yaml's include_partial, or false)"),

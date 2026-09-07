@@ -429,7 +429,7 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	if err := cmdAnalyze([]string{"-macro-only", "-o", outDir, "-details", auditPath}); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	for _, name := range []string{"vmr-report.json", "vmr-report.md", filepath.Join("requests", "index.json"), filepath.Join("requests", "failed.jsonl"), filepath.Join("requests", "failed.md")} {
+	for _, name := range []string{"vmr-report.md", "manifest.json", filepath.Join("macro", "summary.json"), filepath.Join("requests", "index.json"), filepath.Join("requests", "failed.jsonl"), filepath.Join("requests", "failed.md")} {
 		if _, err := os.Stat(filepath.Join(outDir, name)); err != nil {
 			t.Errorf("expected %s to be written: %v", name, err)
 		}
@@ -494,7 +494,7 @@ func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 	if err := cmdAnalyze([]string{"-macro-only", auditPath}); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "myout", "vmr-report.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "myout", "manifest.json")); err != nil {
 		t.Errorf("expected report.yaml's output dir 'myout' to be used: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "myout", "requests", "details")); err == nil {

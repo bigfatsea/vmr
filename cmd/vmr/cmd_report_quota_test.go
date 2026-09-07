@@ -301,13 +301,18 @@ func TestCmdReport_QuotaSourceMetaWiredWhenSubTableRenders(t *testing.T) {
 	if err := cmdAnalyze([]string{"-macro-only", "-c", configPath, "-o", outDir, auditPath}); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(outDir, "vmr-report.json"))
+	data, err := os.ReadFile(filepath.Join(outDir, "macro", "summary.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rep report.Report2
-	if err := json.Unmarshal(data, &rep); err != nil {
+	var sum report.SummarySlice
+	if err := json.Unmarshal(data, &sum); err != nil {
 		t.Fatal(err)
+	}
+	var rep report.Report2
+	if sum.Meta != nil {
+		rep.Meta.QuotaJSONPath = sum.Meta.QuotaJSONPath
+		rep.Meta.QuotaInputOutsideLogDir = sum.Meta.QuotaInputOutsideLogDir
 	}
 	if rep.Meta.QuotaJSONPath == "" {
 		t.Fatal("Meta.QuotaJSONPath must be set when the quota sub-table has rows")

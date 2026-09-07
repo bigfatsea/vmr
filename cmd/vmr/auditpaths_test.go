@@ -117,7 +117,7 @@ func TestCmdAnalyze_MacroOnlyDefaultsToConfigLogDir(t *testing.T) {
 	if err := cmdAnalyze([]string{"-macro-only", "-c", configPath, "-o", outDir}); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only with no input files (config default): %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.json")); err != nil {
-		t.Errorf("expected vmr-report.json to be written: %v", err)
+	if _, err := os.Stat(filepath.Join(outDir, "manifest.json")); err != nil {
+		t.Errorf("expected manifest.json to be written: %v", err)
 	}
 }

@@ -26,8 +26,8 @@ type CostText struct {
 	// and how many config.yaml rate rules were layered on top.
 	StandardTableSummary func(generated string) string
 	ProviderRulesApplied func(n int) string
-	Disclaimer            func(asOf, currency string) string
-	ScopeFootnote         string
+	Disclaimer           func(asOf, currency string) string
+	ScopeFootnote        string
 
 	// TotalLabel names the totals row every §2 table now carries.
 	TotalLabel string

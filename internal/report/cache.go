@@ -204,8 +204,7 @@ func ComputeVMFingerprint(sliceHashes [][]byte) [32]byte {
 }
 
 // ComputeVMFingerprintFromManifest constructs the VM data fingerprint by hashing
-// all recognized slices recorded in manifest.json in deterministic order, plus
-// vmr-report.json if present.
+// all recognized slices recorded in manifest.json in deterministic order.
 func ComputeVMFingerprintFromManifest(outDir string) ([32]byte, error) {
 	m, err := ValidateManifest(outDir)
 	if err != nil {
@@ -216,17 +215,6 @@ func ComputeVMFingerprintFromManifest(outDir string) ([32]byte, error) {
 	for _, rel := range AllSlicePaths {
 		if ref, ok := m.Slices[rel]; ok && ref.SHA256 != "" {
 			raw, err := hex.DecodeString(ref.SHA256)
-			if err == nil && len(raw) == 32 {
-				sliceHashes = append(sliceHashes, raw)
-			}
-		}
-	}
-
-	macroRepPath := filepath.Join(outDir, "vmr-report.json")
-	if fi, err := os.Stat(macroRepPath); err == nil && !fi.IsDir() {
-		shaHex, err := HashFile(macroRepPath)
-		if err == nil {
-			raw, err := hex.DecodeString(shaHex)
 			if err == nil && len(raw) == 32 {
 				sliceHashes = append(sliceHashes, raw)
 			}
@@ -340,7 +328,7 @@ func CheckL3Cache(outDir string, targetL3 [32]byte, mode string) bool {
 // requiredMarkdownFilesExist checks that markdown files corresponding to existing
 // JSON slices actually exist on disk so an L3 hit doesn't leave missing files.
 func requiredMarkdownFilesExist(outDir string, mode string) bool {
-	if _, err := os.Stat(filepath.Join(outDir, "vmr-report.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, SliceMacroSummary)); err == nil {
 		if _, err := os.Stat(filepath.Join(outDir, "vmr-report.md")); err != nil {
 			return false
 		}

@@ -38,7 +38,8 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"vmr-report.md", "vmr-report.json", filepath.Join("requests", "index.json"),
+		"vmr-report.md", "manifest.json", filepath.Join("macro", "summary.json"),
+		filepath.Join("requests", "index.json"),
 		filepath.Join("journeys", "index.md"), filepath.Join("journeys", "index.json"),
 	} {
 		if _, err := os.Stat(filepath.Join(outDir, want)); err != nil {
@@ -771,15 +772,15 @@ func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 		t.Fatalf("story half: want 1 candidate (self-traffic excluded), got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
 
-	repData, err := os.ReadFile(filepath.Join(outDir, "vmr-report.json"))
+	repData, err := os.ReadFile(filepath.Join(outDir, "macro", "summary.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rep report.Report2
-	if err := json.Unmarshal(repData, &rep); err != nil {
+	var sum report.SummarySlice
+	if err := json.Unmarshal(repData, &sum); err != nil {
 		t.Fatal(err)
 	}
-	if rep.Meta.SelfTrafficExcluded != 2 {
-		t.Errorf("report half: meta.self_traffic_excluded = %d, want 2 (the self-analysis pair)", rep.Meta.SelfTrafficExcluded)
+	if sum.Meta == nil || sum.Meta.SelfTrafficExcluded != 2 {
+		t.Errorf("report half: meta.self_traffic_excluded = %v, want 2 (the self-analysis pair)", sum.Meta)
 	}
 }

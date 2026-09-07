@@ -228,11 +228,13 @@ func reportQuotaRow(t *testing.T, reqs []parityRequest, provider string, ts time
 	if err := cmdAnalyze([]string{"-macro-only", "-c", configPath, "-o", outDir, "-details=false", auditPath}); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(outDir, "vmr-report.json"))
+	data, err := os.ReadFile(filepath.Join(outDir, "macro", "finance.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rep report.Report2
+	var rep struct {
+		ProviderQuotas []report.ProviderQuotaRow `json:"provider_quotas"`
+	}
 	if err := json.Unmarshal(data, &rep); err != nil {
 		t.Fatal(err)
 	}
