@@ -87,7 +87,7 @@ type Meta struct {
 	Disclaimers      []string          `json:"disclaimers,omitempty"`
 	// DetailsEnabled records whether details/*.md has anything in it for
 	// this run's output — either this run's own -details write, or (via
-	// `vmr analyze`) the story half having already batch-materialized
+	// `vmr analyze`) the journey half having already batch-materialized
 	// some under -render-all before the report half ran. Not simply the
 	// -details flag: a flag-only check goes stale the moment the two
 	// halves of one `vmr analyze` invocation can populate details/

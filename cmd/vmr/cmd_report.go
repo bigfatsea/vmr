@@ -96,7 +96,7 @@ func buildPricing(cfg *config.Config, loadErr error, configPath string, tw io.Wr
 	return resolver, summary
 }
 
-// resolvePricingForAnalyze builds the pricing resolver the story half needs
+// resolvePricingForAnalyze builds the pricing resolver the journey half needs
 // for zoom views (-journey / -compare), which don't run runReport. cfg/cfgErr
 // come from dispatchAnalyze's single config.Load (P-7-7) — shared with
 // runReport so both halves price against one config view. Same
@@ -236,7 +236,7 @@ func detailsPresentFor(detailsOn bool, detailDir string) bool {
 type reportRunOpts struct {
 	configPath string
 	// cfg/cfgErr: config.Load already done once by the caller (cmdAnalyze),
-	// shared with the story half's pricing resolver — runReport must not
+	// shared with the journey half's pricing resolver — runReport must not
 	// load a second time (P-7-7). cfgErr is non-fatal here; see below.
 	cfg               *config.Config
 	cfgErr            error
@@ -255,7 +255,7 @@ type reportRunOpts struct {
 // already-resolved opts.
 func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.Report2, error) {
 	// cfg/cfgErr come pre-loaded from cmdAnalyze — one config.Load per
-	// analyze run, shared with the story half (P-7-7). buildPricing and
+	// analyze run, shared with the journey half (P-7-7). buildPricing and
 	// buildProviderQuotas below both consume it; a load failure is NOT
 	// fatal to the report half — both callees degrade independently (pricing
 	// falls back to the embedded standard table; the quota section simply

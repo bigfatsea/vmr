@@ -78,7 +78,7 @@ func TestIngestRecord_ExcludesSelfTraffic(t *testing.T) {
 // disclosure fix: an exclusion set that IS configured but matches 0 records
 // in this window must report "exclusion active" (SelfTrafficExclusionActive
 // == true), not fall back to the "not configured" line — which would be a
-// false statement and would contradict the story half's own disclosure on
+// false statement and would contradict the journey half's own disclosure on
 // the same run.
 func TestSelfTrafficExclusion_ConfiguredButNothingMatched(t *testing.T) {
 	dir := t.TempDir()

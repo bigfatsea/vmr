@@ -10,7 +10,7 @@ import (
 	"vmr/internal/tokenutil"
 )
 
-// AttemptFact is the per-attempt slice of an audit.Record the story half
+// AttemptFact is the per-attempt slice of an audit.Record the journey half
 // still needs after buildFrom drops the full Record: modelusage.go reads
 // every distinct (Provider, Model) any attempt touched, render_spine.go
 // reads len() for its "failed over" marker. The routing-half

@@ -83,7 +83,7 @@ type analyzeRun struct {
 	// its own configuration source (report.Meta.ReportConfigPath).
 	reportConfigSource string
 	// cfg/cfgErr: the single config.Load for this analyze run, set at the
-	// top of dispatchAnalyze and shared by the story half's pricing
+	// top of dispatchAnalyze and shared by the journey half's pricing
 	// resolver and the report half — a second independent Load could
 	// observe a different file if an edit lands mid-run (P-7-7). cfgErr is
 	// non-fatal: every consumer degrades on its own (pricing falls back to
@@ -410,7 +410,7 @@ func dispatchJourney(r *analyzeRun, su *journeySetup) error {
 		"no matching journeys to render (all skipped as partial-head; pass -include-partial)", true, priceRes, ccy)
 }
 
-// dispatchDefaultSuite runs the no-selector default suite: story half first,
+// dispatchDefaultSuite runs the no-selector default suite: journey half first,
 // then the macro report half (unless -journey-only), then the orphan sweep;
 // it returns the report for the caller's manifest commit (§3.4).
 func dispatchDefaultSuite(r *analyzeRun, su *journeySetup) (*report.Report2, error) {
@@ -432,7 +432,7 @@ func dispatchDefaultSuite(r *analyzeRun, su *journeySetup) (*report.Report2, err
 	// default-suite journey-*.md/.json without its cost line.
 	priceRes, ccy := resolvePricingForAnalyze(r.cfg, r.cfgErr, r.configPath, r.displayCCY, r.exchangeRate)
 	if err := renderAllJourneys(scope, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx, r.renderAllFlag, priceRes, ccy); err != nil {
-		return nil, fmt.Errorf("analyze (story half): %w", err)
+		return nil, fmt.Errorf("analyze (journey half): %w", err)
 	}
 
 	activeIDs := make([]string, len(su.cands))

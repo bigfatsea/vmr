@@ -240,7 +240,7 @@ func buildDetailFileSet(detailDir string) map[string]struct{} {
 // {outDir}/details' current contents, always computed regardless of
 // whether this run's -details flag was passed — the criterion is whether
 // r.DetailFile actually exists right now, not whether a flag was set:
-// since `vmr analyze` runs the story half (which may batch-materialize
+// since `vmr analyze` runs the journey half (which may batch-materialize
 // details for -render-all) before the report half, a flag-only check
 // could claim "no details were written"
 // while 306 of them sit on disk, or the reverse. r.DetailFile itself is

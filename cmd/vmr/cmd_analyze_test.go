@@ -20,7 +20,7 @@ import (
 
 // TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot covers P6.5's actual
 // user-facing promise: one call, one output directory, both halves'
-// products present, and the story half's journeys actually rendered (not
+// products present, and the journey half's journeys actually rendered (not
 // just listed) — not literally a single scan, see cmd_analyze.go's own
 // doc comment for why that tradeoff was made.
 func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
@@ -48,7 +48,7 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 		}
 	}
 
-	// The story half must have actually rendered the candidate journey
+	// The journey half must have actually rendered the candidate journey
 	// (analyze's default suite renders every category=task candidate,
 	// P9.2 — this fixture's journey has no cron/heartbeat/subagent title
 	// marker, so it classifies as task and gets rendered by default), not
@@ -133,7 +133,7 @@ func TestCmdAnalyze_ShareSameOutputDefault(t *testing.T) {
 		t.Errorf("report half didn't land in default ./reports: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "reports", "journeys", "index.md")); err != nil {
-		t.Errorf("story half didn't land in the SAME default ./reports: %v", err)
+		t.Errorf("journey half didn't land in the SAME default ./reports: %v", err)
 	}
 }
 
@@ -790,7 +790,7 @@ func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 
 	idx := journey.LoadJourneyIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 1 {
-		t.Fatalf("story half: want 1 candidate (self-traffic excluded), got %d: %+v", len(idx.Journeys), idx.Journeys)
+		t.Fatalf("journey half: want 1 candidate (self-traffic excluded), got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
 
 	repData, err := os.ReadFile(filepath.Join(outDir, "macro", "summary.json"))
