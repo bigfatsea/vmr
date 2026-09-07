@@ -87,11 +87,11 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+    <span>⚠️ Opened via file:// protocol. Local file requests are restricted by browsers; please serve via HTTP (e.g. <code>vmr start</code> with <code>analytics.serve: true</code> or <code>python3 -m http.server</code>).</span>
   </div>
-  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span></div>
+  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues; run a full 'vmr analyze' to realign.</span></div>
   <div id="banner-missing" class="banner alert hidden">
-    <span>⚠️ 这不是一套完整的 analyze 产物（manifest.json 或 macro/context-efficiency.json 缺失）。</span>
+    <span>⚠️ Artifacts incomplete or missing. Run <code>vmr analyze</code> to generate full macro slices.</span>
   </div>
 
   <div class="container">
@@ -113,11 +113,11 @@
       <table id="tools-table">
         <thead>
           <tr>
-            <th>Shape / Signature</th>
-            <th class="num">Shipped</th>
-            <th class="num">Called</th>
+            <th>Shape</th>
+            <th class="num">Shipped / Called Tools</th>
+            <th class="num">Shipped Bytes</th>
             <th class="num">Wasted Bytes</th>
-            <th>Waste</th>
+            <th>Waste Ratio</th>
           </tr>
         </thead>
         <tbody id="tools-body">
@@ -127,7 +127,7 @@
     </div>
 
     <div class="foot" id="foot-note">
-      本卡片无对话正文，只有工具名、调用次数与字节量。"≈ tokens wasted" 按 ~4 bytes/token 的稠密 ASCII 启发式估算；准确值需在定价层核算。 "Shipped" 记每次请求随载荷发送的 schema 字节量；"Wasted" 记从未被调用工具的 schema 字节。低浪费率是理想态；高浪费率通常意味着声明的工具面远大于实际用法。
+      This card carries no conversation text, only tool names, call counts, and byte volumes. "≈ Tokens Wasted" is estimated via a ~4 bytes/token dense ASCII heuristic; exact values require pricing layer settlement. "Shipped" records schema bytes sent with payloads across requests; "Wasted" records schema bytes of tools never called. Low waste ratio indicates tight tool declaration; high ratio suggests declared tool surface is far larger than actual usage.
     </div>
   </div>
 
@@ -192,7 +192,7 @@
           const m = await fetchSlice('manifest.json');
           const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
           if (st === 'banner') {
-            dom.bannerVersionText.textContent = `⚠️ 期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${m.format}。请运行全量 vmr analyze。`;
+            dom.bannerVersionText.innerHTML = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Rendering continues; run a full 'vmr analyze' to realign.`;
             dom.bannerVersion.classList.remove('hidden');
           }
         } catch (e) {
@@ -207,12 +207,12 @@
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
           dom.bannerMissing.classList.remove('hidden');
           dom.heroPct.textContent = '—';
-          dom.toolsBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">无法读取 macro/context-efficiency.json</td></tr>`;
+          dom.toolsBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">Failed to load macro/context-efficiency.json</td></tr>`;
         }
       }
 
       function renderToolWaste(ce) {
-        const tools = ce.Tools || ce.tools || [];
+        const tools = ce.tools || [];
         if (tools.length === 0) {
           dom.heroPct.textContent = '0%';
           dom.toolsBody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--ink-dim);">No tool schemas tracked in this snapshot.</td></tr>`;
@@ -221,18 +221,16 @@
 
         // Sort by schema waste desc, shape asc — matching report's ordering.
         tools.sort((a, b) => {
-          const wa = b.SchemaWasteBytes ?? b.schema_waste_bytes ?? 0;
-          const wb = a.SchemaWasteBytes ?? a.schema_waste_bytes ?? 0;
+          const wa = b.schema_waste_bytes ?? 0;
+          const wb = a.schema_waste_bytes ?? 0;
           if (wa !== wb) return wa - wb;
-          const sa = a.Shape || a.shape || '';
-          const sb = b.Shape || b.shape || '';
-          return sa.localeCompare(sb);
+          return (a.shape || '').localeCompare(b.shape || '');
         });
 
         let shipped = 0, waste = 0;
         tools.forEach(t => {
-          shipped += t.SchemaBytesShipped ?? t.schema_bytes_shipped ?? 0;
-          waste += t.SchemaWasteBytes ?? t.schema_waste_bytes ?? 0;
+          shipped += (t.schema_bytes_shipped ?? 0);
+          waste += (t.schema_waste_bytes ?? 0);
         });
 
         const pct = shipped > 0 ? Math.round(waste / shipped * 100) : 0;
@@ -243,16 +241,16 @@
         dom.statShapes.textContent = tools.length;
 
         dom.toolsBody.innerHTML = tools.slice(0, 20).map(t => {
-          const sh = t.SchemaBytesShipped ?? t.schema_bytes_shipped ?? 0;
-          const w = t.SchemaWasteBytes ?? t.schema_waste_bytes ?? 0;
-          const declared = t.DeclaredCount ?? t.declared_count ?? 0;
-          const called = t.CalledCount ?? t.called_count ?? 0;
+          const sh = t.schema_bytes_shipped ?? 0;
+          const w = t.schema_waste_bytes ?? 0;
+          const declared = t.declared ? t.declared.length : 0;
+          const called = t.distinct_called ?? 0;
           const ratio = sh > 0 ? (w / sh) : 0;
-          const shape = t.Shape || t.shape || '(unnamed)';
-          const sig = t.Signature || t.signature || '';
+          const shape = t.shape || '(unnamed)';
+          const neverCalledNotice = t.never_called && t.never_called.length > 0 ? '<span style="display:block; margin-top:3px; font-size:10px; color:var(--ink-dim);">' + t.never_called.length + ' tools never called</span>' : '';
           return `
             <tr>
-              <td class="shape">${shape}${sig ? `<span style="display:block; margin-top:3px; font-size:10px; color:var(--ink-dim);">${sig}</span>` : ''}</td>
+              <td class="shape">${shape}${neverCalledNotice}</td>
               <td class="num">${declared} / ${called}</td>
               <td class="num">${FmtBytes(sh)}</td>
               <td class="num" style="color:var(--amber);">${FmtBytes(w)}</td>

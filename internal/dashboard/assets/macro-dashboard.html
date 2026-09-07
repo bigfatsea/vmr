@@ -175,16 +175,16 @@
 
   <!-- Universal Banners (§6.2, §6.6) -->
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ file:// 协议受同源策略限制无法读取数据切片。请使用 vmr 托管 (<code>vmr start</code> 访问 <code>/reports/</code>) 或任意静态 HTTP 服务器 (例如 <code>python3 -m http.server</code>)。</span>
+    <span>⚠️ Opened via file:// protocol. Local file requests are restricted by browsers; please serve via HTTP (e.g. <code>vmr start</code> with <code>analytics.serve: true</code> or <code>python3 -m http.server</code>).</span>
   </div>
   <div id="banner-version" class="banner warn hidden">
-    <span id="banner-version-text">⚠️ 数据格式版本不一致：页面期望格式 v11，当前产物格式未知。渲染继续；如需完全对齐请运行全量 <code>vmr analyze</code>。</span>
+    <span id="banner-version-text">⚠️ Manifest format mismatch: expected v<span id="expected-format"></span>, actual v—.</span>
   </div>
   <div id="banner-missing" class="banner alert hidden">
-    <span>⚠️ 这不是一套完整的 analyze 产物（未找到 manifest.json）。部分领域切片可能缺失。</span>
+    <span>⚠️ Artifacts incomplete or missing. Run <code>vmr analyze</code> to generate full macro slices.</span>
   </div>
   <div id="banner-err" class="banner alert hidden">
-    <span id="banner-err-text">⚠️ 渲染发生异常。如果产物版本与看板不一致，这可能是主要原因。请运行全量 <code>vmr analyze</code> 重新生成。</span>
+    <span id="banner-err-text">⚠️ Render error: unknown. If artifact versions are out of date, run a full <code>vmr analyze</code>.</span>
   </div>
 
   <!-- Main Content -->
@@ -343,7 +343,7 @@
           manifest = await fetchSlice('manifest.json');
           const status = versionBehavior(EXPECTED_MANIFEST_FORMAT, manifest.format);
           if (status === 'banner') {
-            dom.bannerVersionText.innerHTML = `⚠️ 数据格式版本不一致：页面期望格式 v${EXPECTED_MANIFEST_FORMAT}，实际产物格式 v${manifest.format}。渲染继续；如需完全对齐请运行全量 <code>vmr analyze</code>。`;
+            dom.bannerVersionText.innerHTML = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${manifest.format}. Rendering continues; run a full <code>vmr analyze</code> to realign.`;
             dom.bannerVersion.classList.remove('hidden');
           } else if (status === 'missing') {
             dom.bannerMissing.classList.remove('hidden');
@@ -373,7 +373,7 @@
           ]);
         } catch (err) {
           dom.bannerErr.classList.remove('hidden');
-          dom.bannerErrText.textContent = `⚠️ 渲染异常：${err.message}。如果产物版本不一致，请运行全量 vmr analyze。`;
+          dom.bannerErrText.textContent = `⚠️ Render error: ${err.message}. If artifact versions are out of date, run a full 'vmr analyze'.`;
         }
       }
 
@@ -381,29 +381,37 @@
       async function loadSummary() {
         const s = await fetchSlice('macro/summary.json');
         const o = s.overall || {};
-        const successRate = o.Requests > 0 ? ((o.Requests - (o.Errors || 0)) / o.Requests) : 1;
-        const totalTokens = (o.TokensIn || 0) + (o.TokensOut || 0);
+        const requests = o.requests || 0;
+        const errors = o.errors || 0;
+        const errorRate = requests > 0 ? (errors / requests) : 0;
+        const successRate = o.success_rate != null ? o.success_rate : (requests > 0 ? (requests - errors) / requests : 1);
+        const fallbacks = o.fallbacks || 0;
+        const tokensIn = o.tokens_in || 0;
+        const tokensOut = o.tokens_out || 0;
+        const totalTokens = tokensIn + tokensOut;
+        const costEstimate = o.cost_estimate != null ? FmtCurrency(o.cost_estimate) : '—';
+        const cacheEff = FmtPercent(o.cache_efficiency || 0);
 
         document.getElementById('summary-stats').innerHTML = `
           <div class="stat-card">
             <div class="stat-k">Total Requests</div>
-            <div class="stat-v">${(o.Requests || 0).toLocaleString()}</div>
-            <div class="stat-sub">Errors: ${(o.Errors || 0).toLocaleString()} (${FmtPercent(o.ErrorRate ? o.ErrorRate/100 : (1 - successRate))})</div>
+            <div class="stat-v">${requests.toLocaleString()}</div>
+            <div class="stat-sub">Errors: ${errors.toLocaleString()} (${FmtPercent(errorRate)})</div>
           </div>
           <div class="stat-card">
             <div class="stat-k">Success Rate</div>
             <div class="stat-v">${FmtPercent(successRate)}</div>
-            <div class="stat-sub">Fallbacks: ${(o.Fallbacks || 0).toLocaleString()}</div>
+            <div class="stat-sub">Fallbacks: ${fallbacks.toLocaleString()}</div>
           </div>
           <div class="stat-card">
             <div class="stat-k">Total Tokens</div>
             <div class="stat-v">${FmtTokens(totalTokens)}</div>
-            <div class="stat-sub">In: ${FmtTokens(o.TokensIn || 0)} · Out: ${FmtTokens(o.TokensOut || 0)}</div>
+            <div class="stat-sub">In: ${FmtTokens(tokensIn)} · Out: ${FmtTokens(tokensOut)}</div>
           </div>
           <div class="stat-card">
             <div class="stat-k">Estimated Spend</div>
-            <div class="stat-v">${o.CostEstimate != null ? FmtCurrency(o.CostEstimate) : '—'}</div>
-            <div class="stat-sub">Cache Hit: ${FmtPercent(o.CacheEff || 0)}</div>
+            <div class="stat-v">${costEstimate}</div>
+            <div class="stat-sub">Cache Hit: ${cacheEff}</div>
           </div>
         `;
 
@@ -416,15 +424,19 @@
 
         const fdBox = document.getElementById('summary-findings');
         if (s.efficiency && s.efficiency.length > 0) {
-          fdBox.innerHTML = s.efficiency.map(f => `
+          fdBox.innerHTML = s.efficiency.map(f => {
+            const title = f.finding || f.code || 'NOTICE';
+            const details = [f.value ? 'Value: ' + f.value : '', f.action, f.implicated].filter(Boolean).join(' · ');
+            return `
             <div style="padding:10px 0; border-bottom:1px solid var(--rule); display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
               <div>
-                <span class="badge-pill ${f.severity === 'critical' ? 'badge-alert' : 'badge-warn'}">${f.code || 'NOTICE'}</span>
-                <strong style="margin-left:8px;">${f.title || f.code}</strong>
-                <div style="color:var(--ink-dim); font-size:12px; margin-top:3px;">${f.message || ''}</div>
+                <span class="badge-pill badge-warn">${f.code || 'NOTICE'}</span>
+                <strong style="margin-left:8px;">${title}</strong>
+                ${details ? `<div style="color:var(--ink-dim); font-size:12px; margin-top:3px;">${details}</div>` : ''}
               </div>
             </div>
-          `).join('');
+          `;
+          }).join('');
         } else {
           fdBox.innerHTML = `<p class="stat-sub">No behavioral efficiency warnings detected.</p>`;
         }
@@ -445,9 +457,9 @@
 
         // SVG Bar Chart: Cost by Model
         const models = (f.by_model || []).map(m => ({
-          name: m.Model || m.model || 'unknown',
-          cost: m.CostEstimate != null ? m.CostEstimate : (m.cost_estimate || 0),
-          requests: m.Requests || m.requests || 0
+          name: m.model || 'unknown',
+          cost: m.cost_estimate != null ? m.cost_estimate : 0,
+          requests: m.requests || 0
         })).sort((a,b) => b.cost - a.cost).slice(0, 10);
 
         document.getElementById('chart-cost-model').innerHTML = svgBarChart({
@@ -462,12 +474,12 @@
         // By Model Table
         const modelRows = (f.by_model || []).map(m => `
           <tr>
-            <td><strong>${m.Model || m.model}</strong></td>
-            <td class="num">${(m.Requests || m.requests || 0).toLocaleString()}</td>
-            <td class="num">${FmtTokens(m.TokensInFresh || m.tokens_in_fresh || 0)}</td>
-            <td class="num">${FmtTokens(m.TokensInCached || m.tokens_in_cached || 0)}</td>
-            <td class="num">${FmtTokens(m.TokensOut || m.tokens_out || 0)}</td>
-            <td class="num" style="font-weight:700;">${m.CostEstimate != null ? FmtCurrency(m.CostEstimate) : '—'}</td>
+            <td><strong>${m.model || 'unknown'}</strong></td>
+            <td class="num">${(m.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(m.tokens_in_fresh || 0)}</td>
+            <td class="num">${FmtTokens(m.tokens_in_cached || 0)}</td>
+            <td class="num">${FmtTokens(m.tokens_out || 0)}</td>
+            <td class="num" style="font-weight:700;">${m.cost_estimate != null ? FmtCurrency(m.cost_estimate) : '—'}</td>
           </tr>
         `).join('');
         document.getElementById('table-by-model').innerHTML = `
@@ -480,11 +492,11 @@
         // By Client Table
         const clientRows = (f.by_client || []).map(c => `
           <tr>
-            <td><strong>${c.ClientKey || c.client_key}</strong></td>
-            <td class="num">${(c.Requests || c.requests || 0).toLocaleString()}</td>
-            <td class="num">${FmtTokens(c.TokensIn || c.tokens_in || 0)}</td>
-            <td class="num">${FmtTokens(c.TokensOut || c.tokens_out || 0)}</td>
-            <td class="num" style="font-weight:700;">${c.CostEstimate != null ? FmtCurrency(c.CostEstimate) : '—'}</td>
+            <td><strong>${c.client_key || '—'}</strong></td>
+            <td class="num">${(c.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(c.tokens_in || 0)}</td>
+            <td class="num">${FmtTokens(c.tokens_out || 0)}</td>
+            <td class="num" style="font-weight:700;">${c.cost_estimate != null ? FmtCurrency(c.cost_estimate) : '—'}</td>
           </tr>
         `).join('');
         document.getElementById('table-by-client').innerHTML = `
@@ -495,19 +507,27 @@
         `;
 
         // Provider Quotas Table
-        const quotaRows = (f.provider_quotas || []).map(q => `
+        const quotaRows = (f.provider_quotas || []).map(q => {
+          const provider = q.provider || '—';
+          const metric = `${q.metric || '—'}${q.every ? ' / ' + q.every : ''}`;
+          const windowConsumed = (q.window_consumed || 0).toFixed(2);
+          const liveUsed = q.live && q.live.used != null ? q.live.used.toFixed(2) : '—';
+          const headroom = q.live && q.amount > 0 ? (q.amount - q.live.used).toFixed(2) : '—';
+          const period = q.period_ends_at || (q.live && q.live.period_ends_at) || '—';
+          return `
           <tr>
-            <td><strong>${q.Provider || q.provider}</strong></td>
-            <td>${q.Role || q.role || 'primary'}</td>
-            <td class="num">${(q.WindowConsumed || 0).toFixed(2)}</td>
-            <td class="num">${q.Live && q.Live.Used != null ? q.Live.Used.toFixed(2) : '—'}</td>
-            <td class="num">${q.HeadroomScore != null ? q.HeadroomScore.toFixed(2) : '—'}</td>
-            <td>${q.ResetsIn || q.resets_in || '—'}</td>
+            <td><strong>${provider}</strong></td>
+            <td>${metric}</td>
+            <td class="num">${windowConsumed}</td>
+            <td class="num">${liveUsed}</td>
+            <td class="num">${headroom}</td>
+            <td>${period}</td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
         document.getElementById('table-provider-quotas').innerHTML = `
           <table>
-            <thead><tr><th>Provider</th><th>Role</th><th class="num">Window Consumed</th><th class="num">Live Used</th><th class="num">Headroom</th><th>Resets In</th></tr></thead>
+            <thead><tr><th>Provider</th><th>Metric</th><th class="num">Window Consumed</th><th class="num">Live Used</th><th class="num">Headroom</th><th>Period</th></tr></thead>
             <tbody>${quotaRows || '<tr><td colspan="6" style="text-align:center;">No quotas tracked</td></tr>'}</tbody>
           </table>
         `;
@@ -525,18 +545,28 @@
         });
 
         // Endpoints table
-        const epRows = eps.map(e => `
+        const epRows = eps.map(e => {
+          const endpoint = e.endpoint || '—';
+          const protocol = e.protocol || '—';
+          const requests = (e.requests || 0).toLocaleString();
+          const errors = (e.failed != null ? e.failed : (e.errors || 0)).toLocaleString();
+          const errorRate = e.error_rate != null ? FmtPercent(e.error_rate / 100) : FmtPercent(1 - (e.availability || e.success_rate || 1));
+          const p50 = e.dur_ms_p50 ? e.dur_ms_p50 + 'ms' : '—';
+          const p90 = e.dur_ms_p95 ? e.dur_ms_p95 + 'ms' : '—';
+          const ttft = e.ttft_ms_p50 ? e.ttft_ms_p50 + 'ms' : '—';
+          return `
           <tr>
-            <td><code>${e.Endpoint || e.endpoint}</code></td>
-            <td>${e.Protocol || e.protocol || '—'}</td>
-            <td class="num">${(e.Requests || e.requests || 0).toLocaleString()}</td>
-            <td class="num">${(e.Errors || e.errors || 0).toLocaleString()}</td>
-            <td class="num">${FmtPercent(e.ErrorRate ? e.ErrorRate/100 : 0)}</td>
-            <td class="num">${e.P50MS || e.p50_ms || '—'}ms</td>
-            <td class="num">${e.P90MS || e.p90_ms || '—'}ms</td>
-            <td class="num">${e.TTFTP50MS || e.ttft_p50_ms || '—'}ms</td>
+            <td><code>${endpoint}</code></td>
+            <td>${protocol}</td>
+            <td class="num">${requests}</td>
+            <td class="num">${errors}</td>
+            <td class="num">${errorRate}</td>
+            <td class="num">${p50}</td>
+            <td class="num">${p90}</td>
+            <td class="num">${ttft}</td>
           </tr>
-        `).join('');
+        `;
+        }).join('');
         document.getElementById('table-endpoints').innerHTML = `
           <table>
             <thead><tr><th>Endpoint</th><th>Protocol</th><th class="num">Requests</th><th class="num">Errors</th><th class="num">Error Rate</th><th class="num">P50</th><th class="num">P90</th><th class="num">TTFT P50</th></tr></thead>
@@ -547,19 +577,19 @@
         // Sticky Effectiveness
         const s = r.sticky;
         if (s) {
-          const cont = s.Continued || s.continued || {};
-          const sw = s.Switched || s.switched || {};
+          const cont = s.continued || {};
+          const sw = s.switched || {};
           document.getElementById('sticky-card').innerHTML = `
             <div class="stat-grid">
               <div class="stat-card">
                 <div class="stat-k">Sticky Continued</div>
-                <div class="stat-v" style="color:var(--go);">${(cont.Requests || cont.requests || 0).toLocaleString()}</div>
-                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(cont.CacheEff || 0)}</div>
+                <div class="stat-v" style="color:var(--go);">${(cont.requests || 0).toLocaleString()}</div>
+                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(cont.cache_efficiency || 0)}</div>
               </div>
               <div class="stat-card">
                 <div class="stat-k">Sticky Switched</div>
-                <div class="stat-v" style="color:var(--amber);">${(sw.Requests || sw.requests || 0).toLocaleString()}</div>
-                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(sw.CacheEff || 0)}</div>
+                <div class="stat-v" style="color:var(--amber);">${(sw.requests || 0).toLocaleString()}</div>
+                <div class="stat-sub">Cache Hit Rate: ${FmtPercent(sw.cache_efficiency || 0)}</div>
               </div>
             </div>
           `;
@@ -572,9 +602,9 @@
       async function loadWorkloads() {
         const w = await fetchSlice('macro/workloads.json');
         const byDate = (w.by_date || []).map(d => ({
-          date: d.Date || d.date || '—',
-          cost: d.CostEstimate != null ? d.CostEstimate : 0,
-          requests: d.Requests || d.requests || 0
+          date: d.date || '—',
+          cost: d.cost_estimate || 0,
+          requests: d.requests || 0
         }));
 
         // SVG Line chart
@@ -596,12 +626,12 @@
         // By Date Table
         const dateRows = (w.by_date || []).map(d => `
           <tr>
-            <td><strong>${d.Date || d.date}</strong></td>
-            <td class="num">${(d.Requests || d.requests || 0).toLocaleString()}</td>
-            <td class="num">${FmtTokens(d.TokensInFresh || d.tokens_in_fresh || 0)}</td>
-            <td class="num">${FmtTokens(d.TokensInCached || d.tokens_in_cached || 0)}</td>
-            <td class="num">${FmtTokens(d.TokensOut || d.tokens_out || 0)}</td>
-            <td class="num">${d.CostEstimate != null ? FmtCurrency(d.CostEstimate) : '—'}</td>
+            <td><strong>${d.date || '—'}</strong></td>
+            <td class="num">${(d.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(d.tokens_in_fresh || 0)}</td>
+            <td class="num">${FmtTokens(d.tokens_in_cached || 0)}</td>
+            <td class="num">${FmtTokens(d.tokens_out || 0)}</td>
+            <td class="num">${d.cost_estimate != null ? FmtCurrency(d.cost_estimate) : '—'}</td>
           </tr>
         `).join('');
         document.getElementById('table-by-date').innerHTML = `
@@ -614,11 +644,11 @@
         // Client Endpoints Table
         const ceRows = (w.client_endpoints || []).map(ce => `
           <tr>
-            <td><strong>${ce.ClientKey || ce.client_key}</strong></td>
-            <td><code>${ce.Endpoint || ce.endpoint}</code></td>
-            <td class="num">${(ce.Requests || ce.requests || 0).toLocaleString()}</td>
-            <td class="num">${FmtTokens(ce.TokensIn || ce.tokens_in || 0)}</td>
-            <td class="num">${FmtTokens(ce.TokensOut || ce.tokens_out || 0)}</td>
+            <td><strong>${ce.client_key || '—'}</strong></td>
+            <td><code>${ce.endpoint || '—'}</code></td>
+            <td class="num">${(ce.requests || 0).toLocaleString()}</td>
+            <td class="num">${FmtTokens(ce.tokens_in || 0)}</td>
+            <td class="num">${FmtTokens(ce.tokens_out || 0)}</td>
           </tr>
         `).join('');
         document.getElementById('table-client-endpoints').innerHTML = `
@@ -637,7 +667,7 @@
         const tools = ce.tools || [];
 
         let totalSessTurns = 0;
-        sess.forEach(s => totalSessTurns += (s.Turns || s.turns || 0));
+        sess.forEach(s => totalSessTurns += (s.requests || 0));
         const avgTurns = sess.length > 0 ? (totalSessTurns / sess.length).toFixed(1) : 0;
 
         document.getElementById('efficiency-stats').innerHTML = `
@@ -662,8 +692,8 @@
         const compRows = comp.slice(0, 15).map(c => `
           <tr>
             <td>${c.ts_display || (c.ts ? new Date(c.ts).toISOString() : '—')}</td>
-            <td class="num">${FmtTokens(c.tokens_in || c.TokensIn || 0)}</td>
-            <td class="num">${FmtTokens(c.tokens_out || c.TokensOut || 0)}</td>
+            <td class="num">${FmtTokens(c.tokens_in || 0)}</td>
+            <td class="num">${FmtTokens(c.tokens_out || 0)}</td>
             <td>${(c.swallowed_entities || []).join(', ') || '—'}</td>
             <td>${(c.survived_entities || []).join(', ') || '—'}</td>
           </tr>
@@ -678,8 +708,8 @@
         // Tool waste preview
         let totalShipped = 0, totalWaste = 0;
         tools.forEach(t => {
-          totalShipped += (t.SchemaBytesShipped || t.schema_bytes_shipped || 0);
-          totalWaste += (t.SchemaWasteBytes || t.schema_waste_bytes || 0);
+          totalShipped += (t.schema_bytes_shipped || 0);
+          totalWaste += (t.schema_waste_bytes || 0);
         });
         const wastePct = totalShipped > 0 ? FmtPercent(totalWaste / totalShipped) : '0.0%';
 
