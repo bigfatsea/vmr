@@ -2,7 +2,7 @@
 
 # vmr analyze 架构重构方案：领域切片数据核心 + ViewModel 双轨渲染 + 内容寻址缓存
 
-<!-- Status: 设计提案（未实施）。这条线唯一的当前状态文档；早期草案已删除，不再引用。 -->
+<!-- Status: 已实施（2026-09-07 完成，实施起点 050ad25）。裁决 D1–D21 均已落地；两点经二次裁决的偏差已回写本方案：D2 落实为「单体 vmr-report.json 一步删除，切片为唯一落盘宏观数据」（summary.json 携带溯源 meta、finance.json 携带定价元数据、manifest 在任何读取方之前提交）；§3.5 的 .cache/parse 归位已补齐。实施 review 与逐项验收记录见 analyze_redesign_review_plan_gemini-3.8-flash.md。 -->
 
 ---
 
