@@ -870,7 +870,7 @@ func TestCmdAnalyze_CompareLLMDryRun(t *testing.T) {
 
 // TestCmdAnalyze_CompareWithLLM covers the full path: a real (mock) VMR
 // endpoint, the rendered .md gaining the "## LLM Interpretation" section with the
-// mock's reply, and a cache file appearing under stories/.llm-cache.
+// mock's reply, and a cache file appearing under .llm-cache.
 func TestCmdAnalyze_CompareWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1149,7 +1149,7 @@ func TestCmdAnalyze_BenchmarkExclusivity(t *testing.T) {
 // -journey: a real (mock) VMR endpoint, the rendered journey .md gaining the
 // "## LLM Interpretation" section with the mock's reply, the rendered
 // journey .json gaining populated llm_findings, and a cache file
-// appearing under stories/.llm-cache.
+// appearing under .llm-cache.
 func TestCmdAnalyze_JourneyWithLLM(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
