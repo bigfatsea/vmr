@@ -81,11 +81,11 @@
   </header>
 
   <div id="banner-file" class="banner alert hidden">
-    <span>⚠️ file:// 直开受同源策略限制，无法 fetch 数据切片。请通过 vmr 托管 (/reports/) 或任意静态 HTTP 服务器打开。</span>
+    <span>⚠️ Direct file:// access is restricted by browser same-origin policy and cannot fetch data slices. Please open via vmr hosting (/reports/) or any static HTTP server.</span>
   </div>
-  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ 数据格式版本不一致。渲染继续。</span></div>
+  <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span></div>
   <div id="banner-missing" class="banner alert hidden">
-    <span>⚠️ 这不是一套完整的 analyze 产物（manifest.json 或 journeys/benchmarks.json 缺失）。全量 corpus 数据需运行 <code>vmr analyze</code> 生成。</span>
+    <span>⚠️ This is not a complete analyze artifact set (manifest.json or journeys/benchmarks.json missing). Run 'vmr analyze -benchmark' to generate corpus statistics.</span>
   </div>
 
   <div class="container">
@@ -159,7 +159,7 @@
           const m = await fetchSlice('manifest.json');
           const st = versionBehavior(EXPECTED_MANIFEST_FORMAT, m.format);
           if (st === 'banner') {
-            dom.bannerVersionText.textContent = `⚠️ 期望 v${EXPECTED_MANIFEST_FORMAT}，实际 v${m.format}。请运行全量 vmr analyze。`;
+            dom.bannerVersionText.textContent = `⚠️ Manifest format mismatch: expected v${EXPECTED_MANIFEST_FORMAT}, actual v${m.format}. Please run a full 'vmr analyze'.`;
             dom.bannerVersion.classList.remove('hidden');
           }
         } catch (e) {
@@ -173,16 +173,16 @@
         } catch (e) {
           if (e.status === 401 || e.status === 403) { dom.authModal.classList.remove('hidden'); return; }
           dom.bannerMissing.classList.remove('hidden');
-          dom.headlineStats.innerHTML = `<div class="stat-card"><div class="stat-k">Status</div><div class="stat-v">—</div><div class="stat-sub">benchmarks.json 不可用</div></div>`;
+          dom.headlineStats.innerHTML = `<div class="stat-card"><div class="stat-k">Status</div><div class="stat-v">—</div><div class="stat-sub">benchmarks.json unavailable</div></div>`;
         }
       }
 
       function renderBenchmarks(s) {
-        const journeyCount = s.JourneyCount ?? s.journey_count ?? 0;
-        const dist = s.MetricDist || s.metric_distributions || {};
-        const findingRates = s.FindingRate || s.finding_rates || {};
-        const corr = s.Correlations || s.correlations || [];
-        const protoShare = s.ProtocolShare || s.protocol_share || {};
+        const journeyCount = s.journey_count || 0;
+        const dist = s.metric_distributions || {};
+        const findingRates = s.finding_rates || {};
+        const corr = s.correlations || [];
+        const protoShare = s.protocol_share || {};
 
         dom.headlineStats.innerHTML = `
           <div class="stat-card"><div class="stat-k">Journeys in Corpus</div><div class="stat-v">${journeyCount.toLocaleString()}</div></div>
@@ -195,12 +195,12 @@
         const distRows = Object.entries(dist).map(([code, d]) => `
           <tr>
             <td><code>${code}</code></td>
-            <td class="num">${d.Count ?? d.count ?? 0}</td>
-            <td class="num">${(d.Mean ?? d.mean ?? 0).toFixed(2)}</td>
-            <td class="num">${(d.Median ?? d.median ?? 0).toFixed(2)}</td>
-            <td class="num">${(d.P90 ?? d.p90 ?? 0).toFixed(2)}</td>
-            <td class="num">${(d.Min ?? d.min ?? 0).toFixed(2)}</td>
-            <td class="num">${(d.Max ?? d.max ?? 0).toFixed(2)}</td>
+            <td class="num">${d.count || 0}</td>
+            <td class="num">${(d.mean || 0).toFixed(2)}</td>
+            <td class="num">${(d.median || 0).toFixed(2)}</td>
+            <td class="num">${(d.p90 || 0).toFixed(2)}</td>
+            <td class="num">${(d.min || 0).toFixed(2)}</td>
+            <td class="num">${(d.max || 0).toFixed(2)}</td>
           </tr>
         `).join('');
         dom.tableMetrics.innerHTML = `
@@ -227,17 +227,17 @@
 
         // Correlations
         if (corr.length === 0) {
-          dom.tableCorrelations.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">No empirical correlations above the triage bars (|rho| ≥ 0.3, n ≥ 5).</p>`;
+          dom.tableCorrelations.innerHTML = `<p style="color:var(--ink-dim); font-size:12.5px;">No empirical correlations cleared the triage bars (|rho| ≥ 0.3, n ≥ 5).</p>`;
         } else {
           dom.tableCorrelations.innerHTML = `
             <div class="table-wrap"><table>
               <thead><tr><th>Metric A</th><th>Metric B</th><th class="num">ρ</th><th class="num">n</th></tr></thead>
               <tbody>${corr.map(c => `
                 <tr>
-                  <td><code>${c.MetricA || c.metric_a}</code></td>
-                  <td><code>${c.MetricB || c.metric_b}</code></td>
-                  <td class="num">${(c.Rho ?? c.rho ?? 0).toFixed(2)}</td>
-                  <td class="num">${c.N ?? c.n ?? 0}</td>
+                  <td><code>${c.metric_a}</code></td>
+                  <td><code>${c.metric_b}</code></td>
+                  <td class="num">${(c.rho || 0).toFixed(2)}</td>
+                  <td class="num">${c.n || 0}</td>
                 </tr>
               `).join('')}</tbody>
             </table></div>
