@@ -543,6 +543,81 @@ func TestManifest_AtomicWriteAndValidation(t *testing.T) {
 	}
 }
 
+// TestManifest_PartialMacroSetRejected pins N8: a snapshot the report half
+// ran for must have all five macro slices, and a manifest that records only
+// some of them is corrupt, not a valid macro-free snapshot.
+func TestManifest_PartialMacroSetRejected(t *testing.T) {
+	rep := makeSampleReport()
+
+	// BuildManifest with rep != nil must refuse when a macro slice is gone.
+	t.Run("BuildManifest refuses a missing macro slice", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
+			t.Fatalf("WriteMacroSlices: %v", err)
+		}
+		if err := os.Remove(filepath.Join(dir, SliceMacroFinance)); err != nil {
+			t.Fatalf("remove finance slice: %v", err)
+		}
+		if _, err := BuildManifest(dir, rep, i18n.EN); err == nil {
+			t.Fatal("BuildManifest succeeded with finance.json missing, want error")
+		} else if !strings.Contains(err.Error(), "finance.json") {
+			t.Errorf("error should name the missing slice: %v", err)
+		}
+	})
+
+	// ValidateManifest must reject a manifest that records 4 of 5 macro slices.
+	t.Run("ValidateManifest refuses a partial macro set on record", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
+			t.Fatalf("WriteMacroSlices: %v", err)
+		}
+		m, err := BuildManifest(dir, rep, i18n.EN)
+		if err != nil {
+			t.Fatalf("BuildManifest: %v", err)
+		}
+		delete(m.Slices, SliceMacroReliability)
+		if err := WriteManifest(dir, m); err != nil {
+			t.Fatalf("WriteManifest: %v", err)
+		}
+		if _, err := ValidateManifest(dir); err == nil {
+			t.Fatal("ValidateManifest accepted a manifest recording 4/5 macro slices, want error")
+		}
+	})
+
+	// An empty Slices map is not a valid snapshot.
+	t.Run("ValidateManifest refuses an empty slice set", func(t *testing.T) {
+		dir := t.TempDir()
+		m := &Manifest{Format: ManifestFormat, Lang: "en"}
+		if err := WriteManifest(dir, m); err != nil {
+			t.Fatalf("WriteManifest: %v", err)
+		}
+		if _, err := ValidateManifest(dir); err == nil {
+			t.Fatal("ValidateManifest accepted a manifest with no slices, want error")
+		}
+	})
+
+	// A journey/zoom snapshot (rep == nil, no macro slices) stays valid.
+	t.Run("macro-free snapshot still validates", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, "journeys"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, SliceJourneysIndex), []byte(`{"journeys":[]}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		m, err := BuildManifest(dir, nil, i18n.EN)
+		if err != nil {
+			t.Fatalf("BuildManifest(rep=nil): %v", err)
+		}
+		if err := WriteManifest(dir, m); err != nil {
+			t.Fatalf("WriteManifest: %v", err)
+		}
+		if _, err := ValidateManifest(dir); err != nil {
+			t.Errorf("ValidateManifest rejected a valid macro-free snapshot: %v", err)
+		}
+	})
+}
+
 // TestConfidenceFields verifies that TokensCoveragePct and DurLowN are correctly
 // computed on Row and EndpointRow during aggregation finish (§3.3).
 func TestConfidenceFields(t *testing.T) {

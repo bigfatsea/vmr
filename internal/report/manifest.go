@@ -213,6 +213,17 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 		}
 	}
 
+	// rep != nil means the macro report half ran and WriteMacroSlices
+	// succeeded this run, so all five macro slices must be on disk now. A
+	// missing one at stamp time means something removed or truncated it
+	// between the write and here — refuse to stamp a partial snapshot as
+	// valid rather than silently omitting the slice from the manifest (N8).
+	if rep != nil {
+		if err := requireMacroSlices(slices); err != nil {
+			return nil, err
+		}
+	}
+
 	footnotes, disclaimers := BuildFootnotesAndDisclaimers(rep, lang)
 
 	m := &Manifest{
@@ -255,6 +266,20 @@ func ValidateManifest(dir string) (*Manifest, error) {
 		return nil, fmt.Errorf("manifest format mismatch: got %d, want %d", m.Format, ManifestFormat)
 	}
 
+	if len(m.Slices) == 0 {
+		return nil, fmt.Errorf("manifest records no slices — not a complete analyze snapshot")
+	}
+
+	// A manifest that lists any macro slice must list all five: the macro
+	// set is written as a unit (WriteMacroSlices is all-or-error), so a
+	// partial set on record is a corrupt manifest, not a valid macro-free
+	// snapshot (N8). Zoom/journey-only snapshots legitimately record none.
+	if macroSlicePresent(m.Slices) {
+		if err := requireMacroSlices(m.Slices); err != nil {
+			return nil, err
+		}
+	}
+
 	for key, sliceRef := range m.Slices {
 		p := sliceRef.Path
 		if p == "" {
@@ -271,6 +296,28 @@ func ValidateManifest(dir string) (*Manifest, error) {
 		}
 	}
 	return &m, nil
+}
+
+// macroSlicePresent reports whether slices records at least one of the five
+// macro domain slices.
+func macroSlicePresent(slices map[string]SliceRef) bool {
+	for _, p := range MacroSlicePaths {
+		if _, ok := slices[p]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// requireMacroSlices returns an error naming the first macro slice absent
+// from slices — the five are a unit (§8.2), so a partial set is invalid.
+func requireMacroSlices(slices map[string]SliceRef) error {
+	for _, p := range MacroSlicePaths {
+		if _, ok := slices[p]; !ok {
+			return fmt.Errorf("macro slice %s missing from the snapshot — the five macro slices are written as a unit", p)
+		}
+	}
+	return nil
 }
 
 // HashBytes computes the lowercase hex-encoded SHA-256 digest of b.
