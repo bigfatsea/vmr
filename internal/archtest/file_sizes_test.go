@@ -41,14 +41,14 @@ var fileLineExemptions = map[string]int{
 	// do. Only per-entry facts that aren't that convention are noted below.
 	"internal/router/router.go": 700,
 
-	// render_doc.go's budget is what keeps a new report section arriving as a
-	// new section_*.go rather than as another 90 lines on the biggest file.
+	// aggregate.go's budget is what keeps a new report section arriving as a
+	// new viewmodel_*.go builder rather than as another 90 lines on the biggest file.
 	"internal/report/aggregate.go":  620,
 	"internal/report/ingest.go":     310,
 	"internal/report/recextract.go": 310,
 	// rows.go is the report's JSON contract: a new metric adds a field, so
 	// growth is expected. What this catches is the file absorbing accumulation
-	// or rendering logic again, which belongs in ingest.go/section_*.go.
+	// or rendering logic again, which belongs in ingest.go/viewmodel_*.go.
 	"internal/report/rows.go": 900,
 	// detail.go was split into internal/reqdetail in P2, slimming it to ~286
 	// lines. internal/config/config.go used to carry a 750 exemption here; it

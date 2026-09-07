@@ -293,11 +293,11 @@ func TestBuildStructure_BodiesNoOrphansNoDangling(t *testing.T) {
 // step count, one with ordinary-length content and one with a per-step
 // payload two orders of magnitude larger, must serialize to structures
 // whose size difference is bounded by the per-field truncation cap
-// (structureExcerptChars) times the field count — never proportional to the
+// (maxBodyExcerptChars) times the field count — never proportional to the
 // raw text-length difference itself.
 func TestBuildStructure_VolumeBoundedByStepsNotProseLength(t *testing.T) {
 	small := buildJourneyWithArgsLen(t, 20)
-	huge := buildJourneyWithArgsLen(t, 200000) // two orders of magnitude beyond structureExcerptChars
+	huge := buildJourneyWithArgsLen(t, 200000) // two orders of magnitude beyond maxBodyExcerptChars
 
 	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small, i18n.EN), nil, nil, nil)
 	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge, i18n.EN), nil, nil, nil)
@@ -316,11 +316,11 @@ func TestBuildStructure_VolumeBoundedByStepsNotProseLength(t *testing.T) {
 	// only inlined-and-truncated field this fixture's huge payload reaches,
 	// since it never sets a tool result, RespText, or Reasoning of
 	// comparable size). If truncation is working, the serialized structures
-	// should differ by roughly 4 * structureExcerptChars at most — allow a
+	// should differ by roughly 4 * maxBodyExcerptChars at most — allow a
 	// generous multiple for JSON escaping/field overhead, but this must stay
 	// far below the raw injected difference, not merely "somewhat smaller".
 	diff := len(hugeJSON) - len(smallJSON)
-	bound := 4 * structureExcerptChars * 2 // 4 steps * cap * overhead factor for JSON escaping
+	bound := 4 * maxBodyExcerptChars * 2 // 4 steps * cap * overhead factor for JSON escaping
 	if diff > bound {
 		t.Errorf("structure size grew by %d bytes for a %d-byte prose-length increase — want growth bounded by ~%d (step count * excerpt cap), not proportional to conversation length", diff, 4*200000, bound)
 	}

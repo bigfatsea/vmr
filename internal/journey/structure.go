@@ -37,9 +37,6 @@ import (
 // RespText/Reasoning stored under RespRef has no character limit.
 const maxBodyExcerptChars = 3000
 
-// structureExcerptChars is retained for backwards compatibility with existing references.
-const structureExcerptChars = maxBodyExcerptChars
-
 func hashText(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
