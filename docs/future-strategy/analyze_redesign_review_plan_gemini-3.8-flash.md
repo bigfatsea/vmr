@@ -6,6 +6,8 @@
 
 ## Review 事项清单(按方案结构组织)
 
+> **2026-09-07 状态:全部事项已闭环。** 第一轮 review 的两项待决策(T1/T2/T3/T4/T5)经你逐项裁决后于当日落地;最终提交链:386f92f → 373ff09 → README×2 → 8a7a824(digest 叶子包) → c1a2044(VM 字面量守卫) → 6eefb85(去单体) → 98820fe(看板币种) → 51fe126(设计文档重写)。每一步后全仓测试绿。
+
 ### A. Phase 1 — 数据层闭环
 - [x] A1. Report2 一步解构为五 macro 切片 + manifest.json,无兼容视图(§3.2、§8.1)— **部分完成,见 T1**
 - [x] A2. §3.3 渲染期现算事实下沉 — 已全部完成(tokens_coverage_pct/dur_low_n、CostCoverage、footnotes/disclaimers 注册表、highlights 进 summary 切片、SessionMeta 投影 + journey_link 进 requests/index.json、ts+ts_display 双字段)
@@ -92,6 +94,7 @@
 - **根因分析**:report 与 journey 是分析半区内互不依赖的两个包,单独引入共享 leaf 包的成本大于复制十几行代码。
 - **建议方案**:若要收敛,唯一自然宿主是下沉到双方都依赖的叶子包(ctxgraph 或 core)。纯机械重构。
 - **ROI**:低。差分测试已消除漂移风险,收敛只减少约 40 行重复;若近期无其他理由碰这两个包的依赖关系,不值得动。
+- **执行结果(2026-09-07)**:你裁决消除重复。下沉为 stdlib-only 叶子包 `internal/digest`(Digest/DigestHex/Encode*,包注释钉住 D8 三性质),report/journey 全部改为调用方;archtest 的 zero-internal-dep 清单登记;`cmd/vmr/digest_parity_test.go` 退役(单实现后差分失去对象),线格式手算向量测试移入包内;KNOWN_ISSUES 对应条目改记「由结构而非测试保证」。(8a7a824)
 
 #### T3. v4 Analytics 设计文档大面积过期 — **未完成(建议单独立项)**
 - **问题描述**:docs/VirtualModelRouter_Design_v4_Analytics.md 仍以 `vmr report`/`vmr story` 双 CLI、`section_*.go` 渲染器、`vmr-requests.md` 全家、`meta.format = 10`、`-corpus` 为"现状"描述(§0、§2 全段);而同文档的看板一节(§6.4 一带)已按新拓扑改写——同一份文档一半新一半旧。该文档自我定位是"读完即可维护与二次开发",过期内容会误导下一个维护者。
@@ -104,12 +107,14 @@
 - **根因分析**:方案文档在实施过程中没有被当作"current state"文档回写。
 - **建议方案**:更新状态行为"已实施(2026-09),偏差与登记见 review 记录/KNOWN_ISSUES";T1 裁决后同步 D2 的裁决结果。
 - **ROI**:高(几行字),随 T3/T1 一起做。
+- **执行结果(2026-09-07)**:状态头改为「已实施」,登记 D2 落实结果与 .cache/parse 补齐,指向本 review 记录。
 
 #### T5. "ViewModel 无未 i18n 裸字面量"守卫未写成自动化测试 — **未解决(低优先)**
 - **问题描述**:§9 承诺新增该守卫;实际靠人工核对(当前 viewmodel_*.go 中无裸文案字面量,本次已抽查确认)。
 - **根因分析**:该守卫需要 AST 扫描式的自定义检查,JSON tag、"left"/"right" 等合法字面量会制造噪音,实施成本与误报治理不成比例,实施中被放弃且未登记。
 - **建议方案**:要么在 KNOWN_ISSUES 登记为"刻意不自动化,靠 golden + 抽查",要么写一个只拦"含空格的英文句子字面量"的窄规则测试。
 - **ROI**:低。窄规则半小时,误报概率小;不写则登记一句话。
+- **执行结果(2026-09-07)**:你裁决做到位。`internal/archtest/vm_literals_test.go` 落地——AST 扫描(注释天然排除)两侧全部 viewmodel_*.go,命中英文句子形状的字面量即红,白名单放行内部 panic 诊断与 mermaid 语法。写守卫时发现 viewmodel_cost.go 的定价来源摘要两行正是 3C 推迟的未 i18n 文案,随守卫一并迁入 `i18n.CostText`(EN 措辞不变、ZH 新译,zh golden fixture 跟进)——守卫第一次运行就抓到真猎物。(c1a2044)
 
 ---
 
@@ -128,19 +133,36 @@
 | F9 | README.md/README.zh.md 共 15+ 处 `vmr story`/`vmr report`/`-corpus` 残留,含一条不可运行的示例命令 | **已在 review 中解决**(README 同步提交,示例实跑验证) |
 | F10 | 3C 移交清单的 vm 前缀 helper 改名回退与 vmSkippedAttemptsNote 去重未执行(HANDOVER_P3_NOTES §3) | **未解决** — 见下 |
 | F11 | render-only 重渲染 compares/*.md 与 journeys/details/*.md 时保留旧文件的 `## LLM ` 段,compare/journey JSON 的落盘语言可能与 manifest.lang 不同(跨多次运行累积),重渲染语言可能混排 | **未解决** — 见下 |
-| F12 | 看板 JS `FmtCurrency` 恒定 `$` 前缀,与 `-currency CNY` 的 Go 侧展示不一致 | **未解决(已登记,不行动)** — KNOWN_ISSUES 已作为"刻意不钉"的裁决登记,前端显示币种属产品议题 |
+| F12 | 看板 JS `FmtCurrency` 恒定 `$` 前缀,与 `-currency CNY` 的 Go 侧展示不一致 | **已解决(98820fe)** — 可行性分析确认可落地:切片金额已是 Go 侧按 `-currency` 换算后的值,finance.json 携带 `pricing.currency`(T1 补齐后) |
 
-#### F10. 3C 移交清单未清完(vm 前缀 helper)— **未解决**
+#### F10. 3C 移交清单未清完(vm 前缀 helper)— **已确证完成(review 误报)**
 - **问题描述**:HANDOVER_P3_NOTES §3 明列:删旧路径后把 `vmCostCell` 等 vm 前缀过渡副本改回原名并删 legacy 原件;`vmSkippedAttemptsNote` 改为直接调用存活的 `renderSkippedAttemptsNote`。实际 legacy 原件已删、副本未改名。
 - **根因分析**:3C 的白名单禁止其修改 archtest,改名需要同步动 `file_sizes_test`/`func_sizes_test` 的 `文件:函数名` 键表,被跳过且未回写主控。
 - **建议方案**:一次性机械改名(约 20 个函数,archtest 键表同步),`vmSkippedAttemptsNote` 就近调用存活函数。单独一个 cleanup commit。
 - **ROI**:低。纯命名一致性,无行为风险;适合随下一次碰 internal/report 的变更顺带做,不值得单独立项。
+- **执行结果(2026-09-07)**:复核证实改名回退与 `vmSkippedAttemptsNote` 去重都已在 3C 提交(f2a83b1)内完成——包内已无任何 vm 前缀过渡副本,`viewmodel_provider.go` 直接调用存活的 `renderSkippedAttemptsNote`。误报源头是 HANDOVER_P3_NOTES §3 未回写;该交接文档属过程记录,按仓库纪律保留原样。
 
 #### F11. 渲染语言跨运行累积产物可能混排 — **未解决**
 - **问题描述**:compares/*.json、journeys/details/j-<id>.json 是跨调用累积产物,各自携带生成时的语言;`-render-only`(及全量运行的 renderAllFromDisk)统一以 manifest.lang 重渲染 Markdown,并用 `## LLM ` 标记保留旧文件的 LLM 段(旧语言)。混着换过语言的目录会得到中英混排的 Markdown。
 - **根因分析**:D10 规定"渲染继承 JSON 语言",但累积产物的"JSON 语言"不是一个值;LLM 段保留是既有行为,方案未覆盖。
 - **建议方案**:最小修法是重渲染时逐文件采用该 JSON 自身的 lang 字段(compare json 里有 label 语言吗?若没有则加字段,属 schema 加性变更);LLM 段按自身语言保留无需处理。也可以裁决为"可接受,换语言请全量重跑并清理"。
 - **ROI**:低。触发条件苛刻(同一目录换语言 + 累积产物),建议先登记不修。
+- **执行结果(2026-09-07)**:你裁决登记。KNOWN_ISSUES 新增 §2.93(现状/为什么待定/触发条件)。
 
-#### F12. 看板金额显示恒 `$` — **不行动**
+#### F12. 看板金额显示恒 `$` — **已解决(98820fe)**
 KNOWN_ISSUES 已把"Go 与 JS 金额格式化是两套行为"登记为裁决(2026-09);币种符号未涵盖在该条内,但同属"前端展示策略"范畴。若要支持非 USD 展示,应作为独立产品议题(切片已有币种与汇率事实,前端缺的只是符号与舍入策略),不归入本次重构。
+
+**执行结果(2026-09-07)**:你裁决分析可行性、可行则落地。分析结论:**可行**——`-currency`/report.yaml 的换算在 Go 侧完成,切片里的金额已是目标币种值,T1 之后 finance.json 的 `pricing.currency` 携带币种代码,前端缺的只是符号映射。落地:common.js 增设 `CURRENCY_SYMBOLS`(USD/CNY/EUR/GBP/JPY;未知代码以代码本身作前缀,如 "AUD 1.23")+ `setCurrency`,`FmtCurrency(n, ccy)` 支持显式币种参数(缺省仍为 fixture 钉住的 `$`);macro-dashboard 在加载 finance.json 后 `setCurrency`,journey-viewer 向 `FmtCurrency` 透传 cost 块自带的 `Currency`。金额舍入策略维持 KNOWN_ISSUES 的双语境裁决不变。
+
+### 三、二次执行轮(2026-09-07,按决策落地)中的新发现
+
+以下问题在落实 T1–T5/F10–F12 的过程中新发现,均已当场处理(属"事实清楚、方案明确"一类)或确认非问题;为避免下一个 review 者重查一遍,逐条留痕:
+
+| # | 发现 | 处置 |
+|---|---|---|
+| G1 | F10 实为误报:HANDOVER_P3_NOTES §3 的移交清单在 3C 提交内已完成,文档未回写造成"未清完"假象 | 复核确认,无需改码;交接文档按过程记录保留 |
+| G2 | `internal/report` 的 `Format = 11` 与 `ManifestFormat = 11` 是两个独立常量,违反「整套产物一个版本单位」的精神 | 已合并:`Format` 改为 `ManifestFormat` 的别名并注明(6eefb85) |
+| G3 | §2.5 详单豁免的边界原先只靠口口相传;T1 重写 §2 后 `LoadReport` 强制要求 manifest 通过完整校验,详单/证据豁免与单一渲染路径的边界被 `renderAllFromDisk` 的分步条件显式化 | 无需改码;文档已在 §2.5/§2.7 写明 |
+| G4 | zh golden fixture(viewmodel_golden_data_test.go)钉住了 §2 定价来源摘要的旧英文措辞;EN 措辞保持逐字不变,zh 随 i18n 迁移更新 | 已随 T5 更新(c1a2044) |
+| G5 | `computeTargetL2` 的 LLM 身份入参此前依赖"mode 字符串含 journey:/compare: 前缀"的隐式约定;补指纹时该约定被显式化并加测试(4b/4c 两用例) | 已随 386f92f 固化 |
+
