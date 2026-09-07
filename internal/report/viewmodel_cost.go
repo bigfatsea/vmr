@@ -37,12 +37,10 @@ func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
 	// Pricing is composed from two layers (embedded standard table +
 	// per-provider config.yaml pricing.rates), so there's no longer a
 	// single file's bytes to freeze verbatim — this summary line is the
-	// traceability mechanism. The English lead-in is a legacy renderer
-	// literal reproduced here verbatim for byte equivalence during the
-	// transition; it moves to i18n when the legacy path retires.
-	summary := fmt.Sprintf("standard table generated %s", orDash2(rep.Pricing.StandardGeneratedAt == "", "(unknown)", rep.Pricing.StandardGeneratedAt))
+	// traceability mechanism.
+	summary := t.StandardTableSummary(orDash2(rep.Pricing.StandardGeneratedAt == "", "(unknown)", rep.Pricing.StandardGeneratedAt))
 	if rep.Pricing.ProviderOverrides > 0 {
-		summary += fmt.Sprintf("; %d provider rate rule(s) applied", rep.Pricing.ProviderOverrides)
+		summary += t.ProviderRulesApplied(rep.Pricing.ProviderOverrides)
 	}
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: reqdetail.Details(t.FrozenSnapshotSummary, summary) + "\n\n"})
 	return sec

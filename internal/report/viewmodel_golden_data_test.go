@@ -1573,7 +1573,7 @@ const (
           "Text": "> 估算成本包含了未嗅探到 usage 的请求（按降级估算定价计入）；而 fresh/out 列仅统计已确认的 Token 数量。若按「估算成本 ÷ Token」反推单价可能偏高。\n\n"
         },
         {
-          "Text": "<details><summary>本次使用的定价来源</summary>\n\nstandard table generated 2026-08-01; 1 provider rate rule(s) applied\n</details>\n\n\n"
+          "Text": "<details><summary>本次使用的定价来源</summary>\n\n标准价目表生成于 2026-08-01；已套用 1 条 provider 费率规则\n</details>\n\n\n"
         }
       ]
     },

@@ -21,6 +21,11 @@ type CostText struct {
 	ByClientHeaders       [4]string // client_key, fresh, out, estimated cost
 	NoDataBody            string
 	FrozenSnapshotSummary string
+	// StandardTableSummary / ProviderRulesApplied render the §2 pricing-
+	// source traceability line: the standard table's own generation stamp
+	// and how many config.yaml rate rules were layered on top.
+	StandardTableSummary func(generated string) string
+	ProviderRulesApplied func(n int) string
 	Disclaimer            func(asOf, currency string) string
 	ScopeFootnote         string
 
@@ -61,6 +66,8 @@ func Cost(lang Lang) CostText {
 			ByClientHeaders:       [4]string{"client_key", "fresh", "out", "估算成本"},
 			NoDataBody:            "配置了定价，但没有请求命中已配置的端点，暂无成本数据。\n\n",
 			FrozenSnapshotSummary: "本次使用的定价来源",
+			StandardTableSummary:  func(gen string) string { return fmt.Sprintf("标准价目表生成于 %s", gen) },
+			ProviderRulesApplied:  func(n int) string { return fmt.Sprintf("；已套用 %d 条 provider 费率规则", n) },
 			Disclaimer: func(asOf, currency string) string {
 				return "本章金额是**按量计费等价成本**：这些流量若按 vmr 能解析到的公开价逐 Token 计费要花多少——渠道有自定价时用渠道价，否则用第一方列表价。它不是实付金额——包月/套餐账号的边际成本是 0，经转售商或代理的实际单价也只有你自己知道。它回答的是「这个套餐/代理买得值不值」。价格取自标准价目表（生成于 " + asOf + "）与 config.yaml 的账号覆盖（货币 " + currency + "），不代表历史请求实际发生时的价格；要用实付价请在对应 provider 的 providers[].pricing.rates 里写明。"
 			},
@@ -96,6 +103,8 @@ func Cost(lang Lang) CostText {
 		ByClientHeaders:       [4]string{"client_key", "fresh", "out", "Est. Cost"},
 		NoDataBody:            "Pricing is configured, but no request matched a configured endpoint — no cost data yet.\n\n",
 		FrozenSnapshotSummary: "Pricing sources used for this report",
+		StandardTableSummary:  func(gen string) string { return fmt.Sprintf("standard table generated %s", gen) },
+		ProviderRulesApplied:  func(n int) string { return fmt.Sprintf("; %d provider rate rule(s) applied", n) },
 		Disclaimer: func(asOf, currency string) string {
 			return "The figures in this section are a PAY-AS-YOU-GO EQUIVALENT: what this traffic would cost billed per token at the published prices vmr can resolve for it — the serving platform's own rate where one exists, otherwise the model maker's list price. They are not what you paid — a subscription/plan account's marginal cost is 0, and only you know the real unit price behind a reseller or proxy. They answer \"was this plan/proxy worth it\". Prices come from the standard table (generated " + asOf + ") plus any config.yaml account overrides (currency " + currency + "), and do not represent the prices in effect when these requests historically occurred; configure providers[].pricing.rates on the relevant provider to price at what you actually pay."
 		},
