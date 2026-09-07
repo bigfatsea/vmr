@@ -145,6 +145,7 @@
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
 - **`-render-only` 在 L3 缓存命中时信任磁盘上已有 `.md` 产物**：L3 缓存以 ViewModel 指纹 + 渲染器版本 + 语言为判据；当 L3 命中且磁盘目标 `.md` 文件已存在时直接跳过渲染与写盘。若用户手工修改了 `.md` 文件需要强制重绘，应使用 `-no-cache`。
+- **配了 quota 的部署里，`vmr-quota.json` 变化会使 L2 缓存失效**（2026-09-07，NEW-D 修复）：§2.5 与 `macro/finance.json` 的 `provider_quotas` 直接读 `<log_dir>/vmr-quota.json`（路由半区每次计费请求都会重写它），其内容因此并入 L2 输入哈希集——否则同批日志隔时重跑会在 L2 命中路径上给出过期的额度进度与已用量。副作用：路由半区正在活跃承接流量时，对同一批历史日志反复 `vmr analyze` 会频繁 L2 miss（配额计数器确实在动，§2.5 本就该重算）；这是刻意的保守失效，不是缺陷。不含 quota 限制的配置完全不受影响（`vmr-quota.json` 不进指纹）。`period_elapsed_pct` 这类纯 wall-clock 派生值仍是"as of 上次全量运行"——要 render-time 现算需把它移出切片、渲染侧按 `manifest.generated_at` 重算，属独立的低优改进。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
 - **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
 - **不自建 Markdown→HTML 的渲染层**（2026-09 收敛，原 journey 侧的 mdlite 微渲染器已随自包含 HTML 退役删除）：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。已知瑕疵 §2.51 随之失去载体。

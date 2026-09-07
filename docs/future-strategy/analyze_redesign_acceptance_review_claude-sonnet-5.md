@@ -263,9 +263,9 @@
 |---|---|---|
 | **D1–D21 核心裁决** | ✅ 全部落地，无数据正确性 / 安全模型错误 | D2：`rg vmr-report.json --type go -g '!*_test.go'` 仅剩 4 处注释，零写出代码；宏观渲染源 `LoadReport` 从切片重装 `Report2`。D3：`rg text/template` 零命中。D6/D15：`render_html*`/`toolwaste_html`/`story/assets` 零残留；无 `-redact`/`-html` flag。D8/T2：`internal/report/digest.go` 已删，`internal/digest` 叶子包唯一实现，`digest_parity_test.go` 已退役。D9：`server/reports.go` `len(APIKeys)==0` → 全树 403。D11：`-render-only` 与全量运行产物 `diff -rq` **逐字节一致**（真实数据，含 benchmark zoom 后）。D17：`detail_file` = `r-<ts>_..._h8.md`。D18：`bodies` 顶级去重表 + 三级 `match`（实测 exact/normalized/positional 混合）+ `resp_ref` 不截；`llm_interpretation`/`llm_divergence` 入 JSON，`cmd_render_only.go` 的 `strings.Index("## LLM ")` 刮取 hack 已删。D19：`j-<id>.md` 无 `journey-` 前缀、无 `-partial`。D20：`CleanOrphanJourneys` 严格限 `journeys/details/`，L2 命中路径也清扫。D21：`compares/` 不进 `AllSlicePaths`，每次 analyze 扫目录重建。 |
 | **Phase 1 数据层** | ✅ | 五 macro 切片 + `requests/index.json` + `journeys/index.json` 齐备；`manifest.json` format=11 最后写；`generated_at` 双字段；`footnotes`(6)+`disclaimers`(3) 注册表；`requests/index.json` 行含 `ts`(epoch ms `1787500778429`)+`ts_display`+`detail_file`+`sessions`(50)+`journey_link`(15)；`summary.highlights`(2) 非空；`finance.cost_coverage{unpriced_count,incomplete_rate_count,degraded_estimate_pct}` + `pricing.currency=USD`。 |
-| **Phase 2 看板** | ✅（一处 schema 瑕疵见 NEW-A） | 6 骨架页根级平铺，`common.js` 内联（`rg 'src="common.js"'` 零命中），`EXPECTED_MANIFEST_FORMAT=11` == Go `ManifestFormat=11`，`svgLatencyPlot` 存在，`file://` 降级分支在位，chrome 统一英文，`CURRENCY_SYMBOLS` + `setCurrency`。`TestAllDashboardPages_ReadSnakeCaseFields` 通过——但它是 denylist 而非全量扫描（见 NEW-A）。 |
+| **Phase 2 看板** | ✅（NEW-A schema 瑕疵已修 `c9f1f3a`） | 6 骨架页根级平铺，`common.js` 内联（`rg 'src="common.js"'` 零命中），`EXPECTED_MANIFEST_FORMAT=11` == Go `ManifestFormat=11`，`svgLatencyPlot` 存在，`file://` 降级分支在位，chrome 统一英文，`CURRENCY_SYMBOLS` + `setCurrency`。`TestAllDashboardPages_ReadSnakeCaseFields` 通过；它是 denylist 而非全量扫描——NEW-A 修复后 step `usage` 子对象亦为 snake_case，守卫补 `usage.In`/`usage.Out`。 |
 | **Phase 3 ViewModel / 单一渲染路径** | ✅ | `renderAllFromDisk` 全量与 render-only 共用；`viewmodel_*.go` ↔ `i18n/report_*.go` 配对 + `vm_literals_test.go` AST 守卫；golden 下沉 VM 结构（`viewmodel_golden_data_test.go`）；`structure_test.go` 的 `LosslessReconstruction` 只喂 `j-<id>.json`；`-lang` 与 manifest 不一致拒绝。EN 变体实跑：全人读产物英文，用户 prompt 内容按 passthrough 不译（正确）。 |
-| **Phase 4 缓存** | ✅ 主体（一处失效矩阵缺口见 NEW-D） | L1 `.cache/parse/`；L2 `computeTargetL2 = Digest(inHashes ‖ pricingFP ‖ ManifestFormat ‖ paramsFP)`；L3 `ComputeL3Digest`；`paramsFP` 含 Lang/TaskProfile/IncludePartial/IncludeSelfTraffic/SelfTrafficTags/LLMSelfTag/LLMAddr/LLMModel/DisplayCCY/RenderAll/Details/Mode；LLM identity 仅在 journey:/compare: mode 入指纹；`-no-cache` 常驻；`zoomArtifactMissing` 校验（N-B4）；provider 成本 `round6`（N-B6）；`success_rate` 全精度（N-B5，实测 summary.json = `0.9884393063583815`，§0 显示 98.8%，一致）。L2 命中实测（"L2/L3 缓存命中"提示）。 |
+| **Phase 4 缓存** | ✅（NEW-D 失效矩阵缺口已修 `fa74e04`） | L1 `.cache/parse/`；L2 `computeTargetL2 = Digest(inHashes[+quota.json 当配了 quota] ‖ pricingFP ‖ ManifestFormat ‖ paramsFP)`；L3 `ComputeL3Digest`；`paramsFP` 含 Lang/TaskProfile/IncludePartial/IncludeSelfTraffic/SelfTrafficTags/LLMSelfTag/LLMAddr/LLMModel/DisplayCCY/RenderAll/Details/Mode；LLM identity 仅在 journey:/compare: mode 入指纹；`-no-cache` 常驻；`zoomArtifactMissing` 校验（N-B4）；provider 成本 `round6`（N-B6）；`success_rate` 全精度（N-B5，实测 summary.json = `0.9884393063583815`，§0 显示 98.8%，一致）。L2 命中实测（"L2/L3 缓存命中"提示）。 |
 | **§9 守卫 + §11 不变量** | ✅ | INV-1：`rg '"vmr/internal/(router\|server\|config)"'` 在分析半区非测试文件零命中；`archtest` 全绿。INV-3：实测 vmr 自建目录 700 / 文件 600（预先 `mkdir` 的顶层目录保留 755——非 vmr 行为）。§9 新增守卫逐条具名在位。 |
 | **T/F/N/G/C/N-B 历史遗留** | ✅ 已处理（3 处发现见第四部分）| N-B1 实测已修：journey `.md` 链接为 `../../requests/details/`、`../../requests/evidence/`，从 `journeys/details/` 可解析。N-B2：`journeys/index.md` H1 = "VMR Journey 索引" / "VMR Journey Index"。N-B3：`failed.md` 引子指向 `requests/index.json`。N17/T-E：**当前 `config.yaml` 已迁移**，`./vmr check -c config.yaml` 通过（v4 评审时的旧语法已不复存在）。 |
 
@@ -283,16 +283,19 @@
 |---|---|:---:|---|
 | 核心裁决 | D1–D21（21 项） | ✅ 全部完成 | 见 2.2 逐条证据 |
 | Phase 1 | 概念归一 / CLI 收敛 / 五切片 / §3.3 七类现算事实下沉 / 拓扑归位 / `r-` 前缀 / D19 / 提交顺序 + orphan 清扫 / compares 索引 / 请求索引删除 | ✅ 全部完成 | 拓扑实跑逐字命中；切片 schema 完整 |
-| Phase 2 | go:embed 骨架 / 内联 SVG 四图元 / 六页 + `#data=` + file:// / 版本 banner / 前端 fmt fixture / 旧 HTML 删除 / `/reports/` 托管安全 / snake_case 字段 / common.js 内联 / chrome 一致 / 币种符号 | 🟡 部分完成 | 全部功能落地；`chatmsg.Usage` 子对象 PascalCase 泄漏进 journey 切片 schema（NEW-A，低-中） |
+| Phase 2 | go:embed 骨架 / 内联 SVG 四图元 / 六页 + `#data=` + file:// / 版本 banner / 前端 fmt fixture / 旧 HTML 删除 / `/reports/` 托管安全 / snake_case 字段 / common.js 内联 / chrome 一致 / 币种符号 | ✅ 全部完成 | 全部功能落地；`chatmsg.Usage` 子对象 PascalCase 泄漏（NEW-A）本轮已修（`c9f1f3a`） |
 | Phase 3 | report/journey/compare 三侧 ViewModel / 固定序列化器 / golden 下沉 / `-render-only` 覆盖面 + 语言继承 / AST 裸字面量守卫 | ✅ 全部完成 | 逐字节等价实测；EN 变体实跑 |
-| Phase 4 | 整套产物指纹 + 失效矩阵 / L1-L3 / 配置指纹 / 分析参数指纹 / `-no-cache` / 详单指纹 / L2 命中清扫 + compares 重建 / 冷热一致 | 🟡 部分完成 | 主体落地且测试充分；L2 失效矩阵缺 `vmr-quota.json` 一路输入，配额记账在 L2 命中时冻结（NEW-D，中） |
-| §9 守卫 | 既有迁移（8 项）+ 新增（10+ 项） | ✅ 全部完成 | 逐条具名在位；`TestAllDashboardPages_ReadSnakeCaseFields` 是 denylist（覆盖面有限，见 NEW-A） |
+| Phase 4 | 整套产物指纹 + 失效矩阵 / L1-L3 / 配置指纹 / 分析参数指纹 / `-no-cache` / 详单指纹 / L2 命中清扫 + compares 重建 / 冷热一致 | ✅ 全部完成 | 主体落地且测试充分；L2 失效矩阵缺 `vmr-quota.json` 一路输入（NEW-D）本轮已修（`fa74e04`），失效矩阵补齐 |
+| §9 守卫 | 既有迁移（8 项）+ 新增（10+ 项） | ✅ 全部完成 | 逐条具名在位；`TestAllDashboardPages_ReadSnakeCaseFields` denylist 随 NEW-A 补 `usage.In`/`usage.Out`；新增 `TestAnalyzeCache_QuotaJSONInvalidatesL2` |
 | §11.1 不变量 | INV-1..INV-5（5 条） | ✅ 全部完成 | archtest 强制 + 实测 |
-| 历史遗留 | T1–T5 / F2–F12 / G2 / v2-T1/T2/F1/F2 / N1–N19 / C-imp-1..5 / T-A–T-F / N-B1–N-B7 | ✅ 全部完成 | 见 2.2 末行；本轮独立复核证实（3 处未尽见第四部分） |
+| 历史遗留 | T1–T5 / F2–F12 / G2 / v2-T1/T2/F1/F2 / N1–N19 / C-imp-1..5 / T-A–T-F / N-B1–N-B7 | ✅ 全部完成 | 见 2.2 末行；本轮独立复核证实 |
 
 ### 3.2 部分完成事项详述
 
-见第四部分 NEW-A（Phase 2 schema 瑕疵）与 NEW-D（Phase 4 失效矩阵缺口）——两者均为本轮**新发现**，非方案原案要求未落地。方案 D1–D21 + Phase 1–4 的**原案要求项无一未完成**。
+**方案 D1–D21 + Phase 1–4 的原案要求项无一未完成。** 本轮新发现的 NEW-A（Phase 2 schema 瑕疵）与
+NEW-D（Phase 4 失效矩阵缺口）均已按用户裁决的推荐方案**直接修复**（见 4.2 处置结果）。
+唯一保持"仅记录"的是 NEW-C（`cmd_journey_setup.go` 在 Go 1.26.5 下的 gofmt 差异）——非本次改动引入的
+既有 N14，CI 用 Go 1.25.1 绿，留待"Go 1.26 升级"专项。
 
 ---
 
@@ -302,11 +305,11 @@
 
 | 编号 | 问题 | 严重度 | 处置 |
 |---|---|:---:|:---:|
-| **NEW-A** | `journeys/details/j-<id>.json` 的 step `usage` 子对象序列化 Go 字段名（`In`/`Out`/`CacheRead`/`CacheWrite`/`Reasoning`），与其余全 snake_case 的切片 schema 不一致；N15 守卫（denylist）未覆盖 | 低-中（一致性 / 守卫盲区，无功能破坏） | ⚖️ 记录待裁决（建议修） |
+| **NEW-A** | `journeys/details/j-<id>.json` 的 step `usage` 子对象序列化 Go 字段名（`In`/`Out`/`CacheRead`/`CacheWrite`/`Reasoning`），与其余全 snake_case 的切片 schema 不一致；N15 守卫（denylist）未覆盖 | 低-中（一致性 / 守卫盲区，无功能破坏） | ✔️ **已按推荐方案 A 修复**（commit `c9f1f3a`） |
 | **NEW-B** | `story→journey` 更名遗漏 "story half" 描述短语：9 处 doc 注释 + `dispatchDefaultSuite` 的 `fmt.Errorf("analyze (story half)")`（唯一用户可见），T-A/N9 曾声称"全仓 55 文件已清理" | 低（一致性；一处用户可见错误串） | ✔️ **已直接修复**（commit `8a35c0b`） |
 | **NEW-C** | `cmd/vmr/cmd_journey_setup.go` 在 Go 1.26.5 下非 gofmt-canonical（尾随注释对齐规则变化）；`go.mod` 声明 1.25.1，CI 用 1.25 | 极低（工具链版本差；CI 绿） | 仅记录，不修（属"仓库升级 Go 1.26"专项） |
-| **NEW-D** | L2 缓存命中时 `macro/finance.json` 的 provider 配额区块被冻结在上次全量运行时刻——L2 指纹不含 `vmr-quota.json` 内容哈希，也不含 wall-clock；同批日志隔时重跑（配额周期滚动 / 其间路由过流量）→ §2.5 账户消耗表与 `finance.json` 给出过期的配额进度与已用量 | 中（分析半区展示视图失准；路由半区权威记账不受影响） | ⚖️ 记录待裁决（建议修） |
-| **NEW-E** | `_eval/calibrate_p1b.go`（tracked，但 `_` 前缀目录 → `go build/test ./...` 与 CI 均不含）仍用 `story` import 别名 + `internal/story/llm_findings.go` 路径引用 | 极低（不编译、不测试、不发布的校准脚本） | 仅记录 |
+| **NEW-D** | L2 缓存命中时 `macro/finance.json` 的 provider 配额区块被冻结在上次全量运行时刻——L2 指纹不含 `vmr-quota.json` 内容哈希，也不含 wall-clock；同批日志隔时重跑（配额周期滚动 / 其间路由过流量）→ §2.5 账户消耗表与 `finance.json` 给出过期的配额进度与已用量 | 中（分析半区展示视图失准；路由半区权威记账不受影响） | ✔️ **已按推荐方案 A 修复**（commit `fa74e04`） |
+| **NEW-E** | `_eval/calibrate_p1b.go`（tracked，但 `_` 前缀目录 → `go build/test ./...` 与 CI 均不含）仍用 `story` import 别名 + `internal/story/llm_findings.go` 路径引用 | 极低（不编译、不测试、不发布的校准脚本） | ✔️ 随 Phase C 一并清理（commit `8cf1fe8`） |
 
 ### 4.2 详述（问题、根因、建议方案、ROI）
 
@@ -317,7 +320,8 @@
 - **建议方案**（推荐 A）：
   - **A**：给 `chatmsg.Usage` 字段加 json tag（`in`/`out`/`cache_read`/`cache_write`/`reasoning`）。Go unmarshal 大小写不敏感回退，旧 `.cache/parse` 与旧 journey JSON 仍可读入，无需 bump 解析器版本。连带：`journey-viewer.html` 改读 `usage.in`/`usage.out`；N15 守卫 denylist 增 `usage.In`/`usage.Out`；`UPDATE_GOLDEN=1` 重生 `internal/journey`（及可能 `internal/ctxgraph`/`internal/report`）golden，逐一 diff 确认仅键名变化。机械但跨 2–3 包 golden。
   - **B**：仅在 `structure.go` 用本地 `stepUsage` 结构体（snake_case tag）替换内嵌 `chatmsg.Usage`，build 时转换。blast radius 收敛到 journey 包，但多一个平行类型。
-- **ROI**：中低。当前不影响任何产物正确性与自带看板；收益是切片契约一致性 + 补上守卫盲区，利于第三方看板与未来维护者。建议作为一次独立小改动（含 golden 重生）。
+- **ROI**：中低。当前不影响任何产物正确性与自带看板；收益是切片契约一致性 + 补上守卫盲区，利于第三方看板与未来维护者。
+- **处置结果（commit `c9f1f3a`，按推荐方案 A）**：`chatmsg.Usage` 五字段加 json tag `in`/`out`/`cache_read`/`cache_write`/`reasoning`；`ctxgraph.CacheSchemaVersion` 7→8（同一 shape 也出现在 `.cache/parse` 的 Manifest，改序列化形态必须 bump + 更新 `TestManifestJSONGolden`）；`journey-viewer.html` 改读 `usage.in`/`usage.out`，N15 守卫 denylist 增 `usage.In`/`usage.Out`、want 增 `usage.in`/`usage.out`，`js_test.go` 沙箱 fixture 同步。旧快照与旧 `.cache/parse`（键为 `"In"`）仍可读入（Go unmarshal 大小写不敏感回退）。journey VM golden 无需重生（ViewModel 层不透传 raw step `usage`）。实跑确认新 `j-<id>.json` step usage = `{"in":53182,"out":629,"cache_read":44800,"cache_write":0,"reasoning":0}`。`go test ./...` + `-race` 全绿。
 
 #### NEW-D：L2 缓存命中时配额记账冻结
 
@@ -329,7 +333,8 @@
   - **A'（更彻底）**：把 `period_elapsed_pct` 这类"as-of-now"派生值从切片里剔除，切片只存 `period_start`/`period_ends_at`（事实），渲染侧按 `manifest.generated_at` 或 live now 现算 elapsed%——符合 D12「只是原样透传的字段不该存在」。已用量仍需 A 的指纹修法。
   - **B（低成本兜底）**：在 `KNOWN_ISSUES` 登记为已知局限——L2 命中时配额记账是"上次全量运行时的快照"，要实时数据用 `-no-cache` 或路由半区 `/status`；§2.5 表脚注注明快照时刻。
   - **C（不推荐）**：配额区块每次运行现算、绕过 L2——违反"整套产物一个指纹"。
-- **ROI**：中。修 A 约 1 处指纹入参 + 1 个定向测试；A' 另需触及切片 schema + 渲染侧 + golden；B 是几行文档。是否值得取决于对"L2 命中时配额可陈旧"的容忍度——如果 §2.5 是用户实际盯的表，建议 A。
+- **ROI**：中。修 A 约 1 处指纹入参 + 1 个定向测试；A' 另需触及切片 schema + 渲染侧 + golden；B 是几行文档。
+- **处置结果（commit `fa74e04`，按推荐方案 A）**：`computeTargetL2` 在 `configHasQuotaLimits(r)` 为真（任一 provider 声明了 `quota.limits`）且 `<log_dir>/vmr-quota.json` 存在时，把该文件内容 sha256 并入 L2 输入哈希集（复用 `report.ComputeInputHashes`，与审计文件同一口径）。**只在配了 quota 的部署生效** —— quota-less 配置的指纹完全不变，既有 L2 缓存不失效。副作用：路由半区活跃承接流量时，对同批历史日志反复 `analyze` 会频繁 L2 miss（配额计数器确实在动，§2.5 本就该重算）—— 刻意的保守失效。新增守卫 `TestAnalyzeCache_QuotaJSONInvalidatesL2` 双向钉死（quota 配置下 quota.json 变化 → digest 变；quota-less 配置下 quota.json 变化 → digest 不变）。`KNOWN_ISSUES` 已登记该行为与其 `period_elapsed_pct` 剩余边界（A' 属独立低优改进，未做）。`go test ./...` + `-race` 全绿；`./vmr check -c config.yaml` 通过。
 
 ### 4.3 关于 §11.2 已知取舍的挑战
 
@@ -343,8 +348,9 @@ Phase A 为深度串行的源码核验，无正交可并行任务集；唯一直
 
 ## 第五部分 · 真实数据与真实 LLM 端到端验收测试（Phase B）
 
-Phase A 结论：方案 D1–D21 + Phase 1–4 实质正确落地，仅 2 项**新发现**（NEW-A 低-中 / NEW-D 中）待裁决，
-1 项当场修复（NEW-B）。**无阻塞性大问题**，据此执行 Phase B 端到端验收。
+Phase A 结论：方案 D1–D21 + Phase 1–4 实质正确落地。新发现 NEW-A（低-中）/ NEW-D（中）
+先记录、后按用户裁决的推荐方案修复（`c9f1f3a` / `fa74e04`）；NEW-B 当场修复。
+**无阻塞性大问题**，据此执行 Phase B 端到端验收。
 
 ### 5.1 执行环境
 
@@ -390,23 +396,23 @@ Phase A 结论：方案 D1–D21 + Phase 1–4 实质正确落地，仅 2 项**�
 | **B-05** render-only（zh） | ✅ 通过 | B-01..04 累积后（含 benchmark + 2 组 compare + 2 处 LLM record）`-render-only -no-cache` 产物与源 `diff -rq` **逐字节一致**（除 `.cache/`）；LLM 段从 JSON 恢复，`cmd_render_only.go` 无 `## LLM` 刮取。 |
 | **B-06** 英文变体（抽测） | ✅ 通过（发现 1 处，已修） | 默认套件 + benchmark，`-lang en`；`manifest.lang=en`；`vmr-report.md` / `journeys/index.md` 全英文 chrome，用户 prompt 内容 passthrough 不译（正确）。**发现 NEW-F**：`journeys/benchmarks.md` H1 = "Journey Corpus Report" —— 退役术语泄漏进产物标题，已直接修复。 |
 | **B-07** 冷热一致 + `-no-cache`（单日 08-24） | ✅ 通过 + 发现 NEW-D | L2 命中实测（"L2/L3 缓存命中"提示）；`TestAnalyzeCache_ColdWarmAndNoCache`（1e-6 容差）绿。**发现 NEW-D**：L2 命中时 `finance.json` 的 provider 配额区块（`period_start/ends_at/elapsed_pct` + 已用量）被冻结在上次全量运行时刻——`vmr-quota.json` 内容与 wall-clock 不在 L2 指纹里。 |
-| **B-08** 看板真实数据渲染 | ✅ 通过 | Node 沙箱喂 `reports/` 真实切片：`summary`/`finance`/`reliability`/`context-efficiency`/`requests` 全 snake_case、类型正确；`success_rate` 全精度；`FmtCurrency(1.23,'CNY')` = `¥1.23`（F12）；`versionBehavior` 纯函数三分支正常；`benchmarks.journey_count`；journey `bodies` blob 表。**确认 NEW-A**：step `usage` 子对象键 = `[In,Out,CacheRead,CacheWrite,Reasoning]`（PascalCase，`journey-viewer.html` 恰好按此读，无功能破坏）。`TestAllDashboardPages_ReadSnakeCaseFields` + `TestJS_DashboardRenderSmoke` 全绿。 |
+| **B-08** 看板真实数据渲染 | ✅ 通过 | Node 沙箱喂 `reports/` 真实切片：`summary`/`finance`/`reliability`/`context-efficiency`/`requests` 全 snake_case、类型正确；`success_rate` 全精度；`FmtCurrency(1.23,'CNY')` = `¥1.23`（F12）；`versionBehavior` 纯函数三分支正常；`benchmarks.journey_count`；journey `bodies` blob 表。**确认 NEW-A**：step `usage` 子对象键当时为 `[In,Out,CacheRead,CacheWrite,Reasoning]`（PascalCase，`journey-viewer.html` 恰好按此读，无功能破坏）——已修（`c9f1f3a`，最终快照重生后为 `[in,out,cache_read,cache_write,reasoning]`）。`TestAllDashboardPages_ReadSnakeCaseFields` + `TestJS_DashboardRenderSmoke` 全绿。 |
 | **B-09** 大输入生存性（44 MB） | ✅ 通过 | `logs/vmr-audit-2026-07-16.jsonl.zst`（1815 records）：不 OOM、不崩、产物拓扑完整、manifest format=11、`-no-cache` 亦通过；耗时 ~2 分钟。 |
 | **B-10** 内容复核 | ✅ 通过 | `vmr-report.md` §0–§8 + 附录结构完整、合计/覆盖率/置信度标记（⭐¹⚠️low-n）自洽、§8 指向 `requests/index.json` + `request-browser.html`（无 `vmr-requests.md`）；`journeys/index.md` H1 = "VMR Journey 索引"，16→46 候选分类分组正确；**1459 个 journey→详单/证据/index/report 导航链接全部可解析（0 断链）**——N-B1 在真实数据下彻底闭环；`compare-*.md` 结构完整、两段 LLM 解读渲染正常。唯一发现是 `benchmarks.md` H1 术语（NEW-F，已修）。 |
 
 **Phase B 总判断**：方案落地的功能特性在真实多日日志 + 真实 LLM 下按预期生成。
 产物拓扑 / 权限 / 字节一致性 / 缓存失效 / 语言继承 / 看板渲染 / LLM 解读持久化 / 跨命令数据保护
-均无实质错误。**新发现 NEW-F（已修）；NEW-D 在此轮暴露（Phase A 已记录，待裁决）；NEW-A 再次确认（待裁决）。**
+均无实质错误。**新发现 NEW-F（已修）；NEW-D 在此轮 B-07 暴露实证；NEW-A 在 B-08 二次确认。三者均已修复。**
 
 ### 5.4 验收测试中发现的问题与处置
 
 | 编号 | 问题 | 严重度 | 处置 |
 |---|---|:---:|:---:|
-| **NEW-F** | `journeys/benchmarks.md` 的 H1 渲染 "# Journey Corpus Report" / "# Journey 语料统计报告"——§2.2 明确 `corpus`→`Journey Benchmarks`，文件名/flag/包名都改了，唯独渲染产物标题没改；`benchmarks_test.go` 把旧标题当正确基线锁定（与 N-B1 同类的"守卫锁死错误基线"） | 低（术语；无功能破坏） | ✔️ **已直接修复**（commit `e18dba8`）：EN → `# Journey Benchmarks`，ZH → `# Journey 基准统计报告`，测试断言与 2 处 test 报错串同步更新 |
-| **NEW-D** | （详见第四部分 4.2）L2 命中时配额记账冻结 | 中 | ⚖️ 记录待裁决（Phase A 已详述，Phase B 中在 B-07 暴露实证） |
-| **NEW-A** | （详见第四部分 4.2）step `usage` 子对象 PascalCase | 低-中 | ⚖️ 记录待裁决（Phase A 已详述，Phase B 中在 B-08 二次确认） |
+| **NEW-F** | `journeys/benchmarks.md` 的 H1 渲染 "# Journey Corpus Report" / "# Journey 语料统计报告"——§2.2 明确 `corpus`→`Journey Benchmarks`，文件名/flag/包名都改了，唯独渲染产物标题没改；`benchmarks_test.go` 把旧标题当正确基线锁定（与 N-B1 同类的"守卫锁死错误基线"） | 低（术语；无功能破坏） | ✔️ **已直接修复**（commit `e18dba8`）：EN → `# Journey Benchmarks`，ZH → `# Journey 基准统计报告` |
+| **NEW-D** | （详见第四部分 4.2）L2 命中时配额记账冻结 | 中 | ✔️ **已按推荐方案 A 修复**（commit `fa74e04`，+ 定向守卫 + `KNOWN_ISSUES` 登记） |
+| **NEW-A** | （详见第四部分 4.2）step `usage` 子对象 PascalCase | 低-中 | ✔️ **已按推荐方案 A 修复**（commit `c9f1f3a`，+ N15 守卫补 `usage.In`/`usage.Out`） |
 
-> Phase B 未发现任何**新增的**行为、数据正确性或安全层面的缺陷。NEW-A/NEW-D 均为 Phase A 已记录项在真实数据下的确证。
+> Phase B 未发现任何**新增的**行为、数据正确性或安全层面的缺陷。NEW-A/NEW-D 是 Phase A 已记录项在真实数据下的确证，二者连同 NEW-F 均已在本轮修复闭环。
 
 ### 5.5 报告目录导览（`reports/` — 供人工复核）
 
@@ -420,7 +426,7 @@ Phase A 结论：方案 D1–D21 + Phase 1–4 实质正确落地，仅 2 项**�
 | `reports/manifest.json` | 全套快照准入令牌 | `format=11`；`slices` 列 8 份（5 macro + journeys/index + benchmarks + requests/index）的 sha256；`generated_at` 双字段；`footnotes`(6)/`disclaimers`(3) 注册表；`time_range` 跨 08-22..08-25 |
 | `reports/vmr-report.md` | B-01 宏观报告（§0–§8 + 附录） | 人读主入口。§2.5 账户消耗（标准价目表，无 quota 对照列时为降级）；§7 工具浪费；§8 指向 `requests/index.json` + `request-browser.html`；附录如实披露自指流量排除 56 条 |
 | `reports/macro/summary.json` | B-01 总览切片 | `overall` 全指标 + `highlights` + `meta` 溯源；`success_rate` 全精度 raw（N-B5） |
-| `reports/macro/finance.json` | B-01 成本切片 | `by_model`/`by_client`/`providers` + `cost_coverage` + `pricing.currency`；**provider 配额区块在 L2 命中时可陈旧（NEW-D）** |
+| `reports/macro/finance.json` | B-01 成本切片 | `by_model`/`by_client`/`providers` + `cost_coverage` + `pricing.currency`；provider 配额区块（NEW-D 修复后 `vmr-quota.json` 进 L2 指纹，L2 命中不再陈旧；`period_elapsed_pct` 仍为 as-of 生成时刻，见 `KNOWN_ISSUES`） |
 | `reports/macro/{reliability,workloads,context-efficiency}.json` | B-01 可用性 / 负载 / 上下文效率切片 | 端点可用率、失败分类、按日/时段分布、会话膨胀、compaction、工具 schema 浪费 |
 | `reports/requests/index.json` | B-01 请求明细机读单一真源（1521 行） | 每行 `ts`(epoch ms) + `ts_display` + `detail_file`(`r-` 前缀) + `req` 坐标；`sessions` / `journey_link` 投影 |
 | `reports/requests/failed.{md,jsonl}` | B-01 排障入口（29 条） | 故障聚类；引子指向 `requests/index.json`（N-B3 修复后） |
