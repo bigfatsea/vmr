@@ -680,6 +680,23 @@ func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.
 	}
 
 	jsonPath := filepath.Join(detailsDir, base+".json")
+	// If the caller did not supply new LLM results (e.g. ensureJourneyFile
+	// called during -compare, or a re-render without -llm-addr), preserve
+	// any existing LLM interpretation/findings on disk so an expensive LLM
+	// run is not silently clobbered.
+	if llmInterp == nil && len(llmFindings) == 0 {
+		if existingBytes, err := os.ReadFile(jsonPath); err == nil {
+			var existing journey.JourneySummary
+			if err := json.Unmarshal(existingBytes, &existing); err == nil {
+				if existing.LLMInterpretation != nil {
+					llmInterp = existing.LLMInterpretation
+				}
+				if len(existing.LLMFindings) > 0 {
+					llmFindings = existing.LLMFindings
+				}
+			}
+		}
+	}
 	summary := journey.NewJourneySummary(j, m, findings, llmFindings, cost, llmInterp)
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {

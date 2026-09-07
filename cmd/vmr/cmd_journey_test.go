@@ -1408,3 +1408,68 @@ func TestCmdAnalyze_BatchRendersIncludeCost(t *testing.T) {
 		t.Errorf("summary.Cost.PricedSteps = %d, want 2", summary.Cost.PricedSteps)
 	}
 }
+
+// TestCmdAnalyze_ComparePreservesExistingJourneyLLMInterpretation verifies that
+// when ensureJourneyFile runs during -compare, any pre-existing LLM interpretation
+// in a journey's .json/.md is preserved rather than overwritten with nil.
+func TestCmdAnalyze_ComparePreservesExistingJourneyLLMInterpretation(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "这是 journey 的持久化解读内容。"}},
+			},
+		})
+	}))
+	defer ts.Close()
+	addr := strings.TrimPrefix(ts.URL, "http://")
+
+	outDir := filepath.Join(t.TempDir(), "out")
+	path, idA, idB := writeTwoCandidateJourneys(t, outDir)
+
+	// Step 1: Run -journey with LLM on idA.
+	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-o", outDir, path}); err != nil {
+		t.Fatalf("cmdAnalyze -journey with LLM: %v", err)
+	}
+
+	jsonPathA := filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)[:len(journey.JourneyReportFile(idA))-3]+".json")
+	mdPathA := filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA))
+
+	dataA, err := os.ReadFile(jsonPathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sumA journey.JourneySummary
+	if err := json.Unmarshal(dataA, &sumA); err != nil {
+		t.Fatal(err)
+	}
+	if sumA.LLMInterpretation == nil || sumA.LLMInterpretation.Text != "这是 journey 的持久化解读内容。" {
+		t.Fatalf("idA missing LLM interpretation before compare: %+v", sumA.LLMInterpretation)
+	}
+
+	// Step 2: Run -compare idA,idB (which triggers ensureJourneyFile on both sides).
+	if err := cmdAnalyze([]string{"-compare", idA + "," + idB, "-o", outDir, path}); err != nil {
+		t.Fatalf("cmdAnalyze -compare: %v", err)
+	}
+
+	// Step 3: Verify that idA's LLMInterpretation is STILL preserved in both .json and .md!
+	dataA2, err := os.ReadFile(jsonPathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sumA2 journey.JourneySummary
+	if err := json.Unmarshal(dataA2, &sumA2); err != nil {
+		t.Fatal(err)
+	}
+	if sumA2.LLMInterpretation == nil || sumA2.LLMInterpretation.Text != "这是 journey 的持久化解读内容。" {
+		t.Fatalf("idA LLM interpretation was clobbered by -compare: %+v", sumA2.LLMInterpretation)
+	}
+
+	mdA2, err := os.ReadFile(mdPathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mdA2), "这是 journey 的持久化解读内容。") {
+		t.Errorf("idA markdown lost LLM section after -compare:\n%s", mdA2)
+	}
+}
