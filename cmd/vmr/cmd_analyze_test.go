@@ -71,7 +71,7 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 
 // TestCmdAnalyze_ReportLinksStoriesOnFirstCall locks in the story-before-
 // report ordering inside cmdAnalyze: vmr-report.md must link to
-// stories/vmr-stories.md (P6.2a) after a SINGLE `vmr analyze` call, not
+// journeys/index.md (P6.2a) after a SINGLE `vmr analyze` call, not
 // only from a second run onward — the ordering choice cmd_analyze.go's
 // own comment explains (report.Markdown only links the index when it
 // already exists at render time).
@@ -101,7 +101,7 @@ func TestCmdAnalyze_ReportLinksStoriesOnFirstCall(t *testing.T) {
 // TestCmdAnalyze_ShareSameOutputDefault covers the "same -o for both
 // halves, without the user having to pass it twice" half of P6.5 — no -o
 // at all still lands both halves' products in the same place, since both
-// cmdReport and cmdStory independently fall through to the identical
+// report and journey halves independently fall through to the identical
 // "reports" default.
 func TestCmdAnalyze_ShareSameOutputDefault(t *testing.T) {
 	dir := t.TempDir()
@@ -500,7 +500,7 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 
 // TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly covers P9.1: a zoom
 // selector routes into that one story-side view and does NOT also run the
-// macro report half — "选中其一时行为等价于今天 vmr story 的对应模式", not
+// macro report half — behavior is equivalent to the targeted zoom mode, not
 // the default suite with an extra filter.
 func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
@@ -546,9 +546,9 @@ func TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly(t *testing.T) {
 
 // TestCmdAnalyze_SelectorsAreMutuallyExclusive and
 // TestCmdAnalyze_RenderAllRejectsSelector cover the CLI-level validation
-// cmdAnalyze adds on top of what cmdStory already enforced (P9.1's design:
+// cmdAnalyze adds on top of what the journey half already enforced (P9.1's design:
 // fail loud on a combination that looks like a mistake, rather than
-// silently letting one selector win, the way pre-P9 cmdStory did for
+// silently letting one selector win, the way pre-P9 journey CLI did for
 // -journey + -render-all together).
 func TestCmdAnalyze_SelectorsAreMutuallyExclusive(t *testing.T) {
 	path := writeJourneyJSONL(t, []audit.Record{journeyRec(time.Now(), []any{journeyMsg("user", "x")}, journeySSE("y"))})
@@ -719,7 +719,7 @@ func TestCmdAnalyze_WritesSkeletonPages(t *testing.T) {
 }
 
 // TestCmdAnalyze_LLMAddrRejectedInDefaultSuite covers the batch-mode
-// -llm-addr rejection cmdStory already enforced for -render-all/-corpus —
+// -llm-addr rejection already enforced for -render-all/-benchmark —
 // cmdAnalyze's default suite is the equivalent batch shape and must reject
 // it the same way (one LLM call per journey makes no sense against a
 // suite-wide render).

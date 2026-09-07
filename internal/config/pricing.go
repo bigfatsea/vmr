@@ -213,7 +213,7 @@ func firstDeadOverride(rules []pricing.OverrideRule) int {
 // validates the block structurally (aliases resolve against the standard
 // table, rates are well-formed, no dead overrides) and converts that
 // provider's rates to USD once via its own pricing.currency — building
-// ProviderPricingPolicies for `vmr report`'s offline resolution
+// ProviderPricingPolicies for `vmr analyze`'s offline resolution
 // (internal/pricing.Resolver). Nothing here touches routing or quota:
 // pricing never reaches the request path (see core.PricingSpec's doc
 // comment) — this whole pass exists solely for report's $ estimates and
@@ -284,7 +284,7 @@ func (c *Config) resolvePricing() error {
 
 // PricingTable returns the merged generated+curated standard table — the
 // same table resolvePricing() builds internally, exposed here for
-// `vmr report`'s composition root (cmd/vmr/cmd_report.go), which pairs it
+// `vmr analyze`'s composition root (cmd/vmr/cmd_report.go), which pairs it
 // with ProviderPricingPolicies to build a pricing.Resolver. Safe to call
 // even when validate() hasn't run (returns a freshly loaded table);
 // returns the cached value once validate() has (the common case, once per

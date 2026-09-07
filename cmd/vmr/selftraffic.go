@@ -4,7 +4,7 @@
 // calls route back through this same VMR instance and land in the audit
 // log like any other request. Their cost/tokens are the analysis tool's
 // own overhead, not the workload being analyzed — the architecture doc's
-// §9 risk #1 calls this out by name: it pollutes both `vmr report`'s cost
+// §9 risk #1 calls this out by name: it pollutes both `vmr analyze`'s cost
 // report and `vmr analyze -benchmark`'s aggregate stats.
 //
 // The identification rule is defined exactly once, here, and consumed by
@@ -25,10 +25,10 @@ import (
 // a self-analysis call carries in the audit log — plus any explicitly
 // configured report.yaml self_traffic_client_tags (for the edge case where
 // -llm-addr traffic was generated under a different/rotated credential).
-// llmKey == "" contributes nothing (most `vmr report`/`vmr analyze
+// llmKey == "" contributes nothing (most `vmr analyze
 // -macro-only` runs never resolve one at all — cmd_report.go's -llm-key
 // flag, added P15.3, only ever identifies PAST self-analysis traffic to
-// exclude; `vmr report` never makes a new LLM call itself).
+// exclude; `vmr analyze` never makes a new LLM call itself).
 // Returns nil (not an empty map) when there is nothing to exclude, so
 // callers can pass it straight through as "exclude nothing" without a
 // separate nil check.

@@ -109,7 +109,7 @@ func exchangeRateLine(cfg *config.Config) (string, bool) {
 // the request path (see core.PricingSpec's doc comment), so there is no
 // "resolved per-endpoint rate" to show the way an older build did — the
 // full resolution (standard table + this account's rates/aliases) only
-// happens offline, in `vmr report`/`vmr analyze`.
+// happens offline, in `vmr analyze`.
 func printProviderPricing(w io.Writer, p config.Provider) {
 	if p.Pricing == nil {
 		return
@@ -141,7 +141,7 @@ func ratePart(v *float64) string {
 	// %.6g rather than %g: a rate that went through an exchange-rate
 	// multiplication (e.g. 3.0 USD x 7.1) routinely lands on a float64 like
 	// 21.299999999999997 — cosmetic noise for a display line, not a value
-	// anything downstream computes from (vmr report's pricing.Resolver
+	// anything downstream computes from (vmr analyze's pricing.Resolver
 	// reads the pricing.Rate directly, never this formatted string).
 	return strconv.FormatFloat(*v, 'g', 6, 64)
 }

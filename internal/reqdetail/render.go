@@ -74,8 +74,8 @@ const renderTemplateVersion = 2
 // two caller-injected Manifests (their Req coordinates, "-" when nil).
 // m/prev are part of the fingerprint because Render's output depends on
 // them (delta highlight, history folding, the prev-turn link) while the
-// filename does not — the exact gap that let `vmr report` and `vmr story`
-// pass DIFFERENT m/prev for the same record and have whichever command ran
+// filename does not — the exact gap that let the macro report and journey halves
+// pass DIFFERENT m/prev for the same record and have whichever ran
 // second silently skip, first-writer-wins. Written as the
 // page's first line (an HTML comment, invisible when rendered) so
 // EnsureRendered's existence check can read just this one line — via

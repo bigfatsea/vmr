@@ -3,7 +3,7 @@
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. This package
 // itself only records and provides shared low-level reading (OpenLogFile,
-// ForEachLine) — aggregation (`vmr report`) and request reconstruction
+// ForEachLine) — aggregation (`vmr analyze`) and request reconstruction
 // (`vmr replay`) build on top of it, in their own packages, alongside
 // whatever external scripts (jq, DuckDB, …) also read these files directly.
 package audit
@@ -26,7 +26,7 @@ import (
 // retentionDays gates the delete side of housekeeping (see housekeep.go).
 // 0 = disabled: compression on rotation still happens, files just never get
 // deleted. Deliberately opt-in rather than defaulting to a "reasonable"
-// number — audit logs are the only source for vmr report cost accounting,
+// number — audit logs are the only source for vmr analyze cost accounting,
 // and silently deleting them is not a mistake worth defaulting into.
 var retentionDays atomic.Int64
 
@@ -459,7 +459,7 @@ func mask(v string) string {
 const keyTagLen = 8
 
 // KeyTag derives a short, non-secret label from a credential's tail — the
-// caller-facing "who sent this" identity for `vmr report` grouping. Called
+// caller-facing "who sent this" identity for `vmr analyze` grouping. Called
 // on a matched config.APIKeys entry, and (server.authenticate, when
 // APIKeys is not configured at all) on whatever unvalidated value a
 // client voluntarily sends — KeyTag itself doesn't care which; either way

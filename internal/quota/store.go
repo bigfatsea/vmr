@@ -201,7 +201,7 @@ func (r *Registry) Flush() (err error) {
 	return nil
 }
 
-// Bucket represents a snapshot of quota state exported for offline consumers (vmr report's
+// Bucket represents a snapshot of quota state exported for offline consumers (vmr analyze's
 // §2.5 quota-vs-consumption table via LoadFile) — the JSON tags are shared
 // verbatim with the unexported bucket this package uses in memory and on
 // disk, per store.go's own "there is exactly one shape" rule (see
@@ -226,7 +226,7 @@ func (b Bucket) PeriodStartTime() time.Time {
 
 // LoadFile reads path (a vmr-quota.json) and returns its accounts read-only,
 // without constructing a Registry, taking any lock, or ever writing back —
-// the shape an offline consumer like `vmr report` needs, as opposed to
+// the shape an offline consumer like `vmr analyze` needs, as opposed to
 // Registry.Load's in-place mutation of a live Registry. A missing file
 // returns (nil, nil): the normal case for an instance that hasn't
 // accumulated any quota state yet, or whose log_dir was never wired up with

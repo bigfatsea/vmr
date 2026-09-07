@@ -954,7 +954,7 @@ func TestRespStream_UndecidedOverflowDegradesToOpaque(t *testing.T) {
 // the whole-body path — content still comes through correct and complete
 // (model rewritten, no corruption), just without incremental streaming.
 // The only observable difference from a plain buffered response should be
-// the crlf_framing_suspected marker, added purely for `vmr report`
+// the crlf_framing_suspected marker, added purely for `vmr analyze`
 // visibility into why this response never streamed.
 func TestRespStream_CRLFFramingSuspectedAtEOF(t *testing.T) {
 	t.Parallel()

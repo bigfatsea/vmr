@@ -11,7 +11,7 @@
 // which validates every provider's pricing: block at config-validate time
 // (structural checks only — no runtime charging depends on this anymore,
 // see core.PricingSpec's doc comment); and cmd/vmr/cmd_report.go, which
-// resolves the same tables for vmr report's offline $ estimates. Neither
+// resolves the same tables for vmr analyze's offline $ estimates. Neither
 // internal/report nor internal/router imports this package directly for
 // report's case — cmd is the composition root that reads config.yaml,
 // resolves pricing, and hands report a plain value (see
@@ -35,7 +35,7 @@ import (
 // Rate this package produces is USD-denominated (see Table's doc comment).
 // A nil field means "unknown" (absent from the source data), NOT "free" —
 // an explicit *float64 pointing at 0.0 is how "free" is spelled. This
-// distinction matters for Complete/MissingComponents, which vmr report's
+// distinction matters for Complete/MissingComponents, which vmr analyze's
 // incomplete-rate labeling (internal/report/cost.go) uses to avoid silently
 // treating an unknown component as free.
 type Rate struct {
@@ -331,7 +331,7 @@ func Merge(base, overlay *Table) *Table {
 	out := NewTable()
 	if base != nil {
 		// GeneratedAt travels with base (the generated table, whose
-		// freshness is the signal callers like vmr report's §2 appendix
+		// freshness is the signal callers like vmr analyze's §2 appendix
 		// render — see internal/report/pricing.go's Pricing.Disclaimer);
 		// overlay is the hand-maintained curated table, with no meaningful
 		// generation date of its own.
@@ -404,7 +404,7 @@ type RateRow struct {
 // entry isn't a finite positive number — deliberately no indirect
 // CCY->CCY chaining beyond the one USD hop: every currency this package
 // deals with (a curated row's native currency, a provider's
-// pricing.currency, vmr report's display currency) has a well-known USD
+// pricing.currency, vmr analyze's display currency) has a well-known USD
 // cross-rate, so a general multi-hop graph would be unneeded complexity.
 // Exported: internal/config uses this directly to convert a provider's
 // pricing.rates components into USD at validate time.

@@ -128,7 +128,7 @@ func TestFinalMessage_UnrecognizedShape(t *testing.T) {
 // reasoning summary, and tool calls alike — not silently dropped as an
 // "unrecognized shape". Before this fix FinalMessage only knew "choices"
 // (openai) and "content" (anthropic), so every Responses-protocol response
-// vmr report/vmr story tried to summarize came back ok=false.
+// vmr analyze tried to summarize came back ok=false.
 func TestFinalMessage_ResponsesOutputArray(t *testing.T) {
 	t.Parallel()
 	body := map[string]any{

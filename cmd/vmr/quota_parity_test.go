@@ -1,6 +1,6 @@
 // Ver 2026-08-13 14:40, by Opus 5
 
-// Differential test: `vmr report` §2.5's recomputed "window consumed" column
+// Differential test: `vmr analyze` §2.5's recomputed "window consumed" column
 // vs. what internal/router ACTUALLY charged for the same traffic.
 //
 // Why this lives in cmd/vmr and not internal/report: internal/archtest
@@ -195,7 +195,7 @@ func routerCharged(t *testing.T, reqs []parityRequest, provider string, spec *co
 	return quota.BaseAmount(l, c)
 }
 
-// reportWindowConsumed runs the real `vmr report` pipeline over the same
+// reportWindowConsumed runs the real `vmr analyze` macro report pipeline over the same
 // requests and returns §2.5's recomputed window-consumed figure.
 func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, ts time.Time) float64 {
 	t.Helper()
@@ -204,7 +204,7 @@ func reportWindowConsumed(t *testing.T, reqs []parityRequest, provider string, t
 }
 
 // reportQuotaRow is reportWindowConsumed's full-row form: runs the real
-// `vmr report` pipeline over reqs against the config yamlFn produces, and
+// `vmr analyze` macro report pipeline over reqs against the config yamlFn produces, and
 // returns this provider's whole §2.5 row (the tokens tests also need
 // WindowEstimatedPct, not just the consumed figure).
 func reportQuotaRow(t *testing.T, reqs []parityRequest, provider string, ts time.Time, yamlFn func(logDir string) string) report.ProviderQuotaRow {
@@ -395,7 +395,7 @@ const softblockResp = `{"error":{"type":"content_policy"}}`
 // the router never charges at all, now expanded across all three protocols
 // plus the softblock case.
 //
-// The mix is the whole point. Before B0, `vmr report` counted only the
+// The mix is the whole point. Before B0, the macro report half counted only the
 // sniffed half and rendered the result as a precise number; the all-or-
 // nothing guard that existed ("every request unparseable → render -") never
 // fired on a window like this one, which is also the window real traffic

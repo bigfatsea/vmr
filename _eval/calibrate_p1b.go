@@ -9,10 +9,10 @@
 // the threshold logic, never calling story.ComputeLLMFindings (the actual
 // production entry point) at all.
 //
-// This version calls the real production path: story.ComputeLLMFindings
+// This version calls the real production path: journey.ComputeLLMFindings
 // against real Journeys reconstructed from real production audit logs
-// (logs/vmr-audit-*.jsonl[.zst], the same files vmr story already reads),
-// through the same -llm-addr/-llm-model config vmr story -compare/-journey
+// (logs/vmr-audit-*.jsonl[.zst], the same files vmr analyze already reads),
+// through the same -llm-addr/-llm-model config vmr analyze -compare/-journey
 // uses — an already-running VMR instance, no separate wiring.
 //
 // What it deliberately does NOT do: fabricate a Precision/Recall number.
@@ -44,9 +44,9 @@ import (
 )
 
 func main() {
-	addr := flag.String("llm-addr", "", "host:port of an already-running VMR instance — same flag vmr story -llm-addr takes")
-	model := flag.String("llm-model", "agent", "that instance's virtual model name, sent verbatim — same as vmr story -llm-model")
-	key := flag.String("llm-key", "", "bearer token, only if that instance has api_keys configured — same as vmr story -llm-key")
+	addr := flag.String("llm-addr", "", "host:port of an already-running VMR instance — same flag vmr analyze -llm-addr takes")
+	model := flag.String("llm-model", "agent", "that instance's virtual model name, sent verbatim — same as vmr analyze -llm-model")
+	key := flag.String("llm-key", "", "bearer token, only if that instance has api_keys configured — same as vmr analyze -llm-key")
 	input := flag.String("input", "logs/vmr-audit-*.jsonl*", "glob of real audit log files to sample Journeys from")
 	limit := flag.Int("limit", 12, "max Journeys to run through the 6 detectors (each Journey can cost up to 6 LLM calls)")
 	minSteps := flag.Int("min-steps", 4, "skip Journeys with fewer than this many Steps — too short to exercise the detectors")
@@ -54,7 +54,7 @@ func main() {
 	flag.Parse()
 
 	if *addr == "" {
-		fmt.Fprintln(os.Stderr, "error: -llm-addr is required — point it at an already-running VMR instance, exactly as `vmr story -llm-addr` does (this script never auto-starts one)")
+		fmt.Fprintln(os.Stderr, "error: -llm-addr is required — point it at an already-running VMR instance, exactly as `vmr analyze -llm-addr` does (this script never auto-starts one)")
 		os.Exit(2)
 	}
 	lang := i18n.EN

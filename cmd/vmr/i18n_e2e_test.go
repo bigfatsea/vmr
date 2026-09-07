@@ -95,13 +95,13 @@ func readReportMD(t *testing.T, outDir string) string {
 }
 
 // TestE2E_ReportDefaultsToEnglish covers the design's headline behavior
-// change: with no -lang and no report.yaml anywhere cmdReport looks,
+// change: with no -lang and no report.yaml anywhere analyze looks,
 // vmr-report.md renders in English.
 func TestE2E_ReportDefaultsToEnglish(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	md := readReportMD(t, outDir)
 	if !strings.Contains(md, "# VMR Usage Report") || !strings.Contains(md, "## §0 Summary") {
@@ -125,7 +125,7 @@ func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	md := readReportMD(t, outDir)
 	if !strings.Contains(md, "VMR 用量报告") || !strings.Contains(md, "§0 摘要") {
@@ -164,7 +164,7 @@ func TestE2E_ReportConfigFileZh(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	md := readReportMD(t, outDir)
 	if !strings.Contains(md, "VMR 用量报告") {
@@ -195,7 +195,7 @@ func TestE2E_ReportLangFlagOverridesConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-lang", "en", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	md := readReportMD(t, outDir)
 	if !strings.Contains(md, "# VMR Usage Report") {
@@ -210,7 +210,7 @@ func TestE2E_ReportInvalidLangFlag(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "fr", "-o", outDir, path}); err == nil {
-		t.Error("cmdReport -lang fr should return an error, not silently default")
+		t.Error("cmdAnalyze -macro-only -lang fr should return an error, not silently default")
 	}
 }
 
@@ -227,7 +227,7 @@ func TestE2E_ReportConfigFileInvalidLanguageDegradesToEnglish(t *testing.T) {
 	}
 	out := captureStdout(t, func() {
 		if err := cmdAnalyze([]string{"-macro-only", "-report-config", rcPath, "-o", outDir, path}); err != nil {
-			t.Fatalf("cmdReport: %v", err)
+			t.Fatalf("cmdAnalyze -macro-only: %v", err)
 		}
 	})
 	if !strings.Contains(out, "warning") {
@@ -266,7 +266,7 @@ func TestE2E_ReportExplicitConfigFileMissingIsError(t *testing.T) {
 	}()
 }
 
-// --- vmr story ---
+// --- vmr analyze -journey ---
 
 // e2eStoryFixture writes two independent two-turn journeys (distinct
 // opening instructions, so ListCandidates offers both — and ≥2 manifests
@@ -285,13 +285,13 @@ func e2eStoryFixture(t *testing.T) string {
 	return writeJourneyJSONL(t, []audit.Record{recA1, recA2, recB1, recB2})
 }
 
-// TestE2E_StoryRenderAllDefaultsToEnglish covers vmr story -render-all with
+// TestE2E_StoryRenderAllDefaultsToEnglish covers vmr analyze -render-all with
 // no -lang/report.yaml: journey-*.md must render in English.
 func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-render-all", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -render-all: %v", err)
+		t.Fatalf("cmdAnalyze -render-all: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
@@ -315,13 +315,13 @@ func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 	}
 }
 
-// TestE2E_StoryRenderAllLangZh covers -lang zh flowing through cmdStory into
+// TestE2E_StoryRenderAllLangZh covers -lang zh flowing through cmdAnalyze into
 // journey.BuildAll/RenderMarkdown.
 func TestE2E_StoryRenderAllLangZh(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-render-all", "-lang", "zh", "-o", outDir, path}); err != nil {
-		t.Fatalf("cmdStory -render-all: %v", err)
+		t.Fatalf("cmdAnalyze -render-all: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Join(outDir, "journeys", "details"))
 	if err != nil {
@@ -448,7 +448,7 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	reportPath := e2eReportFixture(t)
 	reportOut := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", reportOut, reportPath}); err != nil {
-		t.Fatalf("cmdReport: %v", err)
+		t.Fatalf("cmdAnalyze -macro-only: %v", err)
 	}
 	rep := readReportJSON(t, reportOut)
 	foundReport := false

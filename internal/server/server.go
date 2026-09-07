@@ -124,7 +124,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 // Self-declared tag, no config needed: when APIKeys is empty, the door
 // stays fully open, but whatever credential-shaped value the client chooses
 // to send still gets KeyTag-derived and recorded — a private-network caller
-// can identify itself to `vmr report` just by ending its own
+// can identify itself to `vmr analyze` just by ending its own
 // Authorization/x-api-key value in "-<label>", with zero vmr-side config.
 // A client sending nothing still gets "".
 //

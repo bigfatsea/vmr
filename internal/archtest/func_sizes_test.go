@@ -55,8 +55,8 @@ var funcLineExemptions = map[string]int{
 	"internal/replay/replay.go:Run":          160,
 	"cmd/vmr/cmd_start.go:cmdStart":          160,
 	"cmd/vmr/cmd_journey.go:compareJourneys": 125,
-	// cmdReport/cmdStory/cmdAnalyze themselves stay below the default limit
-	// once P9.1 (CLI convergence) pulled their linear pipelines out into
+	// cmdAnalyze itself stays below the default limit
+	// once P9.1 (CLI convergence) pulled its linear pipelines out into
 	// runReport/setupJourneyRun/dispatchAnalyze below — those three inherit
 	// the "composition, not an algorithm" reasoning above; the top-level
 	// entry points no longer need an entry here at all (removing an entry

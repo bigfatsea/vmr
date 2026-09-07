@@ -1,12 +1,12 @@
 // Ver 2026-08-20, by Sonnet 5
 
 // Cross-command integration coverage for P5.2's core invariant: a detail
-// page `vmr story` materializes (via journey.EnsureJourneyDetails, driven
+// page `vmr analyze -journey` materializes (via journey.EnsureJourneyDetails, driven
 // from the decision spine's "→ detail" links) must be byte-identical to
-// the one `vmr report -details` writes for the SAME audit record — the P2
+// the one `vmr analyze -details` writes for the SAME audit record — the P2
 // guarantee internal/report/detail_test.go's TestBuildOnRecordMatchesWriteDetails
-// locks on the report side alone. This is the one place both commands'
-// production entry points (cmdStory/cmdReport) run against the same source
+// locks on the report side alone. This is the one place both halves'
+// production entry points (cmdAnalyze) run against the same source
 // file and get diffed, including a stitch-boundary record: Step.PrevManifest
 // must stay nil there, or the two commands would silently disagree.
 package main
@@ -284,7 +284,7 @@ func TestCmdAnalyze_RenderAllAlone_NeverWritesReportHalf(t *testing.T) {
 
 // TestCmdAnalyze_RenderAllBare_StillRunsReportHalf is the direct converse of
 // the regression above: `vmr analyze -render-all` (called directly, not
-// through the `vmr story` alias) must keep running BOTH halves — P9's
+// through the legacy alias) must keep running BOTH halves — P9's
 // original default-suite contract — since analyzeRun.skipMacroReport is an
 // internal-only field cmdAnalyze's own flag set never sets.
 func TestCmdAnalyze_RenderAllBare_StillRunsReportHalf(t *testing.T) {

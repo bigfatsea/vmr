@@ -21,7 +21,7 @@ import (
 // NOT the system temp dir: macOS purges $TMPDIR entries not accessed
 // for ~3 days (and on reboot), which would silently delete audit data —
 // fatal for data whose whole point is long-term cost accounting (audit
-// files are the only data source for vmr report).
+// files are the only data source for vmr analyze).
 // 2. os.TempDir()/<tmpSubdir> — only when the home directory cannot be
 // resolved (no $HOME in a stripped-down service environment).
 // Namespaced under a vmr_-prefixed subdir because the system temp dir

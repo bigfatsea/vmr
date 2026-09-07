@@ -15,11 +15,11 @@
 //
 // This tool is deliberately self-contained: the "server-side view" numbers
 // come from parsing this run's own audit JSONL directly (computeServerStats
-// below), never from running `vmr report` or importing any vmr-internal
+// below), never from running `vmr analyze` or importing any vmr-internal
 // package. A load test measures vmr's HTTP surface under load — it has no
 // business depending on a separate command's (internal/report's) rendering
 // pipeline succeeding, existing, or keeping a particular output shape. Run
-// this having never once run `vmr report` against anything, and the result
+// this having never once run `vmr analyze` against anything, and the result
 // is identical.
 //
 // Requires: vegeta on PATH (go install github.com/tsenart/vegeta@latest)
@@ -313,7 +313,7 @@ type endpointStats struct {
 // tables loadtest-report.md's "server-side view" shows: per-model
 // (=scenario) latency and per-endpoint availability — a scanner over plain
 // JSON lines, nothing more. See the package doc for why this replaced an
-// earlier version that shelled out to `vmr report` and parsed its output.
+// earlier version that shelled out to `vmr analyze` and parsed its output.
 func computeServerStats(logFiles []string) (byModel, endpoints string, err error) {
 	models := map[string]*modelStats{}
 	eps := map[string]*endpointStats{}
@@ -401,7 +401,7 @@ func renderModelStats(models map[string]*modelStats) string {
 	}
 	sort.Strings(names)
 	var b strings.Builder
-	b.WriteString("**按模型**（本次运行自己的审计日志现算，不经过 `vmr report`）\n\n")
+	b.WriteString("**按模型**（本次运行自己的审计日志现算，不经过 `vmr analyze`）\n\n")
 	b.WriteString("| 模型 | 请求 | dur p50/p95/max | ttft p50/p95 |\n|---|---|---|---|\n")
 	for _, name := range names {
 		m := models[name]
@@ -470,7 +470,7 @@ func writeReport(results []roundResult, byModel, endpoints string) error {
 	}
 
 	fmt.Fprint(&b, "## Server-side view (vmr's own audit log), per scenario, all rounds combined\n\n")
-	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) — this is where the per-scenario cost breakdown comes from, computed directly from this run's own audit JSONL (computeServerStats), not from `vmr report` — this tool never runs it.\n\n")
+	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) — this is where the per-scenario cost breakdown comes from, computed directly from this run's own audit JSONL (computeServerStats), not from `vmr analyze` — this tool never runs it.\n\n")
 	b.WriteString(byModel)
 	b.WriteString("\n\n")
 	b.WriteString(endpoints)

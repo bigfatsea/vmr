@@ -50,7 +50,7 @@ func fromCoreRate(r core.Rate) Rate {
 // already converted to USD once at validate time. Resolve therefore never
 // converts currency; the only remaining currency step in this package is
 // Resolver.WithDisplayFactor, a pure display-time rescale applied AFTER
-// resolution, for vmr report's -currency flag.
+// resolution, for vmr analyze's -currency flag.
 type ResolveOptions struct {
 	// Table is the merged generated+curated standard table (see embed.go's
 	// LoadStandard / Merge) — canonical-key -> Rate.
@@ -123,7 +123,7 @@ func resolveCanonicalKey(provider, model string, table *Table, aliases map[strin
 		// precisely so this function never has to decide what a broken
 		// mapping means. Falling through to the next step here is
 		// therefore only reachable for a caller that skipped that
-		// validation — vmr report against a config.yaml it couldn't
+		// validation — vmr analyze against a config.yaml it couldn't
 		// load — where best-effort resolution is the documented behavior,
 		// not a silent mis-price.
 	}

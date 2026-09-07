@@ -664,7 +664,7 @@ const idCodeLen = 8
 // Enough to disambiguate two lineages/chains that otherwise share a client
 // and exact start/end second, not the identity itself (design-doc review
 // follow-up: putting client+time first instead of a bare hash means `ls
-// reports/stories/` and a bare `-journey <id>` listing both sort
+// journeys/` and a bare `-journey <id>` listing both sort
 // meaningfully — grouped by client, chronological within each — instead of
 // by content-hash noise).
 //

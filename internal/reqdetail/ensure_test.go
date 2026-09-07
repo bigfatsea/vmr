@@ -287,8 +287,8 @@ func TestEnsureRendered_NoLeftoverTempFiles(t *testing.T) {
 // TestEnsureRendered_RewritesWhenManifestIdentityChanges is the R72
 // regression guard: Render's output depends on m/prev (delta highlight,
 // history folding, prev-turn link), but the filename doesn't — so before
-// the fingerprint folded m/prev identity in, `vmr report` and `vmr story`
-// passing DIFFERENT m/prev for the same record made whichever command ran
+// the fingerprint folded m/prev identity in, the macro report and journey halves
+// passing DIFFERENT m/prev for the same record made whichever ran
 // second silently skip, first-writer-wins. Same rec, different (m, prev)
 // must therefore RE-render; identical args must keep skipping (idempotent
 // short-circuit preserved).

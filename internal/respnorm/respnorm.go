@@ -495,7 +495,7 @@ func (s *stream) ingest(b []byte) {
 // upstream framing SSE with "\r\n\r\n" (spec-legal, but unobserved from any
 // currently integrated vendor) would land here too. This doesn't change
 // behavior — the whole-body fallback already handles it correctly, just
-// without incremental streaming — it only leaves a trail so `vmr report`
+// without incremental streaming — it only leaves a trail so `vmr analyze`
 // can tell a genuinely tiny/malformed response apart from CRLF framing.
 func (s *stream) noteCRLFFramingIfSuspected(b []byte) {
 	if bytes.Contains(b, crlfEventSepHint) {
@@ -616,7 +616,7 @@ func (s *stream) emitBlock(block []byte) {
 // legitimate mismatch on every single request. What separates an alias from
 // a silent downgrade is only visible in aggregate — a *consistent* mapping
 // is an alias, an inconsistent one is worth looking at — and that judgment
-// belongs in vmr report, offline, over many requests, not in a per-request
+// belongs in vmr analyze, offline, over many requests, not in a per-request
 // heuristic on the streaming path.
 //
 // Costs one extra regex scan per response, not per SSE chunk: the model

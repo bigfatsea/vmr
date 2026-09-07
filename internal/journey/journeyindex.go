@@ -94,11 +94,11 @@ type JourneyIndexRow struct {
 // cache used to live here too, as a "files" section — it's since moved to
 // its own content-hash-sharded directory shared with internal/report
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.cache/parse — one level
-// above storiesDir), so this index stays purely human-scale.
+// above journeys/), so this index stays purely human-scale.
 type JourneyIndex struct {
 	Journeys []JourneyIndexRow `json:"journeys"`
 	// Cache is this run's own ScanCached result, carried on JourneyIndex
-	// purely as a convenience — every cmdStory branch already threads idx
+	// purely as a convenience — every journey branch already threads idx
 	// through to saveJourneyIndex, so riding along here saves plumbing it as
 	// a second parameter everywhere. Never serialized into
 	// journeys/index.json (json:"-"): saveJourneyIndex persists it separately,
@@ -141,7 +141,7 @@ func LoadJourneyIndex(path string) *JourneyIndex {
 }
 
 // Save writes idx to path. 0600: same sensitivity note as every other file
-// under reports/stories/ — it's derived straight from the message-hash
+// under journeys/ — it's derived straight from the message-hash
 // content of the conversations it indexes.
 func (idx *JourneyIndex) Save(path string) error {
 	data, err := json.MarshalIndent(idx, "", "  ")

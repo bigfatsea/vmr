@@ -369,7 +369,7 @@ type Limit struct {
 // lives here rather than as a per-model price table: a Credits-style plan
 // whose account discounts cache reads (or prices output higher) uniformly
 // across all its models needs one shared ratio, not a per-model rate table
-// (a per-model, per-component exact rate is a `vmr report`/`vmr analyze`
+// (a per-model, per-component exact rate is a `vmr analyze`
 // concern, not a routing-control one — see providers[].pricing.rates for
 // the offline $ estimate side).
 //
