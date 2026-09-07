@@ -70,7 +70,7 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // narrative text. Before this, internal/report and internal/journey each
 // carried their own independently-written pctStr with this same
 // multiply-and-format line — one at 1 decimal, one at 0 — and a comment in
-// story claiming the two "matched" report's, which had already gone stale.
+// internal/journey claiming the two "matched" report's, which had already gone stale.
 // Both packages' pctStr are now thin aliases over this, the same pattern
 // FmtBytes already established for byte counts.
 func FmtPercent(f float64, decimals int) string {
@@ -83,8 +83,8 @@ func FmtPercent(f float64, decimals int) string {
 // same compact bare-number shape. Before this, internal/report/metrics.go
 // and internal/journey/render_md.go each carried their own independently
 // written fmtTokens with this same threshold logic, drifted apart only by
-// decimal-place count and B being report-only (report's corpus-wide totals
-// can reach billions; a single story Journey never does) — accidental
+// decimal-place count and B being report-only (report's aggregate totals
+// can reach billions; a single journey never does) — accidental
 // drift, not an intentional difference, so both converge here rather than
 // getting two names. No "(est)" marker: callers use this for actual,
 // already-billed usage counts, never an estimate — a caller that does need

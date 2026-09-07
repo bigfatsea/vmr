@@ -1,12 +1,12 @@
 // Ver 2026-08-17 00:20, by Claude Sonnet 5
 
 // Phase 1b REAL offline calibration harness for the 6 LLM semantic
-// detectors (internal/story/llm_findings.go).
+// detectors (internal/journey/llm_findings.go).
 //
 // This replaces an earlier version of this file that only *looked* like a
 // calibration script: it mocked the LLM's HTTP response with a hand-written
 // "correct answer" and re-parsed that same string with a hand-rolled copy of
-// the threshold logic, never calling story.ComputeLLMFindings (the actual
+// the threshold logic, never calling journey.ComputeLLMFindings (the actual
 // production entry point) at all.
 //
 // This version calls the real production path: journey.ComputeLLMFindings
@@ -39,7 +39,7 @@ import (
 
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	journey "vmr/internal/journey"
 	"vmr/internal/taskseg"
 )
 
@@ -76,9 +76,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	var journeys []*story.Journey
+	var journeys []*journey.Journey
 	for _, l := range g.Lineages {
-		j, err := story.Build(l, taskseg.Generic, lang)
+		j, err := journey.Build(l, taskseg.Generic, lang)
 		if err != nil || j.Partial || countSteps(j) < *minSteps {
 			continue
 		}
@@ -93,12 +93,12 @@ func main() {
 	}
 	fmt.Printf("%d lineage(s) scanned, %d Journey(s) sampled for calibration\nLLM endpoint: %s (model=%s)\n\n", len(g.Lineages), len(journeys), *addr, *model)
 
-	opts := story.LLMOptions{Addr: *addr, Model: *model, APIKey: *key}
+	opts := journey.LLMOptions{Addr: *addr, Model: *model, APIKey: *key}
 
 	total, anchorValid := 0, 0
-	byCode := map[story.FindingCode]int{}
+	byCode := map[journey.FindingCode]int{}
 	for _, j := range journeys {
-		findings, err := story.ComputeLLMFindings(context.Background(), j, opts, lang)
+		findings, err := journey.ComputeLLMFindings(context.Background(), j, opts, lang)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: Journey %s: ComputeLLMFindings: %v\n", j.ID, err)
 			continue
@@ -146,7 +146,7 @@ func main() {
 	fmt.Printf("\nNOTE: Precision/Recall are intentionally not computed here. They require a human to read each finding above against its Journey and judge whether it's actually correct — that judgment can't be scripted, and a script that fabricates one is worse than no number at all.\n")
 }
 
-func countSteps(j *story.Journey) int {
+func countSteps(j *journey.Journey) int {
 	n := 0
 	for _, t := range j.Tasks {
 		n += len(t.Steps)
@@ -161,11 +161,11 @@ func countSteps(j *story.Journey) int {
 // audit.Record: a streamed response's text arrives as many small SSE
 // "delta.content" fragments, so a real, faithfully-quoted multi-word phrase
 // almost never survives as one contiguous run in the raw JSON — only in the
-// already-reassembled RespText/Reasoning fields story.Build produces. The
+// already-reassembled RespText/Reasoning fields journey.Build produces. The
 // raw record IS still marshaled and appended too, since tool_result text
 // (delivered as one complete string in the FOLLOWING step's request body,
 // never streamed) and raw tool-call arguments are only visible there.
-func transcriptPool(j *story.Journey) string {
+func transcriptPool(j *journey.Journey) string {
 	var b strings.Builder
 	for _, t := range j.Tasks {
 		for _, s := range t.Steps {
@@ -183,8 +183,8 @@ func transcriptPool(j *story.Journey) string {
 			}
 		}
 	}
-	// story.Step no longer carries its Record; re-read each manifest's
-	// record and marshal it, mirroring story.searchableTranscript.
+	// journey.Step no longer carries its Record; re-read each manifest's
+	// record and marshal it, mirroring journey.searchableTranscript.
 	var locs []ctxgraph.Loc
 	for _, t := range j.Tasks {
 		for _, s := range t.Steps {
@@ -204,8 +204,8 @@ func transcriptPool(j *story.Journey) string {
 	return b.String()
 }
 
-func sortedCodes(m map[story.FindingCode]int) []story.FindingCode {
-	out := make([]story.FindingCode, 0, len(m))
+func sortedCodes(m map[journey.FindingCode]int) []journey.FindingCode {
+	out := make([]journey.FindingCode, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}

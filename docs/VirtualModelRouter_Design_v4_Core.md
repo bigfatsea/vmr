@@ -4,7 +4,7 @@
 
 本文档描述 vmr 路由核心的完整设计：定位、架构、机制与关键决策。读完即可维护与二次开发路由主线（`internal/{core,config,adapter,health,probe,strategy,sticky,router,server,audit,imgprep,diagnose,replay,buildinfo,rundir,archtest}` + `cmd/vmr` 里除 `cmd_report.go`/`cmd_journey.go` 外的全部子命令）。使用文档见 `README.md`（英文）/ `README.zh.md`（中文）。
 
-**这是 v4 版设计文档的 Part 1**：审计日志的两个离线消费方——聚合报表 `vmr analyze` 与 Agent 任务叙事重建 `vmr analyze`（`internal/{report,story,ctxgraph,chatmsg}` + `cmd_report.go`/`cmd_journey.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档"记录结构"一节）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。本文档的调度链上还挂着一个自带完整计量/定价/周期模型的子系统——Token-Plan 额度感知路由，独立成篇见 `docs/VirtualModelRouter_Design_v4_Quota.md`；它对本文档的唯一接口是"`strategy.Sort` 之后、Sticky 之前多一步重排"。整套 v4 的"为什么做"（战略定位与竞品坐标）见 `docs/VirtualModelRouter_Design_v4_Strategy.md`。早期版本的过程记录见 git 历史。
+**这是 v4 版设计文档的 Part 1**：审计日志的离线消费方——单一入口 `vmr analyze`（聚合报表半区 + Agent 任务叙事重建半区，`internal/{report,journey,ctxgraph,chatmsg}` + `cmd_analyze.go`）——已独立成篇，见姊妹文档 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）。拆分理由：两者体量已经各自撑起一份完整设计文档，且只通过审计日志的 JSONL 格式（本文档"记录结构"一节）耦合，物理上是两个独立进程/命令，不共享任何路由期状态——继续挤在一份文档里已经不利于阅读。本文档的调度链上还挂着一个自带完整计量/定价/周期模型的子系统——Token-Plan 额度感知路由，独立成篇见 `docs/VirtualModelRouter_Design_v4_Quota.md`；它对本文档的唯一接口是"`strategy.Sort` 之后、Sticky 之前多一步重排"。整套 v4 的"为什么做"（战略定位与竞品坐标）见 `docs/VirtualModelRouter_Design_v4_Strategy.md`。早期版本的过程记录见 git 历史。
 
 ---
 
@@ -775,7 +775,7 @@ CLI：`vmr start -c <cfg> [-audit=false]`、`vmr check -c <cfg>`（校验 + `Con
 
 **启动摘要**：`vmr start` 在启动与每次热重载成功后向 stderr 打印生效配置——listen/鉴权开关/各上限/超时、每个 provider 的生效代理（凭证掩码）、每个 virtual model 的端点生效顺序与 key 状态（同 `vmr check` 的口径），控制台即可核对运行实例的真实配置。
 
-**vmr.sh（唯一脚本入口，双模式 + 原生命令透传）**：脚本不认识的子命令原样转发给二进制（`check|diagnose|report|story|replay|version|…`），**刻意不做白名单**——二进制新增子命令无需改脚本，拼错由二进制打自己的 usage。转发只调整路径语义两处：① `cd` 回调用者原目录（`report`/`journey` 的 audit glob、`-o`、`-detail` 都该按调用者所站目录解析）；② 未给 `-c` 时补上 checkout 的 config 绝对路径——这是 ① 的后果（二进制的 `-c` 缺省是相对路径）。补 `-c` 的子命令硬编码为实际定义了 `-c` 标志的那几个（`start/check/status/diagnose/replay/report/journey`）；漏进列表的新子命令退化为"自己敲 `-c`"，不会拿到错配置。
+**vmr.sh（唯一脚本入口，双模式 + 原生命令透传）**：脚本不认识的子命令原样转发给二进制（`check|diagnose|analyze|replay|version|…`），**转发本身不做白名单**——二进制新增子命令无需改脚本，拼错由二进制打自己的 usage。转发只调整路径语义两处：① `cd` 回调用者原目录（`analyze` 的 audit glob、`-o`、`-details` 都该按调用者所站目录解析）；② 未给 `-c` 时补上 checkout 的 config 绝对路径——这是 ① 的后果（二进制的 `-c` 缺省是相对路径）。补 `-c` 的子命令硬编码为实际定义了 `-c` 标志的那几个（`start/check/status/diagnose/smoke/replay/analyze`）；漏进列表的新子命令退化为"自己敲 `-c`"，不会拿到错配置。
 
 dev 模式（`start/stop/restart/status/ps/logs`）nohup 后台、人肉监督，无 PID 文件、按二进制绝对路径 `pgrep -f` 匹配，start 前先 `vmr check` 拒绝坏配置。`ps` 列出**本机全部** vmr 实例而不只是本 checkout：`pgrep` 找进程 → `lsof -a -p PID -iTCP -sTCP:LISTEN` 找端口（监听地址只在那个进程的 config 里，命令行上没有）→ `vmr status -addr … -brief` 向实例自己要其余信息。`-a` 是必须的：lsof 的选择条件默认 OR，漏掉会返回别的守护进程的端口。JSON 解析留在二进制里（`-brief` 输出 Tab 分隔一行），不引入 jq 依赖。**刻意不引入 PID/registry 文件**：那会给一个有意无状态的二进制加上进程生命周期状态（陈旧文件、pid 复用、写盘失败），只为省掉一个 lsof 依赖——而 `ps` 是诊断命令，不是热路径。`status` 复用同一条端口发现路径兜底：`-c` 加载失败时改用 lsof 查出的端口走 `-addr`，因为配置坏掉恰是这条命令最该能用的时刻。缺 lsof 或进程不应答时退化成"pid + 命令行 `-c` 参数"并标注原因，不漏掉实例。
 
