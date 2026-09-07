@@ -51,7 +51,7 @@ func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts 
 	if err := parseJSONFromLLM(res.Text, &items); err != nil {
 		return nil
 	}
-	tx := i18n.StoryFindings(lang)
+	tx := i18n.JourneyFindings(lang)
 	var findings []Finding
 	for _, item := range items {
 		if item.IsMisinterpreted && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
@@ -174,7 +174,7 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 	if err := parseJSONFromLLM(res.Text, &items); err != nil {
 		return nil
 	}
-	tx := i18n.StoryFindings(lang)
+	tx := i18n.JourneyFindings(lang)
 	var findings []Finding
 	for _, item := range items {
 		if item.IsOscillating && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
@@ -272,7 +272,7 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	// anchor" on different steps and prevents the same step from being
 	// cited as both the root and the departure from it.
 	if item.DriftDetected && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" && item.DriftStepSeq > 1 {
-		tx := i18n.StoryFindings(lang)
+		tx := i18n.JourneyFindings(lang)
 		fText := tx.GoalDrift(item.DriftStepSeq, sanitizeMDStruct(item.DriftExplanation))
 		action := sanitizeMDStruct(item.SuggestedAction)
 		if action == "" {
@@ -330,7 +330,7 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 	if err := parseJSONFromLLM(res.Text, &items); err != nil {
 		return nil
 	}
-	tx := i18n.StoryFindings(lang)
+	tx := i18n.JourneyFindings(lang)
 	var findings []Finding
 	for _, item := range items {
 		if item.ConstraintLost && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
@@ -428,7 +428,7 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 		return nil
 	}
 	if item.HasMisalignment && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
-		tx := i18n.StoryFindings(lang)
+		tx := i18n.JourneyFindings(lang)
 		fText := tx.PlanExecutionMisalignment(len(item.UnfulfilledItems), len(pack.PlanItems))
 		evidence := sanitizeMDStruct(item.Explanation)
 		if evidence == "" {
@@ -509,7 +509,7 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 		return nil
 	}
 	if strings.ToUpper(item.ClaimStatus) == "CLAIM_WITHOUT_VERIFICATION" && strings.ToUpper(item.Confidence) == string(ConfidenceHigh) && item.EvidenceAnchor != "" {
-		tx := i18n.StoryFindings(lang)
+		tx := i18n.JourneyFindings(lang)
 		missing := sanitizeMDStruct(item.MissingVerification)
 		fText := tx.UnverifiedCompletionClaim(missing)
 		action := sanitizeMDStruct(item.SuggestedAction)

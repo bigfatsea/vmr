@@ -8,9 +8,9 @@
 // index), the one mode that runs both halves.
 //
 // This file does no rendering or aggregation of its own: every branch below
-// calls the same functions cmd_report.go/cmd_story.go already expose
-// (runReport, setupStoryRun + renderJourney/renderJourneys/renderAllJourneys/
-// compareJourneys/corpusStats) — "pure CLI-layer routing", per the
+// calls the same functions cmd_report.go/cmd_journey.go already expose
+// (runReport, setupJourneyRun + renderJourney/renderJourneys/renderAllJourneys/
+// compareJourneys/renderBenchmarks) — "pure CLI-layer routing", per the
 // ActionPlan's own constraint. `internal/report`/`internal/journey` are not
 // touched by this file at all.
 package main
@@ -27,23 +27,23 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
 // renderableCandidates filters su.cands down to the non-noise rows
-// (story.IsNoiseCategory, already computed by setupStoryRun's
+// (journey.IsNoiseCategory, already computed by setupJourneyRun's
 // BuildJourneyIndexRow call — no new classification logic here). An
 // earlier version kept CategoryTask only, which left cron/subagent
 // candidates visible in the index but permanently unrenderable by
-// default, contradicting the index's own display split — story.IsNoiseCategory
+// default, contradicting the index's own display split — journey.IsNoiseCategory
 // is now the one place both answers come from. cands and freshRows are
 // parallel arrays (same index = same candidate), the invariant
-// setupStoryRun's own doc comment states and relies on.
-func renderableCandidates(su *storySetup) []*ctxgraph.Lineage {
+// setupJourneyRun's own doc comment states and relies on.
+func renderableCandidates(su *journeySetup) []*ctxgraph.Lineage {
 	var out []*ctxgraph.Lineage
 	for i, l := range su.cands {
-		if !story.IsNoiseCategory(su.freshRows[i].Category) {
+		if !journey.IsNoiseCategory(su.freshRows[i].Category) {
 			out = append(out, l)
 		}
 	}
@@ -271,7 +271,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 		return runMacroOnly(r)
 	}
 
-	su, err := setupStoryRun(r.paths, r.outDir, r.includeSelfTraffic, r.llmKey, r.selfTrafficTags, r.showUngrouped, r.lang)
+	su, err := setupJourneyRun(r.paths, r.outDir, r.includeSelfTraffic, r.llmKey, r.selfTrafficTags, r.showUngrouped, r.lang)
 	if err != nil {
 		return err
 	}
@@ -363,12 +363,12 @@ func runMacroOnly(r *analyzeRun) error {
 }
 
 // runBenchmark finishes the -benchmark zoom: corpus statistics.
-func runBenchmark(r *analyzeRun, su *storySetup) error {
-	return corpusStats(su.cands, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx)
+func runBenchmark(r *analyzeRun, su *journeySetup) error {
+	return renderBenchmarks(su.cands, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx)
 }
 
 // dispatchCompare routes -compare's pairwise zoom.
-func dispatchCompare(r *analyzeRun, su *storySetup) error {
+func dispatchCompare(r *analyzeRun, su *journeySetup) error {
 	ids := strings.Split(r.compareArg, ",")
 	if len(ids) != 2 || ids[0] == "" || ids[1] == "" {
 		return fmt.Errorf("-compare wants exactly two comma-separated ids: -compare id1,id2")
@@ -383,10 +383,10 @@ func dispatchCompare(r *analyzeRun, su *storySetup) error {
 
 // dispatchJourney routes -journey's zoom: single-match render, or a batch
 // over the multi-match selector.
-func dispatchJourney(r *analyzeRun, su *storySetup) error {
+func dispatchJourney(r *analyzeRun, su *journeySetup) error {
 	ids := make([]string, len(su.cands))
 	for i, ch := range su.chains {
-		ids[i] = story.ID(ch)
+		ids[i] = journey.ID(ch)
 	}
 	targets, err := resolveJourneySelector(su.cands, ids, r.journeyArg)
 	if err != nil {
@@ -413,7 +413,7 @@ func dispatchJourney(r *analyzeRun, su *storySetup) error {
 // dispatchDefaultSuite runs the no-selector default suite: story half first,
 // then the macro report half (unless -journey-only), then the orphan sweep;
 // it returns the report for the caller's manifest commit (§3.4).
-func dispatchDefaultSuite(r *analyzeRun, su *storySetup) (*report.Report2, error) {
+func dispatchDefaultSuite(r *analyzeRun, su *journeySetup) (*report.Report2, error) {
 	scope := su.cands
 	if !r.renderAllFlag {
 		scope = renderableCandidates(su)
@@ -437,9 +437,9 @@ func dispatchDefaultSuite(r *analyzeRun, su *storySetup) (*report.Report2, error
 
 	activeIDs := make([]string, len(su.cands))
 	for i, ch := range su.chains {
-		activeIDs[i] = story.ID(ch)
+		activeIDs[i] = journey.ID(ch)
 	}
-	_, _ = story.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), activeIDs)
+	_, _ = journey.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), activeIDs)
 
 	var rep *report.Report2
 	if !r.journeyOnly {

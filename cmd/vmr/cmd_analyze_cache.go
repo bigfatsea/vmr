@@ -17,7 +17,7 @@ import (
 
 	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
@@ -111,12 +111,12 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 	// the last full run); their L2 digests differ from the default suite's
 	// anyway, so this branch only ever fires on a true full-run hit.
 	if mode == "default" {
-		if idx := story.LoadStoryIndex(filepath.Join(r.outDir, "journeys", "index.json")); idx != nil {
+		if idx := journey.LoadJourneyIndex(filepath.Join(r.outDir, "journeys", "index.json")); idx != nil {
 			ids := make([]string, len(idx.Journeys))
 			for i, row := range idx.Journeys {
 				ids[i] = row.ID
 			}
-			_, _ = story.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), ids)
+			_, _ = journey.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), ids)
 		}
 	}
 	return true

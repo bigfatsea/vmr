@@ -26,7 +26,7 @@ import (
 
 func buildVMSpine(s *JourneySummary, lang i18n.Lang, linkDetails bool) []VMBlock {
 	t := i18n.Spine(lang)
-	storyT := i18n.Story(lang)
+	journeyT := i18n.Journey(lang)
 	hit := map[int]bool{}
 	for _, f := range s.Findings {
 		hit[f.StepSeq] = true
@@ -43,7 +43,7 @@ func buildVMSpine(s *JourneySummary, lang i18n.Lang, linkDetails bool) []VMBlock
 		task := &s.Structure.Tasks[ti]
 		blocks = append(blocks, vmTextBlock(t.SpineTaskLine(ti+1, escapeHTML(task.Title))))
 		for si := range task.Steps {
-			blocks = append(blocks, vmStepBlocks(s, &task.Steps[si], si, hit, t, storyT, linkDetails)...)
+			blocks = append(blocks, vmStepBlocks(s, &task.Steps[si], si, hit, t, journeyT, linkDetails)...)
 		}
 	}
 	blocks = append(blocks, vmFinalDeliverable(s, t)...)
@@ -112,35 +112,35 @@ func vmStepRoleTag(ss *StepStructure, repeated bool, reply, reasoning string, t 
 	return t.StepTagObserve
 }
 
-func vmTransitionBlocks(ss *StepStructure, storyT i18n.StoryText) []VMBlock {
+func vmTransitionBlocks(ss *StepStructure, journeyT i18n.JourneyText) []VMBlock {
 	var blocks []VMBlock
 	if ss.Edit != nil && ss.Edit.Kind != ctxgraphAppend {
-		blocks = append(blocks, vmTextBlock(storyT.EditLine(ss.Edit.Kind, vmEditStatsHint(ss.Edit, storyT))))
+		blocks = append(blocks, vmTextBlock(journeyT.EditLine(ss.Edit.Kind, vmEditStatsHint(ss.Edit, journeyT))))
 	}
 	if ss.StitchEdge != nil {
-		blocks = append(blocks, vmTextBlock(storyT.StitchLine(ss.StitchEdge.Kind, pctStr(ss.StitchEdge.Score), pctStr(ss.StitchEdge.Confidence))))
+		blocks = append(blocks, vmTextBlock(journeyT.StitchLine(ss.StitchEdge.Kind, pctStr(ss.StitchEdge.Score), pctStr(ss.StitchEdge.Confidence))))
 	}
 	if ss.SysChanged {
-		blocks = append(blocks, vmTextBlock(storyT.SysChangedLine))
+		blocks = append(blocks, vmTextBlock(journeyT.SysChangedLine))
 	}
 	if ss.Compaction != nil {
-		blocks = append(blocks, vmCompactionBlock(ss.Compaction, storyT))
+		blocks = append(blocks, vmCompactionBlock(ss.Compaction, journeyT))
 	}
 	return blocks
 }
 
-func vmCompactionBlock(c *CompactionRef, storyT i18n.StoryText) VMBlock {
+func vmCompactionBlock(c *CompactionRef, journeyT i18n.JourneyText) VMBlock {
 	ratio := "—"
 	if c.TokensBefore > 0 {
 		ratio = fmtutil.FmtPercent(float64(c.TokensAfter)/float64(c.TokensBefore), 1)
 	}
-	summary := storyT.CompactionSummary(fmtutil.FmtTokens(c.TokensBefore), fmtutil.FmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities))
+	summary := journeyT.CompactionSummary(fmtutil.FmtTokens(c.TokensBefore), fmtutil.FmtTokens(c.TokensAfter), ratio, len(c.SwallowedEntities), len(c.SurvivedEntities))
 	var body string
 	if len(c.SwallowedEntities) > 0 {
-		body += storyT.SwallowedEntities(strings.Join(c.SwallowedEntities, storyT.ListSep))
+		body += journeyT.SwallowedEntities(strings.Join(c.SwallowedEntities, journeyT.ListSep))
 	}
 	if len(c.SurvivedEntities) > 0 {
-		body += storyT.SurvivedEntities(strings.Join(c.SurvivedEntities, storyT.ListSep))
+		body += journeyT.SurvivedEntities(strings.Join(c.SurvivedEntities, journeyT.ListSep))
 	}
 	return vmDetailsBlock("", summary, body)
 }
@@ -149,12 +149,12 @@ func vmCompactionBlock(c *CompactionRef, storyT i18n.StoryText) VMBlock {
 // renderSpineBriefStep's shared shape: header, transitions, then either the
 // full tool-calling block (instruction, why-line, every call + its paired
 // result) or the single summary line, then the NoReply marker.
-func vmStepBlocks(s *JourneySummary, ss *StepStructure, taskStepIdx int, hit map[int]bool, t i18n.SpineText, storyT i18n.StoryText, linkDetails bool) []VMBlock {
+func vmStepBlocks(s *JourneySummary, ss *StepStructure, taskStepIdx int, hit map[int]bool, t i18n.SpineText, journeyT i18n.JourneyText, linkDetails bool) []VMBlock {
 	repeated := vmStepRepeated(ss)
 	reply, reasoning := vmRespTexts(s, ss)
 	var blocks []VMBlock
 	blocks = append(blocks, vmTextBlock(vmStepHeader(ss, repeated, hit[ss.Seq], reply, reasoning, t, linkDetails)))
-	blocks = append(blocks, vmTransitionBlocks(ss, storyT)...)
+	blocks = append(blocks, vmTransitionBlocks(ss, journeyT)...)
 	if len(ss.ToolCalls) > 0 {
 		if taskStepIdx > 0 && ss.Instruction != "" {
 			blocks = append(blocks, vmTextBlock(t.SpineInstructionLine(escapeHTML(ss.Instruction))))
@@ -174,7 +174,7 @@ func vmStepBlocks(s *JourneySummary, ss *StepStructure, taskStepIdx int, hit map
 		}
 	}
 	if ss.NoReply {
-		blocks = append(blocks, vmTextBlock(storyT.NoReplyLine))
+		blocks = append(blocks, vmTextBlock(journeyT.NoReplyLine))
 	}
 	return blocks
 }

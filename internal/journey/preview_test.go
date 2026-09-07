@@ -13,7 +13,7 @@ import (
 )
 
 // TestIDMatchesDeriveID locks in that the public ID entry point (used by
-// cmd_story.go's listing/-journey/-compare resolution, all outside this
+// cmd_journey.go's listing/-journey/-compare resolution, all outside this
 // package) returns exactly what deriveID computes — a
 // same-package test that would catch a future divergence directly, instead
 // of only through cmd/vmr's own end-to-end coverage.
@@ -43,7 +43,7 @@ func TestPreviewTitles_NilProfileErrors(t *testing.T) {
 }
 
 // TestPreviewTitles_ReturnsRealOpeningInstruction covers the batched path
-// (the one cmd_story.go's listing actually uses) against a fixture whose
+// (the one cmd_journey.go's listing actually uses) against a fixture whose
 // real opening instruction is known — the result must be that instruction,
 // keyed by the chain's tail lineage.
 func TestPreviewTitles_ReturnsRealOpeningInstruction(t *testing.T) {

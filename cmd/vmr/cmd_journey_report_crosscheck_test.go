@@ -1,7 +1,7 @@
 // Ver 2026-08-20, by Sonnet 5
 
 // Cross-command integration coverage for P5.2's core invariant: a detail
-// page `vmr story` materializes (via story.EnsureJourneyDetails, driven
+// page `vmr story` materializes (via journey.EnsureJourneyDetails, driven
 // from the decision spine's "→ detail" links) must be byte-identical to
 // the one `vmr report -details` writes for the SAME audit record — the P2
 // guarantee internal/report/detail_test.go's TestBuildOnRecordMatchesWriteDetails
@@ -29,26 +29,26 @@ import (
 func crossCheckFixture(t *testing.T) string {
 	t.Helper()
 	at := func(m int) time.Time { return time.Date(2026, 8, 20, 9, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "cross-check fixture opening instruction")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "cross-check fixture opening instruction")
 
 	var recs []audit.Record
 	msgsList := []any{sys, u1}
 	for i := 0; i < 5; i++ {
-		recs = append(recs, storyRec(at(i), append([]any{}, msgsList...), storySSE("ok")))
-		msgsList = append(msgsList, storyMsg("assistant", fmt.Sprintf("step reply %d", i)))
+		recs = append(recs, journeyRec(at(i), append([]any{}, msgsList...), journeySSE("ok")))
+		msgsList = append(msgsList, journeyMsg("assistant", fmt.Sprintf("step reply %d", i)))
 		if i >= 2 {
-			msgsList = append(msgsList, storyMsg("tool", fmt.Sprintf("tool output %d", i)))
+			msgsList = append(msgsList, journeyMsg("tool", fmt.Sprintf("tool output %d", i)))
 		}
 	}
 	// Contract: history collapses to [sys v2, u1, step reply 3, tool output 3]
 	// — 3 shared distinct keys, clearing stitchMinAbsOverlap, with its OWN
 	// new system prompt (same shape TestSystemPromptEras_StitchBoundaryChange
 	// in internal/journey exercises).
-	recs = append(recs, storyRec(at(30), []any{storyMsg("system", "sys v2"), u1,
-		storyMsg("assistant", "step reply 3"), storyMsg("tool", "tool output 3"),
-		storyMsg("assistant", "post-break reply")}, storySSE("continuing")))
-	return writeStoryJSONL(t, recs)
+	recs = append(recs, journeyRec(at(30), []any{journeyMsg("system", "sys v2"), u1,
+		journeyMsg("assistant", "step reply 3"), journeyMsg("tool", "tool output 3"),
+		journeyMsg("assistant", "post-break reply")}, journeySSE("continuing")))
+	return writeJourneyJSONL(t, recs)
 }
 
 // TestEnsureJourneyDetails_MatchesReportDetails runs `vmr analyze -journey-only -render-all` and
@@ -59,19 +59,19 @@ func crossCheckFixture(t *testing.T) string {
 func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 	path := crossCheckFixture(t)
 	root := t.TempDir()
-	storyOut := filepath.Join(root, "story-out")
+	journeyOut := filepath.Join(root, "story-out")
 	reportOut := filepath.Join(root, "report-out")
 
-	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-journey-only", "-render-all", "-o", storyOut, path}) }); err != nil {
+	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-journey-only", "-render-all", "-o", journeyOut, path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -journey-only -render-all: %v", err)
 	}
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-macro-only", "-details", "-o", reportOut, path}) }); err != nil {
 		t.Fatalf("cmdAnalyze -macro-only -details: %v", err)
 	}
 
-	storyDetails := filepath.Join(storyOut, "requests", "details")
+	journeyDetails := filepath.Join(journeyOut, "requests", "details")
 	reportDetails := filepath.Join(reportOut, "requests", "details")
-	entries, err := os.ReadDir(storyDetails)
+	entries, err := os.ReadDir(journeyDetails)
 	if err != nil {
 		t.Fatalf("ReadDir(story details): %v", err)
 	}
@@ -81,7 +81,7 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 
 	compared := 0
 	for _, e := range entries {
-		storyBody, err := os.ReadFile(filepath.Join(storyDetails, e.Name()))
+		journeyBody, err := os.ReadFile(filepath.Join(journeyDetails, e.Name()))
 		if err != nil {
 			t.Fatalf("reading story detail %s: %v", e.Name(), err)
 		}
@@ -92,10 +92,10 @@ func TestEnsureJourneyDetails_MatchesReportDetails(t *testing.T) {
 				"function of the record's own coordinate, identical regardless of which command computed "+
 				"it): %v", e.Name(), err)
 		}
-		if string(storyBody) != string(reportBody) {
+		if string(journeyBody) != string(reportBody) {
 			t.Errorf("detail page %s differs between journey and report -details — this is exactly "+
 				"the P2 byte-identical invariant breaking:\n--- story ---\n%s\n--- report ---\n%s",
-				e.Name(), storyBody, reportBody)
+				e.Name(), journeyBody, reportBody)
 		}
 		compared++
 	}
@@ -340,12 +340,12 @@ func TestCmdAnalyze_MatchesDispatchShape(t *testing.T) {
 func TestCmdReport_LLMKeyMatchesAnalyzeMacroOnly(t *testing.T) {
 	const llmKey = "secret-key"
 	at := func(m int) time.Time { return time.Date(2026, 8, 21, 9, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "ordinary request")
-	ordinary := storyRec(at(0), []any{sys, u1}, storySSE("ok"))
-	selfTraffic := storyRec(at(1), []any{sys, storyMsg("user", "self-analysis call")}, storySSE("ok"))
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "ordinary request")
+	ordinary := journeyRec(at(0), []any{sys, u1}, journeySSE("ok"))
+	selfTraffic := journeyRec(at(1), []any{sys, journeyMsg("user", "self-analysis call")}, journeySSE("ok"))
 	selfTraffic.ClientKeyTag = audit.KeyTag(llmKey)
-	path := writeStoryJSONL(t, []audit.Record{ordinary, selfTraffic})
+	path := writeJourneyJSONL(t, []audit.Record{ordinary, selfTraffic})
 
 	loadMeta := func(dir string) int {
 		t.Helper()

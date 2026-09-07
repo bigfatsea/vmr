@@ -27,18 +27,18 @@ func hashFile(t *testing.T, path string) string {
 func fixtureAuditLogs(t *testing.T) string {
 	t.Helper()
 	at := func(m int) time.Time { return time.Date(2026, 8, 20, 10, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "you are a helpful assistant")
-	u1 := storyMsg("user", "please check the status and run test")
-	a1 := storyMsg("assistant", "checking status")
+	sys := journeyMsg("system", "you are a helpful assistant")
+	u1 := journeyMsg("user", "please check the status and run test")
+	a1 := journeyMsg("assistant", "checking status")
 	t1 := map[string]any{"role": "tool", "tool_call_id": "c1", "content": "status: ok"}
-	a2 := storyMsg("assistant", "all tests passed")
+	a2 := journeyMsg("assistant", "all tests passed")
 
 	recs := []audit.Record{
-		storyRec(at(0), []any{sys, u1}, storySSE("I will help with that")),
-		storyRec(at(1), []any{sys, u1, a1, t1}, storySSE("tool executed successfully")),
-		storyRec(at(2), []any{sys, u1, a1, t1, a2}, storySSE("finished")),
+		journeyRec(at(0), []any{sys, u1}, journeySSE("I will help with that")),
+		journeyRec(at(1), []any{sys, u1, a1, t1}, journeySSE("tool executed successfully")),
+		journeyRec(at(2), []any{sys, u1, a1, t1, a2}, journeySSE("finished")),
 	}
-	return writeStoryJSONL(t, recs)
+	return writeJourneyJSONL(t, recs)
 }
 
 // TestRenderOnly_ByteEquivalenceWithFullRun proves §9's guard:

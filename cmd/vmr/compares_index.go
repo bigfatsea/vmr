@@ -15,7 +15,7 @@ import (
 	"strings"
 
 	"vmr/internal/fmtutil"
-	journey "vmr/internal/journey"
+	"vmr/internal/journey"
 )
 
 // CompareItem describes one pairwise comparison entry in compares/index.json (§3.8, D21).

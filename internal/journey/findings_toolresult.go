@@ -98,7 +98,7 @@ func firstSameNameCall(steps []*Step, from, to int, name string) (*Step, *chatms
 // attempted fix, not a suspected problem). Anthropic-only, like
 // ErrorRecoveryCount and for the same documented reason: OpenAI's protocol
 // has no standard is_error field to detect the triggering error from.
-func detectUnadaptedRetry(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectUnadaptedRetry(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for i, s := range steps {
 		results := toolResultsFor(steps, i)
@@ -199,7 +199,7 @@ func capEntities(items []string) []string {
 // wasted result. This version only fires when NONE of a result's entities
 // are ever referenced again — "the whole result was ignored", the
 // original, meaningfully rare signal this detector was meant to catch.
-func detectUnusedToolResult(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectUnusedToolResult(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for i, s := range steps {
 		results := toolResultsFor(steps, i)
@@ -254,7 +254,7 @@ const falsificationWindowBytes = 160
 // falsification, not a confirmed hallucination (the tool itself could be
 // wrong, or the entity could have been created in the meantime by a Step
 // this detector doesn't specifically check for).
-func detectUnverifiedEntityReference(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectUnverifiedEntityReference(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for i, s := range steps {
 		results := toolResultsFor(steps, i)
@@ -301,7 +301,7 @@ func detectUnverifiedEntityReference(steps []*Step, tx i18n.StoryFindingsText) [
 // Finding text says so explicitly, and calibration against real corpus
 // hit rate should happen before this is trusted the way the Phase 1
 // detectors now are.
-func detectConstraintTextDropped(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectConstraintTextDropped(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, s := range steps {
 		if s.Compaction == nil || len(s.Compaction.SwallowedEntities) == 0 {

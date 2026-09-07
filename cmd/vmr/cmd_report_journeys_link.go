@@ -14,20 +14,20 @@ import (
 	"path/filepath"
 
 	"vmr/internal/fmtutil"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
 // loadStoriesLink reads {outDir}/journeys/index.json if present and
 // returns both navigation aids it feeds: the header-line summary
-// (StoriesLinkInfo, nil when absent) and a lineage-id -> rendered-journey-
+// (JourneysLinkInfo, nil when absent) and a lineage-id -> rendered-journey-
 // filename map (nil/empty when absent or nothing's been rendered yet) for
 // requests.go's session-card links. A missing or unreadable index is not
 // an error — the report half running on its own, with no journey-half pass
 // ever having touched this output root, is a normal, fully supported case.
-func loadStoriesLink(outDir string) (*report.StoriesLinkInfo, map[string]string) {
+func loadStoriesLink(outDir string) (*report.JourneysLinkInfo, map[string]string) {
 	indexPath := filepath.Join(outDir, "journeys", "index.json")
-	idx := story.LoadStoryIndex(indexPath)
+	idx := journey.LoadJourneyIndex(indexPath)
 	if len(idx.Journeys) == 0 {
 		return nil, nil
 	}
@@ -48,7 +48,7 @@ func loadStoriesLink(outDir string) (*report.StoriesLinkInfo, map[string]string)
 			lineageToJourney[lin] = j.Rendered
 		}
 	}
-	info := &report.StoriesLinkInfo{
+	info := &report.JourneysLinkInfo{
 		Path:         "journeys/index.md",
 		JourneyCount: len(idx.Journeys),
 		FromDisplay:  from.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"),

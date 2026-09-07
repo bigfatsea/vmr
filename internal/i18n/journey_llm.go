@@ -58,7 +58,7 @@ type LLMText struct {
 	// ScopeOverall/ScopeDivergence are the scope labels -compare passes to
 	// RenderLLMSection for its two possible LLM sections (see SectionTitle) —
 	// defined here, not composed ad hoc at the call site, so the label text
-	// stays consistent with how DivergenceTitle (story_compare.go) and this
+	// stays consistent with how DivergenceTitle (journey_compare.go) and this
 	// package's other "分叉点"/"divergence" wording already read.
 	ScopeOverall    string
 	ScopeDivergence string

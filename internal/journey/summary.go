@@ -66,7 +66,7 @@ type JourneySummary struct {
 // follow the same lang-follows-everywhere policy (P8,
 // docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.5).
 //
-// The -compare path (cmd/vmr/cmd_story.go's compareJourneys) calls this on both
+// The -compare path (cmd/vmr/cmd_journey.go's compareJourneys) calls this on both
 // sides purely to get Metrics for Compare(sA, sB, lang) — Compare/journeyRef
 // only ever project ID/Title/From/To/Metrics out of the result, so the
 // Structure this also computes (P4) is built and discarded on that path.

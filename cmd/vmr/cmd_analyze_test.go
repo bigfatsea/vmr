@@ -13,7 +13,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
@@ -24,13 +24,13 @@ import (
 // doc comment for why that tradeoff was made.
 func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 20, 10, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "analyze fixture opening instruction")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "analyze fixture opening instruction")
 	recs := []audit.Record{
-		storyRec(at(0), []any{sys, u1}, storySSE("ok")),
-		storyRec(at(1), []any{sys, u1, storyMsg("assistant", "ok"), storyMsg("user", "continue")}, storySSE("ok again")),
+		journeyRec(at(0), []any{sys, u1}, journeySSE("ok")),
+		journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "ok"), journeyMsg("user", "continue")}, journeySSE("ok again")),
 	}
-	path := writeStoryJSONL(t, recs)
+	path := writeJourneyJSONL(t, recs)
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
@@ -76,13 +76,13 @@ func TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot(t *testing.T) {
 // already exists at render time).
 func TestCmdAnalyze_ReportLinksStoriesOnFirstCall(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 20, 11, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "ordering fixture opening instruction")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "ordering fixture opening instruction")
 	recs := []audit.Record{
-		storyRec(at(0), []any{sys, u1}, storySSE("ok")),
-		storyRec(at(1), []any{sys, u1, storyMsg("assistant", "ok"), storyMsg("user", "continue")}, storySSE("ok again")),
+		journeyRec(at(0), []any{sys, u1}, journeySSE("ok")),
+		journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "ok"), journeyMsg("user", "continue")}, journeySSE("ok again")),
 	}
-	path := writeStoryJSONL(t, recs)
+	path := writeJourneyJSONL(t, recs)
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
@@ -114,16 +114,16 @@ func TestCmdAnalyze_ShareSameOutputDefault(t *testing.T) {
 	defer os.Chdir(cwd)
 
 	at := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "default -o fixture")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "default -o fixture")
 	recs := []audit.Record{
-		storyRec(at, []any{sys, u1}, storySSE("ok")),
-		storyRec(at.Add(time.Minute), []any{sys, u1, storyMsg("assistant", "ok"), storyMsg("user", "more")}, storySSE("ok2")),
+		journeyRec(at, []any{sys, u1}, journeySSE("ok")),
+		journeyRec(at.Add(time.Minute), []any{sys, u1, journeyMsg("assistant", "ok"), journeyMsg("user", "more")}, journeySSE("ok2")),
 	}
-	// writeStoryJSONL puts the fixture under t.TempDir(), not cwd — pass
+	// writeJourneyJSONL puts the fixture under t.TempDir(), not cwd — pass
 	// its absolute path so resolveInputPaths' glob still finds it after
 	// the Chdir above.
-	path := writeStoryJSONL(t, recs)
+	path := writeJourneyJSONL(t, recs)
 
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{path}) }); err != nil {
 		t.Fatalf("cmdAnalyze: %v", err)
@@ -157,7 +157,7 @@ func journeyFileNames(t *testing.T, dir string) []string {
 }
 
 // TestCmdAnalyze_DefaultSuiteExcludesHeartbeat covers P14.1 (originally
-// P9.2, narrowed by P14.1/story.IsNoiseCategory — see
+// P9.2, narrowed by P14.1/journey.IsNoiseCategory — see
 // TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent for the categories that
 // changed): the default suite (no selector, no -render-all) excludes only
 // heartbeat candidates — a heartbeat-titled candidate stays in the index
@@ -165,38 +165,38 @@ func journeyFileNames(t *testing.T, dir string) []string {
 // asks for it.
 func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	taskU1 := storyMsg("user", "调研一下 A 股新股打新收益")
-	taskR1 := storyRec(at(0), []any{sys, taskU1}, storySSE("开工"))
-	taskR2 := storyRec(at(1), []any{sys, taskU1, storyMsg("assistant", "done")}, storySSE("完成"))
+	taskU1 := journeyMsg("user", "调研一下 A 股新股打新收益")
+	taskR1 := journeyRec(at(0), []any{sys, taskU1}, journeySSE("开工"))
+	taskR2 := journeyRec(at(1), []any{sys, taskU1, journeyMsg("assistant", "done")}, journeySSE("完成"))
 
 	// [OpenClaw heartbeat poll] is the literal title-marker classifyJourney
 	// checks for (internal/journey/candidates.go) — resolveTaskProfile()
 	// defaults to OpenClawAware, and P7.2's bracket-stripping regexes only
 	// touch timestamp/message_id markers, not this one, so it survives into
 	// the derived title unchanged.
-	hbU1 := storyMsg("user", "[OpenClaw heartbeat poll] check in")
-	hbR1 := storyRec(at(10), []any{sys, hbU1}, storySSE("ack"))
-	hbR2 := storyRec(at(11), []any{sys, hbU1, storyMsg("assistant", "ack")}, storySSE("ack2"))
+	hbU1 := journeyMsg("user", "[OpenClaw heartbeat poll] check in")
+	hbR1 := journeyRec(at(10), []any{sys, hbU1}, journeySSE("ack"))
+	hbR2 := journeyRec(at(11), []any{sys, hbU1, journeyMsg("assistant", "ack")}, journeySSE("ack2"))
 
-	path := writeStoryJSONL(t, []audit.Record{taskR1, taskR2, hbR1, hbR2})
+	path := writeJourneyJSONL(t, []audit.Record{taskR1, taskR2, hbR1, hbR2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
 		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
+	idx := journey.LoadJourneyIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 2 {
 		t.Fatalf("index should list both candidates regardless of render scope, got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
 	var sawTask, sawHeartbeat bool
 	for _, row := range idx.Journeys {
 		switch row.Category {
-		case story.CategoryTask:
+		case journey.CategoryTask:
 			sawTask = true
-		case story.CategoryHeartbeat:
+		case journey.CategoryHeartbeat:
 			sawHeartbeat = true
 		}
 	}
@@ -230,32 +230,32 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 // heartbeat stays unrendered by default.
 func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
 	// [cron:job-id ...] and "... [Subagent Context] ..." are the literal
 	// title markers classifyJourney (internal/journey/candidates.go) checks
 	// for — resolveTaskProfile() defaults to OpenClawAware, whose
 	// bracket-stripping regexes don't touch either marker.
-	cronU1 := storyMsg("user", "[cron:daily-report 0 9 * * *] generate the report")
-	cronR1 := storyRec(at(0), []any{sys, cronU1}, storySSE("start"))
-	cronR2 := storyRec(at(1), []any{sys, cronU1, storyMsg("assistant", "done")}, storySSE("done"))
+	cronU1 := journeyMsg("user", "[cron:daily-report 0 9 * * *] generate the report")
+	cronR1 := journeyRec(at(0), []any{sys, cronU1}, journeySSE("start"))
+	cronR2 := journeyRec(at(1), []any{sys, cronU1, journeyMsg("assistant", "done")}, journeySSE("done"))
 
-	subU1 := storyMsg("user", "[Subagent Context] investigate the failing test")
-	subR1 := storyRec(at(20), []any{sys, subU1}, storySSE("start"))
-	subR2 := storyRec(at(21), []any{sys, subU1, storyMsg("assistant", "done")}, storySSE("done"))
+	subU1 := journeyMsg("user", "[Subagent Context] investigate the failing test")
+	subR1 := journeyRec(at(20), []any{sys, subU1}, journeySSE("start"))
+	subR2 := journeyRec(at(21), []any{sys, subU1, journeyMsg("assistant", "done")}, journeySSE("done"))
 
-	hbU1 := storyMsg("user", "[OpenClaw heartbeat poll] check in")
-	hbR1 := storyRec(at(30), []any{sys, hbU1}, storySSE("ack"))
-	hbR2 := storyRec(at(31), []any{sys, hbU1, storyMsg("assistant", "ack")}, storySSE("ack2"))
+	hbU1 := journeyMsg("user", "[OpenClaw heartbeat poll] check in")
+	hbR1 := journeyRec(at(30), []any{sys, hbU1}, journeySSE("ack"))
+	hbR2 := journeyRec(at(31), []any{sys, hbU1, journeyMsg("assistant", "ack")}, journeySSE("ack2"))
 
-	path := writeStoryJSONL(t, []audit.Record{cronR1, cronR2, subR1, subR2, hbR1, hbR2})
+	path := writeJourneyJSONL(t, []audit.Record{cronR1, cronR2, subR1, subR2, hbR1, hbR2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
 		t.Fatalf("cmdAnalyze (default suite): %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
+	idx := journey.LoadJourneyIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 3 {
 		t.Fatalf("index should list all three candidates, got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}
@@ -268,11 +268,11 @@ func TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent(t *testing.T) {
 	var cronRendered, subagentRendered, heartbeatRendered bool
 	for _, row := range idx.Journeys {
 		switch row.Category {
-		case story.CategoryCron:
+		case journey.CategoryCron:
 			cronRendered = row.Rendered != ""
-		case story.CategorySubagent:
+		case journey.CategorySubagent:
 			subagentRendered = row.Rendered != ""
-		case story.CategoryHeartbeat:
+		case journey.CategoryHeartbeat:
 			heartbeatRendered = row.Rendered != ""
 		}
 	}
@@ -309,11 +309,11 @@ func detailFileCount(t *testing.T, dir string) int {
 // full materialization + real links.
 func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "12-B guard fixture opening instruction")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "12-B guard fixture opening instruction")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("开工"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("完成"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, path}) }); err != nil {
@@ -369,27 +369,27 @@ func TestCmdAnalyze_DefaultSuiteJourneyHasNoDeadDetailLinks(t *testing.T) {
 // just the batch-skips-it half P13.5's other test already covers.
 func TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	aU1 := storyMsg("user", "candidate A for the F-03 targeted-materialization test")
-	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
-	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+	aU1 := journeyMsg("user", "candidate A for the F-03 targeted-materialization test")
+	aR1 := journeyRec(at(0), []any{sys, aU1}, journeySSE("开工 A"))
+	aR2 := journeyRec(at(1), []any{sys, aU1, journeyMsg("assistant", "done A")}, journeySSE("完成 A"))
 
-	bU1 := storyMsg("user", "candidate B for the F-03 targeted-materialization test")
-	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
-	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+	bU1 := journeyMsg("user", "candidate B for the F-03 targeted-materialization test")
+	bR1 := journeyRec(at(10), []any{sys, bU1}, journeySSE("开工 B"))
+	bR2 := journeyRec(at(11), []any{sys, bU1, journeyMsg("assistant", "done B")}, journeySSE("完成 B"))
 
-	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	path := writeJourneyJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
-	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	su, err := setupJourneyRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
 	if err != nil {
-		t.Fatalf("setupStoryRun: %v", err)
+		t.Fatalf("setupJourneyRun: %v", err)
 	}
 	if len(su.chains) != 2 {
 		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
 	}
-	idA := story.ID(su.chains[0])
+	idA := journey.ID(su.chains[0])
 
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-journey", idA, path})
@@ -414,17 +414,17 @@ func TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails(t *testing.T) {
 // already existed.
 func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	aU1 := storyMsg("user", "candidate A for the F-01 regression test")
-	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
-	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+	aU1 := journeyMsg("user", "candidate A for the F-01 regression test")
+	aR1 := journeyRec(at(0), []any{sys, aU1}, journeySSE("开工 A"))
+	aR2 := journeyRec(at(1), []any{sys, aU1, journeyMsg("assistant", "done A")}, journeySSE("完成 A"))
 
-	bU1 := storyMsg("user", "candidate B for the F-01 regression test")
-	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
-	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+	bU1 := journeyMsg("user", "candidate B for the F-01 regression test")
+	bR1 := journeyRec(at(10), []any{sys, bU1}, journeySSE("开工 B"))
+	bR2 := journeyRec(at(11), []any{sys, bU1, journeyMsg("assistant", "done B")}, journeySSE("完成 B"))
 
-	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	path := writeJourneyJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	// Step 1: the default suite renders both (task-classified) candidates'
@@ -436,14 +436,14 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 		t.Fatalf("precondition failed: default suite already materialized %d detail file(s)", n)
 	}
 
-	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	su, err := setupJourneyRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
 	if err != nil {
-		t.Fatalf("setupStoryRun: %v", err)
+		t.Fatalf("setupJourneyRun: %v", err)
 	}
 	if len(su.chains) != 2 {
 		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
 	}
-	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+	idA, idB := journey.ID(su.chains[0]), journey.ID(su.chains[1])
 
 	// Step 1b: those pre-existing j-*.md carry inline coordinates, not
 	// links (default suite, 12-B).
@@ -483,11 +483,11 @@ func TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists(t *testi
 // the default suite with an extra filter.
 func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "single candidate for -journey selector test")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "single candidate for -journey selector test")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("开工"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("完成"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, "-journey", "*", path}) }); err != nil {
@@ -505,11 +505,11 @@ func TestCmdAnalyze_JourneySelectorRunsStoryHalfOnly(t *testing.T) {
 // for -benchmark.
 func TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "single candidate for -benchmark selector test")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "single candidate for -benchmark selector test")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("开工"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("完成"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := captureStdoutErr(t, func() error { return cmdAnalyze([]string{"-o", outDir, "-benchmark", path}) }); err != nil {
@@ -530,7 +530,7 @@ func TestCmdAnalyze_BenchmarkSelectorRunsStoryHalfOnly(t *testing.T) {
 // silently letting one selector win, the way pre-P9 cmdStory did for
 // -journey + -render-all together).
 func TestCmdAnalyze_SelectorsAreMutuallyExclusive(t *testing.T) {
-	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	path := writeJourneyJSONL(t, []audit.Record{journeyRec(time.Now(), []any{journeyMsg("user", "x")}, journeySSE("y"))})
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-journey", "*", "-benchmark", path})
@@ -541,7 +541,7 @@ func TestCmdAnalyze_SelectorsAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestCmdAnalyze_RenderAllRejectsSelector(t *testing.T) {
-	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	path := writeJourneyJSONL(t, []audit.Record{journeyRec(time.Now(), []any{journeyMsg("user", "x")}, journeySSE("y"))})
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-journey", "*", "-render-all", path})
@@ -556,31 +556,31 @@ func TestCmdAnalyze_RenderAllRejectsSelector(t *testing.T) {
 // half never invoked.
 func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	aU1 := storyMsg("user", "candidate A for -compare selector test")
-	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
-	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+	aU1 := journeyMsg("user", "candidate A for -compare selector test")
+	aR1 := journeyRec(at(0), []any{sys, aU1}, journeySSE("开工 A"))
+	aR2 := journeyRec(at(1), []any{sys, aU1, journeyMsg("assistant", "done A")}, journeySSE("完成 A"))
 
-	bU1 := storyMsg("user", "candidate B for -compare selector test")
-	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
-	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+	bU1 := journeyMsg("user", "candidate B for -compare selector test")
+	bR1 := journeyRec(at(10), []any{sys, bU1}, journeySSE("开工 B"))
+	bR2 := journeyRec(at(11), []any{sys, bU1, journeyMsg("assistant", "done B")}, journeySSE("完成 B"))
 
-	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	path := writeJourneyJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	// Discover the two candidates' real content-addressed ids the same way
-	// setupStoryRun (and therefore cmdAnalyze itself) computes them, rather
+	// setupJourneyRun (and therefore cmdAnalyze itself) computes them, rather
 	// than guessing/hardcoding a hash — same package, so this internal
 	// helper is directly callable from the test.
-	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	su, err := setupJourneyRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
 	if err != nil {
-		t.Fatalf("setupStoryRun: %v", err)
+		t.Fatalf("setupJourneyRun: %v", err)
 	}
 	if len(su.chains) != 2 {
 		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
 	}
-	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+	idA, idB := journey.ID(su.chains[0]), journey.ID(su.chains[1])
 
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-compare", idA + "," + idB, path})
@@ -605,27 +605,27 @@ func TestCmdAnalyze_CompareSelectorRunsStoryHalfOnly(t *testing.T) {
 // never express — works on both sides.
 func TestCmdAnalyze_CompareWildcard(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 22, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	aU1 := storyMsg("user", "candidate A for -compare wildcard test")
-	aR1 := storyRec(at(0), []any{sys, aU1}, storySSE("开工 A"))
-	aR2 := storyRec(at(1), []any{sys, aU1, storyMsg("assistant", "done A")}, storySSE("完成 A"))
+	aU1 := journeyMsg("user", "candidate A for -compare wildcard test")
+	aR1 := journeyRec(at(0), []any{sys, aU1}, journeySSE("开工 A"))
+	aR2 := journeyRec(at(1), []any{sys, aU1, journeyMsg("assistant", "done A")}, journeySSE("完成 A"))
 
-	bU1 := storyMsg("user", "candidate B for -compare wildcard test")
-	bR1 := storyRec(at(10), []any{sys, bU1}, storySSE("开工 B"))
-	bR2 := storyRec(at(11), []any{sys, bU1, storyMsg("assistant", "done B")}, storySSE("完成 B"))
+	bU1 := journeyMsg("user", "candidate B for -compare wildcard test")
+	bR1 := journeyRec(at(10), []any{sys, bU1}, journeySSE("开工 B"))
+	bR2 := journeyRec(at(11), []any{sys, bU1, journeyMsg("assistant", "done B")}, journeySSE("完成 B"))
 
-	path := writeStoryJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
+	path := writeJourneyJSONL(t, []audit.Record{aR1, aR2, bR1, bR2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
-	su, err := setupStoryRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
+	su, err := setupJourneyRun([]string{path}, outDir, false, "", nil, false, i18n.EN)
 	if err != nil {
-		t.Fatalf("setupStoryRun: %v", err)
+		t.Fatalf("setupJourneyRun: %v", err)
 	}
 	if len(su.chains) != 2 {
 		t.Fatalf("want 2 independent candidates, got %d", len(su.chains))
 	}
-	idA, idB := story.ID(su.chains[0]), story.ID(su.chains[1])
+	idA, idB := journey.ID(su.chains[0]), journey.ID(su.chains[1])
 	patA, patB := "*"+idA[len(idA)-8:], "*"+idB[len(idB)-8:]
 
 	if err := captureStdoutErr(t, func() error {
@@ -650,8 +650,8 @@ func TestCmdAnalyze_CompareWildcard(t *testing.T) {
 // safe to overwrite and always in sync with the running binary.
 func TestCmdAnalyze_WritesSkeletonPages(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 9, 1, 10, min, 0, 0, time.UTC) }
-	path := writeStoryJSONL(t, []audit.Record{
-		storyRec(at(0), []any{storyMsg("system", "sys"), storyMsg("user", "skeleton probe")}, storySSE("开工")),
+	path := writeJourneyJSONL(t, []audit.Record{
+		journeyRec(at(0), []any{journeyMsg("system", "sys"), journeyMsg("user", "skeleton probe")}, journeySSE("开工")),
 	})
 
 	assertSkeletons := func(t *testing.T, outDir string) {
@@ -703,7 +703,7 @@ func TestCmdAnalyze_WritesSkeletonPages(t *testing.T) {
 // it the same way (one LLM call per journey makes no sense against a
 // suite-wide render).
 func TestCmdAnalyze_LLMAddrRejectedInDefaultSuite(t *testing.T) {
-	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	path := writeJourneyJSONL(t, []audit.Record{journeyRec(time.Now(), []any{journeyMsg("user", "x")}, journeySSE("y"))})
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-llm-addr", "127.0.0.1:1", "-llm-model", "agent", path})
@@ -719,7 +719,7 @@ func TestCmdAnalyze_LLMAddrRejectedInDefaultSuite(t *testing.T) {
 // the batch-mode rejection above (which gates on the resolved value being
 // non-empty, not merely on the flag having been typed).
 func TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite(t *testing.T) {
-	path := writeStoryJSONL(t, []audit.Record{storyRec(time.Now(), []any{storyMsg("user", "x")}, storySSE("y"))})
+	path := writeJourneyJSONL(t, []audit.Record{journeyRec(time.Now(), []any{journeyMsg("user", "x")}, journeySSE("y"))})
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-llm-addr", "", path})
@@ -730,32 +730,32 @@ func TestCmdAnalyze_EmptyLLMAddrNotRejectedInDefaultSuite(t *testing.T) {
 }
 
 // TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves: the
-// "self-traffic input asymmetry" (cmd_story.go could
+// "self-traffic input asymmetry" (cmd_journey.go could
 // take an explicit -llm-key override, cmd_report.go had no such flag and
 // only ever read report.yaml's llm_key) is closed by the unified flag set
 // — an -llm-key passed to `vmr analyze` (not present in report.yaml at
 // all) must exclude the same self-traffic candidate from BOTH the story
 // half's candidate list and the report half's totals, since cmdAnalyze
-// resolves llmKey once and feeds it to both setupStoryRun and runReport's
+// resolves llmKey once and feeds it to both setupJourneyRun and runReport's
 // excludeClientTags.
 func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 8, 21, 9, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
 	selfKey := "sk-analysis-key-not-in-report-yaml"
 	selfTag := audit.KeyTag(selfKey)
 
-	selfU1 := storyMsg("user", "self-analysis interpretation call")
-	selfR1 := storyRec(at(0), []any{sys, selfU1}, storySSE("interpreting"))
+	selfU1 := journeyMsg("user", "self-analysis interpretation call")
+	selfR1 := journeyRec(at(0), []any{sys, selfU1}, journeySSE("interpreting"))
 	selfR1.ClientKeyTag = selfTag
-	selfR2 := storyRec(at(1), []any{sys, selfU1, storyMsg("assistant", "done")}, storySSE("done interpreting"))
+	selfR2 := journeyRec(at(1), []any{sys, selfU1, journeyMsg("assistant", "done")}, journeySSE("done interpreting"))
 	selfR2.ClientKeyTag = selfTag
 
-	workU1 := storyMsg("user", "real workload task")
-	workR1 := storyRec(at(10), []any{sys, workU1}, storySSE("working"))
-	workR2 := storyRec(at(11), []any{sys, workU1, storyMsg("assistant", "done")}, storySSE("done working"))
+	workU1 := journeyMsg("user", "real workload task")
+	workR1 := journeyRec(at(10), []any{sys, workU1}, journeySSE("working"))
+	workR2 := journeyRec(at(11), []any{sys, workU1, journeyMsg("assistant", "done")}, journeySSE("done working"))
 
-	path := writeStoryJSONL(t, []audit.Record{selfR1, selfR2, workR1, workR2})
+	path := writeJourneyJSONL(t, []audit.Record{selfR1, selfR2, workR1, workR2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	// -llm-key only on the command line — report.yaml doesn't exist in
@@ -767,7 +767,7 @@ func TestCmdAnalyze_LLMKeyExcludesSelfTrafficFromBothHalves(t *testing.T) {
 		t.Fatalf("cmdAnalyze -llm-key: %v", err)
 	}
 
-	idx := story.LoadStoryIndex(filepath.Join(outDir, "journeys", "index.json"))
+	idx := journey.LoadJourneyIndex(filepath.Join(outDir, "journeys", "index.json"))
 	if len(idx.Journeys) != 1 {
 		t.Fatalf("story half: want 1 candidate (self-traffic excluded), got %d: %+v", len(idx.Journeys), idx.Journeys)
 	}

@@ -20,9 +20,9 @@ import (
 	"vmr/internal/i18n"
 )
 
-// StoriesLinkInfo carries the "vmr-report.md → journeys/index.md"
+// JourneysLinkInfo carries the "vmr-report.md → journeys/index.md"
 // navigation edge (P6.2a, architecture doc §7.5).
-type StoriesLinkInfo struct {
+type JourneysLinkInfo struct {
 	// Path is relative to vmr-report.md itself, e.g. "journeys/index.md".
 	Path                   string
 	JourneyCount           int
@@ -33,7 +33,7 @@ type StoriesLinkInfo struct {
 // stories is nil when this run's output root has no journeys index to link
 // to; journeyLink is the lineage-id → rendered-journey-filename map the §6
 // session table links against (nil/empty when none).
-func BuildMacroReportVM(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) *MacroReportVM {
+func BuildMacroReportVM(rep *Report2, lang i18n.Lang, stories *JourneysLinkInfo, journeyLink map[string]string) *MacroReportVM {
 	t := i18n.Doc(lang)
 	vm := &MacroReportVM{Title: t.Title}
 	vm.Meta = vmMetaHeader(rep, lang, stories)
@@ -68,12 +68,12 @@ func BuildMacroReportVM(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, 
 
 // MacroMarkdown is the VM path's one-call entry: build the view model and
 // serialize it.
-func MacroMarkdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) string {
+func MacroMarkdown(rep *Report2, lang i18n.Lang, stories *JourneysLinkInfo, journeyLink map[string]string) string {
 	return RenderMarkdown(BuildMacroReportVM(rep, lang, stories, journeyLink))
 }
 
 // Markdown renders rep via the single ViewModel path.
-func Markdown(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo, journeyLink map[string]string) string {
+func Markdown(rep *Report2, lang i18n.Lang, stories *JourneysLinkInfo, journeyLink map[string]string) string {
 	return MacroMarkdown(rep, lang, stories, journeyLink)
 }
 
@@ -179,7 +179,7 @@ func LoadReport(dir string) (*Report2, error) {
 // vmMetaHeader builds the blocks between the H1 and §0: the data-source
 // line (with the report window), the report-config disclosure, the
 // collapsible input list, and the details/journeys link lines.
-func vmMetaHeader(rep *Report2, lang i18n.Lang, stories *StoriesLinkInfo) []BlockVM {
+func vmMetaHeader(rep *Report2, lang i18n.Lang, stories *JourneysLinkInfo) []BlockVM {
 	t := i18n.Doc(lang)
 	var blocks []BlockVM
 	blocks = append(blocks, ParaVM{Text: t.MetaLine(t.MetaInputSummary(len(rep.Meta.Inputs)), rep.Meta.Format,

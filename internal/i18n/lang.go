@@ -10,7 +10,7 @@
 // them needing to know about configuration at all.
 //
 // Text lives one file per producing source file (report_workload.go pairs
-// with internal/report/viewmodel_workload.go, story_render.go pairs with
+// with internal/report/viewmodel_workload.go, journey_render.go pairs with
 // internal/journey/render_md.go, ...) rather than in one shared catalog — see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section
 // for why: a wording change stays in one small file next to the code that

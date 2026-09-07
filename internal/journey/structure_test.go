@@ -665,20 +665,17 @@ func TestBuildStructure_TruncationLimits(t *testing.T) {
 // TestJourneyReportFile_Normalization tests D19 / §1.1 filename normalization.
 func TestJourneyReportFile_Normalization(t *testing.T) {
 	cases := []struct {
-		id      string
-		partial bool
-		want    string
+		id   string
+		want string
 	}{
-		{"j-abc", false, "j-abc.md"},
-		{"j-abc", true, "j-abc.md"}, // No -partial suffix!
-		{"abc", false, "j-abc.md"},
-		{"abc", true, "j-abc.md"},
+		{"j-abc", "j-abc.md"},
+		{"abc", "j-abc.md"},
 	}
 
 	for _, tc := range cases {
-		got := JourneyReportFile(tc.id, tc.partial)
+		got := JourneyReportFile(tc.id)
 		if got != tc.want {
-			t.Errorf("JourneyReportFile(%q, %v) = %q, want %q", tc.id, tc.partial, got, tc.want)
+			t.Errorf("JourneyReportFile(%q) = %q, want %q", tc.id, got, tc.want)
 		}
 	}
 }

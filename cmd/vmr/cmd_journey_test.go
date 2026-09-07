@@ -18,10 +18,10 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 )
 
-func writeStoryJSONL(t *testing.T, recs []audit.Record) string {
+func writeJourneyJSONL(t *testing.T, recs []audit.Record) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	f, err := os.Create(path)
@@ -41,17 +41,17 @@ func writeStoryJSONL(t *testing.T, recs []audit.Record) string {
 	return path
 }
 
-func storySSE(text string) string {
+func journeySSE(text string) string {
 	return `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"` + text + `"}}],"model":"agent"}
 data: {"choices":[{"index":0,"finish_reason":"stop","delta":{}}]}
 data: [DONE]`
 }
 
-func storyMsg(role, content string) map[string]any {
+func journeyMsg(role, content string) map[string]any {
 	return map[string]any{"role": role, "content": content}
 }
 
-func storyRec(ts time.Time, msgs []any, respBody any) audit.Record {
+func journeyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 	body := map[string]any{"model": "agent", "stream": true, "messages": msgs}
 	return audit.Record{
 		TS: ts, DurMS: 100, Model: "agent", Protocol: "openai-completions", Stream: true, Outcome: "ok",
@@ -65,17 +65,17 @@ func storyRec(ts time.Time, msgs []any, respBody any) audit.Record {
 // TestCmdStory_ListAndRender exercises the `vmr story` CLI end to end — a
 // path flagged as untested: internal/journey's own
 // tests cover Build/RenderMarkdown directly, but nothing exercised
-// cmd_story.go's flag parsing, candidate listing (batched PreviewTitles),
+// cmd_journey.go's flag parsing, candidate listing (batched PreviewTitles),
 // or the -journey render-to-file path. Two records sharing the same opening
 // user message form one 2-manifest lineage — the minimum ListCandidates
 // will offer as a journey.
 func TestCmdStory_ListAndRender(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "调研一下 A 股新股打新收益")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("开工"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("完成"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "调研一下 A 股新股打新收益")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("开工"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("完成"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 
@@ -140,18 +140,18 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	if len(detailsEntries) != 2 {
 		t.Fatalf("want 2 files (journey .md+.json) in journeys/details, got %d: %v", len(detailsEntries), detailsEntries)
 	}
-	content, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false)))
+	content, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(id)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(content), "调研一下 A 股新股打新收益") {
 		t.Errorf("rendered journey missing root instruction:\n%s", content)
 	}
-	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(id, false), ".md")+".json"))
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(journey.JourneyReportFile(id), ".md")+".json"))
 	if err != nil {
 		t.Fatalf("j-%s.json not written: %v", id, err)
 	}
-	var summary story.JourneySummary
+	var summary journey.JourneySummary
 	if err := json.Unmarshal(jsonData, &summary); err != nil {
 		t.Fatalf("journey-%s.json is not valid JSON: %v\n%s", id, err, jsonData)
 	}
@@ -160,14 +160,14 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 	}
 	// P4: writeJourneyFile is j-<id>.json's only production writer,
 	// and it builds JourneySummary via its own literal rather than calling
-	// story.Summarize (which has its own Metrics/Findings it must reuse
-	// rather than recompute — see story.NewJourneySummary's doc comment).
+	// journey.Summarize (which has its own Metrics/Findings it must reuse
+	// rather than recompute — see journey.NewJourneySummary's doc comment).
 	// That literal silently missed the Structure field for one build during
 	// P4's own execution (caught only by manually inspecting real-corpus
 	// output, not by any test) — this assertion is what should have caught
 	// it, and is what guards the next field the same way.
 	if len(summary.Structure.Tasks) == 0 {
-		t.Fatal("j-*.json's structure.tasks is empty — writeJourneyFile likely isn't populating Structure (see story.NewJourneySummary)")
+		t.Fatal("j-*.json's structure.tasks is empty — writeJourneyFile likely isn't populating Structure (see journey.NewJourneySummary)")
 	}
 	gotSteps := 0
 	for _, task := range summary.Structure.Tasks {
@@ -184,17 +184,17 @@ func TestCmdStory_ListAndRender(t *testing.T) {
 // the friction this flag removes).
 func TestCmdStory_RenderAll(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	uA := storyMsg("user", "调研一下 A 股新股打新收益")
-	rA1 := storyRec(at(0), []any{sys, uA}, storySSE("开工"))
-	rA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("完成"))
+	uA := journeyMsg("user", "调研一下 A 股新股打新收益")
+	rA1 := journeyRec(at(0), []any{sys, uA}, journeySSE("开工"))
+	rA2 := journeyRec(at(1), []any{sys, uA, journeyMsg("assistant", "done")}, journeySSE("完成"))
 
-	uB := storyMsg("user", "帮我写个 release note")
-	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
-	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
+	uB := journeyMsg("user", "帮我写个 release note")
+	rB1 := journeyRec(at(10), []any{sys, uB}, journeySSE("好的"))
+	rB2 := journeyRec(at(11), []any{sys, uB, journeyMsg("assistant", "done")}, journeySSE("写好了"))
 
-	path := writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
+	path := writeJourneyJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
@@ -247,7 +247,7 @@ func TestCmdStory_JourneyCommaSeparatedList(t *testing.T) {
 		t.Errorf("expected the batched-render summary line:\n%s", out)
 	}
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(id))); err != nil {
 			t.Errorf("j-%s.md not written: %v", id, err)
 		}
 	}
@@ -270,7 +270,7 @@ func TestCmdStory_JourneyWildcardMatchesMultiple(t *testing.T) {
 		t.Errorf("expected both journeys to match 'j-*':\n%s", out)
 	}
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(id))); err != nil {
 			t.Errorf("j-%s.md not written: %v", id, err)
 		}
 	}
@@ -294,7 +294,7 @@ func TestCmdStory_JourneyWildcardMatchesOne(t *testing.T) {
 	if !strings.Contains(out, idA+".md") || !strings.Contains(out, "tasks") {
 		t.Errorf("expected the single-journey RenderedNote line for %s:\n%s", idA, out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idB, false))); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idB))); err == nil {
 		t.Errorf("j-%s.md should not have been rendered (pattern only matches idA)", idB)
 	}
 }
@@ -338,17 +338,17 @@ func TestCmdStory_JourneyMultiMatchRejectsLLM(t *testing.T) {
 // a notable row.
 func TestCmdStory_Compare(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
-	uA := storyMsg("user", "调研一下 A 股新股打新收益")
-	rA1 := storyRec(at(0), []any{sys, uA}, storySSE("开工"))
-	rA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("完成"))
+	uA := journeyMsg("user", "调研一下 A 股新股打新收益")
+	rA1 := journeyRec(at(0), []any{sys, uA}, journeySSE("开工"))
+	rA2 := journeyRec(at(1), []any{sys, uA, journeyMsg("assistant", "done")}, journeySSE("完成"))
 
-	uB := storyMsg("user", "帮我写个 release note")
-	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
-	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
+	uB := journeyMsg("user", "帮我写个 release note")
+	rB1 := journeyRec(at(10), []any{sys, uB}, journeySSE("好的"))
+	rB2 := journeyRec(at(11), []any{sys, uB, journeyMsg("assistant", "done")}, journeySSE("写好了"))
 
-	path := writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
+	path := writeJourneyJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	listing := captureStdout(t, func() {
@@ -387,8 +387,8 @@ func TestCmdStory_Compare(t *testing.T) {
 		t.Fatalf("comparison .md not written: %v", err)
 	}
 	md := string(mdData)
-	linkA := "[" + idA + "](../journeys/details/" + story.JourneyReportFile(idA, false) + ")"
-	linkB := "[" + idB + "](../journeys/details/" + story.JourneyReportFile(idB, false) + ")"
+	linkA := "[" + idA + "](../journeys/details/" + journey.JourneyReportFile(idA) + ")"
+	linkB := "[" + idB + "](../journeys/details/" + journey.JourneyReportFile(idB) + ")"
 	for _, want := range []string{linkA, linkB, "调研一下 A 股新股打新收益", "帮我写个 release note", "Model Time", "Evidence Provenance", ctxgraph.CanonicalPath(path)} {
 		if !strings.Contains(md, want) {
 			t.Errorf("comparison markdown missing %q:\n%s", want, md)
@@ -397,10 +397,10 @@ func TestCmdStory_Compare(t *testing.T) {
 
 	// -compare automatically generated the individual journey files
 	for _, id := range []string{idA, idB} {
-		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(id, false))); err != nil {
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(id))); err != nil {
 			t.Errorf("j-%s.md should have been auto-generated by -compare: %v", id, err)
 		}
-		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(id, false), ".md")+".json")); err != nil {
+		if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(journey.JourneyReportFile(id), ".md")+".json")); err != nil {
 			t.Errorf("j-%s.json should have been auto-generated by -compare: %v", id, err)
 		}
 	}
@@ -409,15 +409,15 @@ func TestCmdStory_Compare(t *testing.T) {
 	if err != nil {
 		t.Fatalf("comparison .json not written: %v", err)
 	}
-	var cmp story.Comparison
+	var cmp journey.Comparison
 	if err := json.Unmarshal(jsonData, &cmp); err != nil {
 		t.Fatalf("comparison .json is not valid JSON: %v\n%s", err, jsonData)
 	}
 	if cmp.A.ID != idA || cmp.B.ID != idB {
 		t.Errorf("comparison json ids = %q/%q, want %q/%q", cmp.A.ID, cmp.B.ID, idA, idB)
 	}
-	wantReportA := filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(idA, false)))
-	wantReportB := filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(idB, false)))
+	wantReportA := filepath.ToSlash(filepath.Join("..", "journeys", "details", journey.JourneyReportFile(idA)))
+	wantReportB := filepath.ToSlash(filepath.Join("..", "journeys", "details", journey.JourneyReportFile(idB)))
 	if cmp.A.ReportFile != wantReportA || cmp.B.ReportFile != wantReportB {
 		t.Errorf("comparison json report files = %q/%q, want %q/%q", cmp.A.ReportFile, cmp.B.ReportFile, wantReportA, wantReportB)
 	}
@@ -434,7 +434,7 @@ func TestCmdStory_Compare(t *testing.T) {
 	}
 }
 
-func extrasSources(cmp story.Comparison) []string {
+func extrasSources(cmp journey.Comparison) []string {
 	if cmp.Extras == nil {
 		return nil
 	}
@@ -446,11 +446,11 @@ func extrasSources(cmp story.Comparison) []string {
 // trailing/leading empty one from a stray comma).
 func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "hello")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("a"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("b"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "hello")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("a"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("b"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	for _, val := range []string{"j-something", "j-something,", ",j-something"} {
@@ -469,11 +469,11 @@ func TestCmdStory_CompareRequiresTwoIDs(t *testing.T) {
 // found".
 func TestCmdStory_CompareUnknownID(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "hello")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("a"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("b"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "hello")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("a"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("b"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	err := captureStdoutErr(t, func() error {
@@ -492,22 +492,22 @@ func TestCmdStory_CompareUnknownID(t *testing.T) {
 // the .md, and a partial mark in compares/index.md.
 func TestCmdStory_ComparePartialGating(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
+	sys := journeyMsg("system", "sys")
 
 	// Partial candidate: looks mid-conversation already (>2 non-system keys)
 	// within the first lines of the only loaded file — same fixture shape as
 	// TestCmdStory_PartialHeadFilenameSuffix.
-	u1 := storyMsg("user", "第一轮指令")
-	a1 := storyMsg("assistant", "第一轮回复")
-	u2 := storyMsg("user", "第二轮追问")
-	rPartial1 := storyRec(at(0), []any{sys, u1, a1, u2}, storySSE("continuing"))
-	rPartial2 := storyRec(at(1), []any{sys, u1, a1, u2, storyMsg("assistant", "第二轮回复")}, storySSE("done"))
+	u1 := journeyMsg("user", "第一轮指令")
+	a1 := journeyMsg("assistant", "第一轮回复")
+	u2 := journeyMsg("user", "第二轮追问")
+	rPartial1 := journeyRec(at(0), []any{sys, u1, a1, u2}, journeySSE("continuing"))
+	rPartial2 := journeyRec(at(1), []any{sys, u1, a1, u2, journeyMsg("assistant", "第二轮回复")}, journeySSE("done"))
 
-	uB := storyMsg("user", "一个普通的新任务")
-	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
-	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
+	uB := journeyMsg("user", "一个普通的新任务")
+	rB1 := journeyRec(at(10), []any{sys, uB}, journeySSE("好的"))
+	rB2 := journeyRec(at(11), []any{sys, uB, journeyMsg("assistant", "done")}, journeySSE("写好了"))
 
-	path := writeStoryJSONL(t, []audit.Record{rPartial1, rPartial2, rB1, rB2})
+	path := writeJourneyJSONL(t, []audit.Record{rPartial1, rPartial2, rB1, rB2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	listing := captureStdout(t, func() {
@@ -599,8 +599,8 @@ func TestCmdStory_ComparePartialGating(t *testing.T) {
 // location.
 func TestCmdStory_ShowUngrouped(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sysOnly := storyRec(at(0), []any{storyMsg("system", "sys, nothing else")}, storySSE("ok"))
-	path := writeStoryJSONL(t, []audit.Record{sysOnly})
+	sysOnly := journeyRec(at(0), []any{journeyMsg("system", "sys, nothing else")}, journeySSE("ok"))
+	path := writeJourneyJSONL(t, []audit.Record{sysOnly})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
@@ -627,11 +627,11 @@ func TestCmdStory_NoInputFiles(t *testing.T) {
 // TestCmdStory_UnknownJourney covers the -journey-with-no-match error path.
 func TestCmdStory_UnknownJourney(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "hello")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("a"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("b"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "hello")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("a"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("b"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 	err := captureStdoutErr(t, func() error {
@@ -647,17 +647,17 @@ func TestCmdStory_UnknownJourney(t *testing.T) {
 // isn't stable, via a "-partial" suffix, without requiring the reader to
 // open the file and find the warning line first. The first record already
 // carries a multi-turn-looking manifest (sys + 2 user/assistant pairs) at
-// line 0 of the only loaded file — story.IsPartialHead's signal for "this
+// line 0 of the only loaded file — journey.IsPartialHead's signal for "this
 // conversation's real opening lives outside the loaded range".
 func TestCmdStory_PartialHeadFilenameSuffix(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "第一轮指令")
-	a1 := storyMsg("assistant", "第一轮回复")
-	u2 := storyMsg("user", "第二轮追问")
-	r1 := storyRec(at(0), []any{sys, u1, a1, u2}, storySSE("continuing"))
-	r2 := storyRec(at(1), []any{sys, u1, a1, u2, storyMsg("assistant", "第二轮回复")}, storySSE("done"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "第一轮指令")
+	a1 := journeyMsg("assistant", "第一轮回复")
+	u2 := journeyMsg("user", "第二轮追问")
+	r1 := journeyRec(at(0), []any{sys, u1, a1, u2}, journeySSE("continuing"))
+	r2 := journeyRec(at(1), []any{sys, u1, a1, u2, journeyMsg("assistant", "第二轮回复")}, journeySSE("done"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	outDir := filepath.Join(t.TempDir(), "out")
 
@@ -751,14 +751,14 @@ func captureStderr(t *testing.T, fn func()) string {
 func writeTwoCandidateJourneys(t *testing.T, outDir string) (path, idA, idB string) {
 	t.Helper()
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	uA := storyMsg("user", "调研一下 A 股新股打新收益")
-	rA1 := storyRec(at(0), []any{sys, uA}, storySSE("开工"))
-	rA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("完成"))
-	uB := storyMsg("user", "帮我写个 release note")
-	rB1 := storyRec(at(10), []any{sys, uB}, storySSE("好的"))
-	rB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("写好了"))
-	path = writeStoryJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
+	sys := journeyMsg("system", "sys")
+	uA := journeyMsg("user", "调研一下 A 股新股打新收益")
+	rA1 := journeyRec(at(0), []any{sys, uA}, journeySSE("开工"))
+	rA2 := journeyRec(at(1), []any{sys, uA, journeyMsg("assistant", "done")}, journeySSE("完成"))
+	uB := journeyMsg("user", "帮我写个 release note")
+	rB1 := journeyRec(at(10), []any{sys, uB}, journeySSE("好的"))
+	rB2 := journeyRec(at(11), []any{sys, uB, journeyMsg("assistant", "done")}, journeySSE("写好了"))
+	path = writeJourneyJSONL(t, []audit.Record{rA1, rA2, rB1, rB2})
 
 	// The id-discovery listing deliberately runs against its own scratch
 	// -o, not the caller's outDir: since journeys/index.{json,md} are now
@@ -932,7 +932,7 @@ func TestCmdStory_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey -llm-addr (no -llm-cache-dir): %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -974,7 +974,7 @@ func TestCmdStory_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportConfigPath, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey (llm settings from report.yaml): %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -1043,7 +1043,7 @@ func TestCmdStory_ReportYamlLLMAddrDoesNotBlockBatchPaths(t *testing.T) {
 // must produce vmr-story-corpus.md + .json under {outDir}/stories, and the
 // "no candidates" path (an audit log that groups into zero lineages at all)
 // must return without error and without writing either file, matching
-// corpusStats' own len(toRender)==0 early return.
+// renderBenchmarks' own len(toRender)==0 early return.
 func TestCmdStory_Corpus(t *testing.T) {
 	outDir := filepath.Join(t.TempDir(), "out")
 	path, _, _ := writeTwoCandidateJourneys(t, outDir)
@@ -1071,7 +1071,7 @@ func TestCmdStory_Corpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("vmr-story-corpus.json not written: %v", err)
 	}
-	var stats story.CorpusStats
+	var stats journey.BenchmarkStats
 	if err := json.Unmarshal(jsonData, &stats); err != nil {
 		t.Fatalf("vmr-story-corpus.json is not valid JSON: %v\n%s", err, jsonData)
 	}
@@ -1080,7 +1080,7 @@ func TestCmdStory_Corpus(t *testing.T) {
 	}
 }
 
-// TestCmdStory_CorpusNoCandidates covers corpusStats' own early return when
+// TestCmdStory_CorpusNoCandidates covers renderBenchmarks' own early return when
 // there are zero candidate journeys to analyze (here: a single record with
 // no non-system messages, which ctxgraph groups into Ungrouped rather than
 // any Lineage at all — same fixture shape as TestCmdStory_ShowUngrouped).
@@ -1091,8 +1091,8 @@ func TestCmdStory_Corpus(t *testing.T) {
 // pure query, which is why that one still leaves no directory at all).
 func TestCmdStory_CorpusNoCandidates(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sysOnly := storyRec(at(0), []any{storyMsg("system", "sys, nothing else")}, storySSE("ok"))
-	path := writeStoryJSONL(t, []audit.Record{sysOnly})
+	sysOnly := journeyRec(at(0), []any{journeyMsg("system", "sys, nothing else")}, journeySSE("ok"))
+	path := writeJourneyJSONL(t, []audit.Record{sysOnly})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	out := captureStdout(t, func() {
@@ -1117,11 +1117,11 @@ func TestCmdStory_CorpusNoCandidates(t *testing.T) {
 // journeys/ directory behind.
 func TestCmdAnalyze_BenchmarkExclusivity(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "hello")
-	r1 := storyRec(at(0), []any{sys, u1}, storySSE("a"))
-	r2 := storyRec(at(1), []any{sys, u1, storyMsg("assistant", "done")}, storySSE("b"))
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "hello")
+	r1 := journeyRec(at(0), []any{sys, u1}, journeySSE("a"))
+	r2 := journeyRec(at(1), []any{sys, u1, journeyMsg("assistant", "done")}, journeySSE("b"))
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 
 	cases := map[string][]string{
 		"-benchmark with -journey":    {"-benchmark", "-journey", "j-something"},
@@ -1201,7 +1201,7 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 	if err := cmdAnalyze([]string{"-journey", idA, "-llm-addr", addr, "-llm-model", "agent", "-llm-cache-dir", cacheDir, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory -journey -llm-addr: %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -1212,11 +1212,11 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 		}
 	}
 
-	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(idA, false), ".md")+".json"))
+	jsonData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", strings.TrimSuffix(journey.JourneyReportFile(idA), ".md")+".json"))
 	if err != nil {
 		t.Fatalf("journey .json not written: %v", err)
 	}
-	var summary story.JourneySummary
+	var summary journey.JourneySummary
 	if err := json.Unmarshal(jsonData, &summary); err != nil {
 		t.Fatalf("unmarshal journey .json: %v", err)
 	}
@@ -1224,7 +1224,7 @@ func TestCmdStory_JourneyWithLLM(t *testing.T) {
 		t.Fatalf("expected non-empty llm_findings in journey .json, got: %s", string(jsonData))
 	}
 	f := summary.LLMFindings[0]
-	if f.Code != story.FindingUnverifiedCompletionClaim || f.Confidence != story.ConfidenceHigh || f.Source != story.SourceLLMInferred {
+	if f.Code != journey.FindingUnverifiedCompletionClaim || f.Confidence != journey.ConfidenceHigh || f.Source != journey.SourceLLMInferred {
 		t.Errorf("unexpected LLM finding: %+v", f)
 	}
 
@@ -1273,7 +1273,7 @@ func TestCmdStory_JourneyWithRealLLM(t *testing.T) {
 	if err := cmdAnalyze([]string{"-journey", idA, "-report-config", reportYamlPath, "-o", outDir, path}); err != nil {
 		t.Fatalf("cmdStory with real report.yaml: %v", err)
 	}
-	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false)))
+	mdData, err := os.ReadFile(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA)))
 	if err != nil {
 		t.Fatalf("journey .md not written: %v", err)
 	}
@@ -1298,7 +1298,7 @@ func TestCmdStory_JourneyLLMDryRun(t *testing.T) {
 	if !strings.Contains(out, "dry run") {
 		t.Errorf("dry-run output missing the size estimate line: %q", out)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", story.JourneyReportFile(idA, false))); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA))); err == nil {
 		t.Error("-llm-dry-run should return before writing the journey .md")
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
@@ -1347,16 +1347,16 @@ func TestCmdStory_CompareLLMFailureDegrades(t *testing.T) {
 // and this test asserts both .md and .json carry resolved cost.
 func TestCmdStory_BatchRendersIncludeCost(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 9, 1, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u := storyMsg("user", "批量套件必须包含成本")
+	sys := journeyMsg("system", "sys")
+	u := journeyMsg("user", "批量套件必须包含成本")
 
 	// Two turns against a standard-priced endpoint (claude-3-7-sonnet-20250219).
-	r1 := storyRec(at(0), []any{sys, u}, costParitySSE("第一步回答", true))
+	r1 := journeyRec(at(0), []any{sys, u}, costParitySSE("第一步回答", true))
 	r1.Attempts = []audit.Attempt{{Endpoint: "anthropic-messages:anthropic:claude-3-7-sonnet-20250219", Protocol: "anthropic-messages", Provider: "anthropic", Model: "claude-3-7-sonnet-20250219", Response: &audit.Message{Status: 200}}}
-	r2 := storyRec(at(1), []any{sys, u, storyMsg("assistant", "第一步回答")}, costParitySSE("第二步回答", true))
+	r2 := journeyRec(at(1), []any{sys, u, journeyMsg("assistant", "第一步回答")}, costParitySSE("第二步回答", true))
 	r2.Attempts = []audit.Attempt{{Endpoint: "anthropic-messages:anthropic:claude-3-7-sonnet-20250219", Protocol: "anthropic-messages", Provider: "anthropic", Model: "claude-3-7-sonnet-20250219", Response: &audit.Message{Status: 200}}}
 
-	path := writeStoryJSONL(t, []audit.Record{r1, r2})
+	path := writeJourneyJSONL(t, []audit.Record{r1, r2})
 	outDir := filepath.Join(t.TempDir(), "out")
 
 	if err := captureStdoutErr(t, func() error {
@@ -1394,7 +1394,7 @@ func TestCmdStory_BatchRendersIncludeCost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var summary story.JourneySummary
+	var summary journey.JourneySummary
 	if err := json.Unmarshal(jsonData, &summary); err != nil {
 		t.Fatalf("unmarshal journey json: %v", err)
 	}

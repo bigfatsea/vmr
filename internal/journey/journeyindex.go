@@ -43,7 +43,7 @@ const (
 
 // IsNoiseCategory reports whether cat should be folded out of the primary
 // index view and excluded from the default suite's render scope — the one
-// judgment RenderStoryIndexMarkdown's display split and cmd/vmr's default
+// judgment RenderJourneyIndexMarkdown's display split and cmd/vmr's default
 // render scope both defer to — one place, so the two can't answer
 // differently for CategoryCron/CategorySubagent the way they once did.
 // Real-corpus measurement is the only evidence this classification rests on: heartbeat
@@ -90,23 +90,23 @@ type JourneyIndexRow struct {
 	Category JourneyCategory `json:"category"`
 }
 
-// StoryIndex is vmr-stories.json's whole shape: just Journeys. The parse
+// JourneyIndex is vmr-stories.json's whole shape: just Journeys. The parse
 // cache used to live here too, as a "files" section — it's since moved to
 // its own content-hash-sharded directory shared with internal/report
 // (ctxgraph.LoadCacheDir/SaveCacheDir, {outDir}/.cache/parse — one level
 // above storiesDir), so this index stays purely human-scale.
-type StoryIndex struct {
+type JourneyIndex struct {
 	Journeys []JourneyIndexRow `json:"journeys"`
-	// Cache is this run's own ScanCached result, carried on StoryIndex
+	// Cache is this run's own ScanCached result, carried on JourneyIndex
 	// purely as a convenience — every cmdStory branch already threads idx
-	// through to saveStoryIndex, so riding along here saves plumbing it as
+	// through to saveJourneyIndex, so riding along here saves plumbing it as
 	// a second parameter everywhere. Never serialized into
-	// vmr-stories.json (json:"-"): saveStoryIndex persists it separately,
+	// vmr-stories.json (json:"-"): saveJourneyIndex persists it separately,
 	// via ctxgraph.SaveCacheDir, at the same point it saves idx itself.
 	Cache *ctxgraph.FileCache `json:"-"`
 	// SelfTraffic records whether this run excluded vmr's own -llm-addr
 	// self-analysis traffic and how many candidates that removed — set in
-	// setupStoryRun, rendered as a one-line disclosure at the top of
+	// setupJourneyRun, rendered as a one-line disclosure at the top of
 	// vmr-stories.md. Rides along on idx for the same reason Cache does.
 	// json:"-": a run-time fact about this invocation, not index content.
 	SelfTraffic *SelfTrafficStatus `json:"-"`
@@ -121,19 +121,19 @@ type SelfTrafficStatus struct {
 	Excluded int  // candidates dropped by it
 }
 
-// LoadStoryIndex reads path if present. A missing, unreadable, or corrupt
+// LoadJourneyIndex reads path if present. A missing, unreadable, or corrupt
 // file all degrade the same way — an empty index (no prior Journey rows) —
 // the same best-effort-cache contract internal/imgprep's disk cache uses:
 // a bad index must never fail or corrupt the actual run, only cost it the
 // Tasks/Rendered carry-forward. Cache is left nil — load it separately via
 // ctxgraph.LoadCacheDir, same as internal/report's cmd_report.go does.
-func LoadStoryIndex(path string) *StoryIndex {
-	empty := &StoryIndex{}
+func LoadJourneyIndex(path string) *JourneyIndex {
+	empty := &JourneyIndex{}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return empty
 	}
-	var idx StoryIndex
+	var idx JourneyIndex
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return empty
 	}
@@ -143,7 +143,7 @@ func LoadStoryIndex(path string) *StoryIndex {
 // Save writes idx to path. 0600: same sensitivity note as every other file
 // under reports/stories/ — it's derived straight from the message-hash
 // content of the conversations it indexes.
-func (idx *StoryIndex) Save(path string) error {
+func (idx *JourneyIndex) Save(path string) error {
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return err
@@ -233,7 +233,7 @@ func MergeJourneyIndexRows(fresh []JourneyIndexRow, prior []JourneyIndexRow) []J
 // vmr-stories.json section on why the index exists at all). An id with no
 // matching row (shouldn't happen — every id passed here was itself resolved
 // from idx's own candidate set moments earlier) simply contributes nothing.
-func SourceFiles(idx *StoryIndex, ids ...string) []string {
+func SourceFiles(idx *JourneyIndex, ids ...string) []string {
 	if idx == nil {
 		return nil
 	}
@@ -258,7 +258,7 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 	return files
 }
 
-// RenderStoryIndexMarkdown renders vmr-stories.md — a pure, human-facing
+// RenderJourneyIndexMarkdown renders vmr-stories.md — a pure, human-facing
 // table (no file hashes; those live only in the JSON's "files" section).
 // Rows are split by IsNoiseCategory: task/cron/subagent are real
 // work and stay in the main, always-expanded table; only heartbeat is
@@ -271,8 +271,8 @@ func SourceFiles(idx *StoryIndex, ids ...string) []string {
 // vmr-stories.json (the machine layer) is unaffected — it lists every row
 // with no such split, per this project's "machine layer never makes
 // editorial cuts" rule.
-func RenderStoryIndexMarkdown(idx *StoryIndex, lang i18n.Lang) string {
-	t := i18n.StoryIndexT(lang)
+func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
+	t := i18n.JourneyIndexT(lang)
 	var rows []JourneyIndexRow
 	if idx != nil {
 		rows = idx.Journeys
@@ -317,7 +317,7 @@ func RenderStoryIndexMarkdown(idx *StoryIndex, lang i18n.Lang) string {
 	if len(visible) > 0 {
 		b.WriteString(t.TableHeader)
 		for _, r := range visible {
-			writeStoryIndexRow(&b, r, t)
+			writeJourneyIndexRow(&b, r, t)
 		}
 	} else {
 		b.WriteString(t.NoCandidatesNote)
@@ -326,7 +326,7 @@ func RenderStoryIndexMarkdown(idx *StoryIndex, lang i18n.Lang) string {
 		b.WriteString("\n<details>\n<summary>" + t.NoiseFoldSummary(len(noisy)) + "</summary>\n\n")
 		b.WriteString(t.TableHeader)
 		for _, r := range noisy {
-			writeStoryIndexRow(&b, r, t)
+			writeJourneyIndexRow(&b, r, t)
 		}
 		b.WriteString("\n</details>\n")
 	}
@@ -334,10 +334,10 @@ func RenderStoryIndexMarkdown(idx *StoryIndex, lang i18n.Lang) string {
 	return b.String()
 }
 
-// writeStoryIndexRow renders one JourneyIndexRow as a table row — shared
-// by RenderStoryIndexMarkdown's visible and collapsed-noise sections so
+// writeJourneyIndexRow renders one JourneyIndexRow as a table row — shared
+// by RenderJourneyIndexMarkdown's visible and collapsed-noise sections so
 // the row format has exactly one definition.
-func writeStoryIndexRow(b *strings.Builder, r JourneyIndexRow, t i18n.StoryIndexText) {
+func writeJourneyIndexRow(b *strings.Builder, r JourneyIndexRow, t i18n.JourneyIndexText) {
 	rendered := t.NotRendered
 	if r.Rendered != "" {
 		rendered = "[" + r.Rendered + "](" + r.Rendered + ")"

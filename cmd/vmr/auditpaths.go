@@ -1,6 +1,6 @@
 // Ver 2026-07-29 14:00, by Sonnet 5
 
-// Input-path resolution shared by cmd_report.go and cmd_story.go: both take
+// Input-path resolution shared by cmd_report.go and cmd_journey.go: both take
 // the same "<audit.jsonl|glob>..." positional argument convention and the
 // same default when it's omitted.
 package main

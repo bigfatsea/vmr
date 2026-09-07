@@ -50,7 +50,7 @@ func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n
 }
 
 func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) string {
-	st := i18n.Story(lang)
+	st := i18n.Journey(lang)
 	if rec == nil {
 		return st.UnreadableTitle
 	}

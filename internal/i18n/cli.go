@@ -1,13 +1,13 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with cmd/vmr/cmd_story.go's stdout listing output (cmd_report.go's
+// Pairs with cmd/vmr/cmd_journey.go's stdout listing output (cmd_report.go's
 // own progress lines are already English in both languages and don't need
 // this — lower priority than the Markdown/JSON producing paths).
 package i18n
 
 import "fmt"
 
-// CLIText is cmd_story.go's candidate-listing text, in one language.
+// CLIText is cmd_journey.go's candidate-listing text, in one language.
 type CLIText struct {
 	HeadTruncatedMark  string
 	StitchedMark       func(n int) string

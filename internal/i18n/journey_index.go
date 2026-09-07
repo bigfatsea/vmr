@@ -1,12 +1,12 @@
 // Ver 2026-08-05, by Sonnet 5
 
-// Pairs with internal/journey/storyindex.go (vmr-stories.md).
+// Pairs with internal/journey/journeyindex.go (vmr-stories.md).
 package i18n
 
 import "strconv"
 
-// StoryIndexText is storyindex.go's text, in one language.
-type StoryIndexText struct {
+// JourneyIndexText is journeyindex.go's text, in one language.
+type JourneyIndexText struct {
 	Title            string
 	TableHeader      string
 	NotRendered      string
@@ -25,9 +25,9 @@ type StoryIndexText struct {
 	NoiseFoldSummary func(n int) string
 }
 
-func StoryIndexT(lang Lang) StoryIndexText {
+func JourneyIndexT(lang Lang) JourneyIndexText {
 	if lang == ZH {
-		return StoryIndexText{
+		return JourneyIndexText{
 			Title:            "VMR Story 索引",
 			TableHeader:      "| ID | Client | 时间范围 | 任务 | 轮数 | 标题 | 已渲染 |\n|---|---|---|---|---|---|---|\n",
 			NotRendered:      "—",
@@ -46,7 +46,7 @@ func StoryIndexT(lang Lang) StoryIndexText {
 			},
 		}
 	}
-	return StoryIndexText{
+	return JourneyIndexText{
 		Title:            "VMR Story Index",
 		TableHeader:      "| ID | Client | Time Range | Tasks | Steps | Title | Rendered |\n|---|---|---|---|---|---|---|\n",
 		NotRendered:      "—",

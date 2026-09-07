@@ -128,18 +128,18 @@ func isMechanicalCorrelation(a, b MetricCode) bool {
 	return mechanicalCorrelationPairs[[2]MetricCode{a, b}]
 }
 
-// corpusMinCorrelationN/corpusMinCorrelationRho: below N, a correlation
+// benchmarkMinCorrelationN/benchmarkMinCorrelationRho: below N, a correlation
 // coefficient is noise dressed up as a number; below |rho|, it's not worth
 // a reader's attention even if computed. Both are triage bars, not
 // statistical significance claims.
 const (
-	corpusMinCorrelationN   = 5
-	corpusMinCorrelationRho = 0.3
+	benchmarkMinCorrelationN   = 5
+	benchmarkMinCorrelationRho = 0.3
 )
 
 func spearman(a, b []float64) (rho float64, n int) {
 	n = len(a)
-	if n != len(b) || n < corpusMinCorrelationN {
+	if n != len(b) || n < benchmarkMinCorrelationN {
 		return 0, n
 	}
 	ra, rb := rankValues(a), rankValues(b)
@@ -206,20 +206,20 @@ type GroupComparison struct {
 	Notable     bool        `json:"notable"`
 }
 
-// corpusMinGroupSize: below this on EITHER side, a median comparison is
+// benchmarkMinGroupSize: below this on EITHER side, a median comparison is
 // one or two data points pretending to be a distribution — skipped
 // entirely rather than shown with a misleadingly precise-looking number.
-const corpusMinGroupSize = 3
+const benchmarkMinGroupSize = 3
 
-// CorpusStats is the corpus layer's entire output — vmr-story-corpus.json's shape.
-type CorpusStats struct {
+// BenchmarkStats is the corpus layer's entire output — vmr-story-corpus.json's shape.
+type BenchmarkStats struct {
 	JourneyCount     int                         `json:"journey_count"`
 	MetricDist       map[MetricCode]Distribution `json:"metric_distributions"`
 	FindingRate      map[FindingCode]float64     `json:"finding_rates"` // fraction of journeys hitting >=1 Finding of this Code
 	Correlations     []CorrelationRow            `json:"correlations,omitempty"`
 	GroupComparisons []GroupComparison           `json:"group_comparisons,omitempty"`
 	// SkippedGroupComparisons names FindingCodes that had at least one hit
-	// but not enough journeys on one side (< corpusMinGroupSize) to compare
+	// but not enough journeys on one side (< benchmarkMinGroupSize) to compare
 	// — named explicitly rather than silently absent, so "not shown" reads
 	// as "not enough data" and not "nothing found".
 	SkippedGroupComparisons []FindingCode         `json:"skipped_group_comparisons,omitempty"`
@@ -233,15 +233,15 @@ type CorpusStats struct {
 	ProtocolShare map[string]float64 `json:"protocol_share,omitempty"`
 }
 
-// ComputeCorpusStats is the corpus layer's entire computation: per-metric
+// ComputeBenchmarkStats is the corpus layer's entire computation: per-metric
 // distributions, per-Finding-Code hit rates, pairwise Spearman
 // correlations among the fourteen behavior-profile metrics, and
 // Finding-grouped NetWorkingMS comparisons. All of it is pure, in-memory,
 // zero-LLM aggregation over already-computed Metrics/Findings — journeys
 // themselves are never re-parsed here, matching Findings' own "rules
 // first" discipline.
-func ComputeCorpusStats(journeys []*Journey) CorpusStats {
-	stats := CorpusStats{
+func ComputeBenchmarkStats(journeys []*Journey) BenchmarkStats {
+	stats := BenchmarkStats{
 		JourneyCount: len(journeys),
 		MetricDist:   map[MetricCode]Distribution{},
 		FindingRate:  map[FindingCode]float64{},
@@ -292,7 +292,7 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 		for _, specB := range metricSpecs[ai+1:] {
 			a, b := specA.Code, specB.Code
 			rho, n := spearman(values[a], values[b])
-			if n < corpusMinCorrelationN || math.Abs(rho) < corpusMinCorrelationRho {
+			if n < benchmarkMinCorrelationN || math.Abs(rho) < benchmarkMinCorrelationRho {
 				continue
 			}
 			stats.Correlations = append(stats.Correlations, CorrelationRow{MetricA: a, MetricB: b, Rho: rho, N: n})
@@ -313,7 +313,7 @@ func ComputeCorpusStats(journeys []*Journey) CorpusStats {
 				noHitVals = append(noHitVals, v)
 			}
 		}
-		if len(hitVals) < corpusMinGroupSize || len(noHitVals) < corpusMinGroupSize {
+		if len(hitVals) < benchmarkMinGroupSize || len(noHitVals) < benchmarkMinGroupSize {
 			stats.SkippedGroupComparisons = append(stats.SkippedGroupComparisons, code)
 			continue
 		}

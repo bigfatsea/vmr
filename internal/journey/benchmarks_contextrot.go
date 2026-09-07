@@ -67,7 +67,7 @@ func isErrorStep(s *Step) bool {
 }
 
 // computeContextRot computes step counts, finding densities, and error rates across context size buckets.
-// findingsPerJourney can be passed in to reuse already computed findings from ComputeCorpusStats.
+// findingsPerJourney can be passed in to reuse already computed findings from ComputeBenchmarkStats.
 func computeContextRot(journeys []*Journey, findingsPerJourney [][]Finding) []ContextRotBucket {
 	buckets := make([]ContextRotBucket, len(contextRotRanges))
 	for i, r := range contextRotRanges {
@@ -153,7 +153,7 @@ func renderContextRotSection(b *strings.Builder, buckets []ContextRotBucket, lan
 		return
 	}
 
-	t := i18n.Corpus(lang)
+	t := i18n.Benchmarks(lang)
 	if hasData {
 		b.WriteString(t.ContextRotTitle)
 		b.WriteString(t.ContextRotHeader)
@@ -169,9 +169,9 @@ func renderContextRotSection(b *strings.Builder, buckets []ContextRotBucket, lan
 	// shape counts from chatmsg. Both are hardcoded English because
 	// internal/i18n is the source of truth for both lines.
 	if excluded > 0 {
-		fmt.Fprintf(b, "%s\n", i18n.Corpus(lang).ContextRotExcludedNote(excluded))
+		fmt.Fprintf(b, "%s\n", i18n.Benchmarks(lang).ContextRotExcludedNote(excluded))
 	}
 	if parts, holders := chatmsg.UnrecognizedShapeCounts(); parts > 0 || holders > 0 {
-		fmt.Fprintf(b, "%s\n", i18n.Corpus(lang).UnrecognizedShapeNote(int(parts), int(holders)))
+		fmt.Fprintf(b, "%s\n", i18n.Benchmarks(lang).UnrecognizedShapeNote(int(parts), int(holders)))
 	}
 }

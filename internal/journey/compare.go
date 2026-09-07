@@ -59,7 +59,7 @@ func journeyRef(s JourneySummary) JourneyRef {
 	ref := JourneyRef{ID: s.ID, Title: s.Title, From: s.From, To: s.To,
 		Steps: steps, ToolCalls: s.Metrics.ToolCallCount, Partial: s.Partial}
 	if s.ID != "" {
-		ref.ReportFile = JourneyReportFile(s.ID, s.Partial)
+		ref.ReportFile = JourneyReportFile(s.ID)
 	}
 	return ref
 }

@@ -17,7 +17,7 @@ type ToolSequencePattern struct {
 	ErrorRate   float64  `json:"error_rate"` // rate of sequence tail step having an error
 }
 
-const corpusMaxToolSequences = 10
+const benchmarkMaxToolSequences = 10
 
 type patternStats struct {
 	seq        []string
@@ -110,8 +110,8 @@ func computeToolSequences(journeys []*Journey) []ToolSequencePattern {
 		return strings.Join(list[i].seq, " ") < strings.Join(list[j].seq, " ")
 	})
 
-	if len(list) > corpusMaxToolSequences {
-		list = list[:corpusMaxToolSequences]
+	if len(list) > benchmarkMaxToolSequences {
+		list = list[:benchmarkMaxToolSequences]
 	}
 
 	out := make([]ToolSequencePattern, len(list))
@@ -132,7 +132,7 @@ func computeToolSequences(journeys []*Journey) []ToolSequencePattern {
 
 // renderToolSequenceSection writes the Tool Sequence Patterns section to the Markdown builder.
 func renderToolSequenceSection(b *strings.Builder, patterns []ToolSequencePattern, lang i18n.Lang) {
-	t := i18n.Corpus(lang)
+	t := i18n.Benchmarks(lang)
 	b.WriteString(t.ToolSeqTitle)
 	if len(patterns) == 0 {
 		b.WriteString(t.NoToolSeq)

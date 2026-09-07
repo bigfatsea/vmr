@@ -65,7 +65,7 @@ type Finding struct {
 	// Finding/Evidence/Action are narrative text, localized per the lang
 	// ComputeFindings was called with. journey-<id>.json and
 	// journey-<id>.md are both built from the same target-lang call
-	// (cmd/vmr/cmd_story.go's writeJourneyFile); report's vmr-report.json
+	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's vmr-report.json
 	// matches, via cmd_report.go's report.LocalizeEfficiency call before
 	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
 	// do NOT follow lang — see docs/future-strategy/analyze_architecture_redesign_opus-5.md
@@ -109,7 +109,7 @@ const (
 // the Finding struct's own doc comment for the still-open question of
 // whether journey-<id>.json's *text* should track lang or stay fixed EN).
 func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
-	tx := i18n.StoryFindings(lang)
+	tx := i18n.JourneyFindings(lang)
 	steps := journeySteps(j)
 
 	var out []Finding
@@ -170,7 +170,7 @@ func groupToolCallsByKey(steps []*Step) []toolCallGroup {
 	return groups
 }
 
-func detectExactRepeatToolCall(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectExactRepeatToolCall(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, g := range groupToolCallsByKey(steps) {
 		if len(g.Seqs) < exactRepeatThreshold {
@@ -200,7 +200,7 @@ const (
 	narrationJaccardThreshold = 0.5
 )
 
-func detectNarrationWithoutAction(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectNarrationWithoutAction(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	i := 0
 	for i < len(steps) {
@@ -280,7 +280,7 @@ func looksLikeVerification(s *Step) bool {
 // still carries a Finish (the model considers the turn done) while still
 // armed, that's the candidate — an error was seen and the task ended
 // without anything that looked like a check in between.
-func detectUnverifiedSuccess(j *Journey, tx i18n.StoryFindingsText) []Finding {
+func detectUnverifiedSuccess(j *Journey, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, task := range j.Tasks {
 		unverified := false
@@ -380,7 +380,7 @@ func entityReferenced(e string, actionEntities []string) bool {
 	return false
 }
 
-func detectReasoningActionMismatch(steps []*Step, tx i18n.StoryFindingsText) []Finding {
+func detectReasoningActionMismatch(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, s := range steps {
 		if len(s.ToolCalls) == 0 || s.Reasoning == "" {
@@ -422,7 +422,7 @@ func detectReasoningActionMismatch(steps []*Step, tx i18n.StoryFindingsText) []F
 // --- plan_execution_misalignment ------------------------------------------
 
 // Plan parsing logic is housed in plan_parse.go (ExtractActionablePlan).
-func detectPlanExecutionMisalignment(j *Journey, tx i18n.StoryFindingsText) []Finding {
+func detectPlanExecutionMisalignment(j *Journey, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, task := range j.Tasks {
 		if len(task.Steps) == 0 {

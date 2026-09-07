@@ -49,8 +49,8 @@
 | D16 | 托管目录默认 `./reports`、不走 rundir | ✅ | `reportsState.resolve()` 按进程 cwd；目录缺失 404 + 每目录一次日志（missingDirWarner） |
 | D17 | 详单 `r-` 前缀 | ✅ | `reqdetail.FileName` 输出 `r-<ts>_<virt>_<real>_<outcome>_<h8>.md`，三个包装函数透传 |
 | D18 | Journey JSON 自包含（tree + bodies blob + 三级 match） | ✅ | `JourneySummary.Bodies` 顶级 blob 表；structure 的 bodies `json:"-"`；`match: exact|normalized|positional`；compaction 前驱摘录；截断口径数据层统一、RespText 不截；`structure_test.go` 双向断言（无孤儿/无悬引用）+ LosslessReconstruction 只吃 JSON |
-| D19 | `-partial` 不进文件名 | 🟡 | journey 侧完整落地（`JourneyReportFile` 忽略 partial 参数；partial 进 JSON 字段 + md banner + 索引行）。**compare 侧残留：`cmd_story.go` compareJourneys 仍 `base += "-partial"`** —— 见 T1 |
-| D20 | 作业清单来自索引 + orphan 清扫限 journeys/details/ | 🟡 | 清扫实现与范围正确（clean_orphans.go 路径严格隔离；测试断言 compares/、requests/* 不受影响）；**但清扫只在冷启动全量路径触发，L2 命中的全量运行跳过清扫** —— 发现 F1，已修 |
+| D19 | `-partial` 不进文件名 | ✅ | journey 侧与 compare 侧均完整落地。compare 文件名不再带 `-partial` 后缀（8663dee），partiality 经 `Comparison.Partial` 字段 + `.md` 顶部 banner + `compares/index.md` 行标记 + 看板徽标全链路表达 |
+| D20 | 作业清单来自索引 + orphan 清扫限 journeys/details/ | ✅ | 清扫实现与范围正确（clean_orphans.go 路径严格隔离；测试断言 compares/、requests/* 不受影响）；L2 命中路径的清扫缺口已由 F1 修复 |
 | D21 | compares/index 扫目录派生、子树不进 manifest | ✅ | `RebuildComparesIndex` 每次 analyze 重建（含 L2 命中路径与 -render-only 路径，实测）；`AllSlicePaths` 不含 compares/* |
 
 ### 分章结论
@@ -58,8 +58,8 @@
 | 章节 | 状态 | 说明 |
 |---|---|---|
 | §1 现状基线 | ✅ | 方案所列旧产物全部确认废弃（vmr-report.json / stories/ / vmr-requests-* / 自包含 HTML / .parse-cache）。`reports/` 下残留旧产物是历史测试样例，非 analyze 现行为 |
-| §2 概念模型归一 | 🟡 | 包名/CLI/落盘名全部迁移（story→journey、-corpus→-benchmark、benchmarks.{json,md}）；**但代码符号层 story/corpus 大面积残留** —— 见 T2 |
-| §3 数据层 | 🟡 | 五切片/现算事实下沉/提交顺序/compares 索引全部落地；D19 compare 侧残留（T1）+ L2-hit 清扫缺口（F1，已修） |
+| §2 概念模型归一 | ✅ | 包名/CLI/落盘名/代码符号/文件名已彻底清理（见 T2 落地）。story/corpus 词族已从全部生产代码中清除 |
+| §3 数据层 | ✅ | 五切片/现算事实下沉/提交顺序/compares 索引全部落地；D19 compare 侧落地；L2-hit 清扫闭环 |
 | §4 目录拓扑 | ✅ | 冒烟产物拓扑与 §4 逐字一致（含 .cache/parse），权限全 0600 |
 | §5 ViewModel 渲染 | ✅ | §5.0–5.6 全部落地；VM 构建器吃统一的 Report2 内存形状（切片经 LoadReport 重装），-render-only 与全量运行同路径 |
 | §6 HTML 看板 | ✅ | 六页 + 安全模型 + 版本探测 + file:// 降级 + 币种显示全部落地 |
@@ -71,24 +71,12 @@
 
 ---
 
-## 二、待决策事项（未动手）
+## 二、待决策事项
 
-### T1. compare 文件名仍带 `-partial` 后缀（D19 残留）
-
-- **事实**：`cmd/vmr/cmd_story.go` `compareJourneys` 中 `base := "compare-" + jA.ID + "-vs-" + jB.ID; if partialA || partialB { base += "-partial" }`。方案 D19 的裁决理由（partial 是本次加载范围的函数，不该焊进内容寻址文件名）对 compare 同样成立。
-- **根因**：D19 实施时只改了 `JourneyReportFile` 单点；compare 文件名的拼装在 cmd 层，被漏掉。而直接删后缀会**丢失 partial 事实**——`Comparison` 结构没有 Partial 字段（journey 侧有 `JourneySummary.Partial`），compares/index 也没有对应列。
-- **建议方案（二选一）**：
-  - **A. 完整落实 D19**：`Comparison` 加 `Partial bool`（或 A/B 各一），删 `-partial` 后缀拼装，partial 经 JSON 字段 + .md banner 表达；compares/index 可加标记列。约半天，schema 加性变更。
-  - **B. 登记豁免**：compare 因结构无 Partial 字段暂保留后缀，在方案文档 D19 加一句作用域注记。
-- **ROI**：中-低。触发场景少（partial journey 的 compare）；但与 D19 纪律的偏差是真实的，且"4 种 partial 组合压成一个布尔后缀"本就损失信息。倾向 A。
-
-### T2. 代码符号层的 story / corpus 残留（§2.1/§2.2 纪律未完全兑现）
-
-- **事实**（rg 实测）：`cmd/vmr/cmd_story.go`、`cmd_story_batch.go`、`cmd_story_setup.go`、`cmd_story_test.go`、`cmd_story_batch_test.go`、`cmd_story_report_crosscheck_test.go`；`internal/journey/storyindex.go`（`StoryIndex`/`LoadStoryIndex`/`SaveStoryIndex`/`RenderStoryIndexMarkdown`）；`internal/journey/corpus*.go` 7 个文件（`CorpusStats`/`ComputeCorpusStats`/`RenderCorpusMarkdown`）；`internal/i18n/story_*.go` 10 个文件（`StoryText`/`CorpusText`/`StoryIndexT`…）。这些**全部是活代码**（被 cmd_analyze.go 直接调用），不是死代码。
-- **根因**：实施以"包名 + CLI 入口 + 落盘文件名"三项为界；代码内文件名/类型名/函数名的机械改名被跳过且未登记。方案 §2.1 原文是"把 story 一词从代码、CLI 与产物中一次清干净"。
-- **建议方案**：一次性机械重命名（约 20 个文件、30+ 符号），archtest 的 file/func 预算键表同步。纯命名变更，编译期拦截漏改。
-- **ROI**：中-低。行为零变化；收益是下一个维护者 grep `corpus` 时不再撞上与方案 §2.2 相抵的符号面。若裁决不动，建议在 KNOWN_ISSUES 登记为"接受的命名残留"，否则它会像 HANDOVER_P3_NOTES 一样在下一轮 review 里被重新报出来。
-- **注**：`cmd_report.go` 的文件名不在本项范围——`report` 作为分析半区的正式称谓（report half）并未被方案废弃，废弃的只是 `vmr report` 子命令。仅 `cmd_story*.go` 与 story/corpus 符号属偏差面。
+> **全部待决策事项已闭环**。经你裁决：
+> - **T1 选 A**（完整落实 D19，已落地于 commit `8663dee`）
+> - **T2 选彻底清理**（一次性机械重命名，已落地）
+> 当前无未决议题。
 
 ---
 
@@ -123,17 +111,11 @@
 4. 行为验证：L2 命中、orphan 清扫、compares 索引重建在冷/热/-no-cache 三路径下实测。
 5. 红绿验证：F1 的修复移除后新测试确实 FAIL。
 
-### 提交清单（本次 review）
+### 提交记录
 
-| 文件 | 变更 |
-|---|---|
-| `cmd/vmr/cmd_analyze.go` | 拆出缓存函数族；瘦身至预算内 |
-| `cmd/vmr/cmd_analyze_cache.go` | 新文件：L2/L3 缓存层 CLI 逻辑，含 F1 修复（L2 命中 default 模式的 orphan 清扫） |
-| `cmd/vmr/cmd_analyze_cache_test.go` | 新增 TestAnalyzeCache_L2HitSweepsOrphanJourneys |
-| `internal/report/rows.go` | F2：Report2 定位注释重写 |
-| `internal/report/aggregate.go` | F2：文件头渲染归属注释重写 |
-| `internal/i18n/story_render.go` | F2：配对注释重写 |
-| `docs/future-strategy/analyze_redesign_review_plan_v2_minimax-m3.md` | 本文件 |
+1. `49e316d` — fix(analyze): sweep orphan journeys on L2-hit full runs; refresh stale ownership comments (包含 F1, F2 及缓存代码拆分)
+2. `8663dee` — feat(compare): carry partiality as data, retire the -partial filename suffix (D19) (T1 落实)
+3. 待提交 — refactor(analytics): eradicate legacy story/corpus symbols and filenames (T2 落实)
 
 ### 与前轮 review 的关系
 

@@ -63,7 +63,7 @@ type promptSpec struct {
 // pick the right prompt for whichever pack type they're called with,
 // entirely through Go's generic type inference — every call site
 // (Interpret(ctx, opts, pack, lang)) reads identically regardless of which
-// scenario pack belongs to, and the -compare call site in cmd_story.go
+// scenario pack belongs to, and the -compare call site in cmd_journey.go
 // needed zero changes when 5.9/6c were added.
 type evidencePackKind interface {
 	promptSpec(lang i18n.Lang) promptSpec
@@ -528,7 +528,7 @@ func atxHeading(line string) (level int, ok bool) {
 
 // downgradeHeadingLevels shifts every level-2-through-5 ATX heading in text
 // one level deeper (## -> ###, ### -> ####, …, capped at level 6) — a
-// deterministic render-layer fallback for i18n/story_llm.go's prompt
+// deterministic render-layer fallback for i18n/journey_llm.go's prompt
 // instruction (already asks the model to use level-3 subsection headings),
 // since a document's outline structure shouldn't depend on a model's
 // instruction-following (architecture doc §4.2).

@@ -4,7 +4,7 @@ package main
 
 import "vmr/internal/ctxgraph"
 
-// renderBatchBudgetBytes bounds one story.BuildAll batch's decompressed
+// renderBatchBudgetBytes bounds one journey.BuildAll batch's decompressed
 // working set: BuildAll does ONE combined ctxgraph.FetchRecords across its
 // input, decoding ~this many bytes of audit JSON, and that transient
 // dominates peak memory (the built Journeys themselves are ~1% of it —

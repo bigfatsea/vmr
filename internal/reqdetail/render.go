@@ -104,7 +104,7 @@ func renderFingerprint(lang i18n.Lang, linkEvidence bool, m, prev *ctxgraph.Mani
 // later column in it, not just eating content the way an unescaped "<!--"
 // does), and a literal newline breaks the one-line-per-row structure
 // GFM tables depend on. Exported for the same reason as EscapeHTML — see
-// its doc comment — internal/journey's index table (storyindex.go) writes
+// its doc comment — internal/journey's index table (journeyindex.go) writes
 // user-derived titles into table cells too.
 func EscapeCell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")

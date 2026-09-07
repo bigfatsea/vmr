@@ -11,7 +11,7 @@ import (
 
 	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/report"
 )
 
@@ -66,8 +66,8 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 	journeysDir := filepath.Join(outDir, "journeys")
 	indexPath := filepath.Join(journeysDir, "index.json")
 	if _, err := os.Stat(indexPath); err == nil {
-		idx := story.LoadStoryIndex(indexPath)
-		md := story.RenderStoryIndexMarkdown(idx, lang)
+		idx := journey.LoadJourneyIndex(indexPath)
+		md := journey.RenderJourneyIndexMarkdown(idx, lang)
 		if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
 			return fmt.Errorf("write journeys index md: %w", err)
 		}
@@ -78,18 +78,18 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 		reportMDExists := reportMDErr == nil
 
 		for _, jRow := range idx.Journeys {
-			base := strings.TrimSuffix(story.JourneyReportFile(jRow.ID, jRow.Partial), ".md")
+			base := strings.TrimSuffix(journey.JourneyReportFile(jRow.ID), ".md")
 			jsonPath := filepath.Join(journeysDir, "details", base+".json")
 			data, err := os.ReadFile(jsonPath)
 			if err != nil {
 				continue
 			}
-			var s story.JourneySummary
+			var s journey.JourneySummary
 			if err := json.Unmarshal(data, &s); err != nil {
 				continue
 			}
 			outPath := filepath.Join(journeysDir, "details", base+".md")
-			journeyMD := story.RenderMarkdownFromSummary(&s, lang, reportMDExists, linkDetails)
+			journeyMD := journey.RenderMarkdownFromSummary(&s, lang, reportMDExists, linkDetails)
 			// Preserve appended LLM interpretation section if present in existing file
 			if oldData, err := os.ReadFile(outPath); err == nil {
 				if idx := strings.Index(string(oldData), "\n## LLM "); idx >= 0 {
@@ -105,9 +105,9 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 	// 4. journeys/benchmarks.md
 	benchmarksJSON := filepath.Join(journeysDir, "benchmarks.json")
 	if data, err := os.ReadFile(benchmarksJSON); err == nil {
-		var stats story.CorpusStats
+		var stats journey.BenchmarkStats
 		if err := json.Unmarshal(data, &stats); err == nil {
-			benchMD := story.RenderCorpusMarkdown(stats, lang)
+			benchMD := journey.RenderBenchmarksMarkdown(stats, lang)
 			if err := os.WriteFile(filepath.Join(journeysDir, "benchmarks.md"), []byte(benchMD), 0o600); err != nil {
 				return fmt.Errorf("write benchmarks md: %w", err)
 			}
@@ -128,12 +128,12 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 				if err != nil {
 					continue
 				}
-				var cmp story.Comparison
+				var cmp journey.Comparison
 				if err := json.Unmarshal(data, &cmp); err != nil {
 					continue
 				}
 				cmpMDPath := filepath.Join(comparesDir, strings.TrimSuffix(entry.Name(), ".json")+".md")
-				cmpMD := story.RenderComparisonMarkdown(cmp, lang)
+				cmpMD := journey.RenderComparisonMarkdown(cmp, lang)
 				if oldData, err := os.ReadFile(cmpMDPath); err == nil {
 					if idx := strings.Index(string(oldData), "\n## LLM "); idx >= 0 {
 						cmpMD += string(oldData[idx:])

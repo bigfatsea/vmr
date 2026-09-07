@@ -44,7 +44,7 @@ type SingleJourneyEvidencePack struct {
 
 // BuildSingleJourneyEvidencePack assembles j/m/findings into the bounded
 // evidence pack the LLM prompt embeds — m/findings are passed in rather
-// than recomputed so a caller that already has them (cmd_story.go's
+// than recomputed so a caller that already has them (cmd_journey.go's
 // writeJourneyFile always does) doesn't pay for ComputeMetrics/
 // ComputeFindings a second time.
 func BuildSingleJourneyEvidencePack(j *Journey, m Metrics, findings []Finding, lang i18n.Lang) SingleJourneyEvidencePack {

@@ -2,7 +2,7 @@
 
 // The detector-coverage disclosure: split out of corpus.go once this
 // pushed that file over archtest's file-line budget — same package, no new
-// import boundary. See RenderCorpusMarkdown's call to anthropicCoverageNote
+// import boundary. See RenderBenchmarksMarkdown's call to anthropicCoverageNote
 // for where this actually surfaces.
 package journey
 
@@ -30,9 +30,9 @@ import (
 // llm_findings.go's evidence-pack construction — an LLM-judged Finding
 // degrades gracefully on weaker evidence rather than going structurally
 // silent, a different failure mode this list doesn't claim to cover).
-// CorpusSections/JourneySections name views that read the same signal but
+// BenchmarkSections/JourneySections name views that read the same signal but
 // aren't FindingCode/MetricCode-keyed — free text since there's no code to
-// key them by. CorpusSections only exist in -corpus output
+// key them by. BenchmarkSections only exist in -corpus output
 // (ContextRotBucket.ErrorRate/ErrorStepCount, ToolSequencePattern.ErrorRate);
 // JourneySections only exist in a single journey's own report/JSON (the
 // decision spine's ❌/↩️ tool-result badge, structure.json's
@@ -40,18 +40,18 @@ import (
 var anthropicOnlyCoverage = struct {
 	Findings        []FindingCode
 	Metrics         []MetricCode
-	CorpusSections  []string
+	BenchmarkSections  []string
 	JourneySections []string
 }{
 	Findings:        []FindingCode{FindingUnadaptedRetry, FindingUnverifiedSuccess},
 	Metrics:         []MetricCode{MetricErrorRecoveryCount},
-	CorpusSections:  []string{"Context Rot error rate", "Tool Sequence error rate"},
+	BenchmarkSections:  []string{"Context Rot error rate", "Tool Sequence error rate"},
 	JourneySections: []string{"decision spine's tool-result ❌ badge", "structure.json's ToolCalls[].ResultError"},
 }
 
 // anthropicCoverageNote renders the disclosure line, or "" when
 // protocolShare is empty (never computed, e.g. a
-// hand-built CorpusStats, or protocolShare's own zero-Steps edge case:
+// hand-built BenchmarkStats, or protocolShare's own zero-Steps edge case:
 // asserting "Anthropic traffic is scarce" from data we don't actually have
 // would be exactly the kind of unearned claim §5.6's discipline rules out)
 // or this corpus is (up to floating-point noise) 100% anthropic-messages —
@@ -62,11 +62,11 @@ var anthropicOnlyCoverage = struct {
 // "couldn't be checked" — Package E's original 1%-cliff design (a corpus
 // at 1.2% Anthropic printed nothing, silently reintroducing the exact
 // ambiguity this note exists to close) was cut for exactly this reason.
-func anthropicCoverageNote(protocolShare map[string]float64, t i18n.CorpusText) string {
+func anthropicCoverageNote(protocolShare map[string]float64, t i18n.BenchmarksText) string {
 	if len(protocolShare) == 0 || protocolShare[core.ProtocolAnthropicMessages] > 1-1e-9 {
 		return ""
 	}
-	names := anthropicOnlyCoverageNames(anthropicOnlyCoverage.CorpusSections)
+	names := anthropicOnlyCoverageNames(anthropicOnlyCoverage.BenchmarkSections)
 	return t.AnthropicOnlyCoverageNote(fmtutil.FmtPercent(protocolShare[core.ProtocolAnthropicMessages], 1), strings.Join(names, ", "))
 }
 

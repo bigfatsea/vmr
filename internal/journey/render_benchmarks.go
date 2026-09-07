@@ -10,19 +10,19 @@ import (
 	"vmr/internal/i18n"
 )
 
-// corpusCorrelationsShown caps how many correlation rows the Markdown
+// benchmarkCorrelationsShown caps how many correlation rows the Markdown
 // table lists — see the call site's comment for why the full list would
 // otherwise read as noise, not signal.
-const corpusCorrelationsShown = 15
+const benchmarkCorrelationsShown = 15
 
-// RenderCorpusMarkdown renders stats as a self-contained Markdown report —
+// RenderBenchmarksMarkdown renders stats as a self-contained Markdown report —
 // same fact-layer-only convention as RenderMarkdown/RenderComparisonMarkdown:
-// every number here is a value CorpusStats already computed, no judgment
+// every number here is a value BenchmarkStats already computed, no judgment
 // calls happen in this file.
-func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
+func RenderBenchmarksMarkdown(stats BenchmarkStats, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
-	t := i18n.Corpus(lang)
+	t := i18n.Benchmarks(lang)
 
 	w("%s", t.Title)
 	w("%s", t.JourneyCount(stats.JourneyCount))
@@ -78,8 +78,8 @@ func RenderCorpusMarkdown(stats CorpusStats, lang i18n.Lang) string {
 			}
 		}
 		shown := empirical
-		if len(shown) > corpusCorrelationsShown {
-			shown = shown[:corpusCorrelationsShown]
+		if len(shown) > benchmarkCorrelationsShown {
+			shown = shown[:benchmarkCorrelationsShown]
 		}
 		for _, c := range shown {
 			w("| %s | %s | %.2f | %d |\n", i18n.MetricLabel(lang, string(c.MetricA)), i18n.MetricLabel(lang, string(c.MetricB)), c.Rho, c.N)

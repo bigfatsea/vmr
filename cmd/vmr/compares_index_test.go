@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	journey "vmr/internal/journey"
+	"vmr/internal/journey"
 )
 
 func TestRebuildComparesIndex_EmptyDirectory(t *testing.T) {

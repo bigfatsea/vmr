@@ -110,14 +110,14 @@ func TestMergeJourneyIndexRows_FreshBuiltFieldsWinOverPrior(t *testing.T) {
 	}
 }
 
-// TestStoryIndex_SaveLoadRoundTrip covers Save/LoadStoryIndex's remaining
+// TestStoryIndex_SaveLoadRoundTrip covers Save/LoadJourneyIndex's remaining
 // job — Journeys only; the parse cache used to round-trip through this
 // same file (a "files" section) but has since moved to its own
 // content-hash-sharded directory (see ctxgraph's own
 // TestSaveCacheDir_LoadCacheDir_RoundTrip) and Cache's json:"-" tag.
 func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
 	chain := twoStepChain(t)
-	idx := &StoryIndex{
+	idx := &JourneyIndex{
 		Cache:    &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{"x": {Hash: "deadbeef"}}},
 		Journeys: []JourneyIndexRow{BuildJourneyIndexRow(chain, "t", false)},
 	}
@@ -132,17 +132,17 @@ func TestStoryIndex_SaveLoadRoundTrip(t *testing.T) {
 	if strings.Contains(string(data), "deadbeef") {
 		t.Error("vmr-stories.json should not embed Cache's content (json:\"-\")")
 	}
-	got := LoadStoryIndex(path)
+	got := LoadJourneyIndex(path)
 	if len(got.Journeys) != 1 || got.Journeys[0].ID != idx.Journeys[0].ID {
 		t.Fatalf("round-tripped Journeys = %+v, want %+v", got.Journeys, idx.Journeys)
 	}
 	if got.Cache != nil {
-		t.Errorf("LoadStoryIndex should leave Cache nil (load it separately via ctxgraph.LoadCacheDir), got %+v", got.Cache)
+		t.Errorf("LoadJourneyIndex should leave Cache nil (load it separately via ctxgraph.LoadCacheDir), got %+v", got.Cache)
 	}
 }
 
 func TestLoadStoryIndex_MissingFileReturnsEmpty(t *testing.T) {
-	idx := LoadStoryIndex(filepath.Join(t.TempDir(), "does-not-exist.json"))
+	idx := LoadJourneyIndex(filepath.Join(t.TempDir(), "does-not-exist.json"))
 	if idx == nil || len(idx.Journeys) != 0 {
 		t.Errorf("expected an empty, non-nil index for a missing file, got %+v", idx)
 	}
@@ -153,14 +153,14 @@ func TestLoadStoryIndex_CorruptFileDegradesToEmpty(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{not valid json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	idx := LoadStoryIndex(path)
+	idx := LoadJourneyIndex(path)
 	if idx == nil || len(idx.Journeys) != 0 {
 		t.Errorf("expected a corrupt file to degrade to an empty index, got %+v", idx)
 	}
 }
 
 func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
-	empty := RenderStoryIndexMarkdown(nil, i18n.EN)
+	empty := RenderJourneyIndexMarkdown(nil, i18n.EN)
 	if empty == "" {
 		t.Error("empty render should still produce a title/note, not an empty string")
 	}
@@ -168,7 +168,7 @@ func TestRenderStoryIndexMarkdown_EmptyAndPopulated(t *testing.T) {
 	chain := twoStepChain(t)
 	rows := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
 	rows[0].Tasks, rows[0].Steps, rows[0].Rendered = 1, 2, "journey-"+rows[0].ID+".md"
-	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN)
+	md := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows}, i18n.EN)
 	for _, want := range []string{rows[0].ID, "调研一下", rows[0].Rendered} {
 		if !strings.Contains(md, want) {
 			t.Errorf("rendered markdown missing %q:\n%s", want, md)
@@ -185,14 +185,14 @@ func TestRenderStoryIndexMarkdown_ListOnlyNote(t *testing.T) {
 	chain := twoStepChain(t)
 
 	listOnly := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
-	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: listOnly}, i18n.EN)
+	md := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: listOnly}, i18n.EN)
 	if !strings.Contains(md, "This run rendered no journeys") {
 		t.Errorf("list-only index missing the blank-column note:\n%s", md)
 	}
 
 	rendered := []JourneyIndexRow{BuildJourneyIndexRow(chain, "调研一下", false)}
 	rendered[0].Tasks, rendered[0].Steps, rendered[0].Rendered = 1, 2, "journey-x.md"
-	if got := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rendered}, i18n.EN); strings.Contains(got, "This run rendered no journeys") {
+	if got := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rendered}, i18n.EN); strings.Contains(got, "This run rendered no journeys") {
 		t.Errorf("note must not show once a Journey has been rendered:\n%s", got)
 	}
 }
@@ -203,18 +203,18 @@ func TestRenderStoryIndexMarkdown_ListOnlyNote(t *testing.T) {
 func TestRenderStoryIndexMarkdown_SelfTrafficLine(t *testing.T) {
 	rows := []JourneyIndexRow{BuildJourneyIndexRow(twoStepChain(t), "x", false)}
 
-	active := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{Active: true, Excluded: 16}}, i18n.EN)
+	active := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{Active: true, Excluded: 16}}, i18n.EN)
 	if !strings.Contains(active, "Self-traffic exclusion: active (16 candidate(s) removed)") {
 		t.Errorf("active exclusion not disclosed:\n%s", active)
 	}
 
-	inactive := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{}}, i18n.EN)
+	inactive := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows, SelfTraffic: &SelfTrafficStatus{}}, i18n.EN)
 	if !strings.Contains(inactive, "Self-traffic exclusion: not active") {
 		t.Errorf("inactive exclusion not disclosed:\n%s", inactive)
 	}
 
 	// nil status (e.g. a prior index loaded from disk) → no line, no panic.
-	if strings.Contains(RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN), "Self-traffic") {
+	if strings.Contains(RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows}, i18n.EN), "Self-traffic") {
 		t.Error("nil SelfTraffic should emit no disclosure line")
 	}
 }
@@ -232,7 +232,7 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 		{ID: "j-subagent", Category: CategorySubagent, Title: "subagent row", Requests: 1},
 		{ID: "j-heartbeat", Category: CategoryHeartbeat, Title: "heartbeat row", Requests: 1},
 	}
-	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: rows}, i18n.EN)
+	md := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: rows}, i18n.EN)
 
 	beforeDetails := md
 	if i := strings.Index(md, "<details>"); i >= 0 {
@@ -260,7 +260,7 @@ func TestRenderStoryIndexMarkdown_OnlyHeartbeatFolded(t *testing.T) {
 // ("ps aux | grep vmr") is a completely ordinary way to trigger this.
 func TestRenderStoryIndexMarkdown_EscapesTitle(t *testing.T) {
 	row := JourneyIndexRow{ID: "l-deadbeef", Title: "ps aux | grep vmr <!-- keywords -->", Requests: 1}
-	md := RenderStoryIndexMarkdown(&StoryIndex{Journeys: []JourneyIndexRow{row}}, i18n.EN)
+	md := RenderJourneyIndexMarkdown(&JourneyIndex{Journeys: []JourneyIndexRow{row}}, i18n.EN)
 
 	lines := strings.Split(md, "\n")
 	var rowLine string
@@ -273,7 +273,7 @@ func TestRenderStoryIndexMarkdown_EscapesTitle(t *testing.T) {
 	if rowLine == "" {
 		t.Fatalf("rendered markdown missing the row for %s:\n%s", row.ID, md)
 	}
-	// writeStoryIndexRow's own format string is 7 columns: id, client,
+	// writeJourneyIndexRow's own format string is 7 columns: id, client,
 	// window, tasks, steps, title, rendered — that's 8 unescaped "|"
 	// separators. The title's own "|" must survive escaped ("\|", still a
 	// literal "|" character but no longer a column delimiter to a GFM
@@ -319,7 +319,7 @@ func TestSourceFiles(t *testing.T) {
 		t.Errorf("SourceFiles(nil) = %v, want nil", got)
 	}
 
-	idx := &StoryIndex{
+	idx := &JourneyIndex{
 		Journeys: []JourneyIndexRow{
 			{ID: "j-1", Files: []string{"b.jsonl", "a.jsonl"}},
 			{ID: "j-2", Files: []string{"b.jsonl", "c.jsonl"}},

@@ -193,7 +193,7 @@ func TestCacheKey_DiffersAcrossPackTypes(t *testing.T) {
 // hypothetical: BuildEvidencePack takes the full in-memory *Journey (not
 // JourneySummary), and Summarize(j, lang) — which now always computes
 // Structure — sits directly upstream of Compare/BuildEvidencePack in
-// production (cmd_story.go's compareJourneys calls Summarize then Compare
+// production (cmd_journey.go's compareJourneys calls Summarize then Compare
 // then BuildEvidencePack in sequence). Proving the pack's size tracks only
 // step count (via ToolIndexEntry, already bounded by taskseg.Preview), not
 // the richness of the per-step content Structure now also carries, is what
@@ -228,7 +228,7 @@ func TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T
 // TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness
 // is TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness's
 // -journey counterpart (llm_single.go's BuildSingleJourneyEvidencePack,
-// used by cmd_story.go's renderJourney for the single-Journey LLM
+// used by cmd_journey.go's renderJourney for the single-Journey LLM
 // interpretation section) — same guard, same reasoning, different pack type.
 func TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T) {
 	small := buildJourneyWithArgsLen(t, 20)

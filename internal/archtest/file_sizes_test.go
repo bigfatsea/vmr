@@ -67,8 +67,8 @@ var fileLineExemptions = map[string]int{
 	"internal/journey/findings_toolresult.go": 320,
 	"internal/journey/compare.go":             820,
 	"internal/journey/metrics.go":             470,
-	"internal/journey/corpus.go":              380,
-	"internal/journey/render_corpus.go":       150,
+	"internal/journey/benchmarks.go":          380,
+	"internal/journey/render_benchmarks.go":   150,
 
 	"internal/respnorm/respnorm.go": 950,
 	"internal/respnorm/minimax.go":  235,
@@ -76,10 +76,10 @@ var fileLineExemptions = map[string]int{
 	// The CLI is thin by design (parse flags, wire, delegate — see CLAUDE.md's
 	// module map), so a subcommand crossing its budget means logic belongs in
 	// an internal package, not that the number should go up.
-	"cmd/vmr/cmd_story.go":  850,
-	"cmd/vmr/cmd_check.go":  610,
-	"cmd/vmr/cmd_report.go": 500,
-	"cmd/vmr/cmd_status.go": 370,
+	"cmd/vmr/cmd_journey.go": 850,
+	"cmd/vmr/cmd_check.go":   610,
+	"cmd/vmr/cmd_report.go":  500,
+	"cmd/vmr/cmd_status.go":  370,
 
 	// classify.go's budget keeps it a thin error-classification file: the
 	// generic JSON scanning it used to hold lives in internal/jsonscan now, and
@@ -137,7 +137,7 @@ func TestArchitecture_CoreFileSizes(t *testing.T) {
 			if n > limit {
 				// "another file in the same package", not "under
 				// internal/router" as this message used to say — the table has
-				// covered report/story/config/cmd files for far longer than it
+				// covered report/journey/config/cmd files for far longer than it
 				// has covered only the router.
 				t.Errorf("%s is %d lines, over its %d-line budget: split it "+
 					"into another file in the same package, don't just raise "+

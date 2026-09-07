@@ -1,12 +1,12 @@
 // Ver 2026-08-16 18:30, by Gemini 3.7 Flash
 
-// Pairs with internal/journey/render_corpus.go (the corpus layer's vmr-story-corpus.md).
+// Pairs with internal/journey/render_benchmarks.go (the corpus layer's vmr-story-corpus.md).
 package i18n
 
 import "strconv"
 
-// CorpusText is render_corpus.go's text, in one language.
-type CorpusText struct {
+// BenchmarksText is render_benchmarks.go's text, in one language.
+type BenchmarksText struct {
 	Title              string
 	JourneyCount       func(n int) string
 	NoJourneys         string
@@ -56,9 +56,9 @@ type CorpusText struct {
 	ToolSeqFootnote string
 }
 
-func Corpus(lang Lang) CorpusText {
+func Benchmarks(lang Lang) BenchmarksText {
 	if lang == ZH {
-		return CorpusText{
+		return BenchmarksText{
 			Title:        "# Journey 语料统计报告\n\n",
 			JourneyCount: func(n int) string { return "> 分析了 " + strconv.Itoa(n) + " 个 Journey\n\n" },
 			NoJourneys:   "没有可分析的 Journey。\n",
@@ -106,7 +106,7 @@ func Corpus(lang Lang) CorpusText {
 			ToolSeqFootnote: "> 基于任务内连续 2-gram 与 3-gram 工具调用统计，展示最高频出现的行为定势与异常关联。\n\n",
 		}
 	}
-	return CorpusText{
+	return BenchmarksText{
 		Title:        "# Journey Corpus Report\n\n",
 		JourneyCount: func(n int) string { return "> Analyzed " + strconv.Itoa(n) + " journeys\n\n" },
 		NoJourneys:   "No journeys to analyze.\n",

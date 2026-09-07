@@ -57,7 +57,7 @@ func testPack(t *testing.T) EvidencePack {
 // buildToolIndex/journeyTaskTitles against a real *Journey built from audit
 // records — every other test in this file exercises Interpret/callLLM/
 // caching against the hand-built literal testPack() returns, which never
-// goes through these three functions. cmd_story.go's compareJourneys calls
+// goes through these three functions. cmd_journey.go's compareJourneys calls
 // BuildEvidencePack(jA, jB, cmp, i18n.EN) in production, so this closes a real gap:
 // the per-Journey evidence-pack assembly (tool index, task titles) had zero
 // direct unit coverage.
@@ -336,7 +336,7 @@ func TestRenderLLMSection(t *testing.T) {
 
 // TestDowngradeH2Headings covers the P1.4 render-layer fallback: even
 // though the prompt already asks the model for level-3 subsection
-// headings (i18n/story_llm.go), a model that ignores the instruction and
+// headings (i18n/journey_llm.go), a model that ignores the instruction and
 // still emits "## X" must not corrupt the document's own outline —
 // RenderLLMSection downgrades it to "### X" deterministically, except
 // inside fenced code blocks, where "## " is literal content.

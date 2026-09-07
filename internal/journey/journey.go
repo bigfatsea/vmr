@@ -67,7 +67,7 @@ type Journey struct {
 // markdown filename (D19 / §1.1). Artifacts are uniformly named j-<id>.{json,md},
 // exactly aligned with ID: no redundant "journey-" prefix and no "-partial" suffix.
 // The .json sibling shares the stem.
-func JourneyReportFile(id string, partial bool) string {
+func JourneyReportFile(id string) string {
 	base := id
 	if !strings.HasPrefix(base, "j-") {
 		base = "j-" + base
@@ -504,7 +504,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 				if atStitchBoundary {
 					title, humanInitiated = titleAtStitchBoundary(ru, m, msgs, rawMsgs, off, seen, stitchEdge, lang)
 				} else {
-					title = taskseg.TaskTitle(taskseg.LastInstruction(ru, deltaStart), i18n.Story(lang).ToolLoopTitle)
+					title = taskseg.TaskTitle(taskseg.LastInstruction(ru, deltaStart), i18n.Journey(lang).ToolLoopTitle)
 				}
 				curTask = &Task{Title: title}
 				j.Tasks = append(j.Tasks, curTask)
@@ -571,7 +571,7 @@ func appendNewEvents(j *Journey, step *Step, m *ctxgraph.Manifest, msgs []chatms
 // claim this is "just a tool loop continuing", which understates what
 // actually happened (a structural context break was bridged).
 func stitchTaskTitle(e *ctxgraph.StitchEdge, lang i18n.Lang) string {
-	return i18n.Story(lang).StitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
+	return i18n.Journey(lang).StitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
 }
 
 // extractEntities moved to chatmsg.ExtractEntities: internal/report needed
@@ -782,7 +782,7 @@ func deriveTitle(firstRu taskseg.RealUsers, tasks []*Task, lang i18n.Lang) strin
 	if t := taskseg.FirstInstruction(firstRu); t != "" {
 		return t
 	}
-	st := i18n.Story(lang)
+	st := i18n.Journey(lang)
 	for _, t := range tasks {
 		if t.Title != "" && t.Title != st.ToolLoopTitle {
 			return t.Title

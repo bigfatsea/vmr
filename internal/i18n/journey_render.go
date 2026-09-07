@@ -13,9 +13,9 @@ package i18n
 
 import "strconv"
 
-// StoryText is render_md.go's (plus journey.go's fallback titles') text, in
+// JourneyText is render_md.go's (plus journey.go's fallback titles') text, in
 // one language.
-type StoryText struct {
+type JourneyText struct {
 	ListSep     string // joins e.g. swallowed/survived entity lists ("a、b" vs "a, b")
 	JourneyMeta func(tasks, turns int, from, to string) string
 	// PartialBanner is the ⚠️ line shown when a Journey is partial (its tail
@@ -65,9 +65,9 @@ type StoryText struct {
 	UnreadableTitle string
 }
 
-func Story(lang Lang) StoryText {
+func Journey(lang Lang) JourneyText {
 	if lang == ZH {
-		return StoryText{
+		return JourneyText{
 			ListSep:       "、",
 			PartialBanner: "此 Journey 的开头被所加载的文件范围截断，展示的是可见部分。",
 			JourneyMeta: func(tasks, turns int, from, to string) string {
@@ -140,7 +140,7 @@ func Story(lang Lang) StoryText {
 			},
 		}
 	}
-	return StoryText{
+	return JourneyText{
 		ListSep:       ", ",
 		PartialBanner: "This journey's beginning is truncated by the loaded file range; only the visible part is shown.",
 		JourneyMeta: func(tasks, turns int, from, to string) string {

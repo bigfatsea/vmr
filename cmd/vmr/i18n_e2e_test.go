@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 )
 
 // e2eReportFixture writes a one-record audit log guaranteed to trigger the
@@ -275,14 +275,14 @@ func TestE2E_ReportExplicitConfigFileMissingIsError(t *testing.T) {
 func e2eStoryFixture(t *testing.T) string {
 	t.Helper()
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	uA := storyMsg("user", "research topic A")
-	uB := storyMsg("user", "research topic B")
-	recA1 := storyRec(at(0), []any{sys, uA}, storySSE("ok"))
-	recA2 := storyRec(at(1), []any{sys, uA, storyMsg("assistant", "done")}, storySSE("done A"))
-	recB1 := storyRec(at(10), []any{sys, uB}, storySSE("ok"))
-	recB2 := storyRec(at(11), []any{sys, uB, storyMsg("assistant", "done")}, storySSE("done B"))
-	return writeStoryJSONL(t, []audit.Record{recA1, recA2, recB1, recB2})
+	sys := journeyMsg("system", "sys")
+	uA := journeyMsg("user", "research topic A")
+	uB := journeyMsg("user", "research topic B")
+	recA1 := journeyRec(at(0), []any{sys, uA}, journeySSE("ok"))
+	recA2 := journeyRec(at(1), []any{sys, uA, journeyMsg("assistant", "done")}, journeySSE("done A"))
+	recB1 := journeyRec(at(10), []any{sys, uB}, journeySSE("ok"))
+	recB2 := journeyRec(at(11), []any{sys, uB, journeyMsg("assistant", "done")}, journeySSE("done B"))
+	return writeJourneyJSONL(t, []audit.Record{recA1, recA2, recB1, recB2})
 }
 
 // TestE2E_StoryRenderAllDefaultsToEnglish covers vmr story -render-all with
@@ -316,7 +316,7 @@ func TestE2E_StoryRenderAllDefaultsToEnglish(t *testing.T) {
 }
 
 // TestE2E_StoryRenderAllLangZh covers -lang zh flowing through cmdStory into
-// story.BuildAll/RenderMarkdown.
+// journey.BuildAll/RenderMarkdown.
 func TestE2E_StoryRenderAllLangZh(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
@@ -468,10 +468,10 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	// fields already followed lang before P8 (TestE2E_StoryRenderAllLangZh
 	// covers the Markdown side); this just confirms it's still true
 	// alongside the other two outputs in the same run.
-	storyPath := e2eStoryFixture(t)
-	storyOut := filepath.Join(t.TempDir(), "out")
+	journeyPath := e2eStoryFixture(t)
+	journeyOut := filepath.Join(t.TempDir(), "out")
 	listing := captureStdout(t, func() {
-		if err := cmdAnalyze([]string{"-list-only", "-o", storyOut, storyPath}); err != nil {
+		if err := cmdAnalyze([]string{"-list-only", "-o", journeyOut, journeyPath}); err != nil {
 			t.Fatalf("cmdAnalyze -list-only: %v", err)
 		}
 	})
@@ -485,10 +485,10 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	if len(ids) != 2 {
 		t.Fatalf("want 2 candidate journeys, got %d from listing:\n%s", len(ids), listing)
 	}
-	if err := cmdAnalyze([]string{"-journey", ids[0], "-lang", "zh", "-o", storyOut, storyPath}); err != nil {
+	if err := cmdAnalyze([]string{"-journey", ids[0], "-lang", "zh", "-o", journeyOut, journeyPath}); err != nil {
 		t.Fatalf("cmdAnalyze -journey: %v", err)
 	}
-	journeyData, err := os.ReadFile(filepath.Join(storyOut, "journeys", "details", strings.TrimSuffix(story.JourneyReportFile(ids[0], false), ".md")+".json"))
+	journeyData, err := os.ReadFile(filepath.Join(journeyOut, "journeys", "details", strings.TrimSuffix(journey.JourneyReportFile(ids[0]), ".md")+".json"))
 	if err != nil {
 		t.Fatalf("journey json not written: %v", err)
 	}
@@ -500,17 +500,17 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	}
 
 	// compare-*.json: rows[].label, same fixture/ids as above.
-	if err := cmdAnalyze([]string{"-compare", ids[0] + "," + ids[1], "-lang", "zh", "-o", storyOut, storyPath}); err != nil {
+	if err := cmdAnalyze([]string{"-compare", ids[0] + "," + ids[1], "-lang", "zh", "-o", journeyOut, journeyPath}); err != nil {
 		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(storyOut, "compares"))
+	entries, err := os.ReadDir(filepath.Join(journeyOut, "compares"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var comparePath string
 	for _, e := range entries {
 		if strings.HasPrefix(e.Name(), "compare-") && strings.HasSuffix(e.Name(), ".json") {
-			comparePath = filepath.Join(storyOut, "compares", e.Name())
+			comparePath = filepath.Join(journeyOut, "compares", e.Name())
 		}
 	}
 	if comparePath == "" {

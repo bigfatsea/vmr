@@ -433,7 +433,7 @@ func formatDelta(a, b float64, newLabel string) string {
 
 // formatDeltaRel renders a signed relative change as a percentage —
 // "+42%"/"-15%"/"0%". Still used by the corpus report's cache-hit vs
-// no-hit median table (render_corpus.go), where both sides are medians of
+// no-hit median table (render_benchmarks.go), where both sides are medians of
 // milliseconds and never 0, so the ±100% compression formatDelta was built
 // to avoid doesn't bite.
 func formatDeltaRel(rel float64) string {

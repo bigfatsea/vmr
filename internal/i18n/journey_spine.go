@@ -6,7 +6,7 @@
 // list, per-Step role tags, an optional tool-call timeline) added on top
 // of render_md.go's existing fact-layer renderer. All of it is pure
 // formatting over data render_md.go's renderStep already has; only the
-// Findings section's text comes from story_findings.go.
+// Findings section's text comes from journey_findings.go.
 package i18n
 
 import "strconv"
@@ -78,7 +78,7 @@ type SpineText struct {
 	FindingEvidence   func(text string) string
 	FindingAction     func(text string) string
 	// AnthropicOnlyCoverageNote is the per-journey detector-coverage
-	// disclosure line — same wording/role as story_corpus.go's field
+	// disclosure line — same wording/role as journey_benchmarks.go's field
 	// of the same name, printed when THIS journey has no Anthropic Messages
 	// Steps at all, naming the signals (Findings, the decision spine's own
 	// ❌/↩️ tool-result badge, structure.json's ToolCalls[].ResultError)

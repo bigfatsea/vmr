@@ -86,7 +86,7 @@ const (
 // metricSpec is one behavior-profile metric's full definition: its stable
 // Code, how to render it (Kind), and how to pull its value out of a Metrics
 // value. Its display label is NOT stored here — see i18n.MetricLabel(lang,
-// string(Code)), the single lookup Compare and render_corpus.go both use;
+// string(Code)), the single lookup Compare and render_benchmarks.go both use;
 // keeping the label out of this struct means there is exactly one place a
 // metric's display text can come from, not two (this struct plus the i18n
 // table) that could drift apart. metricSpecs below is the ONE authoritative

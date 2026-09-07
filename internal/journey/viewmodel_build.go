@@ -57,7 +57,7 @@ func vmRespTexts(s *JourneySummary, ss *StepStructure) (reply, reasoning string)
 
 // vmBreakReasonHint is breakReasonHint's string-kind counterpart: Break.Kind
 // is EditRef's already-stringified kind.
-func vmBreakReasonHint(kind string, t i18n.StoryText) string {
+func vmBreakReasonHint(kind string, t i18n.JourneyText) string {
 	switch kind {
 	case ctxgraph.Contract.String():
 		return t.BreakReasonContract
@@ -68,12 +68,12 @@ func vmBreakReasonHint(kind string, t i18n.StoryText) string {
 	}
 }
 
-func vmEditStatsHint(e *EditRef, t i18n.StoryText) string {
+func vmEditStatsHint(e *EditRef, t i18n.JourneyText) string {
 	return t.EditStatsHint(e.LCP, e.Coverage*100)
 }
 
 func buildVMHeader(s *JourneySummary, lang i18n.Lang, reportMDExists bool) []VMBlock {
-	t := i18n.Story(lang)
+	t := i18n.Journey(lang)
 	var blocks []VMBlock
 	blocks = append(blocks, vmTextBlock(fmt.Sprintf("# Journey %s\n\n", s.ID)))
 	blocks = append(blocks, vmTextBlock("> "+escapeHTML(s.Title)+"\n\n"))
@@ -130,7 +130,7 @@ func sameSysHash(a, b *ctxgraph.Hash) bool {
 }
 
 func buildVMSysPrompt(s *JourneySummary, lang i18n.Lang, linkDetails bool) []VMBlock {
-	t := i18n.Story(lang)
+	t := i18n.Journey(lang)
 	eras := vmSystemPromptEras(s)
 	if len(eras) == 0 {
 		return nil
@@ -224,7 +224,7 @@ func buildVMOverview(s *JourneySummary, lang i18n.Lang) []VMBlock {
 	}
 	blocks = append(blocks, vmTextBlock("\n"))
 	if len(tags) > 0 {
-		blocks = append(blocks, vmTextBlock(t.TagsLine(strings.Join(tags, i18n.Story(lang).ListSep))))
+		blocks = append(blocks, vmTextBlock(t.TagsLine(strings.Join(tags, i18n.Journey(lang).ListSep))))
 	}
 	return blocks
 }

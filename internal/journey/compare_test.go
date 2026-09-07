@@ -510,7 +510,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 }
 
 // TestRenderComparisonMarkdown_WithSources covers the evidence-provenance
-// section: Extras.Sources, when the caller sets it (cmd_story.go does, from
+// section: Extras.Sources, when the caller sets it (cmd_journey.go does, from
 // resolveInputPaths — ComputeComparisonExtras
 // itself never touches this field), must render as a "证据溯源" section
 // listing every source path so a reader can independently re-open the exact

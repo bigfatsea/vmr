@@ -9,7 +9,7 @@
 //
 // The identification rule is defined exactly once, here, and consumed by
 // both cmd_report.go (internal/report's excludeClientTags) and
-// cmd_story.go (filtering ListCandidates' output) — never reimplemented
+// cmd_journey.go (filtering ListCandidates' output) — never reimplemented
 // per command, the same discipline this project already applies to
 // session/task segmentation.
 package main
@@ -66,7 +66,7 @@ func llmSelfTag(llmKey string) string {
 
 // filterSelfTrafficCandidates drops any candidate Lineage whose root
 // manifest's ClientKeyTag is a self-traffic tag (P6.4) — filtered here in
-// cmd/vmr, not inside story.ListCandidates: self-traffic identification is
+// cmd/vmr, not inside journey.ListCandidates: self-traffic identification is
 // a deployment-time configuration fact, not a structural signal, so it
 // doesn't belong in internal/journey's own "no new guessing" judgment.
 func filterSelfTrafficCandidates(cands []*ctxgraph.Lineage, llmKey string, extra []string) []*ctxgraph.Lineage {

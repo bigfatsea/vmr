@@ -16,17 +16,17 @@ import (
 	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/pricing"
 	"vmr/internal/taskseg"
 )
 
 // llmCLIOptions bundles the -llm-* flags after validation — a thin CLI-level
-// wrapper around story.LLMOptions that also carries -llm-dry-run (a command-
+// wrapper around journey.LLMOptions that also carries -llm-dry-run (a command-
 // behavior switch compareJourneys itself acts on, not something
-// story.Interpret needs to know about).
+// journey.Interpret needs to know about).
 type llmCLIOptions struct {
-	story.LLMOptions
+	journey.LLMOptions
 	DryRun bool
 }
 
@@ -50,14 +50,14 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	if model == "" && !dryRun {
 		return llmCLIOptions{}, fmt.Errorf("-llm-model is required when -llm-addr is given (unless -llm-dry-run)")
 	}
-	return llmCLIOptions{LLMOptions: story.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
+	return llmCLIOptions{LLMOptions: journey.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
 // updateJourneyRow finds id's row in idx.Journeys and fills in the
-// full-Journey-only fields (only known once story.BuildChain has actually
+// full-Journey-only fields (only known once journey.BuildChain has actually
 // run) — a no-op if id isn't present (shouldn't happen: every id passed
 // here was itself resolved from idx's own candidate set moments earlier).
-func updateJourneyRow(idx *story.StoryIndex, id string, tasks, steps int, rendered string) {
+func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, rendered string) {
 	for i := range idx.Journeys {
 		if idx.Journeys[i].ID == id {
 			idx.Journeys[i].Tasks = tasks
@@ -70,10 +70,10 @@ func updateJourneyRow(idx *story.StoryIndex, id string, tasks, steps int, render
 	}
 }
 
-// saveStoryIndex writes index.json + index.md into journeysDir
+// saveJourneyIndex writes index.json + index.md into journeysDir
 // (creating it if needed), plus this run's parse cache into
 // {outDir}/.cache/parse (shared with report half — see cmd_report.go).
-func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error {
+func saveJourneyIndex(idx *journey.JourneyIndex, outDir string, lang i18n.Lang) error {
 	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
 		return err
@@ -82,8 +82,8 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 	if err := idx.Save(indexPath); err != nil {
 		return err
 	}
-	diskIdx := story.LoadStoryIndex(indexPath)
-	md := story.RenderStoryIndexMarkdown(diskIdx, lang)
+	diskIdx := journey.LoadJourneyIndex(indexPath)
+	md := journey.RenderJourneyIndexMarkdown(diskIdx, lang)
 	if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func saveStoryIndex(idx *story.StoryIndex, outDir string, lang i18n.Lang) error 
 func resolveJourneyID(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, pat string) (*ctxgraph.Lineage, []*ctxgraph.Lineage, error) {
 	for _, l := range cands {
 		chain := ctxgraph.ChainFrom(l, byIdx)
-		if journeyPatternMatches(story.ID(chain), pat) {
+		if journeyPatternMatches(journey.ID(chain), pat) {
 			return l, chain, nil
 		}
 	}
@@ -165,8 +165,8 @@ func resolveJourneySelector(cands []*ctxgraph.Lineage, ids []string, selector st
 // as of the vmr-stories.json change, also persists it — idx's rows already
 // carry everything this needs (id, mark info, request count, time range,
 // title), computed once and shared with the index, so this
-// function no longer touches ctxgraph/story.PreviewTitles itself.
-func listJourneys(idx *story.StoryIndex, g *ctxgraph.Graph, outDir string, includePartial bool, lang i18n.Lang) error {
+// function no longer touches ctxgraph/journey.PreviewTitles itself.
+func listJourneys(idx *journey.JourneyIndex, g *ctxgraph.Graph, outDir string, includePartial bool, lang i18n.Lang) error {
 	t := i18n.CLI(lang)
 	excluded := len(g.Lineages) - len(idx.Journeys)
 	fmt.Printf("%d candidate journey(s) (%d total lineage(s), %d single-request/scheduled excluded or absorbed into a stitched chain):\n\n", len(idx.Journeys), len(g.Lineages), excluded)
@@ -190,7 +190,7 @@ func listJourneys(idx *story.StoryIndex, g *ctxgraph.Graph, outDir string, inclu
 		fmt.Print(t.SkippedPartialNote(skippedPartial))
 	}
 	fmt.Print(t.RenderHint)
-	return saveStoryIndex(idx, outDir, lang)
+	return saveJourneyIndex(idx, outDir, lang)
 }
 
 // maxUngroupedShown caps how many ungrouped records -show-ungrouped prints —
@@ -224,27 +224,27 @@ func printUngrouped(ms []*ctxgraph.Manifest, lang i18n.Lang) {
 // dry-run/degrade contract compareJourneys' own LLM section follows: a
 // dry run never leaves a journeys/ directory behind, and a call
 // failure only drops the LLM section, never fails the command.
-func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string) error {
+func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *journey.JourneyIndex, priceRes *pricing.Resolver, ccy string) error {
 	t := i18n.CLI(lang)
 	chain := ctxgraph.ChainFrom(target, byIdx)
-	partial := story.IsPartialHead(chain, firstPath)
+	partial := journey.IsPartialHead(chain, firstPath)
 	if partial && !includePartial {
-		return fmt.Errorf("journey %s looks head-truncated — pass -include-partial to render it anyway", story.ID(chain))
+		return fmt.Errorf("journey %s looks head-truncated — pass -include-partial to render it anyway", journey.ID(chain))
 	}
-	j, err := story.BuildChain(chain, prof, lang)
+	j, err := journey.BuildChain(chain, prof, lang)
 	if err != nil {
 		return err
 	}
 	j.Partial = partial
-	m := story.ComputeMetrics(j)
-	findings := story.ComputeFindings(j, lang)
+	m := journey.ComputeMetrics(j)
+	findings := journey.ComputeFindings(j, lang)
 
 	if llmOpts.Addr != "" && llmOpts.DryRun {
 		// Every pack the run would send — each detector whose candidate
 		// filter fires, plus the always-sent interpretation — not just the
 		// interpretation pack (R90: the old single-pack estimate understated
 		// the call count by up to 7x).
-		fmt.Print(story.FormatLLMDryRun(story.EstimateLLMDryRun(j, m, findings, lang)))
+		fmt.Print(journey.FormatLLMDryRun(journey.EstimateLLMDryRun(j, m, findings, lang)))
 		return nil
 	}
 
@@ -254,9 +254,9 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	}
 
 	var llmSection string
-	var llmFindings []story.Finding
+	var llmFindings []journey.Finding
 	if llmOpts.Addr != "" {
-		if findingsLLM, err := story.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(findingsLLM) > 0 {
+		if findingsLLM, err := journey.ComputeLLMFindings(context.Background(), j, llmOpts.LLMOptions, lang); err == nil && len(findingsLLM) > 0 {
 			llmFindings = findingsLLM
 			findings = append(findings, llmFindings...)
 			sort.SliceStable(findings, func(a, b int) bool {
@@ -266,21 +266,21 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 				return findings[a].Code < findings[b].Code
 			})
 		}
-		pack := story.BuildSingleJourneyEvidencePack(j, m, findings, lang)
+		pack := journey.BuildSingleJourneyEvidencePack(j, m, findings, lang)
 		chars := pack.EstimateChars()
 		fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
-		res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
+		res, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
 			// scope "": renderJourney's document only ever has one LLM
 			// section (unlike -compare, there's no second, divergence-
 			// scoped call to disambiguate it from).
-			llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, "")
+			llmSection = journey.RenderLLMSection(llmOpts.LLMOptions, res, lang, "")
 		}
 	}
 
-	cost := story.ComputeJourneyCost(j, priceRes, ccy)
+	cost := journey.ComputeJourneyCost(j, priceRes, ccy)
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
 	// true: a single named -journey target, not a batch scope (P13.1).
@@ -290,19 +290,19 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	}
 	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
 	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", journeyBaseName(j)+".md")))
-	return saveStoryIndex(idx, outDir, lang)
+	return saveJourneyIndex(idx, outDir, lang)
 }
 
 // compareJourneys is Differential analysis: resolve
 // both id prefixes, build each Journey, diff their already-computed
-// behavior profiles (story.Compare), and write the result as one Markdown +
+// behavior profiles (journey.Compare), and write the result as one Markdown +
 // JSON pair — the same .md+.json convention writeJourneyFile uses for a
 // single Journey. Either side being partial-head gates on -include-partial
 // exactly like a single-journey render (an unstable ID is still unstable
 // when it's one half of a comparison); partiality itself rides as data —
 // the Comparison's Partial field plus the .md banner (D19: no filename
 // suffix).
-func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *story.StoryIndex, priceRes *pricing.Resolver, ccy string) error {
+func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, idA, idB, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, llmOpts llmCLIOptions, lang i18n.Lang, idx *journey.JourneyIndex, priceRes *pricing.Resolver, ccy string) error {
 	_, chainA, err := resolveJourneyID(cands, byIdx, idA)
 	if err != nil {
 		return fmt.Errorf("-compare first id: %w", err)
@@ -311,17 +311,17 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err != nil {
 		return fmt.Errorf("-compare second id: %w", err)
 	}
-	partialA := story.IsPartialHead(chainA, firstPath)
-	partialB := story.IsPartialHead(chainB, firstPath)
+	partialA := journey.IsPartialHead(chainA, firstPath)
+	partialB := journey.IsPartialHead(chainB, firstPath)
 	if (partialA || partialB) && !includePartial {
 		return fmt.Errorf("one or both journeys look head-truncated — pass -include-partial to compare them anyway")
 	}
 
-	jA, err := story.BuildChain(chainA, prof, lang)
+	jA, err := journey.BuildChain(chainA, prof, lang)
 	if err != nil {
 		return err
 	}
-	jB, err := story.BuildChain(chainB, prof, lang)
+	jB, err := journey.BuildChain(chainB, prof, lang)
 	if err != nil {
 		return err
 	}
@@ -331,15 +331,15 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	// Partial field silently lost the fact (D19 makes the field the carrier).
 	jA.Partial = partialA
 	jB.Partial = partialB
-	sA, sB := story.Summarize(jA, lang), story.Summarize(jB, lang)
-	cmp := story.Compare(sA, sB, lang)
+	sA, sB := journey.Summarize(jA, lang), journey.Summarize(jB, lang)
+	cmp := journey.Compare(sA, sB, lang)
 	// ReportFile points at each side's own journey report; the comparison
 	// lives under compares/, so the .md's side-block link must climb out to
 	// journeys/details/ to resolve.
-	cmp.A.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(jA.ID, jA.Partial)))
-	cmp.B.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", story.JourneyReportFile(jB.ID, jB.Partial)))
-	extras := story.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, priceRes, ccy)
-	extras.Sources = story.SourceFiles(idx, jA.ID, jB.ID)
+	cmp.A.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", journey.JourneyReportFile(jA.ID)))
+	cmp.B.ReportFile = filepath.ToSlash(filepath.Join("..", "journeys", "details", journey.JourneyReportFile(jB.ID)))
+	extras := journey.ComputeComparisonExtras(jA, jB, sA.Metrics, sB.Metrics, priceRes, ccy)
+	extras.Sources = journey.SourceFiles(idx, jA.ID, jB.ID)
 	cmp.Extras = &extras
 
 	// -llm-dry-run: print the evidence-pack size estimate and return
@@ -348,11 +348,11 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	// behind (design doc C.7: "should I even run this" is a pure query, not
 	// a partial run).
 	if llmOpts.Addr != "" && llmOpts.DryRun {
-		pack := story.BuildEvidencePack(jA, jB, cmp, lang)
+		pack := journey.BuildEvidencePack(jA, jB, cmp, lang)
 		chars := pack.EstimateChars()
 		fmt.Printf("evidence pack: %d chars (~%d tokens estimated) — dry run, no request sent\n", chars, chars/4)
 		if extras.Divergence.Found {
-			divPack := story.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
+			divPack := journey.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
 			divChars := divPack.EstimateChars()
 			fmt.Printf("divergence evidence pack: %d chars (~%d tokens estimated) — dry run, no request sent\n", divChars, divChars/4)
 		}
@@ -396,13 +396,13 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	if err != nil {
 		return err
 	}
-	var diskCmp story.Comparison
+	var diskCmp journey.Comparison
 	if err := json.Unmarshal(diskData, &diskCmp); err != nil {
 		return err
 	}
 
 	mdPath := filepath.Join(comparesDir, base+".md")
-	md := story.RenderComparisonMarkdown(diskCmp, lang)
+	md := journey.RenderComparisonMarkdown(diskCmp, lang)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}
@@ -412,37 +412,37 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	fmt.Printf("%s\n", mdPath)
 	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), filepath.ToSlash(filepath.Join("details", journeyBaseName(jA)+".md")))
 	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), filepath.ToSlash(filepath.Join("details", journeyBaseName(jB)+".md")))
-	return saveStoryIndex(idx, outDir, lang)
+	return saveJourneyIndex(idx, outDir, lang)
 }
 
 // compareLLMSections runs the overall and divergence LLM interpretation
 // calls for -compare, degrading gracefully on failure without failing the
 // command. Returns the Markdown section for the .md report from the same
 // two calls.
-func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras story.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
+func compareLLMSections(jA, jB *journey.Journey, cmp journey.Comparison, extras journey.ComparisonExtras, llmOpts llmCLIOptions, lang i18n.Lang) string {
 	if llmOpts.Addr == "" {
 		return ""
 	}
 	var llmSection string
-	pack := story.BuildEvidencePack(jA, jB, cmp, lang)
+	pack := journey.BuildEvidencePack(jA, jB, cmp, lang)
 	chars := pack.EstimateChars()
 	fmt.Fprintf(os.Stderr, "calling %s (model=%s): evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, chars, chars/4)
-	res, err := story.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
+	res, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, pack, lang)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 	} else {
-		llmSection = story.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
+		llmSection = journey.RenderLLMSection(llmOpts.LLMOptions, res, lang, i18n.LLM(lang).ScopeOverall)
 	}
 
 	if extras.Divergence.Found {
-		divPack := story.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
+		divPack := journey.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
 		divChars := divPack.EstimateChars()
 		fmt.Fprintf(os.Stderr, "calling %s (model=%s) for the divergence point: evidence pack %d chars (~%d tokens estimated)\n", llmOpts.Addr, llmOpts.Model, divChars, divChars/4)
-		divRes, err := story.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
+		divRes, err := journey.Interpret(context.Background(), llmOpts.LLMOptions, divPack, lang)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", err)
 		} else {
-			divSection := story.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
+			divSection := journey.RenderLLMSection(llmOpts.LLMOptions, divRes, lang, i18n.LLM(lang).ScopeDivergence)
 			if llmSection != "" {
 				llmSection += "\n" + divSection
 			} else {
@@ -462,7 +462,7 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 // message printed when none of them survive the partial-head filter, and
 // (P13.1) materializeDetails: a -journey selector is still a user-named
 // target set even when it resolves to more than one match, so both of
-// this function's callers in cmd_story.go/cmd_analyze.go pass true for it;
+// this function's callers in cmd_journey.go/cmd_analyze.go pass true for it;
 // only renderAllJourneys' own default-suite caller (not -render-all) ever
 // passes false — see writeJourneyFile's doc comment for what false means.
 //
@@ -472,13 +472,13 @@ func compareLLMSections(jA, jB *story.Journey, cmp story.Comparison, extras stor
 // same overview cost line). priceRes may be nil (no pricing resolvable at
 // all) — ComputeJourneyCost then yields the documented unresolved fact,
 // exactly as the single-journey path would.
-func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, noneMsg string, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
+func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *journey.JourneyIndex, noneMsg string, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
 	var toRender [][]*ctxgraph.Lineage
 	var toRenderPartial []bool
 	skippedPartial := 0
 	for _, l := range cands {
 		chain := ctxgraph.ChainFrom(l, byIdx)
-		partial := story.IsPartialHead(chain, firstPath)
+		partial := journey.IsPartialHead(chain, firstPath)
 		if partial && !includePartial {
 			skippedPartial++
 			continue
@@ -488,7 +488,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 	}
 	if len(toRender) == 0 {
 		fmt.Println(noneMsg)
-		return saveStoryIndex(idx, outDir, lang)
+		return saveJourneyIndex(idx, outDir, lang)
 	}
 
 	journeysDir, err := ensureJourneysDir(outDir)
@@ -500,19 +500,19 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 	rendered := 0
 	for _, br := range batchByBytes(toRender, renderBatchBudgetBytes) {
 		start, end := br[0], br[1]
-		journeys, batchRecs, err := story.BuildAllWithRecords(toRender[start:end], prof, lang)
+		journeys, batchRecs, err := journey.BuildAllWithRecords(toRender[start:end], prof, lang)
 		if err != nil {
 			return err
 		}
 		for i, j := range journeys {
 			j.Partial = toRenderPartial[start+i]
-			m := story.ComputeMetrics(j)
-			findings := story.ComputeFindings(j, lang)
+			m := journey.ComputeMetrics(j)
+			findings := journey.ComputeFindings(j, lang)
 			// Same cost computation as single -journey's renderJourney — the
 			// batch rendered the same journeys and must produce the same
 			// files (formerly a nil cost here: batch output silently lacked
 			// the cost line the zoomed-in render of the same journey had).
-			cost := story.ComputeJourneyCost(j, priceRes, ccy)
+			cost := journey.ComputeJourneyCost(j, priceRes, ccy)
 			// batchRecs: EnsureJourneyDetails reuses this batch's already-
 			// decompressed records instead of re-reading the source files.
 			outPath, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, &cost, materializeDetails, batchRecs)
@@ -528,7 +528,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		fmt.Print(t.AllRenderedSkipped(skippedPartial))
 	}
 	fmt.Print(t.AllRenderedNote(rendered, journeysDir))
-	return saveStoryIndex(idx, outDir, lang)
+	return saveJourneyIndex(idx, outDir, lang)
 }
 
 // renderAllJourneys renders every non-partial candidate journey — see
@@ -539,22 +539,22 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 // there) — the latter is exactly the unbounded-materialization case to
 // avoid (238+ candidates' worth of Step detail pages written on every run
 // whether or not anyone reads them).
-func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
+func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *journey.JourneyIndex, materializeDetails bool, priceRes *pricing.Resolver, ccy string) error {
 	return renderJourneys(cands, byIdx, firstPath, prof, includePartial, outDir, lang, idx,
 		"no candidate journeys to render (all skipped as partial-head; pass -include-partial)", materializeDetails, priceRes, ccy)
 }
 
-// corpusStats builds every non-partial candidate journey (same
+// renderBenchmarks builds every non-partial candidate journey (same
 // batched BuildAll path renderAllJourneys uses) and compute/write corpus-
 // level statistics (vmr-story-corpus.md/.json) instead of per-Journey
-// files. Journeys are built here only to feed ComputeCorpusStats — none of
+// files. Journeys are built here only to feed ComputeBenchmarkStats — none of
 // them are individually rendered or written to disk by this path.
-func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *story.StoryIndex) error {
+func renderBenchmarks(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *journey.JourneyIndex) error {
 	var toRender [][]*ctxgraph.Lineage
 	skippedPartial := 0
 	for _, l := range cands {
 		chain := ctxgraph.ChainFrom(l, byIdx)
-		partial := story.IsPartialHead(chain, firstPath)
+		partial := journey.IsPartialHead(chain, firstPath)
 		if partial && !includePartial {
 			skippedPartial++
 			continue
@@ -563,22 +563,22 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	}
 	if len(toRender) == 0 {
 		fmt.Println("no candidate journeys to analyze (all skipped as partial-head; pass -include-partial)")
-		return saveStoryIndex(idx, outDir, lang)
+		return saveJourneyIndex(idx, outDir, lang)
 	}
 
 	// Build in byte-budgeted batches (same bound renderJourneys uses): each
 	// batch's records are released before the next fetch, but the built
 	// Journeys are ~1% of that and all accumulate cheaply — the corpus
 	// stats need every one of them at once, and 586 of them is ~300 MB.
-	var journeys []*story.Journey
+	var journeys []*journey.Journey
 	for _, br := range batchByBytes(toRender, renderBatchBudgetBytes) {
-		js, err := story.BuildAll(toRender[br[0]:br[1]], prof, lang)
+		js, err := journey.BuildAll(toRender[br[0]:br[1]], prof, lang)
 		if err != nil {
 			return err
 		}
 		journeys = append(journeys, js...)
 	}
-	stats := story.ComputeCorpusStats(journeys)
+	stats := journey.ComputeBenchmarkStats(journeys)
 
 	journeysDir, err := ensureJourneysDir(outDir)
 	if err != nil {
@@ -597,12 +597,12 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	if err != nil {
 		return err
 	}
-	var diskStats story.CorpusStats
+	var diskStats journey.BenchmarkStats
 	if err := json.Unmarshal(diskData, &diskStats); err != nil {
 		return err
 	}
 	mdPath := filepath.Join(journeysDir, "benchmarks.md")
-	if err := os.WriteFile(mdPath, []byte(story.RenderCorpusMarkdown(diskStats, lang)), 0o600); err != nil {
+	if err := os.WriteFile(mdPath, []byte(journey.RenderBenchmarksMarkdown(diskStats, lang)), 0o600); err != nil {
 		return err
 	}
 	if skippedPartial > 0 {
@@ -612,14 +612,14 @@ func corpusStats(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fir
 	for _, j := range journeys {
 		updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), "")
 	}
-	return saveStoryIndex(idx, outDir, lang)
+	return saveJourneyIndex(idx, outDir, lang)
 }
 
 // detailAndEvidenceDirs returns {outDir}/details and {outDir}/evidence — the
 // same layout internal/report's DetailWriter uses (setupDetailWriter/
 // NewDetailWriter in cmd_report.go), shared so a detail page materialized
 // by either command is reachable at the same path and a decision spine's
-// "→ detail" link (P5.2, story.EnsureJourneyDetails) resolves regardless of
+// "→ detail" link (P5.2, journey.EnsureJourneyDetails) resolves regardless of
 // which command wrote it first.
 func detailAndEvidenceDirs(outDir string) (detailDir, evidenceDir string) {
 	return filepath.Join(outDir, "requests", "details"), filepath.Join(outDir, "requests", "evidence")
@@ -649,8 +649,8 @@ func ensureComparesDir(outDir string) (string, error) {
 // for j - the stem shared by both artifacts, derived from story's
 // JourneyReportFile (the single naming source of truth) by dropping the
 // canonical .md extension.
-func journeyBaseName(j *story.Journey) string {
-	return strings.TrimSuffix(story.JourneyReportFile(j.ID, j.Partial), ".md")
+func journeyBaseName(j *journey.Journey) string {
+	return strings.TrimSuffix(journey.JourneyReportFile(j.ID), ".md")
 }
 
 // ensureJourneyFile (re)writes j's journey report (.md + .json) and
@@ -664,16 +664,16 @@ func journeyBaseName(j *story.Journey) string {
 // the re-render are both cheap here — EnsureRendered's fingerprint check
 // (P12) makes an already-materialized Step a fast skip, and RenderMarkdown
 // is a pure string build.
-func ensureJourneyFile(j *story.Journey, journeysDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact) error {
-	m := story.ComputeMetrics(j)
-	findings := story.ComputeFindings(j, lang)
+func ensureJourneyFile(j *journey.Journey, journeysDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string, cost *journey.CostFact) error {
+	m := journey.ComputeMetrics(j)
+	findings := journey.ComputeFindings(j, lang)
 	// true: both -compare sides are user-named targets, same as a single
 	// -journey render (P13.1) — not a batch scope.
 	_, err := writeJourneyFile(j, m, findings, journeysDir, lang, "", nil, prof, detailDir, evidenceDir, cost, true, nil)
 	return err
 }
 
-func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Finding, journeysDir string, lang i18n.Lang, llmSection string, llmFindings []story.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *story.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
+func writeJourneyFile(j *journey.Journey, m journey.Metrics, findings []journey.Finding, journeysDir string, lang i18n.Lang, llmSection string, llmFindings []journey.Finding, prof taskseg.Profile, detailDir, evidenceDir string, cost *journey.CostFact, materializeDetails bool, recs map[ctxgraph.Loc]*audit.Record) (string, error) {
 	detailsDir := filepath.Join(journeysDir, "details")
 	if err := os.MkdirAll(detailsDir, 0o700); err != nil {
 		return "", err
@@ -681,11 +681,11 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	base := journeyBaseName(j)
 	outPath := filepath.Join(detailsDir, base+".md")
 	if materializeDetails {
-		story.EnsureJourneyDetails(os.Stderr, j, recs, detailDir, evidenceDir, prof, lang)
+		journey.EnsureJourneyDetails(os.Stderr, j, recs, detailDir, evidenceDir, prof, lang)
 	}
 
 	jsonPath := filepath.Join(detailsDir, base+".json")
-	summary := story.NewJourneySummary(j, m, findings, llmFindings, cost)
+	summary := journey.NewJourneySummary(j, m, findings, llmFindings, cost)
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return "", err
@@ -698,14 +698,14 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 	if err != nil {
 		return "", err
 	}
-	var s story.JourneySummary
+	var s journey.JourneySummary
 	if err := json.Unmarshal(diskData, &s); err != nil {
 		return "", err
 	}
 
 	_, reportMDErr := os.Stat(filepath.Join(filepath.Dir(journeysDir), "vmr-report.md"))
 	linkDetails := materializeDetails || detailDirHasFiles(detailDir)
-	md := story.RenderMarkdownFromSummary(&s, lang, reportMDErr == nil, linkDetails)
+	md := journey.RenderMarkdownFromSummary(&s, lang, reportMDErr == nil, linkDetails)
 	if llmSection != "" {
 		md += "\n" + llmSection
 	}
@@ -716,7 +716,7 @@ func writeJourneyFile(j *story.Journey, m story.Metrics, findings []story.Findin
 }
 
 // journeySteps totals a Journey's steps across all its tasks.
-func journeySteps(j *story.Journey) int {
+func journeySteps(j *journey.Journey) int {
 	steps := 0
 	for _, t := range j.Tasks {
 		steps += len(t.Steps)

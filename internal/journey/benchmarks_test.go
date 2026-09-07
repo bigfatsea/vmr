@@ -68,7 +68,7 @@ func TestSpearman(t *testing.T) {
 			t.Errorf("n = %d, want 2", n)
 		}
 		if rho != 0 {
-			t.Errorf("rho = %v, want 0 (below corpusMinCorrelationN)", rho)
+			t.Errorf("rho = %v, want 0 (below benchmarkMinCorrelationN)", rho)
 		}
 	})
 
@@ -150,7 +150,7 @@ func TestMetricValue_ModelSwitchCount_Registered(t *testing.T) {
 
 func TestComputeCorpusStats(t *testing.T) {
 	t.Run("empty corpus", func(t *testing.T) {
-		stats := ComputeCorpusStats(nil)
+		stats := ComputeBenchmarkStats(nil)
 		if stats.JourneyCount != 0 {
 			t.Errorf("JourneyCount = %d, want 0", stats.JourneyCount)
 		}
@@ -161,7 +161,7 @@ func TestComputeCorpusStats(t *testing.T) {
 		for i := 0; i < 4; i++ {
 			journeys = append(journeys, buildTestJourney(t, 2+i, i%2 == 0)) // 2 hit, 2 don't
 		}
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 		if stats.JourneyCount != 4 {
 			t.Fatalf("JourneyCount = %d, want 4", stats.JourneyCount)
 		}
@@ -180,7 +180,7 @@ func TestComputeCorpusStats(t *testing.T) {
 		journeys = append(journeys, buildTestJourney(t, 2, true)) // only 1 hit
 		journeys = append(journeys, buildTestJourney(t, 2, false))
 		journeys = append(journeys, buildTestJourney(t, 3, false))
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 		found := false
 		for _, c := range stats.SkippedGroupComparisons {
 			if c == FindingExactRepeatToolCall {
@@ -188,7 +188,7 @@ func TestComputeCorpusStats(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("expected exact_repeat_tool_call in SkippedGroupComparisons (only 1 hit, below corpusMinGroupSize): %v", stats.SkippedGroupComparisons)
+			t.Errorf("expected exact_repeat_tool_call in SkippedGroupComparisons (only 1 hit, below benchmarkMinGroupSize): %v", stats.SkippedGroupComparisons)
 		}
 		for _, g := range stats.GroupComparisons {
 			if g.Code == FindingExactRepeatToolCall {
@@ -205,10 +205,10 @@ func TestComputeCorpusStats(t *testing.T) {
 	// test would have to approximate.
 	t.Run("correlations: populated, one specific pair asserted, sorted by |rho| descending", func(t *testing.T) {
 		var journeys []*Journey
-		for n := 3; n <= 8; n++ { // 6 journeys, N clears corpusMinCorrelationN(5)
+		for n := 3; n <= 8; n++ { // 6 journeys, N clears benchmarkMinCorrelationN(5)
 			journeys = append(journeys, buildTestJourney(t, n, false))
 		}
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 		if len(stats.Correlations) == 0 {
 			t.Fatal("expected a non-empty Correlations slice")
 		}
@@ -237,14 +237,14 @@ func TestComputeCorpusStats(t *testing.T) {
 		}
 	})
 
-	t.Run("correlations: excluded entirely when corpus size is below corpusMinCorrelationN", func(t *testing.T) {
+	t.Run("correlations: excluded entirely when corpus size is below benchmarkMinCorrelationN", func(t *testing.T) {
 		var journeys []*Journey
-		for n := 3; n <= 6; n++ { // 4 journeys, below corpusMinCorrelationN(5)
+		for n := 3; n <= 6; n++ { // 4 journeys, below benchmarkMinCorrelationN(5)
 			journeys = append(journeys, buildTestJourney(t, n, false))
 		}
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 		if len(stats.Correlations) != 0 {
-			t.Errorf("Correlations = %+v, want none (N=4 < corpusMinCorrelationN=5 for every pair)", stats.Correlations)
+			t.Errorf("Correlations = %+v, want none (N=4 < benchmarkMinCorrelationN=5 for every pair)", stats.Correlations)
 		}
 	})
 
@@ -264,7 +264,7 @@ func TestComputeCorpusStats(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			journeys = append(journeys, buildTestJourney(t, 4, false))
 		}
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 
 		var found *GroupComparison
 		for i := range stats.GroupComparisons {
@@ -296,13 +296,13 @@ func TestComputeCorpusStats(t *testing.T) {
 		}
 	})
 
-	// ComputeCorpusStats' ProtocolShare field is
+	// ComputeBenchmarkStats' ProtocolShare field is
 	// populated straight from protocolShare (tested in isolation below,
 	// since ComputeMetrics needs a fuller Step fixture than this field
 	// alone) — this only pins that the two stay wired together.
 	t.Run("protocol share is populated on real journeys", func(t *testing.T) {
 		journeys := []*Journey{buildTestJourney(t, 2, false)} // mkRec sets Protocol: "openai-completions"
-		stats := ComputeCorpusStats(journeys)
+		stats := ComputeBenchmarkStats(journeys)
 		if got, want := stats.ProtocolShare["openai-completions"], 1.0; math.Abs(got-want) > 1e-9 {
 			t.Errorf("ProtocolShare[openai-completions] = %v, want %v", got, want)
 		}
@@ -353,7 +353,7 @@ func TestProtocolShare(t *testing.T) {
 
 func TestRenderCorpusMarkdown(t *testing.T) {
 	t.Run("empty corpus renders without panicking", func(t *testing.T) {
-		md := RenderCorpusMarkdown(CorpusStats{}, i18n.EN)
+		md := RenderBenchmarksMarkdown(BenchmarkStats{}, i18n.EN)
 		if md == "" {
 			t.Error("expected non-empty output even for an empty corpus")
 		}
@@ -364,8 +364,8 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		for i := 0; i < 6; i++ {
 			journeys = append(journeys, buildTestJourney(t, 3+i, i%2 == 0))
 		}
-		stats := ComputeCorpusStats(journeys)
-		md := RenderCorpusMarkdown(stats, i18n.EN)
+		stats := ComputeBenchmarkStats(journeys)
+		md := RenderBenchmarksMarkdown(stats, i18n.EN)
 		for _, want := range []string{"# Journey Corpus Report", "## Metric Distributions", "## Finding Hit Rates", "## Metric Correlations", "## Finding-Grouped Comparison"} {
 			if !strings.Contains(md, want) {
 				t.Errorf("rendered corpus report missing %q:\n%s", want, md)
@@ -376,13 +376,13 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		// otherwise reads as "agent execution takes hours" to a non-
 		// statistical reader (see the 36-day Max case in the reports-
 		// generation review).
-		if !strings.Contains(md, i18n.Corpus(i18n.EN).MetricDistFootnote) {
+		if !strings.Contains(md, i18n.Benchmarks(i18n.EN).MetricDistFootnote) {
 			t.Errorf("rendered corpus report missing the metric-distribution mean-skew footnote:\n%s", md)
 		}
 	})
 
 	t.Run("distribution table renders human units, not raw numbers (regression)", func(t *testing.T) {
-		stats := CorpusStats{
+		stats := BenchmarkStats{
 			JourneyCount: 1,
 			MetricDist: map[MetricCode]Distribution{
 				MetricModelMS:             {Count: 1, Mean: 2500, Median: 2500, Min: 2500, Max: 2500, P90: 2500},
@@ -392,7 +392,7 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 				{Code: "exact_repeat_tool_call", HitCount: 2, NoHitCount: 3, HitMedian: 4000, NoHitMedian: 2000, DeltaRel: 1.0, Notable: true},
 			},
 		}
-		md := RenderCorpusMarkdown(stats, i18n.EN)
+		md := RenderBenchmarksMarkdown(stats, i18n.EN)
 		if strings.Contains(md, "2500.00") {
 			t.Errorf("KindMillis metric rendered as a raw float instead of via fmtutil.FmtSeconds:\n%s", md)
 		}
@@ -404,8 +404,8 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		}
 	})
 
-	t.Run("correlation table truncates to corpusCorrelationsShown, footnote reports the rest", func(t *testing.T) {
-		const total = corpusCorrelationsShown + 5
+	t.Run("correlation table truncates to benchmarkCorrelationsShown, footnote reports the rest", func(t *testing.T) {
+		const total = benchmarkCorrelationsShown + 5
 		rows := make([]CorrelationRow, total)
 		for i := 0; i < total; i++ {
 			rows[i] = CorrelationRow{
@@ -415,8 +415,8 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 				N:       10,
 			}
 		}
-		stats := CorpusStats{JourneyCount: 1, Correlations: rows}
-		md := RenderCorpusMarkdown(stats, i18n.EN)
+		stats := BenchmarkStats{JourneyCount: 1, Correlations: rows}
+		md := RenderBenchmarksMarkdown(stats, i18n.EN)
 
 		dataRows := 0
 		for _, line := range strings.Split(md, "\n") {
@@ -424,25 +424,25 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 				dataRows++
 			}
 		}
-		if dataRows != corpusCorrelationsShown {
-			t.Errorf("rendered %d correlation data rows, want exactly %d (corpusCorrelationsShown):\n%s", dataRows, corpusCorrelationsShown, md)
+		if dataRows != benchmarkCorrelationsShown {
+			t.Errorf("rendered %d correlation data rows, want exactly %d (benchmarkCorrelationsShown):\n%s", dataRows, benchmarkCorrelationsShown, md)
 		}
-		if !strings.Contains(md, "syn_00_a") || !strings.Contains(md, fmt.Sprintf("syn_%02d_a", corpusCorrelationsShown-1)) {
-			t.Errorf("expected the top corpusCorrelationsShown rows (highest |rho|) in the table:\n%s", md)
+		if !strings.Contains(md, "syn_00_a") || !strings.Contains(md, fmt.Sprintf("syn_%02d_a", benchmarkCorrelationsShown-1)) {
+			t.Errorf("expected the top benchmarkCorrelationsShown rows (highest |rho|) in the table:\n%s", md)
 		}
-		if strings.Contains(md, fmt.Sprintf("syn_%02d_a", corpusCorrelationsShown)) {
-			t.Errorf("row %d should have been truncated out of the table:\n%s", corpusCorrelationsShown, md)
+		if strings.Contains(md, fmt.Sprintf("syn_%02d_a", benchmarkCorrelationsShown)) {
+			t.Errorf("row %d should have been truncated out of the table:\n%s", benchmarkCorrelationsShown, md)
 		}
-		wantFootnote := i18n.Corpus(i18n.EN).CorrelationMore(total - corpusCorrelationsShown)
+		wantFootnote := i18n.Benchmarks(i18n.EN).CorrelationMore(total - benchmarkCorrelationsShown)
 		if !strings.Contains(md, wantFootnote) {
-			t.Errorf("expected CorrelationMore(%d) footnote %q in:\n%s", total-corpusCorrelationsShown, wantFootnote, md)
+			t.Errorf("expected CorrelationMore(%d) footnote %q in:\n%s", total-benchmarkCorrelationsShown, wantFootnote, md)
 		}
 	})
 
 	t.Run("nonzero journey count with empty findings/correlations/group comparisons hits the no-data branches", func(t *testing.T) {
-		stats := CorpusStats{JourneyCount: 3} // no MetricDist/FindingRate/Correlations/GroupComparisons at all
-		md := RenderCorpusMarkdown(stats, i18n.EN)
-		et := i18n.Corpus(i18n.EN)
+		stats := BenchmarkStats{JourneyCount: 3} // no MetricDist/FindingRate/Correlations/GroupComparisons at all
+		md := RenderBenchmarksMarkdown(stats, i18n.EN)
+		et := i18n.Benchmarks(i18n.EN)
 		for _, want := range []string{et.NoFindings, et.NoCorrelations, et.NoGroupComparisons} {
 			if !strings.Contains(md, want) {
 				t.Errorf("expected no-data text %q in rendered report:\n%s", want, md)
@@ -466,8 +466,8 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 	// anthropicOnlyCoverage's own doc comment for how they were found:
 	// isErrorMarker, not just ToolResult.IsError directly).
 	t.Run("anthropic coverage note fires on any non-100% Anthropic share", func(t *testing.T) {
-		mostlyOpenAI := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.995, "anthropic-messages": 0.005}}
-		md := RenderCorpusMarkdown(mostlyOpenAI, i18n.EN)
+		mostlyOpenAI := BenchmarkStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.995, "anthropic-messages": 0.005}}
+		md := RenderBenchmarksMarkdown(mostlyOpenAI, i18n.EN)
 		for _, code := range []string{
 			string(FindingUnadaptedRetry), string(FindingUnverifiedSuccess), string(MetricErrorRecoveryCount),
 			"Context Rot error rate", "Tool Sequence error rate",
@@ -481,20 +481,20 @@ func TestRenderCorpusMarkdown(t *testing.T) {
 		// a slice the disclosed signals are blind on — this is the exact
 		// case the old 1%-threshold cliff (at 1.2% Anthropic) silently
 		// suppressed.
-		mostlyAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.012, "anthropic-messages": 0.988}}
-		md2 := RenderCorpusMarkdown(mostlyAnthropic, i18n.EN)
+		mostlyAnthropic := BenchmarkStats{JourneyCount: 1, ProtocolShare: map[string]float64{"openai-completions": 0.012, "anthropic-messages": 0.988}}
+		md2 := RenderBenchmarksMarkdown(mostlyAnthropic, i18n.EN)
 		if !strings.Contains(md2, string(FindingUnadaptedRetry)) {
 			t.Errorf("coverage note should still fire at 98.8%% Anthropic (not literally 100%%):\n%s", md2)
 		}
 
-		pureAnthropic := CorpusStats{JourneyCount: 1, ProtocolShare: map[string]float64{"anthropic-messages": 1.0}}
-		md3 := RenderCorpusMarkdown(pureAnthropic, i18n.EN)
+		pureAnthropic := BenchmarkStats{JourneyCount: 1, ProtocolShare: map[string]float64{"anthropic-messages": 1.0}}
+		md3 := RenderBenchmarksMarkdown(pureAnthropic, i18n.EN)
 		if strings.Contains(md3, string(FindingUnadaptedRetry)) {
 			t.Errorf("coverage note should not fire on a 100%% Anthropic corpus (nothing is blind):\n%s", md3)
 		}
 
-		noShare := CorpusStats{JourneyCount: 1}
-		md4 := RenderCorpusMarkdown(noShare, i18n.EN)
+		noShare := BenchmarkStats{JourneyCount: 1}
+		md4 := RenderBenchmarksMarkdown(noShare, i18n.EN)
 		if strings.Contains(md4, string(FindingUnadaptedRetry)) {
 			t.Errorf("coverage note should not fire on an empty ProtocolShare (nothing to disclose):\n%s", md4)
 		}

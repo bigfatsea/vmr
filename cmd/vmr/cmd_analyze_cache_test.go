@@ -207,8 +207,8 @@ func TestAnalyzeCache_InvalidationMatrix(t *testing.T) {
 
 	// Case 1: Audit log changed -> L2 invalidated
 	t0 := time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
-	path2 := writeStoryJSONL(t, []audit.Record{
-		storyRec(t0, []any{storyMsg("user", "completely different log")}, storySSE("ok")),
+	path2 := writeJourneyJSONL(t, []audit.Record{
+		journeyRec(t0, []any{journeyMsg("user", "completely different log")}, journeySSE("ok")),
 	})
 	targetL2LogChanged, _ := computeTargetL2(&analyzeRun{
 		paths:   []string{path2},

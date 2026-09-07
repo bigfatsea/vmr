@@ -21,7 +21,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
-	story "vmr/internal/journey"
+	"vmr/internal/journey"
 	"vmr/internal/pricing"
 	"vmr/internal/report"
 	"vmr/internal/taskseg"
@@ -46,11 +46,11 @@ rates:
 	return pricing.NewResolver(tbl, nil)
 }
 
-// costParitySSE is storySSE plus an optional usage block — the one axis
+// costParitySSE is journeySSE plus an optional usage block — the one axis
 // this test varies, since "upstream reported usage" vs "upstream reported
 // nothing" is the only case the two halves ever disagreed on.
 func costParitySSE(text string, withUsage bool) string {
-	body := storySSE(text)
+	body := journeySSE(text)
 	if !withUsage {
 		return body
 	}
@@ -73,12 +73,12 @@ data: [DONE]`
 // and the two halves must agree on which records those are.
 func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 9, 1, 9, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "cancel parity fixture opening instruction")
-	doneMsg := storyMsg("assistant", "step reply")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "cancel parity fixture opening instruction")
+	doneMsg := journeyMsg("assistant", "step reply")
 
 	mk := func(i int, respBody any) audit.Record {
-		r := storyRec(at(i), []any{sys, u1, doneMsg}, respBody)
+		r := journeyRec(at(i), []any{sys, u1, doneMsg}, respBody)
 		r.Attempts = []audit.Attempt{{Endpoint: costParityEndpoint, Protocol: "openai-completions", Provider: "acme", Model: "m", Response: &audit.Message{Status: 200, Headers: map[string][]string{}}}}
 		return r
 	}
@@ -114,7 +114,7 @@ func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
 	failedOutright.Attempts[0].Error = "network:connection refused"
 	recs = append(recs, failedOutright)
 
-	path := writeStoryJSONL(t, recs)
+	path := writeJourneyJSONL(t, recs)
 
 	res := costParityResolver(t)
 	rep, _, err := report.Build([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil)
@@ -131,18 +131,18 @@ func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
 	}
 	byIdx := ctxgraph.LineageIndex(g)
 	tails := ctxgraph.StitchedSuccessorSet(g)
-	var storyTotal float64
+	var journeyTotal float64
 	var pricedSteps, estimatedSteps int
 	for _, l := range g.Lineages {
 		if tails[l.Idx] {
 			continue
 		}
-		j, err := story.BuildChain(ctxgraph.ChainFrom(l, byIdx), taskseg.Generic, i18n.EN)
+		j, err := journey.BuildChain(ctxgraph.ChainFrom(l, byIdx), taskseg.Generic, i18n.EN)
 		if err != nil {
-			t.Fatalf("story.BuildChain: %v", err)
+			t.Fatalf("journey.BuildChain: %v", err)
 		}
-		c := story.ComputeJourneyCost(j, res, "USD")
-		storyTotal += c.TotalAmount()
+		c := journey.ComputeJourneyCost(j, res, "USD")
+		journeyTotal += c.TotalAmount()
 		pricedSteps += c.PricedSteps
 		estimatedSteps += c.EstimatedSteps
 	}
@@ -156,32 +156,32 @@ func TestCostBasis_ReportAndStoryAgreeCanceledAndError(t *testing.T) {
 		t.Fatalf("estimatedSteps = %d, want 3 (records 2/4/5 priced from the degraded estimate)", estimatedSteps)
 	}
 	want := *rep.Overall.CostEstimate
-	if d := storyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
-		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", storyTotal, want)
+	if d := journeyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
+		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
 	}
 	// The exact-usage record alone is 10*4000/1e6 + 40*1500/1e6 = 0.10; the
 	// total must exceed that to prove the degraded records contributed too.
-	if storyTotal < 0.10 {
-		t.Errorf("story total %v < 0.10 — the degraded records stopped contributing", storyTotal)
+	if journeyTotal < 0.10 {
+		t.Errorf("story total %v < 0.10 — the degraded records stopped contributing", journeyTotal)
 	}
 }
 
 func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
 	at := func(m int) time.Time { return time.Date(2026, 8, 31, 9, m, 0, 0, time.UTC) }
-	sys := storyMsg("system", "sys")
-	u1 := storyMsg("user", "cost basis parity fixture opening instruction")
+	sys := journeyMsg("system", "sys")
+	u1 := journeyMsg("user", "cost basis parity fixture opening instruction")
 
 	var recs []audit.Record
 	msgs := []any{sys, u1}
 	for i := 0; i < 6; i++ {
 		// Alternating: real reported usage, then none at all (the degraded
 		// path both halves must price identically).
-		r := storyRec(at(i), append([]any{}, msgs...), costParitySSE("reply body long enough to estimate a non-trivial token count from", i%2 == 0))
+		r := journeyRec(at(i), append([]any{}, msgs...), costParitySSE("reply body long enough to estimate a non-trivial token count from", i%2 == 0))
 		r.Attempts = []audit.Attempt{{Endpoint: costParityEndpoint, Protocol: "openai-completions", Provider: "acme", Model: "m", Response: &audit.Message{Status: 200, Headers: map[string][]string{}}}}
 		recs = append(recs, r)
-		msgs = append(msgs, storyMsg("assistant", "step reply"))
+		msgs = append(msgs, journeyMsg("assistant", "step reply"))
 	}
-	path := writeStoryJSONL(t, recs)
+	path := writeJourneyJSONL(t, recs)
 	res := costParityResolver(t)
 	rep, _, err := report.Build([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil)
 	if err != nil {
@@ -200,18 +200,18 @@ func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
 	// stitched onto is already covered by that one's chain, and counting it
 	// twice would make the story side spuriously exceed the report's.
 	tails := ctxgraph.StitchedSuccessorSet(g)
-	var storyTotal float64
+	var journeyTotal float64
 	var pricedSteps, estimatedSteps int
 	for _, l := range g.Lineages {
 		if tails[l.Idx] {
 			continue
 		}
-		j, err := story.BuildChain(ctxgraph.ChainFrom(l, byIdx), taskseg.Generic, i18n.EN)
+		j, err := journey.BuildChain(ctxgraph.ChainFrom(l, byIdx), taskseg.Generic, i18n.EN)
 		if err != nil {
-			t.Fatalf("story.BuildChain: %v", err)
+			t.Fatalf("journey.BuildChain: %v", err)
 		}
-		c := story.ComputeJourneyCost(j, res, "USD")
-		storyTotal += c.TotalAmount()
+		c := journey.ComputeJourneyCost(j, res, "USD")
+		journeyTotal += c.TotalAmount()
 		pricedSteps += c.PricedSteps
 		estimatedSteps += c.EstimatedSteps
 	}
@@ -222,7 +222,7 @@ func TestCostBasis_ReportAndStoryAgree(t *testing.T) {
 		t.Fatal("no step took the degraded-estimate path — the fixture stopped covering the case this test exists for")
 	}
 	want := *rep.Overall.CostEstimate
-	if d := storyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
-		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", storyTotal, want)
+	if d := journeyTotal - want; d > 1e-9*(1+want) || d < -1e-9*(1+want) {
+		t.Errorf("story total %v != report total %v — the two halves are pricing different records, or the same records on different bases", journeyTotal, want)
 	}
 }
