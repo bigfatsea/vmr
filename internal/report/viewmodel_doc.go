@@ -368,12 +368,10 @@ func vmAppendixClosing(rep *Report2, lang i18n.Lang) ([]string, []FootnoteVM) {
 	} else {
 		footnotes = append(footnotes, FootnoteVM{ID: "self-traffic", Text: t.AppendixSelfTrafficNotExcluded})
 	}
-	// clientsWithSiblingFile is empty since D7, so every client with
-	// traffic but no sibling file is reported.
-	withSibling := clientsWithSiblingFile(rep)
+	// Every client with traffic is listed here (D7 removed the per-client index files).
 	var missingSiblings []string
 	for _, c := range rep.ByClient {
-		if c.ClientKey != "" && !withSibling[c.ClientKey] {
+		if c.ClientKey != "" {
 			missingSiblings = append(missingSiblings, c.ClientKey)
 		}
 	}
