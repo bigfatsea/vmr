@@ -472,3 +472,111 @@
 ### 新发现问题补充：N14
 
 评审中另注意到 `cmd/vmr/compares_index.go`、`internal/archtest/func_sizes_test.go`、`internal/i18n/journey_compare.go`、`internal/i18n/lang_test.go`、`internal/journey/benchmarks_coverage.go` 在 Go 1.26 gofmt 下非 canonical（尾随注释对齐），`go.mod` 声明 `go 1.25.1`。**非缺陷**（CI 用 1.25，当前通过），但仓库升级到 Go 1.26 时需一次全仓 `gofmt -w`。仅作记录，无需本轮处理。
+
+---
+
+## 第四部分：第二轮（用户反馈后的落地）
+
+**触发**：用户就第三部分的 partial/未解决项给出逐条指示——C1/C3(完整方案)/C6/N3/N5/N7-N10 按建议方案落实。
+**起点** `c1dec4c`，**终点** `21859b3`（本轮 12 个 commit，含 2 个 merge；G1/G2 用 pi worker + worktree 并行，G3/G5/G6 主控串行）。
+执行编排与进度见 `_review/EXECUTION_REPORT.md`。
+
+### 4.1 反馈项落地状态
+
+| 项 | 指示 | 状态 | commit |
+|---|---|---|---|
+| **N3 / C6**（旧请求索引死代码） | 建议方案落实 | ✅ **完成** | `29b7f42`（-451 行：`requests.go` / `report_requests.go` / `requests_test.go` / `viewmodel_doc.go`）；`5d5734a` merge |
+| **N7**（`vmr-requests.json` 死分支） | 按建议处理 | ✅ **完成** | `29b7f42`（`WriteRequestsIndex`）+ `de50ce4`（`WriteFailedIndex` 的 `vmr-requests-failed.md` 同类副本一并删） |
+| **N5 / C8**（`compares/index.md` 双语） | 建议方案落实 | ✅ **完成** | `6c067ee`（新 `i18n/journey_compares_index.go` + 3 调用点 + `TestRebuildComparesIndex_LanguageZH`）；`3737afc` merge |
+| **N8**（`ValidateManifest` 不校验切片齐全） | 按建议处理 | ✅ **完成** | `a5bf692`（`BuildManifest`/`ValidateManifest` 拒绝残缺 macro 切片集，4 子测试） |
+| **C3 / C13#4 / N1完整 / C12**（时间双字段收敛 + §9 守卫） | "完整方案"落实 | ✅ **基本完成**（一处经论证缩小） | `de50ce4` + `d85858c` |
+| **N9 / C1**（注释与命名清理） | 建议方案落实 | ✅ **完成主体**（低价值残留见 4.3） | `ad7d18d` + `fdfad15` + `21859b3` |
+| **N10 / C9**（看板 chrome 本地化） | 按建议处理（推荐英文统一） | ⚠️ **暂缓**（并入 N15） | — |
+| **N2 / C5**（journey `llm_interpretation` 入 JSON） | 用户本轮未列入 | 保留未做 | — |
+
+### 4.2 C3 完整方案：一处缩小及其理由
+
+**缩小项**：`SessionRow.from/to` 未从 RFC3339 字符串转成 epoch ms。
+
+- **已做**：`RequestRow.ts` → epoch ms（与 `CompactionRow.ts` 一致，`requests_failed.go` 适配，`corrupt-ts` 测试改 `missing-ts`）；`StepStructure` 补 `ts_display`；`JourneySummary` 补 `from_display`/`to_display`（均经 `fmtutil.DisplayZone`）；新增 `internal/report/slices_time_test.go` + journey 侧 `TestJourneySummary_TimePointsCarryDisplayForm` 两个 §9 守卫。
+- **未做的理由**：`SessionRow.from/to` 无任何前端消费者——只被 `viewmodel_sessions.go` 的 `formatSessionTimeRange`（Go 侧，已正确走 DisplayZone）读取；`macro-dashboard.html` 只显示会话计数与均值，不渲染 from/to。把它转 epoch ms 需改 `aggregate.go` + `formatSessionTimeRange` + 重生成 macro VM golden，换来零功能收益。守卫已在注释中明确记录：`SessionRow.from/to`、`Meta.time_range`、`ProviderQuotaRow.Period*` 是仅 Go 侧渲染的 RFC3339 机读时间戳，豁免；将来若有前端视图渲染它们，须补 `*_display` 并扩展守卫。
+- 若不认可此缩小，补齐 `SessionRow` 是一个约 15 行 + 1 处 golden 重生成的独立小改动。
+
+### 4.3 N9 残留（低优先级，未处理）
+
+按建议保留了"report 半区 / journey 半区"这类**角色描述**，只清了命令名/文件名/flag 名/test 函数名。仍有约 100+ 处注释在 `internal/ctxgraph`、`internal/fmtutil`、`internal/pricing`、`internal/quota`、`internal/audit` 等 leaf 包里写 `vmr story` / `vmr report` 作为命令名（如 `internal/ctxgraph/cache.go` 的旧流程描述、`internal/journey/journeyindex.go` 里剩余的 `storiesDir` / `cmdStory branch` / `reports/stories/` 字样）。这些不影响功能，人工甄别成本高（易误伤合法的两半区描述），建议作为一次独立的低优 commit，不阻塞。
+
+---
+
+## 第五部分：本轮新发现的问题（N15、N16）
+
+### N15（严重）— 看板渲染层普遍读错切片字段名，从未对真实产出验证
+
+**问题描述**：6 个骨架页的 JS 大量按 **Go 结构体字段名（PascalCase）** 读切片数据（`r.ClientKey`、`s.DurMS`、`m.Model`、`q.HeadroomScore` …），而切片 JSON 用的是 **snake_case json tag**（`client_key`、`dur_ms`、`model`、`headroom_score` …）。各页 `X || x` 兜底覆盖极不一致：
+
+| 页 | PascalCase 读 | 有 `\|\| snake` 兜底 | 结论 |
+|---|---:|---:|---|
+| `macro-dashboard.html` | 76 | 30 | 部分表可用，多处 `—` |
+| `request-browser.html` | 44 | **1** | 几乎完全失效（**本轮已修**，见下） |
+| `journey-viewer.html` | 48 | 26 | 部分失效 |
+| `journey-compare.html` | 30 | 6 | 大面积失效 |
+| `benchmarks.html` | 13 | 6 | 半数失效 |
+| `tool-waste.html` | 13 | 4 | 大面积失效 |
+
+叠加第三部分 N1（`common.js` 从未部署，本轮已修），**Phase 2 看板作为交付形态从未真正工作过**。根因：看板 JS 按"理想契约"（Go 字段名）编写，从无渲染测试对真实切片输出验证；`dashboard_test.go` 只测 `WriteSkeletons` 写文件，`js_test.go` 只测 `common.js` 纯函数。
+
+**本轮已直接解决的部分**：`request-browser.html` —— 它是 D7 删掉人读请求索引后**唯一**的请求浏览界面（"浏览交给看板"是 D7 的立论），却几乎完全失效。`0788d8f` 把它的字段名全部对齐 `requests/index.json` 实际 key（含 facet 构建、过滤、排序、journey 链接从 `details/j-<id>.md` 派生出裸 id），端到端核对真实产出，加静态守卫 `TestRequestBrowser_ReadsSnakeCaseFields`。
+
+**未解决部分（建议方案 + ROI）**：
+- **问题**：其余 5 页同类字段错配 + 缺渲染测试。
+- **根因**：Phase 2 未做"渲染层对真实切片验证"这一步。
+- **建议方案**：一次专项"看板补完盘"——(1) 逐页把字段读对齐各切片的 json tag（对照 `internal/report/rows.go`、`internal/report/slices.go`、`internal/journey/{summary,structure,benchmarks,compare}.go`、`internal/report/manifest.go`）；(2) 每页加一个 Node 渲染 smoke（喂一份真实切片 fixture，断言关键单元格非 `—`/`NaN`）；(3) 顺带做 N10（chrome 本地化统一——推荐读 `manifest.lang` 切一套内置 dict，`common.js` 已 fetch manifest）。
+- **ROI**：工作量约 **2–4 人天**（6 页字段审计 + 测试脚手架 + chrome）。价值高——这是"生成即交付"能否成立的前提，且 request-browser 之外的 4 个 zoom 页目前对用户基本无用。**建议列为下一个独立任务**，不塞进评审后续。
+
+### N16（中）— `vmr-report.md` §8 附录与详单回链仍指向 D7 删除的 `vmr-requests.md`
+
+**问题描述**：与第三部分 N4 同类（拓扑迁移遗留的失效链接），本轮新查出三处：
+- `vmr-report.md` §8 正文 + 附录的"详单链接"行链到 `./vmr-requests.md`（`i18n/report_doc.go` 的 `DetailLinkLine` / `RequestIndexBody`）。
+- 每个 `requests/details/r-<id>.md` 顶部 `← Back to [vmr-requests.md](../vmr-requests.md)`（`i18n/reqdetail_detail.go` 的 `BackToIndexLine`）—— 404。
+- `DetailsOnDemandBody` 提"`vmr-requests.md` 的『文件』列"。
+
+**处置**：✅ **本轮已直接解决**（`dac8c07`）。§8 改为描述 `requests/index.json`（数据）+ `request-browser.html`（浏览）；详单回链改指 `../../request-browser.html`（用户实际是从那里点进详单的）；`details/` 路径补全为 `requests/details/`。macro VM golden 已重生成，端到端核对真实产出无残留 `vmr-requests.md`。
+
+---
+
+## 第六部分：本轮验证结果
+
+- `go build ./...` / `go vet ./...`：通过
+- `go test ./...`：全绿
+- `go test -race ./internal/{report,journey,dashboard,i18n}/... ./cmd/vmr/...`：全绿
+- `go test ./internal/archtest/...`：通过
+- `gofmt -l .`：仅 `cmd/vmr/cmd_journey_setup.go` 一个文件（Go 1.26 尾随注释对齐；CI 用 1.25，clean）。本轮顺带修好了 `lang_test.go`、`benchmarks_coverage.go`、`func_sizes_test.go`、`journey_compare.go`、`compares_index.go` 这几个 session 开始时就 CI-脏的文件。
+- **端到端实跑**（`vmr analyze` + `-render-only` against `logs/vmr-audit-2026-08-24/25`）：
+  - `requests/index.json` 的 `ts` 为 epoch ms（`1787500778429`），`request-browser.html` 字段读全部命中实际 key
+  - `vmr-report.md` §8 无 `vmr-requests.md`，改为 `requests/index.json` / `request-browser.html`
+  - `requests/details/*.md` 回链 = `← 返回 [request-browser.html](../../request-browser.html)`，路径可解析
+  - `compares/index.md` 随 `-lang zh` 出中文标题
+  - `-render-only` 产物与全量运行**逐字节一致**（D11 未受影响）
+
+## 第七部分：本轮 commit 清单
+
+| commit | 内容 |
+|---|---|
+| `a5bf692` | fix(report): reject a partial macro slice set at manifest build and validate（N8） |
+| `6c067ee` + `3737afc` | feat(journey): internationalize compares index markdown（N5，pi worker G2） |
+| `29b7f42` + `5d5734a` | refactor(report): remove dead markdown request index rendering code（N3/N7，pi worker G1） |
+| `fdfad15` | style: gofmt bundleConstructors map alignment |
+| `de50ce4` | fix(report): RequestRow.ts is epoch ms, drop the legacy failed.md copy（C3 + N7 残留） |
+| `d85858c` | feat(analytics): DisplayZone companions on journey time points + §9 dual-time guard（C3/C12/N1完整） |
+| `0788d8f` | fix(dashboard): request-browser reads requests/index.json's actual keys（N15 部分） |
+| `dac8c07` | fix(i18n): retarget the §8 appendix and detail back-link off the deleted vmr-requests.md（N16） |
+| `ad7d18d` | docs: purge stale story/-corpus names from comments and .gitignore（N9/C1） |
+| `21859b3` | style: gofmt column alignment left by earlier renames |
+
+## 第八部分：仍待用户裁决 / 后续任务
+
+1. **N15 看板补完盘**（2–4 人天）—— 5 个页面字段审计 + 渲染测试 + N10 chrome。**最高优先级后续任务**。
+2. **N2 / C5**（journey `llm_interpretation` 入 JSON）—— 本轮用户未列入；仍是方案 §3.6 点名要消除的旁路拼接。
+3. **C3 SessionRow 收敛**（约 15 行）—— 若不认可 4.2 的缩小理由。
+4. **N9 leaf 包注释残留**（低优）—— `vmr story` / `vmr report` 作命令名的约 100+ 处注释。
+5. **N11**（配置指纹字段核对）/ **N12**（方案 §7.2 `-from/-to` 术语脚注）—— 观察/文档项。
