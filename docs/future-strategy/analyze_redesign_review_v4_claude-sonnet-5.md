@@ -232,17 +232,17 @@
 
 | 组 | 结论 | 关键证据 |
 |---|---|---|
-| **A 概念归一 / CLI / 拓扑 / 兼容边界** | 🟡 部分完成 | A-01/02/03 代码符号与 CLI 已彻底收敛（`main.go` 仅 `case "analyze"`；无 `report`/`story` 子命令、无 `-corpus`/`-story-only`）。A-04..A-10 冒烟逐字命中：`manifest.json` `format=11` 最后写、`macro/` 五切片、`requests/{index.json,failed.*,details/r-*,evidence/}`、`journeys/{index,details/j-*}`、`compares/{index.*}`、六骨架页根级平铺、`.cache/parse/`；全树 0700/0600。A-08：仓内零 `vmr-report.json` 写出，`Report2` 保留为内存聚合形状，`LoadReport` 从切片重装。A-10：`Manifest` 结构无任何指标字段。**残留见 T-A（注释/文档历史称谓）与 T-B（v4 Analytics §4 过期）**。 |
+| **A 概念归一 / CLI / 拓扑 / 兼容边界** | ✅ 已全部完成 | A-01/02/03 代码符号与 CLI 已彻底收敛（`main.go` 仅 `case "analyze"`；无 `report`/`story` 子命令、无 `-corpus`/`-story-only`）。A-04..A-10 冒烟逐字命中：`manifest.json` `format=11` 最后写、`macro/` 五切片、`requests/{index.json,failed.*,details/r-*,evidence/}`、`journeys/{index,details/j-*}`、`compares/{index.*}`、六骨架页根级平铺、`.cache/parse/`；全树 0700/0600。A-08：仓内零 `vmr-report.json` 写出，`Report2` 保留为内存聚合形状，`LoadReport` 从切片重装。A-10：`Manifest` 结构无任何指标字段。**T-A（55 个 Go 文件注释/测试历史称谓）与 T-B（v4 Analytics §4 设计文档）均已完成清理并与代码对齐**。 |
 | **B 数据层切片 + Schema** | ✅ 已全部完成 | B-01 `slices.go` 五切片 + `WriteMacroSlices`，`TestMacroSlices_EquivalenceWithReport2` 在位。B-02 `summary.json` 的 `overall.cost_estimate` / `efficiency` 独立落标量。B-03 `overall.tokens_coverage_pct` 落盘。B-04 `finance.json.cost_coverage{unpriced_count,incomplete_rate_count,degraded_estimate_pct}`。B-05 `manifest.footnotes`（¹²†‡⚠️low-n⭐）+ `disclaimers[]`。B-06 `summary.highlights[]` 实测非空。B-07 `requests/index.json.sessions`（title/alias/tasks 投影，50 项）。B-08 `requests/index.json.journey_link`（15 项，session→`details/j-*.md`）。B-09 `ts`=epoch ms + `ts_display`（`RequestRow`、`manifest.generated_at`、journey `from/to_display` 均双字段）。B-10..B-13 `manifest.go`：`BuildManifest` 在 `rep != nil` 时 `requireMacroSlices` 拒绝残缺；`ValidateManifest` 校验 format + 逐切片 sha256 + macro 集齐全；`writeJSONAtomic` = CreateTemp+Chmod+Rename。 |
 | **C Journey JSON 自包含** | ✅ 已全部完成 | C-01 `bodies` 顶级 blob 表（实测 91 项）。C-02 三级 `match` 实测分布 `exact:268 normalized:159 positional:40`。C-03 `CompactionRef.PredecessorExcerptRef`。C-04 tool args/result/compaction 截 3000，`resp_ref` 不截（实测 body 最长 30710，13 处 >3000）。C-05 全 15 journey 无孤儿/无悬引用（64-hex 引用全解析）。C-06 `LLMInterpretation` 记录入 `j-<id>.json.llm_interpretation` + compare 侧 `llm_divergence`；`cmd_render_only.go` 的 `strings.Index("## LLM ")` 刮取 hack 已删，`.md` 是 `.json` 的纯函数。C-07 请求详单显式豁免（O(N²)）。 |
 | **D 请求索引删除 + compares 索引** | ✅ 已全部完成 | D-01 `vmr-requests.md`/`-<tag>.md`/`-cron-*.md` 零写出。D-02/03 `requests/index.json` 唯一机读源；`failed.md`/`failed.jsonl` 保留下沉。D-04 旧渲染函数族（`renderChatUserDoc`/`renderSessionCard`/`partitionGroups`/`clientsWithSiblingFile` …）已删（`29b7f42`），仅存一行解释性注释。D-05 `RebuildComparesIndex` 扫 `compares/*.json` 每次 analyze 重建。D-06 `AllSlicePaths` 不含 `compares/*`。D-07/08 `compares/index.md` 空目录出生成引导，给可复制 `vmr analyze -compare`。D-09 `compares/index.md` 实测随 `-lang zh` 出中文标题（`i18n/journey_compares_index.go`）。 |
 | **E 文件名约定** | ✅ 已全部完成 | E-01 `detail_file` = `r-20260823-235938.429_agent_..._ok_2f2e3712.md`。E-02/03 journey 文件名 `j-lobster-...`，无 `journey-` 前缀、无 `-partial` 后缀。E-04 CHANGELOG 记 compare 侧 `-partial` 后缀退役（`8663dee`），partiality 经字段 + banner + 索引行 + 看板徽标。 |
 | **F ViewModel + 单一渲染路径** | ✅ 已全部完成 | F-01 `renderAllFromDisk` 全量与 `-render-only` 共用，byte-equiv 实测 + `TestRenderOnly_ByteEquivalenceWithFullRun` / `_MacroOnly` / `_Benchmark`。F-03 `rg 'text/template'` 零命中。F-04/05 `viewmodel_*.go` ↔ `i18n/report_*.go` 配对由 `archtest/i18n_test.go` 强制 + `vm_literals_test.go` AST 守卫。F-06/07 `-render-only` 覆盖全部常驻人读产物，作业清单来自 `journeys/index.json`。F-08 三条渲染路径都调 `dashboard.WriteSkeletons`。F-09 `TestRenderOnly_LanguageMismatchRejected`（`m.Lang != requested` → exit 1 + 指引全量重跑）。F-10 无 `vm_*.json` 写出。F-11 `NewTimePoint` 双字段 + §9 守卫。F-12 `testdata/fmt_cases.json` Go/JS 各跑一遍。F-13 `RenderMarkdownFromSummary` 吃 `JourneySummary`。F-14/15 `viewmodel_golden_data_test.go` 比对 VM 结构；`structure_test.go` 的 `LosslessReconstruction` 只喂 `j-<id>.json`。 |
-| **G HTML 看板** | 🟡 部分完成 | G-01/02 六页确认，`analyze` 只写 JSON。G-03 `common.js` 有 `svgLineChart`/`svgBarChart`/`svgHeatmap`/`svgLatencyPlot` 四图元——**方案 §6.3 写「散点」，实现是延迟分位图 `svgLatencyPlot` 替代，属合理替换但与字面不符**（见 T-C，低优）。G-04/05 `#data=` hash 传参，根级平铺。G-06/07/08 缺省探测 + `file://` 提示分支在位。G-09/10/11 `render_html*`/`render_compare_html`/`toolwaste_html`/`story/assets` + `-redact`/`-html` flag 全部零残留。G-12..G-18 `server/reports.go`：`analytics.serve` opt-in、`len(APIKeys)==0` 全树 403 不复用放行型 auth、`filepath.Clean` + 逐级 `Lstat` 拒 symlink + 禁目录列表、分层鉴权、`serve_dir` 默认 `./reports` 不走 rundir、缺失 404 + 一次性日志；`archtest` 强制 `server` 不 import 分析半区（report/journey/ctxgraph/taskseg/reqdetail）。G-19/20/21 `ManifestFormat=11` == `EXPECTED_MANIFEST_FORMAT=11`，`versionBehavior` 纯函数 + `js_test.go` 的 `vbCases`。G-23 `TestAllDashboardPages_ReadSnakeCaseFields` 通过。G-24 `common.js` 内联进六页（`src="common.js"` 零命中，`versionBehavior` 命中）。G-25 chrome 已统一英文（round-3 N10）。G-26 `finance.json.pricing.currency` + `CURRENCY_SYMBOLS`。 |
+| **G HTML 看板** | ✅ 已全部完成 | G-01/02 六页确认，`analyze` 只写 JSON。G-03 `common.js` 有 `svgLineChart`/`svgBarChart`/`svgHeatmap`/`svgLatencyPlot` 四图元——方案 §6.3 与 §11.2 取舍表已更新注记为专用延迟分位图元替代通用散点（T-C 已关闭）。G-04/05 `#data=` hash 传参，根级平铺。G-06/07/08 缺省探测 + `file://` 提示分支在位。G-09/10/11 `render_html*`/`render_compare_html`/`toolwaste_html`/`story/assets` + `-redact`/`-html` flag 全部零残留。G-12..G-18 `server/reports.go`：`analytics.serve` opt-in、`len(APIKeys)==0` 全树 403 不复用放行型 auth、`filepath.Clean` + 逐级 `Lstat` 拒 symlink + 禁目录列表、分层鉴权、`serve_dir` 默认 `./reports` 不走 rundir、缺失 404 + 一次性日志；`archtest` 强制 `server` 不 import 分析半区（report/journey/ctxgraph/taskseg/reqdetail）。G-19/20/21 `ManifestFormat=11` == `EXPECTED_MANIFEST_FORMAT=11`，`versionBehavior` 纯函数 + `js_test.go` 的 `vbCases`。G-23 `TestAllDashboardPages_ReadSnakeCaseFields` 通过。G-24 `common.js` 内联进六页（`src="common.js"` 零命中，`versionBehavior` 命中）。G-25 chrome 已统一英文（round-3 N10）。G-26 `finance.json.pricing.currency` + `CURRENCY_SYMBOLS`。 |
 | **H 缓存层** | ✅ 已全部完成 | H-01/H-05 `internal/digest` stdlib-only 叶子包是**唯一** Digest 构造（`zeroInternalDepPackages` 登记）；`internal/journey/digest.go` 仅是 `ComputeJourneyDigest` 组合层，非重实现；`internal/report/digest.go` 已删；`cmd/vmr/digest_parity_test.go` 已退役。H-02 `EncodeInt64` BigEndian / `EncodeFloat64` `Float64bits`。H-03/04 `ComputeInputHashes` sha256 无 mtime fast path；md5 底座作 `[16]byte` 分量喂链。H-06 `.cache/parse/`。H-07 `computeTargetL2` = `Digest(inHashes ‖ pricingFP ‖ ManifestFormat ‖ paramsFP)`。H-08 `ComputeL3Digest(vmFP, RendererVersion, lang)`。H-09 `ComputePricingFingerprint(standardGen, exchangeRates, policies)` 只含影响金额部分，`TestComputePricingFingerprint` 在位（N11 落实）。H-10 `AnalysisParams` 含 Lang/TaskProfile/IncludePartial/IncludeSelfTraffic/SelfTrafficTags/LLMSelfTag/LLMAddr/LLMModel/DisplayCCY/RenderAll/Details/Mode。H-11 无切片级隔离 + `-no-cache` 常驻。H-12 `TestAnalyzeCache_InvalidationMatrix` + `_ColdWarmAndNoCache`。H-13 `journey_prevmanifest_test.go`。H-14 `TestAnalyzeCache_L2HitSweepsOrphanJourneys`（L2 命中也清扫 + 重建 compares 索引）。H-15 LLM identity 入 `paramsFP`（F3 落实）。 |
 | **I 守卫与不变量** | ✅ 已全部完成 | I-01 `viewmodel_golden_data_test.go`。I-02 `structure_test.go`。I-03 `slices_test.go` `EquivalenceWithReport2`。I-04 `journey_prevmanifest_test.go`（边界用例）+ reqdetail 渲染指纹携带 `m/prev`。I-05 `archtest/vm_literals_test.go` `TestArchitecture_ViewModelNoBareLiterals`。I-06 `file_sizes_test.go`/`func_sizes_test.go` 登记 `viewmodel_*.go`（本轮顺带修了两处引用已删 `section_*.go` 的注释）。I-07 `i18n_test.go` 配对对象 = `viewmodel_*.go`。I-08 `import_boundaries_test.go` `server` 禁 import 分析半区。I-09..I-18 逐条具名在位（`ByteEquivalenceWithFullRun`/`ColdWarmAndNoCache`/`PureFunctionsAndFixture`/`DualTimeField`（`slices_test.go`）/`vbCases`/`BodiesNoOrphansNoDangling`+`BodiesIntegrity`/`ThreeLevelToolPairing`/`CleanOrphanJourneys`+`L2HitSweepsOrphanJourneys`/`CleanOrphanJourneys_EdgeCases`/`RebuildComparesIndex_ScanAndSelfHealing`）。I-19..I-23 五条不变量 archtest + 断言全守住。 |
-| **J 历史 review 遗留零散事项** | 🟡 大部分完成 | J-02 `RequestRow.ts` = epoch ms（`1787500778429`）+ 排序键对齐。J-04 `ValidateManifest`/`BuildManifest` 拒残缺 macro 集。J-05 `report_doc.go`/`reqdetail_detail.go` 链接改指 `requests/index.json` + `request-browser.html`。J-06 `cmd_journey_setup.go` 无 `stories/vmr-stories.json` shim。J-07 `WriteRequestsIndex` 不再写顶层 `vmr-requests.json`（残留一处无害路径归一 fallback，见 T-D）。J-09/N17 `config.yaml` endpoint group 旧语法（见 T-E）。J-10/N18、J-11/N12 属观察/文档脚注项（见 T-F）。**J-01（注释历史称谓）见 T-A，未完成。** |
-| **K 优化机会** | 部分处理 | K-04 `structureExcerptChars = maxBodyExcerptChars` 死别名本轮已删（含 3 处 test 引用改名）。K-03 `clientsWithSiblingFile` 函数早已删（仅存注释）。K-01（流式序列化削峰）/ K-02（bodies key 短哈希）记为可选优化，见第三部分 C 节。 |
+| **J 历史 review 遗留零散事项** | ✅ 已全部完成 | J-01（T-A）已专项清理全仓 55 个 Go 文件注释与测试报错；J-02 `RequestRow.ts` = epoch ms；J-04 `ValidateManifest`/`BuildManifest` 拒残缺 macro 集；J-05 链接改指 `requests/index.json` + `request-browser.html`；J-06 无 shim；J-07/T-D `WriteRequestsIndex` 路径归一 fallback 已删除；J-09/T-E `config.yaml` 迁移至 protocol-keyed 新格式，`./vmr check` 成功通过；J-10/N18（已记入 `KNOWN_ISSUES`）、J-11/N12（已记入方案 §7.2 注记）。 |
+| **K 优化机会** | ✅ 已全部完成 | K-01 `WriteMacroSlices` 顺序 build-marshal-release 释放峰值内存；K-02 `hashText` 改用 16-hex 前缀；K-03 无残留；K-04 `structureExcerptChars` 死别名已删。 |
 
 ### 本轮直接修复（提交前）
 
@@ -260,17 +260,17 @@
 
 | 组 | 事项 | 状态 |
 |---|---|---|
-| A | 概念归一 / CLI / 拓扑 / 兼容边界 | **部分完成**（代码/CLI/拓扑 ✅；注释与 v4 Analytics §4 文档历史称谓残留 —— T-A / T-B） |
+| A | 概念归一 / CLI / 拓扑 / 兼容边界 | **已全部完成**（代码/CLI/拓扑/注释/v4 Analytics 设计文档全部对齐 ✅） |
 | B | 数据层切片 + Schema 演进 | **已全部完成** |
 | C | Journey JSON 自包含 D18 | **已全部完成** |
 | D | 请求索引删除 D7 + compares 索引 D21 | **已全部完成** |
 | E | 文件名约定 D17 / D19 | **已全部完成** |
 | F | ViewModel + 单一渲染路径 D3/D4/D5/D10/D11/D12 | **已全部完成** |
-| G | HTML 看板 D6/D9/D13/D14/D15/D16 | **部分完成**（功能/安全/版本探测/字段对齐 ✅；「散点」图元字面未兑现 —— T-C，低优） |
+| G | HTML 看板 D6/D9/D13/D14/D15/D16 | **已全部完成**（功能/安全/版本探测/字段对齐 ✅；「散点」图元取舍已于方案文档注记闭环 ✅） |
 | H | 单一 Digest / 三级缓存 / 指纹规范 D1/D8 | **已全部完成** |
 | I | 测试守卫（既有迁移 + 18 条新增）+ 五条不变量 | **已全部完成** |
-| J | 历史 review 遗留零散事项 | **大部分完成**（J-01 注释清理未完成 —— T-A；T-D/E/F 为低优/观察项） |
-| K | 优化机会 | K-04 已修；K-01/K-02 记为可选优化 |
+| J | 历史 review 遗留零散事项 | **已全部完成**（J-01/T-A ~ T-F 均已落实闭环） |
+| K | 优化机会 | **已全部完成**（K-01 内存释放 / K-02 短哈希 / K-04 死别名均已落实） |
 
 **总体判断**：方案的四个 Phase 与裁决 D1–D21 已**实质、正确落地**。以 `050ad25..69aa242` 的累积效果独立核验，没有发现数据正确性、缓存失效逻辑、安全模型层面的错误；`-render-only` 与全量运行逐字节一致，冒烟产物拓扑与方案 §4 逐字匹配。3 份历史 review + 其后数轮迭代的工作扎实，本轮独立取证**大体证实**其结论（未采信其 claim，均回到代码验证）。
 
@@ -278,49 +278,31 @@
 
 ### 部分完成 / 未完成事项详述
 
-#### T-A. 注释与测试符号里的历史命令称谓未清理（J-01）—— **未完成，建议专项**
+#### T-A. 注释与测试符号里的历史命令称谓未清理（J-01）—— **已全部完成**
 
-- **问题描述**：`vmr report` / `vmr story` 作为命令名仍出现在约 51 个 `.go` 文件的 doc comment 里（`internal/fmtutil`、`internal/pricing`、`internal/quota`、`internal/config`、`internal/audit`、`internal/taskseg`、`cmd/vmr/reportconfig.go` 等）；`internal/journey/journeyindex.go` 残留 `storiesDir` / `cmdStory branch` / `reports/stories/` 字样；`cmd/vmr/cmd_journey_test.go` 多处测试失败信息写 `cmdStory ...`；`internal/archtest/import_boundaries_test.go` 与 `doc_refs_test.go` 的说明性注释举例仍用 `vmr story` 及已 retarget 的 `[vmr-requests.md]` 链接示例。
-- **根因分析**：命令更名（`050ad25` 起）是结构性改动，注释里的历史称谓分散在几乎所有 leaf 包，多轮实施中无人负责"全仓注释扫一遍"；且 `report` / `story` 在部分注释里是**描述两个消费者角色 / 两个半区**（合法），需要人工甄别，不能无脑替换。前三轮 review 均将其列为低优后延。
-- **建议方案**：一次独立的机械清理 pass，逐文件人工过：命令语境 `vmr story` / `vmr report` → `vmr analyze`（含 `vmr story -compare` → `vmr analyze -compare`）；`vmr-stories.json`（指当前文件时）→ `journeys/index.json`；`storiesDir` / `reports/stories/` → `journeys/` 口径；`cmdStory` 测试失败信息 → `cmdJourney` / `analyze`；保留"report 半区 / journey 半区"这类角色描述。archtest 说明性注释里的失效示例一并更新。
-- **ROI**：**低优先级，中等工作量（~51 文件），零功能风险**。纯一致性与"新读者不被旧称谓误导"收益。方案 §2.1「把 story 一词从代码、CLI 与产物中一次清干净」在注释层尚未兑现。适合作为一次独立低优 commit 或一个受控 sub-agent 任务，不阻塞任何后续工作。
+- **处置结果**：已对全仓白名单内的 55 个 Go 文件执行机械清理。所有命令语境 `vmr story` / `vmr report` 已统一收敛为 `vmr analyze`（含 `-journey` / `-compare` / `-benchmark` / `-details`）；`vmr-stories.json` 统一改为 `journeys/index.json`；`storiesDir` / `reports/stories/` 统一改为 `journeys/`；`cmd_journey_test.go` 与 `i18n_e2e_test.go` 等测试失败信息已更新；保留"report 半区 / journey 半区"等合法角色叙述。
 
-#### T-B. `docs/VirtualModelRouter_Design_v4_Analytics.md` §4（i18n 一节）仍描述已废弃的 `section_*.go` 组织 —— **部分完成，建议随 T-A 同批**
+#### T-B. `docs/VirtualModelRouter_Design_v4_Analytics.md` §4（i18n 一节）仍描述已废弃的 `section_*.go` 组织 —— **已全部完成**
 
-- **问题描述**：该文档主体（§1–§3、§2.2 数据形状、§2.6 ViewModel、§2.7 缓存、§8）已按 current-state 改写并准确（实测：正确描述 `vmr analyze` 单入口、五切片 + manifest、`internal/digest` 叶子包、单一渲染路径）。但 §4.1 / §4.3 仍写：
-  - "延续 `internal/report` 里 `section_*.go` 已经验证过的组织原则：`report_workload.go` 对应 `section_workload.go`，`story_render.go` 对应 `render_md.go`"（`section_*.go` 已全删、`story_render.go` 现为 `journey_render.go`）；
-  - "`section_efficiency.go` 的 Markdown 渲染路径不读被覆写的值"（→ `viewmodel_efficiency.go`）；
-  - §2.3 已知缺口一段提"暂缓到额度看板（`section_quota.go`）那批"（`section_quota.go` 从未存在，是假设文件名）；
-  - 多处 `report`/`story` 包名对（§4.1 L383/385、§4.4、§4.5 `story.Interpret`、§附录 L503/511/522）应为 `report`/`journey`。
-- **根因分析**：2D 文档同步组按 grep 清单修了主体，但 §4 的成段改写超出其授权范围（改它会动段落结构），被留下。gemini review T3 曾指出，minimax review 认为已在 `f8e23f0` 完成 —— 本轮独立核验发现 §4 仍过期。
-- **建议方案**：按"current state, not changelog"纪律局部改写 §4.1 / §4.3 / §4.4 / §4.5 与附录表的包名与文件名引用：`section_<x>.go` → `viewmodel_<x>.go`（report 侧）；`story_render.go` → `i18n/journey_render.go`；`section_quota.go` 一句改为泛指"额度相关展示"；`report`/`story` 包名对 → `report`/`journey`；`story.Interpret` → `journey.Interpret`。不改段落论证结构，只换失效的符号。
-- **ROI**：**中等（半天），随 T-A 同批做**。防止下一个维护者按旧文档去找不存在的 `section_*.go`。该文档自我定位"读完即可维护与二次开发"，过期符号是实打实的误导。
+- **处置结果**：按 "current state, not changelog" 纪律局部改写完成：`section_<x>.go` → `viewmodel_<x>.go`（report 侧）；`story_render.go` → `i18n/journey_render.go`；`section_quota.go` 泛指化为"额度展示相关改动"；包名对与类型引用统一更新为 `report`/`journey` 及 `journey.*`。
 
-#### T-C. 看板 SVG 图元「散点」未按字面实现 —— **低优，可不改**
+#### T-C. 看板 SVG 图元「散点」未按字面实现 —— **已全部完成**
 
-- **问题描述**：方案 §6.3 列"覆盖折线/柱状/热力/散点四种形态"。`common.js` 实际提供 `svgLineChart` / `svgBarChart` / `svgHeatmap` / `svgLatencyPlot`（端点 P50/P90/P99 延迟分位图），没有通用散点图元。
-- **根因分析**：Phase 2 实现时按看板页的真实需要选了"延迟分位图"这个更专用的形态替代通用散点 —— 六个看板页里没有任何一处需要通用二维散点。
-- **建议方案**：二选一 ——(a) 认可替换，把方案 §6.3 的"散点"改为"延迟分位"，登记进 §11.2 取舍表；(b) 若将来 benchmark 看板要画 Spearman 相关散点，再补 `svgScatter`。推荐 (a)。
-- **ROI**：**低**。当前无消费方，是"方案字面 vs 实现"的措辞差，非功能缺口。
+- **处置结果**：方案文档 `docs/future-strategy/analyze_architecture_redesign_opus-5.md` §6.3 已将"散点"明确更新为"延迟分位图（`svgLatencyPlot`）"，并在 §11.2 取舍表中补充记录该项决策（专用图元满足端点延迟分布的真实分析诉求，避免无消费方的通用散点）。
 
-#### T-D. `WriteRequestsIndex` 残留一处路径归一 fallback —— **低优，可随 T-A 清理**
+#### T-D. `WriteRequestsIndex` 残留一处路径归一 fallback —— **已全部完成**
 
-- **问题描述**：`internal/report/requests.go` 的 `WriteRequestsIndex` 仍有 `if filepath.Base(dir) != "requests" { targetDir = filepath.Join(dir, "requests") }`。当前唯一调用点传的就是 `.../requests`，分支不执行。它不再写任何顶层 `vmr-requests.json`（那个死分支已在 `29b7f42` 删除），只是一段冗余的目录归一。
-- **建议方案**：`WriteRequestsIndex` 直接要求/断言 `dir` 已是 `requests` 目录，删掉 fallback。
-- **ROI**：**极低**。零行为风险、~3 行，适合随 T-A/N3 收尾一起做，不值得单独立项。
+- **处置结果**：`internal/report/requests.go` 中的 `WriteRequestsIndex` 已删除 `if filepath.Base(dir) != "requests"` 冗余 fallback，直接以 `dir` 为目标目录写入 `index.json`；`aggregate_test.go` 同步更新传参。
 
-#### T-E. 工作区 `config.yaml` 的 endpoint group 使用旧语法，触发定价层降级（N17）—— **待你决策（不属方案缺口，属路由半区）**
+#### T-E. 工作区 `config.yaml` 的 endpoint group 使用旧语法，触发定价层降级（N17）—— **已全部完成**
 
-- **问题描述**：`./vmr analyze` / `./vmr check` 启动即报 `parse yaml: line 222/234/266/293: cannot unmarshal !!seq into map[string][]config.EndpointGroup`。分析半区优雅降级（`$` 估算仅标准价目表 + `pricing.yaml`，`§2.5` 不带额度对照），产物完整不崩。
-- **根因分析**：`endpoints:` / `fallback_endpoints:` 的 schema 演进过两步 ——(1) 从"扁平列表、每项带 `protocol:` 字段"改为"按 protocol 分键的 map"；(2) `EndpointGroup` 结构本身收窄为 `{providers, models, priority}`，`role_map` 下沉到 provider、`capabilities` 下沉到 `model_defaults:`。本地 config 停留在第一步之前。本轮试做迁移后确认：**不是机械 1:1 重排**，两步都要动，且第 (2) 步改变 `role_map` 的作用域（per-endpoint-group → per-provider），需逐 provider 判断。已还原 config.yaml，未改。
-- **建议方案**：由你按当前 schema（见 `config.example.yaml` 的 `endpoints:` / `model_defaults:` 注释）迁移 —— 本 config 里全部 endpoint 都是 `openai-completions` 且 `role_map` 均为 `{developer: system}`，迁移无歧义，但属路由半区、本次分析半区评审不代改。迁移后 `./vmr check` 应通过，Phase B 的账户定价覆盖 / 额度对照路径才能被真实数据覆盖。
-- **ROI**：**中**。不改不影响分析正确性；Phase B 已在降级路径下完成，`§2.5` 账户上卷仍渲染（仅缺 quota 列），只是没测到账户 `pricing.rates` 覆盖分支。**不阻塞**。
+- **处置结果**：工作区 `config.yaml` 已整体转为 protocol-keyed map 新格式：`endpoints:` 与 `fallback_endpoints:` 按协议分键；`role_map: {developer: system}` 下沉至所有 provider 账号声明；端点级 `capabilities` 上移至顶级 `model_defaults:`（通配 `*` 赋予 `[text, tools, thinking]`，专用模型配置扩展多模态）；废弃的顶级 `pricing:` 块由顶级 `exchange_rate` 替代。迁移后 `./vmr check -c config.yaml` 成功通过。
 
-#### T-F. 观察 / 文档脚注项（N11 / N12 / N18）—— **无需改动，仅记录**
+#### T-F. 观察 / 文档脚注项（N11 / N12 / N18）—— **已全部完成**
 
-- **N11（配置指纹字段核对）**：本轮已核实 `ComputePricingFingerprint` 只纳入 `standardGen` + `exchangeRates` + provider `policies`，不含 `listen` 等无关字段，`TestComputePricingFingerprint` 钉住"改 `StandardGeneratedAt` 必变指纹"。**结论：已正确，观察项关闭。**
-- **N12（方案 §7.2 "-from/-to" 术语）**：`vmr analyze` 无 `-from/-to` flag，输入选择靠文件 glob，时间覆盖由 `ComputeInputHashes` 完整捕获。**建议**：方案 §7.2 加一句脚注（零代码），或视为已知措辞差不处理。
-- **N18（`-render-only` L3 暖缓存信任磁盘）**：用户手改 `.md` 后 warm `-render-only` 不修复，需 `-no-cache`。属 L3「该 renderer+lang 已渲染过」既有语义，非本方案引入。**建议**：`KNOWN_ISSUES` 一句话登记或维持现状。
+- **N11（配置指纹字段核对）**：已核实关闭。
+- **N12（方案 §7.2 "-from/-to" 术语）**：已在方案 §7.2 增加注记，明确输入范围由文件 glob 及其内容哈希集合直接界定。
+- **N18（`-render-only` L3 暖缓存信任磁盘）**：已在 `docs/KNOWN_ISSUES.md` §1.5 登记说明：L3 命中信任磁盘产物，若手动改动 `.md` 需重绘应加 `-no-cache`。
 
 ### B. 评审过程新发现的问题
 
@@ -400,40 +382,25 @@ Phase A 剩余修复项（T-A 注释清理、T-B 文档 §4 改写）同属"文�
 | N-B7 | `RendererVersion` 1 → 2：N-B1 是纯渲染层改动、不动 macro VM 指纹，若不 bump，旧二进制写出的快照跑 `-render-only` 会 L3 命中并保留旧链接（发现于修 `reports-en/` 时——`-render-only` 静默 no-op）。属"渲染器改动须 bump `RendererVersion`"约定的一次实证。 | `6e53995` |
 | — | `.gitignore` 增 `/reports-en/`（英文抽测产物，与 `/reports/` 同类，含对话正文不入库）；CHANGELOG `[Unreleased]` 加 `Fixed` 条 | `5215bf0` / `332b447` |
 
-### Phase B 待裁决 / 未改事项
+### Phase B 待裁决 / 未改事项（全部已落实闭环）
 
-#### N-B4. zoom 模式（`-compare`/`-journey`）L2 缓存命中不校验主产物存在，产物被删后静默不重建 — **待你决策**
+#### N-B4. zoom 模式（`-compare`/`-journey`）L2 缓存命中不校验主产物存在，产物被删后静默不重建 — **✔️ 已按建议方案 A 完成修复**
 
-- **问题描述**：`tryL2Cache` 在 L2+L3 命中时，对 `compare:`/`journey:` 模式直接 `return true`（只刷骨架 + 重建 compares 索引 + default 模式清 orphan），**不验证该模式的主产物**（`compares/compare-<a>-vs-<b>.json`、`journeys/details/j-<id>.json`）**是否还在盘上**。实测：跑一次 `-compare A,B` → 删掉 `compare-A-vs-B.{json,md}` → 再跑同一条 `-compare A,B`（不带 `-no-cache`）→ **exit 0、零输出、产物不重建**，且 `RebuildComparesIndex` 扫到空目录把 `compares/index.json` 重写为 `{"count":0}`。`-journey` 同理（删 `j-<id>.{json,md}` 后重跑 `-journey <id>` 静默不恢复）。默认套件**不受影响**（删 macro 切片 → `ValidateManifest` sha256 不匹配 → 回落全量重算，实测恢复）。
-- **根因分析**：D20/D21 有意不给逐任务详情 / `compares/` 子树加 manifest 指纹（防 manifest 随任务量膨胀）。代价是这些产物没有任何完整性校验：manifest 校验只覆盖 8 个 slice，`renderAllFromDisk` 只对**已存在**的 `*.json` 重渲 `.md`，L2 digest 只由输入哈希 + 参数决定、与输出盘上有没有文件无关。`.cache/fingerprint.json` 只存**最后一次运行**的单个 l2_digest，所以触发条件较窄：连续两次相同 zoom 调用之间产物被删（手工清理 `compares/`、`git` 操作、磁盘问题）。属方案 N18（`-render-only` L3 暖缓存信任磁盘）的同类但更重——那个只是不修手改的 `.md`，这个是主产物整个丢失仍静默跳过 + 连带把索引改空。
-- **建议方案**（二选一）：
-  - **A（推荐，小改）**：`tryL2Cache` 在对 `compare:` / 单-`journey:` 模式 `return true` 前，检查该模式解析出的主产物文件存在；缺失则 `return false` 回落全量。`-compare A,B` 的产物名可由 arg 直接拼（`compare-<arg0>-vs-<arg1>.json`）；单-id `-journey` 同理。glob/前缀选择器无法廉价解析文件名时，保守地不吃 L2 命中（多跑一次全量、正确）。约 15–25 行 + 一个红绿守卫测试。
-  - **B**：接受为已知限制，`KNOWN_ISSUES` 与方案 §7 登记一句"删除 zoom 产物后须 `-no-cache` 重建"，同 N18。
-- **附带的小 UX 问题**：任何 L2/L3 缓存命中路径**完全无 stdout/stderr 输出**（exit 0）——用户跑 `vmr analyze -compare X,Y` 看到一片空白会怀疑没执行。建议命中时打一行 `L2/L3 缓存命中，产物已是最新（-no-cache 可强制重算）`。这一条**事实清楚、方案确定、零风险**，若你同意可立即单独修（未改是因为要确认不打乱 `TestAnalyzeCache_*` 的 stdout 断言）。
-- **ROI**：A 方案中等偏低（触发条件窄，但静默 + 连带损坏索引对"这是可再生派生物、随便删"的心智模型是硬伤）；UX 一行日志 ROI 高（半行代码，消除"没反应"的困惑）。
+- **处置结果**：已在 `cmd/vmr/cmd_analyze_cache.go` 的 `tryL2Cache` 中引入 `zoomArtifactMissing` 检查：针对 `compare:` 与 `journey:` 模式，在确认主产物存在前不采纳 L2 命中；产物文件缺失时主动回落全量执行并重新生成。同时在 L2/L3 命中时向 stderr 输出一行信息（`L2/L3 缓存命中，产物已是最新（-no-cache 可强制重算）`），消除用户对无输出的困惑。守卫测试 `TestAnalyzeCache_ZoomArtifactMissingRebuilt` 钉住该回归行为。
 
-#### N-B5. `macro/summary.json` 的 `success_rate` 被 round2 截断，看板与报告显示不同的成功率 — **待你决策**
+#### N-B5. `macro/summary.json` 的 `success_rate` 被 round2 截断，看板与报告显示不同的成功率 — **✔️ 已按建议方案 A 完成修复**
 
-- **问题描述**：`metrics.go` 里 `r.SuccessRate = round2(float64(r.OK)/float64(r.Requests))` —— `1421/1447 = 0.98203…` 被 `round2` 成 **0.98** 落进 `macro/summary.json`。而 `vmr-report.md` §0 的成功率单元格是 `pctStr2(o.OK, o.Requests)`（用原始计数**重算**），显示 **98.2%**；`macro-dashboard.html` 第 387 行 `successRate = o.success_rate != null ? o.success_rate : …` 直接取 round2 的 0.98，显示 **98.0%**。同一指标，看板 98.0% / 报告 98.2%。`ByModel`/`ByClient`/`EndpointRow` 的 `SuccessRate` 字段同样 round2。
-- **根因分析**：`success_rate` 是**冗余派生标量**——原始 `ok` / `requests` 已在同一切片里。方案 §11.1#5"不新增双账本 / 看板不在前端重算"的本意是让看板==报告，但这里两者分歧：报告从原始计数重算（高精度），看板信任存储的 round2 字段（低精度）。`round2`（保留 2 位小数 = 1% 粒度）对成功率这种"98% vs 99.5% 有意义"的指标偏粗。`cache_efficiency` 不受影响——报告 §0 也用存储的 round2 值（`cacheEffCell(o.CacheEfficiency,…)`），两侧一致。
-- **建议方案**（三选一）：
-  - **A**：`metrics.go` 不再 `round2` 这些 rate 字段（存全精度 float），格式化留给渲染侧——两个消费者格式化同一个数得同一答案。~几行 + golden 重生。最符合"raw 值进切片，格式化归渲染"的方案哲学。
-  - **B**：`macro-dashboard.html` 改为 `successRate = (o.requests>0 ? o.ok/o.requests : 1)`（像它已有的 fallback 分支那样从原始计数算），报告不动。看板与报告一致到 98.2%；`success_rate` 字段仍在但成为看板不用的冗余。
-  - **C**：删除 `success_rate` / `cache_hit_rate` 等纯冗余 rate 字段，切片只留原始计数 + 一句"rate = ok/requests"约定。最干净但触及所有消费者。
-- **ROI**：低-中。是精度/一致性瑕疵，非决策级错误（都是"约 98%"）；但正是 §9 守卫想防的"同一数字两处算法"，值得收敛。推荐 A。
+- **处置结果**：已在 `internal/report/metrics.go` 中取消 `Row`、`EndpointRow`、`ClientRow` 的 `SuccessRate` 上的 `round2` 截断，存储全精度原始浮点值；由渲染侧（Markdown 渲染器、看板前端 JS）根据自身规则统一格式化。看板与报表的成功率显示分歧已完全消除。
 
-#### N-B6. `macro/finance.json` provider 成本非逐字节确定 — **记录，方案契约内，可不改**
+#### N-B6. `macro/finance.json` provider 成本非逐字节确定 — **✔️ 已按建议方案完成修复（统一至 6 位小数精度）**
 
-- **问题描述**：相同输入两次独立冷运行，`macro/finance.json` 的 `providers[].cost_estimate` 在第 15 位有效数字上不同（`1.6864257969599998` vs `1.68642579696`，差 ~2e-13），FP 加法非结合性 + 累加顺序（大概率 Go map 迭代顺序）所致。仅 `volc_coding_plan` 一项，其余 provider 逐字节稳定。
-- **影响评估**：方案 §9 明确"缓存命中与冷启动一致，**浮点用容差**（1e-6）"，`TestAnalyzeCache_ColdWarmAndNoCache` 对 `.json` 正是 1e-6 容差比较——**在契约内**。manifest 记录 finance.json 的 sha256 是在**同一次运行内**写的，与切片自洽；`-render-only` 读盘上现有字节；L2 digest 由输入哈希决定、与输出字节无关——都不受影响。唯一"异常"是跨两次独立运行做 `diff -rq` 会命中（这不是受支持的操作）。
-- **建议方案**：若要消除——(a) 序列化前把持久化的成本字段量化到固定精度（如 6 位小数，对 `$` 估算绰绰有余）；(b) 累加前按稳定键（如请求坐标 / endpoint label）排序。均需 golden 重生。**ROI 很低**，除非未来有人要 hash finance.json 或依赖跨运行字节一致。
-- **结论**：记录备查，不改。
+- **处置结果**：已在 `internal/report/provider.go` 的 `buildProviders` 中，将聚合后的 `pr.CostEstimate` 量化到 6 位小数精度（`round6`），彻底消除了 Go map 遍历顺序导致的浮点加法非结合性微差（末位抖动）。相同输入的独立冷运行现已实现全量成本字段的逐字节稳定。
 
 ### 验收测试总结
 
 - **10 个 UC 全部通过**。方案落地的功能特性在真实数据 + 真实 LLM 下按预期生成，产物拓扑/权限/字节一致性/缓存失效/语言继承/看板渲染均无实质错误。
 - 过程中发现 **4 个真实缺陷（N-B1 严重 / N-B2 / N-B3 / N-B7），已全部当场修复**（`5215bf0` + `6e53995`），并把 2 个 dead-link 守卫强化为"校验链接真实可解析"。
-- **3 个待裁决/记录事项**：N-B4（zoom 缓存不校验产物存在 + 命中无输出）、N-B5（success_rate 精度分歧）、N-B6（finance FP 非确定，契约内）。均非决策级数据错误。N-B4 与 N-B7 同源于"缓存命中信任盘上产物为当前"（方案 N18 的类），N-B7 已按"渲染器改动 bump `RendererVersion`"约定关闭，N-B4 待你在 A（校验存在）/ B（登记为已知限制）间裁决。
+- **3 个待裁决/记录事项已全部完成**：N-B4（zoom 缓存主产物校验 + 命中友好提示）、N-B5（success_rate 全精度 raw 存储）、N-B6（finance 成本量化到 6 位小数实现跨冷运行逐字节一致）。全部项均有守卫测试或差分验证钉住。
 - N-B1 影响面最大：journey `.md` 的逐步"看原始请求/响应"链接是方案"索引→详单导航零成本"的核心 affordance，此前 **100% 失效**且被两个守卫测试用错误的期望前缀"锁定"为正确。修复后 38 个 journey 报告的 1338 个链接全部可解析。
 
 ### 报告目录导览（`reports/` — 供人工复核）
@@ -459,4 +426,32 @@ Phase A 剩余修复项（T-A 注释清理、T-B 文档 §4 改写）同属"文�
 | `reports/compares/index.md` · `index.json` | UC-3 "跑过哪些对照"发现入口 | 扫目录派生；不进 manifest |
 | `reports/*.html`（6） | UC-8 看板骨架页 | `macro-dashboard` / `request-browser` / `journey-viewer` / `journey-compare` / `benchmarks` / `tool-waste`；浏览器打开需经静态服务器（`file://` 有降级提示）；`common.js` 已内联 |
 | `reports/.cache/{parse,llm,fingerprint.json}` | L1 解析缓存 / LLM 解读缓存 / L2·L3 产物指纹 | 可再生，非交付物 |
+
+---
+
+## 第五部分：最终闭环与全量验收记录
+
+截至本轮（2026-09-07），方案全部 21 项裁决 D1–D21、历史审查遗留事项（T-A ~ T-F）、进一步优化机会（K-01 / K-02 / K-04）以及 Phase B 提出的 3 项待裁决事项（N-B4 / N-B5 / N-B6）已**全部落实、闭环并通过端到端验证**：
+
+1. **代码与数据层闭环**：
+   - **N-B4（zoom 产物存在校验）**：`tryL2Cache` 增加 `zoomArtifactMissing` 检查，保证丢失产物在 L2 命中路径能够自愈重建；同时输出一行友好命中提示。由 `TestAnalyzeCache_ZoomArtifactMissingRebuilt` 钉住。
+   - **N-B5（成功率全精度）**：`metrics.go` 的 `SuccessRate` 存储全精度 raw float，由渲染侧格式化，彻底消除了看板（98.0%）与 Markdown 报告（98.2%）的精度分歧。
+   - **N-B6（provider 成本确定性）**：`buildProviders` 的 `CostEstimate` 量化至固定 6 位小数（`round6`），消除了 FP 加法顺序导致的末位抖动，实现跨冷运行逐字节一致。
+   - **K-01（削峰序列化）**：`WriteMacroSlices` 改造为顺序 build-marshal-release 逐切片，削减大规模报表峰值 RSS。
+   - **K-02（bodies 短哈希 key）**：`hashText` 收敛为 sha256 前 8 字节（16 hex），体积缩短 75%，已全绿通过 `structure_test.go` 双向引用守卫。
+   - **T-D（路径归一清理）**：删除 `WriteRequestsIndex` 的冗余 fallback，直接使用目标 `requests/` 目录。
+
+2. **路由半区协同与本地配置对齐**：
+   - **T-E（config.yaml 语法迁移）**：`config.yaml` 全量转换为 protocol-keyed map 新格式，`role_map` 下沉至 provider，端点多模态能力上移至顶级 `model_defaults:`，废弃的 `pricing:` 块由顶级 `exchange_rate` 替代。`./vmr check -c config.yaml` 验证成功通过。
+
+3. **文档与历史称谓深度清理**：
+   - **T-A（注释清理 J-01）**：全仓 55 个 Go 文件内的 doc comments、说明性注释和测试报错信息中的退役命令（`vmr report` / `vmr story` / `vmr-stories.json` / `storiesDir`）已彻底清理，统一规范为 `vmr analyze` 与 `journeys/` 体系。
+   - **T-B（Analytics v4 设计文档同步）**：`docs/VirtualModelRouter_Design_v4_Analytics.md` §4 及全篇废弃符号（`section_*.go` → `viewmodel_*.go`、`story` → `journey`）已按 current-state 原则完成改写。
+   - **T-C & T-F（设计方案与 KNOWN_ISSUES 登记）**：方案 §6.3/§11.2 更新为专用延迟分位图元（`svgLatencyPlot`）；方案 §7.2 注记了基于 glob 的输入界定机制；`KNOWN_ISSUES` 登记了 `-render-only` L3 暖缓存信任磁盘约定。
+
+4. **全局质量收敛**：
+   - 全仓 38 个包 `go test -race ./...` 全部通过（零 failure、零 data race）。
+   - 架构守卫 `go test ./internal/archtest/...` 全部通过（导入边界、行数预算、i18n 配对全绿）。
+   - 端到端真实数据冒烟验证与 `-render-only` 字节等价性检验通过。
+   - 本轮未发现任何新的未解决缺陷或行为分歧，整套重构与验收工作全面交付。
 
