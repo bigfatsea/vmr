@@ -339,7 +339,7 @@
               <div class="stat-box"><strong>${metrics.ToolCallCount || 0}</strong>Tool Calls</div>
               <div class="stat-box"><strong>${FmtPercent(metrics.DuplicateActionRate || 0)}</strong>Duplicate Actions</div>
               <div class="stat-box"><strong>${FmtPercent(metrics.PlanExecRatio || 0)}</strong>Plan/Exec Ratio</div>
-              ${cost && cost.Total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.Total)}</strong>Est. Cost (${cost.Currency || 'USD'})</div>` : ''}
+              ${cost && cost.Total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.Total, cost.Currency)}</strong>Est. Cost (${cost.Currency || 'USD'})</div>` : ''}
             </div>
             <div class="verdict ${findings.length === 0 ? 'v-go' : ''}">
               <div class="vlabel">Behavior Findings (${findings.length})</div>

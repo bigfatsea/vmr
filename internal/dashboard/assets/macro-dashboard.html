@@ -433,6 +433,7 @@
       // Tab 2: Finance
       async function loadFinance() {
         const f = await fetchSlice('macro/finance.json');
+        if (f.pricing && f.pricing.currency) setCurrency(f.pricing.currency);
         if (f.cost_coverage) {
           const cc = f.cost_coverage;
           document.getElementById('cost-coverage-box').innerHTML = `

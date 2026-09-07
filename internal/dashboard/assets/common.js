@@ -51,10 +51,36 @@ function FmtPercent(f, decimals) {
   return (Number(f) * 100).toFixed(d) + '%';
 }
 
-// FmtCurrency renders dollar amount with 2 fixed decimals.
-function FmtCurrency(n) {
-  if (n === null || n === undefined || isNaN(n)) return '$0.00';
-  return '$' + Number(n).toFixed(2);
+// Currency symbols for the codes `-currency`/report.yaml can select; an
+// unknown code falls back to the code itself as the prefix ("AUD 1.23").
+const CURRENCY_SYMBOLS = {
+  USD: '$',
+  CNY: '¥',
+  EUR: '€',
+  GBP: '£',
+  JPY: '¥',
+};
+
+// displayCurrency is the module default FmtCurrency prefixes when a call
+// site doesn't pass an explicit code; pages set it from the slice's
+// pricing.currency after loading finance.json (the amounts in the slices
+// are already converted to that currency Go-side).
+let displayCurrency = 'USD';
+
+function setCurrency(ccy) {
+  if (ccy) displayCurrency = String(ccy).toUpperCase();
+}
+
+function currencySymbol(ccy) {
+  const c = String(ccy || displayCurrency || 'USD').toUpperCase();
+  return CURRENCY_SYMBOLS[c] || c + ' ';
+}
+
+// FmtCurrency renders an amount in the display currency: 2 fixed decimals
+// with the currency's symbol (or the code as prefix when unmapped).
+function FmtCurrency(n, ccy) {
+  if (n === null || n === undefined || isNaN(n)) return currencySymbol(ccy) + '0.00';
+  return currencySymbol(ccy) + Number(n).toFixed(2);
 }
 
 const FmtCost = FmtCurrency;
@@ -445,6 +471,7 @@ if (typeof module !== 'undefined' && module.exports) {
     FmtPercent,
     FmtCurrency,
     FmtCost,
+    setCurrency,
     FmtDuration,
     Auth,
     Theme,
