@@ -397,7 +397,8 @@ Phase A 剩余修复项（T-A 注释清理、T-B 文档 §4 改写）同属"文�
 | N-B1 | journey `.md` 决策脊柱的 `→ [详情]` 链接与 System-Prompt 证据链接深度错误（`../details/`→`../../requests/details/`、`../evidence/`→`../../requests/evidence/`）；2 个 dead-link 守卫测试改为**校验链接真实可解析**而非匹配前缀 | `5215bf0` |
 | N-B2 | `journeys/index.md` H1 `VMR Story 索引` / `VMR Story Index` → `VMR Journey ...`（退役术语泄漏进渲染产物） | `5215bf0` |
 | N-B3 | `requests/failed.md` 引子指向已删除的 `vmr-requests-<tag>.md` / `-unresolved.md`、自称"额外索引"（现为唯一人读请求文档）→ 改指 `requests/index.json` + `request-browser.html`；`report_requests.go` 包注释同步 | `5215bf0` |
-| — | `.gitignore` 增 `/reports-en/`（英文抽测产物，与 `/reports/` 同类，含对话正文不入库） | `5215bf0` |
+| N-B7 | `RendererVersion` 1 → 2：N-B1 是纯渲染层改动、不动 macro VM 指纹，若不 bump，旧二进制写出的快照跑 `-render-only` 会 L3 命中并保留旧链接（发现于修 `reports-en/` 时——`-render-only` 静默 no-op）。属"渲染器改动须 bump `RendererVersion`"约定的一次实证。 | `6e53995` |
+| — | `.gitignore` 增 `/reports-en/`（英文抽测产物，与 `/reports/` 同类，含对话正文不入库）；CHANGELOG `[Unreleased]` 加 `Fixed` 条 | `5215bf0` / `332b447` |
 
 ### Phase B 待裁决 / 未改事项
 
@@ -431,8 +432,8 @@ Phase A 剩余修复项（T-A 注释清理、T-B 文档 §4 改写）同属"文�
 ### 验收测试总结
 
 - **10 个 UC 全部通过**。方案落地的功能特性在真实数据 + 真实 LLM 下按预期生成，产物拓扑/权限/字节一致性/缓存失效/语言继承/看板渲染均无实质错误。
-- 过程中发现 **3 个真实缺陷（N-B1 严重 / N-B2 / N-B3），已全部当场修复**（`5215bf0`），并把 2 个 dead-link 守卫强化为"校验链接真实可解析"。
-- **3 个待裁决/记录事项**：N-B4（zoom 缓存不校验产物存在 + 命中无输出）、N-B5（success_rate 精度分歧）、N-B6（finance FP 非确定，契约内）。均非决策级数据错误。
+- 过程中发现 **4 个真实缺陷（N-B1 严重 / N-B2 / N-B3 / N-B7），已全部当场修复**（`5215bf0` + `6e53995`），并把 2 个 dead-link 守卫强化为"校验链接真实可解析"。
+- **3 个待裁决/记录事项**：N-B4（zoom 缓存不校验产物存在 + 命中无输出）、N-B5（success_rate 精度分歧）、N-B6（finance FP 非确定，契约内）。均非决策级数据错误。N-B4 与 N-B7 同源于"缓存命中信任盘上产物为当前"（方案 N18 的类），N-B7 已按"渲染器改动 bump `RendererVersion`"约定关闭，N-B4 待你在 A（校验存在）/ B（登记为已知限制）间裁决。
 - N-B1 影响面最大：journey `.md` 的逐步"看原始请求/响应"链接是方案"索引→详单导航零成本"的核心 affordance，此前 **100% 失效**且被两个守卫测试用错误的期望前缀"锁定"为正确。修复后 38 个 journey 报告的 1338 个链接全部可解析。
 
 ### 报告目录导览（`reports/` — 供人工复核）
