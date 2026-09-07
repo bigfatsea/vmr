@@ -324,7 +324,7 @@
 
 #### 2.7 [低] `vmr report` §2 成本表结构化透传 `CostEstimateEst`（方案 ②）
 
-- **现状**：方案 ①（Markdown 口径提示脚注）已闭环。方案 ② 要给 `Row`/`ClientRow` 补 `CostEstimateEst`、改 `rows.go`/`accumulateCost`/渲染层三处，并再次改 `vmr-report.json` 形状。
+- **现状**：方案 ①（Markdown 口径提示脚注）已闭环。方案 ② 要给 `Row`/`ClientRow` 补 `CostEstimateEst`、改 `rows.go`/`accumulateCost`/渲染层三处，并再次改 macro 切片的形状。
 - **为什么待定**：无明确外部程序消费需求前遵循 YAGNI。
 
 
@@ -369,7 +369,7 @@
 
 #### 2.62 [低，YAGNI 待触发] 无 CSV / 扁平表导出
 
-- **现状**：`vmr-report.json` / `vmr-requests.json` 是嵌套 schema，pandas / Excel 用户要先 flatten（`RequestRow` 本身已接近扁平）。
+- **现状**：`macro/*.json` 是嵌套 schema、`requests/index.json` 是行集合，pandas / Excel 用户要先 flatten（`RequestRow` 本身已接近扁平）。
 - **可能方案**：`vmr analyze -format csv` 导出几张固定扁平表（`requests.csv` / `cost_by_client.csv` / `cost_by_date.csv` / `sessions.csv`），不做「万能 CSV」。
 - **触发条件**：出现真实的表格工具消费需求——与 §2.29 同口径，无消费者就没人需要。
 
