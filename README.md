@@ -71,7 +71,7 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **1-Click Request Replay (`vmr replay`)**: Re-issue any failed request using exact historical byte payloads to reproduce bugs instantly.
 - **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-benchmark` to zoom into exactly one view.
 - **Aggregate Report (`vmr analyze`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
-- **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a Step-by-step story — what context went in, what the model did with it, where a compaction event silently dropped information.
+- **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a step-by-step narrative — what context went in, what the model did with it, where a compaction event silently dropped information.
 - **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
 
 ## Quick Start
@@ -158,7 +158,7 @@ curl http://127.0.0.1:8800/status
 ./vmr analyze -c config.yaml   # one call, one output dir: aggregate report + every task journey, cross-linked
 ```
 
-`-journey <id>`/`-compare id1,id2`/`-benchmark` zoom into a single task narrative, a pairwise behavior diff, or corpus-level statistics instead of the default full suite.
+`-journey <id>`/`-compare id1,id2`/`-benchmark` zoom into a single task narrative, a pairwise behavior diff, or benchmark statistics across every candidate journey instead of the default full suite.
 
 Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 

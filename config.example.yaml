@@ -66,17 +66,17 @@
 
 listen: 127.0.0.1:8800
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
-#                                # tail also tags its caller: `vmr report` then auto-writes a
-#                                # vmr-requests-<tag>.md per tag (the index data lives in the
-#                                # shared vmr-requests.json), alongside the usual full files. No
-#                                # flag needed for this.
+#                                # tail also tags its caller: `vmr analyze` records that tag as each
+#                                # request's client_key in requests/index.json, so request-browser.html
+#                                # and the macro report can break totals down per caller. No flag
+#                                # needed for this.
 #                                #
 #                                # Tag = last 8 chars of the key, cut to after the last "-" in that
 #                                # window — so end each key "-<label>" (e.g. ...-alice -> tag
 #                                # "alice"). Use >= 3-4 chars so two keys don't land on the same tag.
-#                                # The tag becomes a filename (sanitized: non A-Za-z0-9._- -> "-"),
-#                                # and vmr does NOT detect two DIFFERENT tags colliding after that —
-#                                # pick suffixes that are already filename-safe and stay distinct.
+#                                # The tag is sanitized (non A-Za-z0-9._- -> "-") before it's used as
+#                                # a client_key, and vmr does NOT detect two DIFFERENT tags colliding
+#                                # after that — pick suffixes that stay distinct.
 #                                # Each key must be >= 16 chars, else the tag window is the whole key.
 #   - ${VMR_KEY_ALICE}
 #   - ${VMR_KEY_OPENCLAW}

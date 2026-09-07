@@ -1,8 +1,8 @@
 # Ver 2026-08-09, by Sonnet 5
-# vmr report/vmr story 自己的侧车配置——复制为 report.yaml 后按需修改。
+# vmr analyze 自己的侧车配置——复制为 report.yaml 后按需修改。
 # 提交进仓库的是这份示例文件本身；report.yaml 自己是 .gitignore 的，和
 # config.yaml 一样——它可以放一个真实的 llm_key。和 config.yaml 完全独立：
-# 没有 provider 配置，schema 也很简单，而且 vmr report/vmr story 完全可以在
+# 没有 provider 配置，schema 也很简单，而且 vmr analyze 完全可以在
 # 没有任何 report.yaml 的情况下正常运行（这时每个 flag 都退回自己内置的默认
 # 值）。当 -report-config 没有指定时，会自动从当前目录加载；传
 # -report-config path 可以指向别的文件。
@@ -11,40 +11,41 @@
 # 某个字段没写（或者整份文件都不存在）就退回那个 flag 自己内置的默认值，具体
 # 见每个字段自己的注释。
 
-language: en   # en（默认）| zh —— vmr-report.md / vmr-requests*.md /
-               # vmr-stories.md / journey-*.md / compare-*.md /
-               # vmr-story-corpus.md / details/*.md 的输出语言。
+language: en   # en（默认）| zh —— vmr-report.md / journeys/index.md /
+               # journeys/details/j-*.md / compares/*.md /
+               # journeys/benchmarks.md / requests/details/*.md 的输出语言。
                # 叙述性的 JSON 字段（比如 Finding.Finding、MetricDiff.Label）
                # 不管这里怎么设置永远保持英文，所以写脚本解析这些文件时完全
                # 不需要考虑报告是用哪种语言生成的。会被 -lang 覆盖。
 
-output: reports   # -o 的默认值（内置默认："reports"）。`vmr report` 和
-                  # `vmr story` 共用这一个字段——没有分别的按命令输出设置。
+output: reports   # -o 的默认值（内置默认："reports"）。一个共用设置——默认套件
+                  # 与每个变焦选择器（-journey / -compare / -benchmark）都写在
+                  # 它下面。
 
-details: false   # 只对 vmr report 有效。是否额外为每个请求各渲染一份
-                 # Markdown 文件到 {output}/details/（内置默认：false——
-                 # 请求索引照常带上每条记录的详单文件名链接，这个文件名
-                 # 不依赖文件是否真的存在就能算出来）。会被 -details 覆盖。
+details: false   # 是否额外为每个请求各渲染一份 Markdown 文件到
+                 # {output}/requests/details/（内置默认：false——请求索引照常
+                 # 带上每条记录的详单文件名链接，这个文件名不依赖文件是否真的
+                 # 存在就能算出来）。会被 -details 覆盖。
 
-currency: ""   # 只对 vmr report 有效。$ 成本估算的展示币种，比如 "CNY" 或
-               # "JPY"——和这些估算实际"计算"时用的币种（config.yaml 的
-               # pricing.currency，或者没有 config.yaml 可用时的 USD）相互
-               # 独立。推荐的默认做法：留空——直接显示计算时用的那个币种，不
-               # 做任何换算。只有当你确实想让报告用和记账不同的币种呈现时，
-               # 才需要设置它。会被 -currency 覆盖。
+currency: ""   # $ 成本估算的展示币种（宏观报表与 journey 成本行），比如 "CNY"
+               # 或 "JPY"——和这些估算实际"计算"时用的币种（config.yaml 的
+               # providers[].pricing.currency，或者没有 config.yaml 可用时的
+               # USD）相互独立。推荐的默认做法：留空——直接显示计算时用的那个
+               # 币种，不做任何换算。只有当你确实想让报告用和记账不同的币种
+               # 呈现时，才需要设置它。会被 -currency 覆盖。
 
-exchange_rate: {}   # 一张"1 美元 = X <货币代码>"的映射表（和 config.yaml 的
-                     # pricing.exchange_rate 形状相同），只用来解析上面
-                     # currency: 的换算——比如 {JPY: 155}。这里的条目在 key
-                     # 撞车时会盖过 config.yaml 自己的 pricing.exchange_rate；
-                     # 而且当完全没有 config.yaml 可用时（report.yaml 本来就
-                     # 设计成能独立使用），这是唯一能让 -currency 生效的办法。
+exchange_rate: {}   # 一张"1 美元 = X <货币代码>"的映射表（和 config.yaml 顶层
+                     # exchange_rate 形状相同），只用来解析上面 currency: 的
+                     # 换算——比如 {JPY: 155}。这里的条目在 key 撞车时会盖过
+                     # config.yaml 自己的 exchange_rate；而且当完全没有
+                     # config.yaml 可用时（report.yaml 本来就设计成能独立
+                     # 使用），这是唯一能让 -currency 生效的办法。
 
-include_partial: false   # 只对 vmr story 有效。是否也列出/渲染那些头部看起来
-                          # 被加载文件范围截断的 journey（内置默认：false）。
-                          # 会被 -include-partial 覆盖。
+include_partial: false   # -journey / -compare / 默认套件的 journey 侧。是否也
+                          # 列出/渲染那些头部看起来被加载文件范围截断的 journey
+                          # （内置默认：false）。会被 -include-partial 覆盖。
 
-# --- LLM 解读层（只对 vmr story 有效；完整说明见 -llm-addr 自己的 -h 文本） ---
+# --- LLM 解读层（只对 -journey / -compare 有效；完整说明见 -llm-addr 自己的 -h 文本） ---
 # llm_addr/llm_model/llm_key 三个都是可选的，彼此独立的意义仅在于各自有各自
 # 的默认值；-llm-addr（不管是写在这里还是命令行上）始终是唯一决定这一层是否
 # 打开的开关——只写了 llm_model/llm_key、哪里都没写 llm_addr，会和命令行 flag
@@ -69,3 +70,16 @@ llm_cache_dir: ""   # LLM 解读结果磁盘缓存所在的目录。刻意没有
                      # 如果这里为空、且命令行也没传 -llm-cache-dir，LLM 调用
                      # 就完全不会被缓存——缓存只会发生在你明确指定过的地方。
                      # 会被 -llm-cache-dir 覆盖。
+
+# --- 自指流量排除（每种模式都适用；见 -include-self-traffic） ---
+# `vmr analyze -journey/-compare -llm-addr` 自己的解读调用会绕回同一个 VMR
+# 实例、和其它请求一样落进审计日志——默认情况下宏观报表的成本/用量合计与
+# journey 候选列表都会把它们排除掉（那部分流量是分析工具自身的开销，不是被
+# 分析的工作负载）。上面 llm_key 派生出的 tag（与 api_keys 认证同一种取尾
+# 变换，audit.KeyTag）已经覆盖了常见情形——多数部署这里什么都不用设。
+
+self_traffic_client_tags: []   # 额外要排除的 client_key_tag 值，在上面从
+                                # llm_key 自动派生的那个之外——只有当 -llm-addr
+                                # 流量曾用一个不同的（比如已经轮换掉的）凭据
+                                # 产生过时才需要。传 -include-self-traffic
+                                # 可以让这次运行完全关闭排除。

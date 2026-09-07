@@ -601,7 +601,7 @@ passthrough() {
   local sub="$1"; shift
   local args=("$@")
   case "$sub" in
-    start|check|status|diagnose|smoke|replay|report|story|analyze)
+    start|check|status|diagnose|smoke|replay|analyze)
       has_c_flag "$@" || args=(-c "$CFG" "$@")
       ;;
   esac
@@ -636,7 +636,7 @@ case "${1:-}" in
   "")
     echo "usage: $0 {start|stop|restart|redeploy|status|ps|logs}          # dev mode (you supervise)" >&2
     echo "       $0 service {install|uninstall|start|stop|restart|status|logs}   # init system supervises" >&2
-    echo "       $0 <check|diagnose|report|replay|...> [args]         # forwarded to vmr (defaults -c $CFG)" >&2
+    echo "       $0 <check|diagnose|analyze|replay|...> [args]        # forwarded to vmr (defaults -c $CFG)" >&2
     exit 2 ;;
   # Not a script-owned subcommand — the binary decides whether it exists.
   # `vmr start` in the foreground is the one thing this shadows: run

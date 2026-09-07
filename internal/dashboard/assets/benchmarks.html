@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-06, VMR Forensics Benchmarks (§6.2: consumes journeys/benchmarks.json = corpus stats) -->
+<!-- Ver 2026-09-06, VMR Forensics Benchmarks (§6.2: consumes journeys/benchmarks.json = benchmark stats) -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VMR Forensics — Corpus Benchmarks</title>
+  <title>VMR Forensics — Journey Benchmarks</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230a0e14%22/><path d=%22M6 8l10 16 10-16%22 fill=%22none%22 stroke=%22%23ffb000%22 stroke-width=%223.5%22 stroke-linecap=%22round%22/></svg>">
   <style>
     :root {
@@ -85,13 +85,13 @@
   </div>
   <div id="banner-version" class="banner warn hidden"><span id="banner-version-text">⚠️ Manifest format mismatch. Rendering continues.</span></div>
   <div id="banner-missing" class="banner alert hidden">
-    <span>⚠️ This is not a complete analyze artifact set (manifest.json or journeys/benchmarks.json missing). Run 'vmr analyze -benchmark' to generate corpus statistics.</span>
+    <span>⚠️ This is not a complete analyze artifact set (manifest.json or journeys/benchmarks.json missing). Run 'vmr analyze -benchmark' to generate benchmark statistics.</span>
   </div>
 
   <div class="container">
     <div class="stat-grid" id="headline-stats"></div>
 
-    <div class="section-title">Metric Distributions (corpus-wide)</div>
+    <div class="section-title">Metric Distributions (across all journeys)</div>
     <div class="card table-wrap" id="table-metrics"></div>
 
     <div class="section-title">Finding Hit Rates</div>
@@ -185,7 +185,7 @@
         const protoShare = s.protocol_share || {};
 
         dom.headlineStats.innerHTML = `
-          <div class="stat-card"><div class="stat-k">Journeys in Corpus</div><div class="stat-v">${journeyCount.toLocaleString()}</div></div>
+          <div class="stat-card"><div class="stat-k">Journeys Analyzed</div><div class="stat-v">${journeyCount.toLocaleString()}</div></div>
           <div class="stat-card"><div class="stat-k">Metrics Tracked</div><div class="stat-v">${Object.keys(dist).length}</div></div>
           <div class="stat-card"><div class="stat-k">Finding Codes</div><div class="stat-v">${Object.keys(findingRates).length}</div></div>
           <div class="stat-card"><div class="stat-k">Empirical Correlations</div><div class="stat-v">${corr.length}</div></div>

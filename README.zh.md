@@ -158,7 +158,7 @@ curl http://127.0.0.1:8800/status
 ./vmr analyze -c config.yaml   # 一次调用、一个输出目录：聚合报表 + 每个任务 journey，互相链接
 ```
 
-`-journey <id>`/`-compare id1,id2`/`-benchmark` 可以只变焦进单个任务叙事、一次成对行为对比，或语料级统计，而不是默认的完整套件。
+`-journey <id>`/`-compare id1,id2`/`-benchmark` 可以只变焦进单个任务叙事、一次成对行为对比，或跨每个候选 journey 的基准统计，而不是默认的完整套件。
 
 更多细节见 **[用户指南](docs/UserGuide.zh.md)**。
 
