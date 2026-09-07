@@ -1033,7 +1033,7 @@ const (
               "ok"
             ],
             [
-              "[s23 (l-d1)](stories/j-claw-b-1.md)",
+              "[s23 (l-d1)](journeys/j-claw-b-1.md)",
               "07-24 02:00 → 02:02",
               "follow-up &lt;!-- ok",
               "1",
@@ -1227,7 +1227,7 @@ const (
           "Notes": null
         },
         {
-          "Text": "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in vmr-report.json -> tools[])\n\n"
+          "Text": "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in macro/context-efficiency.json -> tools[])\n\n"
         },
         {
           "Title": "",
@@ -2321,7 +2321,7 @@ const (
               "ok"
             ],
             [
-              "[s23 (l-d1)](stories/j-claw-b-1.md)",
+              "[s23 (l-d1)](journeys/j-claw-b-1.md)",
               "07-24 02:00 → 02:02",
               "follow-up &lt;!-- ok",
               "1",
@@ -2515,7 +2515,7 @@ const (
           "Notes": null
         },
         {
-          "Text": "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 vmr-report.json -> tools[]）\n\n"
+          "Text": "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 macro/context-efficiency.json -> tools[]）\n\n"
         },
         {
           "Title": "",

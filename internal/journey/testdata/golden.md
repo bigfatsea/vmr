@@ -4,7 +4,7 @@
 
 > 2 tasks · 3 turns · 2026-07-29 10:00:00 → 10:00:06
 
-← Back to [vmr-stories.md](vmr-stories.md)
+← Back to [index.md](../index.md)
 
 ## System Prompt
 

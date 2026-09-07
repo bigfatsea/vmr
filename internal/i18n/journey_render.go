@@ -24,7 +24,8 @@ type JourneyText struct {
 	// Markdown banner and the dashboard banner were the same sentence.
 	PartialBanner string
 	// BackLinkLine is the "journey report → return" edge (P6.2d):
-	// vmr-stories.md (always) and, when reportLink != "", vmr-report.md.
+	// journeys/index.md (always, as ../index.md from journeys/details/) and,
+	// when reportLink != "", vmr-report.md.
 	BackLinkLine        func(reportLink string) string
 	BreakWarning        func(kind, reasonHint, statsHint string) string
 	BreakReasonContract string
@@ -74,7 +75,7 @@ func Journey(lang Lang) JourneyText {
 				return "> " + strconv.Itoa(tasks) + " 任务 · " + strconv.Itoa(turns) + " 轮 · " + from + " → " + to + "\n\n"
 			},
 			BackLinkLine: func(reportLink string) string {
-				s := "← 返回 [vmr-stories.md](vmr-stories.md)"
+				s := "← 返回 [index.md](../index.md)"
 				if reportLink != "" {
 					s += " · [vmr-report.md](" + reportLink + ")"
 				}
@@ -147,7 +148,7 @@ func Journey(lang Lang) JourneyText {
 			return "> " + strconv.Itoa(tasks) + " tasks · " + strconv.Itoa(turns) + " turns · " + from + " → " + to + "\n\n"
 		},
 		BackLinkLine: func(reportLink string) string {
-			s := "← Back to [vmr-stories.md](vmr-stories.md)"
+			s := "← Back to [index.md](../index.md)"
 			if reportLink != "" {
 				s += " · [vmr-report.md](" + reportLink + ")"
 			}

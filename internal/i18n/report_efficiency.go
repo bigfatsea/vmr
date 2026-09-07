@@ -6,7 +6,7 @@
 // six Finding* closures here are called with EN by Build (populating
 // Report2.Efficiency's language-agnostic default), again with the report's
 // real language by cmd_report.go's LocalizeEfficiency (overwriting it
-// before vmr-report.json is written), and again independently by
+// before macro/summary.json is written), and again independently by
 // renderEfficiency for the Markdown output — three calls, same selection
 // logic, only the text differs. Code (report.FindingCode) never appears
 // here — it's the caller's stable identifier and never varies by language.
@@ -56,7 +56,7 @@ func Efficiency(lang Lang) EfficiencyText {
 		return EfficiencyText{
 			Title:            "§7 效率与浪费 ⭐",
 			TableHeaders:     [5]string{"发现", "指标", "值", "涉及", "建议"},
-			ToolWasteTitle:   "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 vmr-report.json -> tools[]）",
+			ToolWasteTitle:   "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 macro/context-efficiency.json -> tools[]）",
 			ToolWasteHeaders: [6]string{"形态", "请求", "声明", "已用", "利用率", "浪费字节"},
 			WindowNote:       "> 统计窗口 = 本报告的输入日志范围；低频工具（如 cron 触发类）可能不在窗口内，裁剪决策建议基于 ≥1 周日志。\n\n",
 			DetailSummary: func(shape string, requests, declared, distinctCalled int) string {
@@ -129,7 +129,7 @@ func Efficiency(lang Lang) EfficiencyText {
 	return EfficiencyText{
 		Title:            "§7 Efficiency & Waste ⭐",
 		TableHeaders:     [5]string{"Finding", "Metric", "Value", "Implicated", "Action"},
-		ToolWasteTitle:   "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in vmr-report.json -> tools[])",
+		ToolWasteTitle:   "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in macro/context-efficiency.json -> tools[])",
 		ToolWasteHeaders: [6]string{"Shape", "Requests", "Declared", "Used", "Utilization", "Wasted Bytes"},
 		WindowNote:       "> Stats window = this report's input log range; low-frequency tools (e.g. cron-triggered ones) may fall outside it — base trimming decisions on ≥1 week of logs.\n\n",
 		DetailSummary: func(shape string, requests, declared, distinctCalled int) string {

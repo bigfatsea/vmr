@@ -86,7 +86,8 @@ func buildVMHeader(s *JourneySummary, lang i18n.Lang, reportMDExists bool) []VMB
 	blocks = append(blocks, vmTextBlock(t.JourneyMeta(len(s.Structure.Tasks), len(vmSteps(s)), from.Format("2006-01-02 15:04:05"), to.Format(toLayout))))
 	reportLink := ""
 	if reportMDExists {
-		reportLink = "../vmr-report.md"
+		// j-<id>.md sits in journeys/details/; vmr-report.md is at the report root.
+		reportLink = "../../vmr-report.md"
 	}
 	blocks = append(blocks, vmTextBlock(t.BackLinkLine(reportLink)))
 	if s.Partial {

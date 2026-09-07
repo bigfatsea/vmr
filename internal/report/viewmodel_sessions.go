@@ -168,7 +168,7 @@ func vmSessionRow(tbl *TableVM, s SessionRow, journeyLink map[string]string, t i
 	// Link the row to its journey narrative when one was rendered for this
 	// lineage in the same output root (问题 5 / P6.2c).
 	if journey := journeyLink[s.ID]; journey != "" {
-		id = "[" + id + "](stories/" + journey + ")"
+		id = "[" + id + "](journeys/" + journey + ")"
 	}
 	timeRange := formatSessionTimeRange(s.From, s.To)
 	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form

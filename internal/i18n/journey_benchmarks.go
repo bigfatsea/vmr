@@ -1,6 +1,6 @@
 // Ver 2026-08-16 18:30, by Gemini 3.7 Flash
 
-// Pairs with internal/journey/render_benchmarks.go (the corpus layer's vmr-story-corpus.md).
+// Pairs with internal/journey/render_benchmarks.go (journeys/benchmarks.md).
 package i18n
 
 import "strconv"
@@ -78,7 +78,7 @@ func Benchmarks(lang Lang) BenchmarksText {
 			CorrelationHeader: "| 指标 A | 指标 B | rho | 样本数 |\n|---|---|---|---|\n",
 			NoCorrelations:    "未发现达到阈值的相关性——这本身也是一个诚实的结果，不代表指标之间一定没有关系，只是在本批样本规模下没有观测到足够强的秩相关。\n\n",
 			CorrelationMore: func(n int) string {
-				return "> 另有 " + strconv.Itoa(n) + " 组达到阈值但未在表中列出的相关性（含不少是同一时间类指标之间的机械关联，如\"净工作时长 = 模型时间 + Agent 侧执行时间\"）——完整列表见 vmr-story-corpus.json 的 correlations 字段。\n\n"
+				return "> 另有 " + strconv.Itoa(n) + " 组达到阈值但未在表中列出的相关性（含不少是同一时间类指标之间的机械关联，如\"净工作时长 = 模型时间 + Agent 侧执行时间\"）——完整列表见 journeys/benchmarks.json 的 correlations 字段。\n\n"
 			},
 			CorrelationFootnote: "> 仅报告效应量（rho），不报告 p 值/显著性——当前语料规模不足以支撑严格的显著性检验，报告 p 值只会制造虚假的确定性。相关性不代表因果关系。\n\n",
 
@@ -126,7 +126,7 @@ func Benchmarks(lang Lang) BenchmarksText {
 		CorrelationHeader: "| Metric A | Metric B | rho | N |\n|---|---|---|---|\n",
 		NoCorrelations:    "No correlation cleared the threshold — this is itself an honest result, not proof the metrics are unrelated, just that no sufficiently strong rank correlation was observed at this sample size.\n\n",
 		CorrelationMore: func(n int) string {
-			return "> " + strconv.Itoa(n) + " more correlation(s) cleared the threshold but aren't listed here (several are mechanical relationships between time-based metrics, e.g. \"Net Working Time = Model Time + Agent-Side Execution Time\") — the full list is in vmr-story-corpus.json's correlations field.\n\n"
+			return "> " + strconv.Itoa(n) + " more correlation(s) cleared the threshold but aren't listed here (several are mechanical relationships between time-based metrics, e.g. \"Net Working Time = Model Time + Agent-Side Execution Time\") — the full list is in journeys/benchmarks.json's correlations field.\n\n"
 		},
 		CorrelationFootnote: "> Effect size (rho) only — no p-values/significance claims: this corpus size can't support a rigorous significance test, and reporting one would manufacture false confidence. Correlation is not causation.\n\n",
 

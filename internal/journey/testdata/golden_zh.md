@@ -4,7 +4,7 @@
 
 > 2 任务 · 3 轮 · 2026-07-29 10:00:00 → 10:00:06
 
-← 返回 [vmr-stories.md](vmr-stories.md)
+← 返回 [index.md](../index.md)
 
 ## System Prompt
 
