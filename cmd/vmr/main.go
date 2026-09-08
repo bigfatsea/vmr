@@ -11,6 +11,7 @@
 //	vmr diagnose -c config.yaml   validate config, test DNS/TLS/connectivity to every provider, preview routing
 //	vmr smoke   -c config.yaml   fire a minimal real request at every configured backend through a running vmr (warms quota buckets, proves E2E reachability; -provider/-target-model/-model filter the run, pinned via X-VMR-* headers)
 //	vmr replay   -provider NAME <audit.jsonl>   rebuild and resend one request from an audit record (-line/-ts/-req to pick which; -print to just read it, no -provider needed)
+//	vmr diff     <coordA> <coordB> compare two audit records structurally
 //
 // Each subcommand lives in its own cmd_*.go file; this file is only the
 // dispatcher, usage text, and the adapter blank-import registration point.
@@ -49,6 +50,8 @@ func main() {
 		err = cmdAnalyze(os.Args[2:])
 	case "replay":
 		err = cmdReplay(os.Args[2:])
+	case "diff":
+		err = cmdDiff(os.Args[2:])
 	case "smoke":
 		err = cmdSmoke(os.Args[2:])
 	case "diagnose":
@@ -73,5 +76,6 @@ func usage() {
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]
        vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]
        vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] [audit.jsonl|.jsonl.zst|dir]   (the file argument is required for -line/-ts; optional for -req, which can search cwd/log_dir for its coordinate's basename)
+       vmr diff [-c config.yaml] <coordA> <coordB>   (structural comparison between two audit records)
        vmr version`)
 }
