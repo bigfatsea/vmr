@@ -460,3 +460,108 @@ func TestBuildManifest_UsageProtocolAware(t *testing.T) {
 		t.Errorf("responses manifest usage In=%d (want 100, inclusive), inOK/outOK=%v/%v (want true/false — no output reported)", mResponses.Usage.In, mResponses.UsageInOK, mResponses.UsageOutOK)
 	}
 }
+
+func TestBuildManifest_ToolsHash(t *testing.T) {
+	t.Parallel()
+
+	// 1. Absent tools
+	bodyNoTools := map[string]any{"messages": []any{map[string]any{"role": "user", "content": "hi"}}}
+	recNoTools := mkAuditRec(time.Now(), bodyNoTools)
+	mNoTools, ok := BuildManifest(&recNoTools, "f", 1)
+	if !ok || mNoTools.HasTools || mNoTools.ToolsHash != (Hash{}) {
+		t.Errorf("absent tools: HasTools=%v ToolsHash=%v, want false/zero", mNoTools.HasTools, mNoTools.ToolsHash)
+	}
+
+	// 2. Empty tools slice
+	bodyEmptyTools := map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools":    []any{},
+	}
+	recEmptyTools := mkAuditRec(time.Now(), bodyEmptyTools)
+	mEmptyTools, ok := BuildManifest(&recEmptyTools, "f", 2)
+	if !ok || mEmptyTools.HasTools || mEmptyTools.ToolsHash != (Hash{}) {
+		t.Errorf("empty tools: HasTools=%v ToolsHash=%v, want false/zero", mEmptyTools.HasTools, mEmptyTools.ToolsHash)
+	}
+
+	// 3. OpenAI tools shape
+	openAITools := []any{
+		map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "search",
+				"description": "web search",
+				"parameters":  map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
+			},
+		},
+	}
+	bodyOpenAI := map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools":    openAITools,
+	}
+	recOpenAI := mkAuditRec(time.Now(), bodyOpenAI)
+	mOpenAI, ok := BuildManifest(&recOpenAI, "f", 3)
+	if !ok || !mOpenAI.HasTools || mOpenAI.ToolsHash == (Hash{}) {
+		t.Fatalf("openai tools: HasTools=%v ToolsHash=%v, want true/non-zero", mOpenAI.HasTools, mOpenAI.ToolsHash)
+	}
+
+	// 4. Anthropic tools shape
+	anthropicTools := []any{
+		map[string]any{
+			"name":         "search",
+			"description":  "web search",
+			"input_schema": map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
+		},
+	}
+	bodyAnthropic := map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools":    anthropicTools,
+	}
+	recAnthropic := mkAuditRec(time.Now(), bodyAnthropic)
+	mAnthropic, ok := BuildManifest(&recAnthropic, "f", 4)
+	if !ok || !mAnthropic.HasTools || mAnthropic.ToolsHash == (Hash{}) {
+		t.Fatalf("anthropic tools: HasTools=%v ToolsHash=%v, want true/non-zero", mAnthropic.HasTools, mAnthropic.ToolsHash)
+	}
+
+	// 5. Tool definition change changes hash
+	anthropicToolsModified := []any{
+		map[string]any{
+			"name":         "search",
+			"description":  "web search with filters",
+			"input_schema": map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
+		},
+	}
+	bodyAnthropicMod := map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools":    anthropicToolsModified,
+	}
+	recAnthropicMod := mkAuditRec(time.Now(), bodyAnthropicMod)
+	mAnthropicMod, ok := BuildManifest(&recAnthropicMod, "f", 5)
+	if !ok || !mAnthropicMod.HasTools {
+		t.Fatal("BuildManifest failed")
+	}
+	if mAnthropic.ToolsHash == mAnthropicMod.ToolsHash {
+		t.Errorf("ToolsHash should change when tool description changes: both are %v", mAnthropic.ToolsHash)
+	}
+
+	// 6. Tools with cache_control stripped
+	anthropicToolsWithCC := []any{
+		map[string]any{
+			"name":          "search",
+			"description":   "web search",
+			"input_schema":  map[string]any{"type": "object", "properties": map[string]any{"q": map[string]any{"type": "string"}}},
+			"cache_control": map[string]any{"type": "ephemeral"},
+		},
+	}
+	bodyAnthropicCC := map[string]any{
+		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
+		"tools":    anthropicToolsWithCC,
+	}
+	recAnthropicCC := mkAuditRec(time.Now(), bodyAnthropicCC)
+	mAnthropicCC, ok := BuildManifest(&recAnthropicCC, "f", 6)
+	if !ok || !mAnthropicCC.HasTools {
+		t.Fatal("BuildManifest failed")
+	}
+	if mAnthropic.ToolsHash != mAnthropicCC.ToolsHash {
+		t.Errorf("ToolsHash should ignore cache_control: %v vs %v", mAnthropic.ToolsHash, mAnthropicCC.ToolsHash)
+	}
+}

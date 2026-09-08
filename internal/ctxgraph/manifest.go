@@ -111,6 +111,13 @@ type Manifest struct {
 	HasSys  bool `json:"has_sys,omitempty"`
 	LeadSys int  `json:"lead_sys,omitempty"`
 
+	// ToolsHash is the digest of the top-level tools array. HasTools is false
+	// when the request declared no tools. The array shape differs between
+	// protocols (OpenAI tools[].function vs Anthropic tools[]), but within
+	// a conversation the hash is stable and comparable to detect tool definition churn.
+	ToolsHash Hash `json:"tools_hash,omitempty"`
+	HasTools  bool `json:"has_tools,omitempty"`
+
 	// Keys is one hash per non-leading-system message, in original order.
 	// MsgIdx[i] is the index of Keys[i]'s message within chatmsg.Messages'
 	// output for this request — used by edit classification (edit.go) and
@@ -185,6 +192,11 @@ func BuildManifest(rec *audit.Record, path string, line int) (*Manifest, bool) {
 		if parts := strings.Split(tp, "-"); len(parts) >= 2 {
 			m.TraceID = parts[1]
 		}
+	}
+
+	if rawTools, ok := body["tools"].([]any); ok && len(rawTools) > 0 {
+		m.ToolsHash = hashMsgJSONCached(rawTools)
+		m.HasTools = true
 	}
 
 	for i, msg := range msgs {
