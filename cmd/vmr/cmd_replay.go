@@ -3,11 +3,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
+	"vmr/internal/audit"
+	"vmr/internal/config"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/replay"
 )
 
@@ -67,4 +72,73 @@ func cmdReplay(args []string) error {
 		opts.Stream = &b
 	}
 	return replay.Run(context.Background(), opts, os.Stdout)
+}
+
+// resolveAuditPath finds the file a req coordinate's basename refers to,
+// searching dirHint (if given), current directory, and config.yaml's log_dir.
+func resolveAuditPath(basename, dirHint, configPath string) (string, error) {
+	// If basename is directly an existing file path, use it.
+	if fi, err := os.Stat(basename); err == nil && !fi.IsDir() {
+		return basename, nil
+	}
+	if fi, err := os.Stat(basename + ".zst"); err == nil && !fi.IsDir() {
+		return basename + ".zst", nil
+	}
+
+	dirs := []string{}
+	if dirHint != "" {
+		if fi, err := os.Stat(dirHint); err == nil && !fi.IsDir() {
+			if ctxgraph.CanonicalPath(dirHint) == ctxgraph.CanonicalPath(basename) {
+				return dirHint, nil
+			}
+		}
+		dirs = append(dirs, dirHint)
+	}
+	dirs = append(dirs, ".")
+	if fi, err := os.Stat("logs"); err == nil && fi.IsDir() {
+		dirs = append(dirs, "logs")
+	}
+	if cfg, err := config.Load(configPath); err == nil && cfg.LogDir != "" {
+		dirs = append(dirs, cfg.LogDir)
+	}
+
+	for _, dir := range dirs {
+		for _, name := range []string{basename, basename + ".zst", filepath.Base(basename), filepath.Base(basename) + ".zst"} {
+			p := filepath.Join(dir, name)
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				return p, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("couldn't find %q (or its .zst variant) under %v", basename, dirs)
+}
+
+// resolveAuditCoord parses a "basename:line" req coordinate and locates the audit file path.
+func resolveAuditCoord(req, dirHint, configPath string) (path string, line int, err error) {
+	basename, reqLine, perr := ctxgraph.ParseReqCoord(req)
+	if perr != nil {
+		return "", 0, perr
+	}
+	p, err := resolveAuditPath(basename, dirHint, configPath)
+	if err != nil {
+		return "", 0, err
+	}
+	return p, reqLine, nil
+}
+
+// loadAuditRecord resolves a coordinate and loads the audit.Record at that position.
+func loadAuditRecord(req, dirHint, configPath string) (*audit.Record, string, int, error) {
+	path, line, err := resolveAuditCoord(req, dirHint, configPath)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	raw, err := audit.LineAt(path, line)
+	if err != nil {
+		return nil, path, line, err
+	}
+	var rec audit.Record
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, path, line, fmt.Errorf("%s:%d: unmarshal audit record: %w", path, line, err)
+	}
+	return &rec, path, line, nil
 }
