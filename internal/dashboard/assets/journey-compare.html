@@ -232,8 +232,7 @@
       }
       function totMoney(c) {
         if (!c || !c.resolved) return '—';
-        const amt = Number(c.total || 0);
-        const s = ((!c.currency || c.currency === 'USD') ? '$' : (c.currency + ' ')) + amt.toFixed(amt >= 100 ? 0 : 2);
+        const s = FmtCurrency(c.total, c.currency);
         return s + ((Number(c.priced_steps || 0) < Number(c.total_steps || 0)) ? '+' : '');
       }
       function epList(eps) {

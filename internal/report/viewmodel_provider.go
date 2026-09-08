@@ -55,7 +55,7 @@ func vmProvidersSection(rep *Report2, lang i18n.Lang) SectionVM {
 			}
 			if priced {
 				if p.CostEstimate != nil {
-					cells = append(cells, strconv.FormatFloat(*p.CostEstimate, 'f', 4, 64))
+					cells = append(cells, fmtutil.FmtCurrency(*p.CostEstimate, rep.Pricing.Currency))
 				} else {
 					cells = append(cells, "-")
 				}

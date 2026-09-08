@@ -241,3 +241,83 @@ func TestModelLabel(t *testing.T) {
 		t.Errorf("ModelLabel = %q, want %q", got, "vm [openai-completions]")
 	}
 }
+
+func TestCurrencySymbol(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		ccy  string
+		want string
+	}{
+		{"", "$"},
+		{"USD", "$"},
+		{"usd", "$"},
+		{"CNY", "¥"},
+		{"cny", "¥"},
+		{"JPY", "¥"},
+		{"EUR", "€"},
+		{"GBP", "£"},
+		{"CAD", "CAD "},
+		{"aud", "AUD "},
+	}
+	for _, tc := range cases {
+		if got := CurrencySymbol(tc.ccy); got != tc.want {
+			t.Errorf("CurrencySymbol(%q) = %q, want %q", tc.ccy, got, tc.want)
+		}
+	}
+}
+
+func TestFmtCurrency(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		amount float64
+		ccy    []string
+		want   string
+	}{
+		{0, nil, "$0.00"},
+		{1.23, nil, "$1.23"},
+		{0.05, nil, "$0.05"},
+		{1250.5, nil, "$1250.50"},
+		// binary-exact ties: Go's strconv rounds half to even — the fixture
+		// and the dashboard's goFixed pin the same rule cross-language
+		{0.125, nil, "$0.12"},
+		{0.375, nil, "$0.38"},
+		{124.36, []string{"USD"}, "$124.36"},
+		{124.36, []string{"CNY"}, "¥124.36"},
+		{124.36, []string{"EUR"}, "€124.36"},
+		{124.36, []string{"GBP"}, "£124.36"},
+		{124.36, []string{"JPY"}, "¥124.36"},
+		{124.36, []string{"CAD"}, "CAD 124.36"},
+		{-5.0, []string{"USD"}, "$-5.00"},
+	}
+	for _, tc := range cases {
+		if got := FmtCurrency(tc.amount, tc.ccy...); got != tc.want {
+			t.Errorf("FmtCurrency(%v, %v) = %q, want %q", tc.amount, tc.ccy, got, tc.want)
+		}
+		if got := FmtCost(tc.amount, tc.ccy...); got != tc.want {
+			t.Errorf("FmtCost(%v, %v) = %q, want %q", tc.amount, tc.ccy, got, tc.want)
+		}
+	}
+}
+
+func TestFmtCurrencyPrecise(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		amount float64
+		ccy    []string
+		want   string
+	}{
+		{0, nil, "$0.0000"},
+		{1.2823, []string{"USD"}, "$1.2823"},
+		{0.0012, []string{"CNY"}, "¥0.0012"},
+		{124.36, []string{"USD"}, "$124.3600"},
+		{45.6789, []string{"CAD"}, "CAD 45.6789"},
+		// binary-exact ties at 4 decimals, half to even like strconv
+		{0.03125, nil, "$0.0312"},
+		{0.09375, nil, "$0.0938"},
+	}
+	for _, tc := range cases {
+		if got := FmtCurrencyPrecise(tc.amount, tc.ccy...); got != tc.want {
+			t.Errorf("FmtCurrencyPrecise(%v, %v) = %q, want %q", tc.amount, tc.ccy, got, tc.want)
+		}
+	}
+}

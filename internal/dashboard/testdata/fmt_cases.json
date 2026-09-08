@@ -31,6 +31,15 @@
     {"fn": "FmtCurrency", "input": 1.23, "want": "$1.23"},
     {"fn": "FmtCurrency", "input": 0.05, "want": "$0.05"},
     {"fn": "FmtCurrency", "input": 1250.5, "want": "$1250.50"},
+    {"fn": "FmtCurrency", "input": 0.125, "want": "$0.12"},
+    {"fn": "FmtCurrency", "input": 0.375, "want": "$0.38"},
+
+    {"fn": "FmtCurrencyPrecise", "input": 0, "want": "$0.0000"},
+    {"fn": "FmtCurrencyPrecise", "input": 1.2823, "want": "$1.2823"},
+    {"fn": "FmtCurrencyPrecise", "input": 0.0012, "want": "$0.0012"},
+    {"fn": "FmtCurrencyPrecise", "input": 1250.5, "want": "$1250.5000"},
+    {"fn": "FmtCurrencyPrecise", "input": 0.03125, "want": "$0.0312"},
+    {"fn": "FmtCurrencyPrecise", "input": 0.09375, "want": "$0.0938"},
 
     {"fn": "FmtCost", "input": 0, "want": "$0.00"},
     {"fn": "FmtCost", "input": 1.23, "want": "$1.23"},

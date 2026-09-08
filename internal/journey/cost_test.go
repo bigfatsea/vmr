@@ -230,6 +230,34 @@ func TestComputeJourneyCost_UnresolvedSerializesAsAbsent(t *testing.T) {
 	}
 }
 
+// TestFmtMoney pins the NEW-01 unification: the old ≥100-drop-the-cents
+// policy is gone — every amount goes through fmtutil.FmtCurrency's
+// two-decimal financial format, matching the macro report and the
+// dashboards byte-for-byte, so one total reads identically on every surface.
+func TestFmtMoney(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		c    CostFact
+		want string
+	}{
+		{"small usd", CostFact{Resolved: true, Currency: "USD", Total: fp(3.5)}, "$3.50"},
+		// the old policy would render "$124" — cents are ledger truth, not noise
+		{"over 100 keeps cents", CostFact{Resolved: true, Currency: "USD", Total: fp(124.36)}, "$124.36"},
+		{"blank currency defaults usd", CostFact{Resolved: true, Currency: "", Total: fp(4.8)}, "$4.80"},
+		{"cny symbol", CostFact{Resolved: true, Currency: "CNY", Total: fp(34.2)}, "¥34.20"},
+		{"partial plus", CostFact{Resolved: true, Currency: "USD", Total: fp(2), PricedSteps: 1, TotalSteps: 2}, "$2.00+"},
+	}
+	for _, tc := range cases {
+		if got := fmtMoney(tc.c); got != tc.want {
+			t.Errorf("%s: fmtMoney = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	if got := totMoney(CostFact{Resolved: false}); got != "—" {
+		t.Errorf("totMoney(unresolved) = %q, want %q", got, "—")
+	}
+}
+
 func TestCostFact_Partial(t *testing.T) {
 	cases := []struct {
 		name string

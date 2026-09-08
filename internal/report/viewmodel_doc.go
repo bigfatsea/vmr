@@ -237,7 +237,7 @@ func summaryCostCell(rep *Report2, o Row, unknown string) string {
 	if cur == "" {
 		cur = "USD"
 	}
-	return money(*o.CostEstimate, cur)
+	return fmtutil.FmtCurrency(*o.CostEstimate, cur)
 }
 
 // summaryInteractiveShare returns how many of rep's total requests belong

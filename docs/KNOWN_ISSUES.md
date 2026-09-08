@@ -20,6 +20,7 @@
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
 - **§2 分布**：高危 0；中危 3（`2.2`/`2.17`/`2.18`），其余均为低危。
+- **2026-09-08 已闭环（review NEW-01，金额格式化统一）**：三套互斥的金额展示策略（宏观 `%.4f USD`、journey ≥100 抹分、看板恒两位）统一收敛到 `fmtutil.FmtCurrency`（账面金额恒两位小数 + 货币符号）/ `FmtCurrencyPrecise`（单价四位小数，§6.6 专用）；跨语言 fixture 恢复对 FmtCurrency/FmtCost/FmtCurrencyPrecise 的两侧等价断言（原第 128 条的妥协性豁免随之作废）。散落点全量排查过：journey 聚类成员的 cost 同时补上了货币标注（`journeys/index.json` 行新增 `currency` 字段，加性变更）。详见 §1.4 对应条目与 `CHANGELOG` `[Unreleased]`。
 - **2026-09-04 已闭环**（定价 / 计费 / 配额专题 review 落地）：`firstDeadOverride` 收窄为「只有显式规则终结匹配」（合法化「通配折扣在前 + 专属显式在后」，F1）；`Resolve`/`Resolver.RateFor` 对悬空折扣与全空费率返回「无费率」而非冒充 `$0.00`（F7，同时惠及 `vmr analyze` §2/§2.5 与 journey 半区）；`parseRateRow` 拒绝四分量全空的费率行（N1）；`TokenCountersSides` 精确/降级折算口径下沉 `internal/quota`（纯标量入参），router/replay/report 共用一份，消灭跨隔离包手写复刻（F2）；cost 计费与其估算并进单锁原子写、`/status` 单锁读（F4）；`PeriodBounds` 一次 `findK` 取周期起止（F9）；`ScoreForLimits` 空 Limit 集返回中性 `1.0`（备注B）；配额耗尽 Finding / §2.5 子表格带 per-model 作用域（F8 / N6）；报表 skip 统计移入 `Report2`、进 JSON 契约、去包级全局（F3 / N7）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-05 已闭环**（追踪三条遗留裁决落地）：§2.89 第一步落地——cost 计费热路径改为折叠字段直读，override 链解析不再进实时路由热路径，架构红线（§1.0）不再被越界（该优化本身已于 2026-09-06 被 §2.89 记录的整体删除取代，见下）。原 §2.90 已落地并移除——`BucketIndex` 等周期时加确定性次级裁决（共享池优先为桶、同类 `Amount` 大者为桶、全平局保持配置书写顺序），角色不再依赖 YAML 书写顺序；`vmr check` 按 provider 级视图打印每条 Limit 的 `role=`（per-model Limit 以 note 行指向 `/status` 的实时角色）。§2.91 裁决不修——latch 只控制 WARN 是否打印，对计量行为零影响（回退期间计数照常且方向保守、随周期前移或重启自愈），残留仅是第二次真实回退少一条日志，不值得为一条日志引入时间窗/limitKey 状态（完整理由见条目）。详见 `CHANGELOG` `[Unreleased]`。
 - **2026-09-06 已闭环**（Pricing 架构极简化重构）：`metric: cost`、两层定价热路径挂点（原挂在 `core.Endpoint` 上的折叠费率字段）、其折叠函数、`quota.Counters` 的 cost 分量与其原子写方法整体删除（§2.89 更新记录）；顶层 `pricing:` 块（`currency`/`exchange_rate`/`supplement`/`standard`）删除，改为顶层 `exchange_rate:` + `providers[].pricing.{currency,aliases,rates}`（原 `map`/`overrides` 改名）二层模型；`internal/pricing` 新增内置默认汇率表（`standard_exchange_rate.yaml`）。路由半区从此零价格、零币种；定价解析完全下沉到离线 `vmr analyze`。Breaking change，详见 `CHANGELOG` `[Unreleased]` 的迁移指引。
@@ -125,7 +126,7 @@
 - **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`；`ModelLabel` 也下沉 `fmtutil`（2026-09 复核：其签名不含任何 core 类型，是纯展示格式化，两个调用方本就 import `fmtutil`，无依赖两难，不构成例外）；`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
 - **`archtest` 的包边界守卫是单向的，与规则本身同构**：CLAUDE.md 的不变量「分析半区不 import 路由半区」是单向禁令，`import_boundaries_test` 只需要守这一半；「audit JSONL 记录是唯一耦合」那半句是**数据流事实**，不是另一条可机检的 import 规则，不存在对应护栏也不需要有。不要因为「只守了一半」提案加反向守卫——反向（路由 import 分析）本来就是合法的依赖方向。
 - **2026-09-07 已闭环**：`Digest` 构造曾以 report/journey 两份实现 + 差分测试钉住落地（当时裁决：为 ~40 行纯函数建共享叶子包不划算）；实施 review 裁决消除重复，现下沉为叶子包 `internal/digest`（纯 stdlib，零内部依赖，archtest 的 zero-internal-dep 清单已登记），report/journey 均为其调用方，D8 的「全系统一个 Digest 构造」由结构而非测试保证。线格式（uvarint 长度前缀 + sha256）由 `internal/digest` 的手算向量测试钉死。
-- **Go 与看板 JS 的金额格式化是两套行为，不在 `fmtutil` 收编统一（2026-09，跨语言 fixture 落地时裁决）**：dashboard 包的格式化 fixture（testdata/fmt_cases.json，由 fmtutil 侧测试与看板 JS 各跑一遍）钉住了 FmtTokens/FmtBytes/FmtPercent 三类两侧一致；金额则刻意不钉——Go 侧金额格式化发生在渲染层（journey 的 `fmtMoney`：≥100 抹分、<100 保留两位，服务于 Markdown 报表的紧凑排版），看板 JS 恒定两位小数（服务于表格对齐），两者的排版语境不同，统一哪一侧都要牺牲另一个语境。`FmtCurrency`/`FmtCost` 的 fixture 条目在 Go 侧测试中显式跳过并注明指向本条。**不要以「消除漂移」名义把金额格式化收进 `fmtutil`**——那会把两种排版策略压成一个错误的全局值；重新裁决的触发条件是出现第三种消费语境或两侧任一行为变更。
+- **金额展示统一收敛在 `fmtutil` 一处（2026-09，review NEW-01 落地）**：`FmtCurrency`（恒定两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（§6.6 的成本/1M out 与成本/成功请求）。此前三套互斥策略（宏观 `%.4f USD`、journey ≥100 抹分、看板恒两位）已全部替换；跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCost/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**——新金额渲染点一律走 fmtutil；表格列的货币也可在表头标注（如 §2.5/§6.6），此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`i18n` 的一批微文件不合并**：与 `internal/report/viewmodel_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿 700 行全局预算，且改一节文案从打开小文件变成在大文件里找。
@@ -207,6 +208,13 @@
 - **相关**：`FetchRecords` 的接口形状（返回全量 map）天然逼调用方驻留全部；`PreviewTitles` 是纯提取（读一条、取一句标题、丢弃），可顺手切 `ctxgraph.ForEachRecord`，消掉一个约 600MB 的瞬时峰值。
 - **可能方案（治本）**：让 `Manifest` 携带每步 delta 正文，取消 `FetchRecords` 这第二遍解压。但要把叙事提取逻辑从 `journey` 挪进 `ctxgraph`，破坏后者「不驻留正文」的契约，`.cache/parse` 从几 MB 涨到约 160MB，且该 cache 是 report 半区共享的。跨包契约 + 双半边影响。
 - **触发条件**：内存不再是瓶颈后，时间成为首要痛点时单独立项。
+
+#### 2.96 [低，登记待办] 单请求详情/证据链过度延迟物化，批量回溯场景下引发 I/O 抖动（NEW-08）
+
+- **现状**：`requests/details/` 与 `requests/evidence/` 严格懒物化（不预批量写出，点击/按需生成）。静态 HTTP 服务器走查或批量下载多个单请求分析时，后台需即时解压审计日志定位单行，引发磁盘随机寻道与 CPU 尖峰。
+- **根因**：审计日志按块压缩存放（`.jsonl.zst`），随机定位一个请求需解压整个压缩块；连续请求多个详情时解压重复执行，无块级复用。
+- **可能方案**：保持「全量分析不产生海量微小 Markdown」的前提下，在 `requests/index.json` 增加每请求在压缩日志中的字节偏移与块 ID（schema 加性变更），并在按需物化模块引入容量有限的最近解压块 LRU 缓存（如 10 个 block），避免跨请求重复解压。
+- **触发条件**：作为按需物化性能专项排期处理；在那之前单请求详情的数百毫秒级响应在单人本地场景可接受。
 
 
 #### 2.50 [低，潜在] 详单文件名去重位 `md5(basename:line)[:4]`（32 bit）
@@ -375,6 +383,19 @@
 - **现状**：`compares/*.json`、`journeys/details/j-<id>.json` 是跨调用累积的产物，各自携带生成时的语言；`-render-only`（及全量运行的 renderAllFromDisk）统一以 manifest.lang 重渲染 Markdown，且保留旧文件里的 `## LLM ` 段（旧语言）。同一输出目录换过语言并累积过产物时，重渲染结果可能中英混排。
 - **为什么待定**：D10 规定「渲染继承 JSON 语言」，但累积产物的「JSON 语言」不是一个值；逐文件采用各自 JSON 的 lang 字段需要 compare JSON 增加语言字段（schema 加性变更），且触发条件苛刻（同目录换语言 + 有跨语言累积）。
 - **触发条件**：出现真实的双语交替使用场景，或用户报告混排造成误读；在那之前「换语言请全量重跑并清理输出目录」是够用的指引。
+
+#### 2.94 [低，登记待办] 看板 `wireHashReload` 用 `location.reload()` 解决路由刷新，破坏 SPA 完整性（NEW-03）
+
+- **现状**：`journey-viewer.html` / `journey-compare.html` 内用户在同页切换 `#data=` 链接（如候选列表点开某个任务）时，`common.js` 的 `wireHashReload` 监听 `hashchange` 后直接 `location.reload()` 整页重载——功能可用，但销毁了滚动位置、筛选器状态与展开状态，也谈不上 SPA。
+- **根因**：骨架页早期是一次性 IIFE 绑定生命周期，没有组件化「数据拉取 → DOM 局部清空与重绘」的函数。
+- **可能方案**：把各页数据加载与渲染封装为显式的无状态渲染函数（如 `renderJourneyViewer(data)`），`hashchange` 时仅局部 fetch + 内存内替换 DOM 节点，保留滚动位置与 UI 状态。需重构两到三个页面的生命周期。
+- **触发条件**：作为看板体验专项排期处理；在那之前 reload 行为可接受，不单独修。
+
+#### 2.95 [低，登记待办] 中文报表环境下的单版英文看板呈现割裂且缺国际化扩展点（NEW-05）
+
+- **现状**：`vmr analyze -lang zh` 产出的 Markdown 全中文，但同目录下看板骨架页的导航、表头、按钮、图例固定英文——「英文 chrome + 中文数据」的现状及其裁决理由见 §1.5（看板骨架页 chrome 英文单版条目）。
+- **可能方案**：`common.js` 内置轻量中英词典（数十词条），骨架页写入时按产物语言注入 `window.__LANG`，`initDashboard()` 阶段对带 `data-i18n` 属性的静态文本节点做替换；无需多套 HTML。约 1 人天。
+- **状态**：§1.5 的裁决不变（不把英文 chrome 当 bug 报），本条把该改造登记为排期待办；落地后同条更新。
 
 #### 2.62 [低，YAGNI 待触发] 无 CSV / 扁平表导出
 

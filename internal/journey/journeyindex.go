@@ -81,6 +81,7 @@ type JourneyIndexRow struct {
 	// only once the full Journey has been built (same gate as Tasks/Steps); absent
 	// on a bare listing pass.
 	Cost         *float64 `json:"cost,omitempty"`
+	Currency     string   `json:"currency,omitempty"`
 	NetWorkingMS int64    `json:"net_working_ms,omitempty"`
 	Model        string   `json:"model,omitempty"`
 	// Lineages is every ctxgraph.Lineage.LineageID() this Journey's chain
@@ -328,7 +329,7 @@ func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
 				}
 				cost := t.ClusterUnpriced
 				if m.Cost != nil {
-					cost = strconv.FormatFloat(*m.Cost, 'f', 4, 64)
+					cost = fmtutil.FmtCurrency(*m.Cost, m.Currency)
 				}
 				badges := ""
 				if m.ID == c.Cheapest {

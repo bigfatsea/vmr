@@ -14,8 +14,8 @@ package journey
 
 import (
 	"sort"
-	"strconv"
 
+	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 )
 
@@ -163,25 +163,14 @@ func ComputeJourneyCost(j *Journey, res *pricing.Resolver, currency string) Cost
 	return fact
 }
 
-// moneyDecimals shows cents for small amounts, whole units past $100 where
-// the cents are noise on a shareable report.
-func moneyDecimals(v float64) int {
-	if v >= 100 {
-		return 0
-	}
-	return 2
-}
-
-// fmtMoney formats c's total with its currency — "$4.80" for USD/blank,
-// "CNY 34.20" otherwise, a trailing "+" when the estimate is partial.
+// fmtMoney formats c's total with its currency through fmtutil's canonical
+// two-decimal financial formatter — "$4.80", "¥34.20" — with a trailing "+"
+// when the estimate is partial. Before this, journey carried its own
+// decimals policy here (≥100 dropped the cents, serving compactness over
+// ledger truth) and the macro report and dashboards each carried another
+// one — the same total read differently in every surface (review NEW-01).
 func fmtMoney(c CostFact) string {
-	amt := strconv.FormatFloat(c.TotalAmount(), 'f', moneyDecimals(c.TotalAmount()), 64)
-	s := amt
-	if c.Currency == "" || c.Currency == "USD" {
-		s = "$" + amt
-	} else {
-		s = c.Currency + " " + amt
-	}
+	s := fmtutil.FmtCurrency(c.TotalAmount(), c.Currency)
 	if c.Partial() {
 		s += "+"
 	}

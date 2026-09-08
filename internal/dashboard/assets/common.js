@@ -80,10 +80,71 @@ function currencySymbol(ccy) {
 // with the currency's symbol (or the code as prefix when unmapped).
 function FmtCurrency(n, ccy) {
   if (n === null || n === undefined || isNaN(n)) return currencySymbol(ccy) + '0.00';
-  return currencySymbol(ccy) + Number(n).toFixed(2);
+  return currencySymbol(ccy) + goFixed(n, 2);
 }
 
 const FmtCost = FmtCurrency;
+
+// FmtCurrencyPrecise renders a micro-amount with 4 fixed decimals.
+function FmtCurrencyPrecise(n, ccy) {
+  if (n === null || n === undefined || isNaN(n)) return currencySymbol(ccy) + '0.0000';
+  return currencySymbol(ccy) + goFixed(n, 4);
+}
+
+// goFixed renders x with exactly d decimals, byte-identical to Go's
+// strconv %.Nf — the shared fixture (testdata/fmt_cases.json) pins both
+// sides to the same string. Both round the double's exact binary value
+// to nearest; they differ only on exact ties, where Go's strconv rounds
+// half to even and Number#toFixed rounds away from zero (0.125 → "0.12"
+// vs "0.13" — the same ledger total reading differently per surface,
+// the very drift NEW-01 set out to kill). A tie exists only when the
+// double is an odd multiple of 2^-(d+1) (its exact decimal expansion
+// terminates at digit d+1 with a trailing 5), so the whole format is
+// done in BigInt on the raw IEEE-754 bits: scale by 10^d, round
+// half-to-even, place the decimal point. toFixed alone would also
+// switch to scientific notation at ≥1e21, where Go keeps printing
+// digits — unreachable for ledger amounts, handled here anyway.
+function goFixed(n, d) {
+  const neg = n < 0 || Object.is(n, -0);
+  const x = Math.abs(n);
+  if (!isFinite(x)) return isNaN(x) ? 'NaN' : (neg ? '-Inf' : '+Inf');
+  const bits = new BigUint64Array(new Float64Array([x]).buffer)[0];
+  const rawExp = Number((bits >> 52n) & 0x7ffn);
+  let m, exp; // value = m × 2^exp
+  if (rawExp === 0) { // subnormal: no implicit leading bit
+    m = bits & 0xfffffffffffffn;
+    exp = -1074;
+  } else {
+    m = (bits & 0xfffffffffffffn) | (1n << 52n);
+    exp = rawExp - 1075;
+  }
+  let q; // round(value × 10^d) — the d-decimal fixed-point integer
+  if (m === 0n) {
+    q = 0n;
+  } else {
+    // normalize to m odd so tie detection below reads the true mantissa
+    while ((m & 1n) === 0n) { m >>= 1n; exp++; }
+    // value × 10^d = m × 2^(exp+d) × 5^d (10^d = 2^d·5^d)
+    const shift = exp + d;
+    const f = FIVE_POW_D[d];
+    if (shift >= 0) {
+      q = (m << BigInt(shift)) * f;
+    } else {
+      const den = 1n << BigInt(-shift);
+      const num = m * f;
+      q = num / den;
+      const r = num % den;
+      if (r * 2n > den || (r * 2n === den && (q & 1n) === 1n)) q++;
+    }
+  }
+  let str = q.toString();
+  if (d > 0) {
+    while (str.length <= d) str = '0' + str;
+    str = str.slice(0, str.length - d) + '.' + str.slice(-d);
+  }
+  return (neg ? '-' : '') + str;
+}
+const FIVE_POW_D = { 2: 25n, 4: 625n };
 
 // FmtDuration formats milliseconds into human-readable duration.
 function FmtDuration(ms) {
@@ -192,17 +253,41 @@ function wireHashReload() {
   }
 }
 
+// downloadArtifact fetches an artifact with the current Auth headers and triggers
+// browser download as a blob (§6.5, ISSUE-34/NEW-04), avoiding 401 on protected hosts.
+function downloadArtifact(href, filename) {
+  if (typeof fetch === 'undefined') return;
+  fetch(href, { headers: Auth.getHeaders() })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.blob();
+    })
+    .then(function (blob) {
+      if (typeof URL === 'undefined' || typeof document === 'undefined') return;
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename || href.split('/').pop();
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+    })
+    .catch(function (err) {
+      if (typeof alert !== 'undefined') alert('Download failed: ' + err.message);
+    });
+}
+
 // sourceBar returns the shared "download the underlying artifact" strip
 // every page carries (G3): a row of relative links to the .json / .md /
-// .jsonl files the page rendered from. links is [{label, href}]. Plain <a>
-// navigation carries no Bearer key, so under an api_keys-gated vmr host
-// these 401; the dominant use (python3 -m http.server, no auth) is fine.
+// .jsonl files the page rendered from. links is [{label, href}].
+// Uses downloadArtifact on click so Bearer auth is attached when configured.
 function sourceBar(links) {
   if (!links || links.length === 0) return '';
   const parts = links
     .filter(function (l) { return l && l.href; })
     .map(function (l) {
-      return '<a href="' + esc(l.href) + '" download>' + esc(l.label || l.href) + '</a>';
+      return '<a href="' + esc(l.href) + '" download onclick="event.preventDefault(); downloadArtifact(this.getAttribute(\'href\'), this.getAttribute(\'download\'));">' + esc(l.label || l.href) + '</a>';
     });
   return '<div class="source-bar">↓ Source: ' + parts.join(' &middot; ') + '</div>';
 }
@@ -528,11 +613,13 @@ if (typeof module !== 'undefined' && module.exports) {
     FmtPercent,
     FmtCurrency,
     FmtCost,
+    FmtCurrencyPrecise,
     setCurrency,
     FmtDuration,
     Auth,
     Theme,
     esc,
+    downloadArtifact,
     wireHashReload,
     sourceBar,
     getDataParam,

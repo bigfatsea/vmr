@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -75,6 +76,50 @@ func FmtSeconds(d time.Duration, decimals int) string {
 // FmtBytes already established for byte counts.
 func FmtPercent(f float64, decimals int) string {
 	return fmt.Sprintf("%.*f%%", decimals, f*100)
+}
+
+// CurrencySymbol returns the display symbol for a currency code ("$", "¥", "€", "£")
+// or the uppercase currency code followed by a space ("CAD ") when unmapped.
+// An empty code or "USD" defaults to "$".
+func CurrencySymbol(ccy string) string {
+	switch strings.ToUpper(strings.TrimSpace(ccy)) {
+	case "", "USD":
+		return "$"
+	case "CNY", "JPY":
+		return "¥"
+	case "EUR":
+		return "€"
+	case "GBP":
+		return "£"
+	default:
+		return strings.ToUpper(strings.TrimSpace(ccy)) + " "
+	}
+}
+
+// FmtCurrency renders an amount in standard financial format with 2 fixed decimals
+// ("$1.23", "$124.36", "¥124.36", "CAD 124.36"). An omitted or empty currency
+// defaults to USD ("$").
+func FmtCurrency(amount float64, currency ...string) string {
+	var ccy string
+	if len(currency) > 0 {
+		ccy = currency[0]
+	}
+	return fmt.Sprintf("%s%.2f", CurrencySymbol(ccy), amount)
+}
+
+// FmtCost is an alias of FmtCurrency, matching the dashboard's common.js export.
+func FmtCost(amount float64, currency ...string) string {
+	return FmtCurrency(amount, currency...)
+}
+
+// FmtCurrencyPrecise renders a micro-amount with 4 fixed decimals ("$1.2345", "¥0.0012"),
+// used when unit rates or sub-cent allocations require higher precision.
+func FmtCurrencyPrecise(amount float64, currency ...string) string {
+	var ccy string
+	if len(currency) > 0 {
+		ccy = currency[0]
+	}
+	return fmt.Sprintf("%s%.4f", CurrencySymbol(ccy), amount)
 }
 
 // FmtTokens renders a token count for a dense Markdown table cell

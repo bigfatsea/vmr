@@ -26,10 +26,10 @@ func TestJS_PureFunctionsAndFixture(t *testing.T) {
 
 	testScript := `
 const fs = require('fs');
-const { versionBehavior, FmtTokens, FmtBytes, FmtPercent, FmtCurrency, FmtCost } = require(` + "'" + commonJSPath + "'" + `);
+const { versionBehavior, FmtTokens, FmtBytes, FmtPercent, FmtCurrency, FmtCost, FmtCurrencyPrecise } = require(` + "'" + commonJSPath + "'" + `);
 const fixture = JSON.parse(fs.readFileSync(` + "'" + fixturePath + "'" + `, 'utf8'));
 
-const fns = { FmtTokens, FmtBytes, FmtPercent, FmtCurrency, FmtCost };
+const fns = { FmtTokens, FmtBytes, FmtPercent, FmtCurrency, FmtCost, FmtCurrencyPrecise };
 
 let failed = 0;
 for (const tc of fixture.cases) {

@@ -6,8 +6,6 @@
 package report
 
 import (
-	"fmt"
-
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/reqdetail"
@@ -56,11 +54,11 @@ func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) cos
 			// rate. Render "-" ("unknown ≠ zero"), not a dropped row.
 			cost := "-"
 			if d.CostEstimate != nil {
-				cost = money(*d.CostEstimate, cur)
+				cost = fmtutil.FmtCurrency(*d.CostEstimate, cur)
 			}
 			tbl.row(d.Date, fmtutil.FmtTokens(d.TokensInFresh), fmtutil.FmtTokens(d.TokensOut), cost)
 		}
-		tbl.row(t.TotalLabel, "", "", money(dateTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", fmtutil.FmtCurrency(dateTot.sum, cur))
 		if dateTot.unpriced > 0 {
 			tbl.note(t.ByDatePartialNote + "\n\n")
 			tbl.note(t.UnpricedNote(dateTot.unpriced, dateTot.priced+dateTot.unpriced, t.UnitDays) + "\n\n")
@@ -78,10 +76,10 @@ func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) co
 		for _, m := range rep.ByModel {
 			if m.CostEstimate != nil {
 				tbl.row(m.Model, m.Protocol, fmtutil.FmtTokens(m.TokensInFresh), fmtutil.FmtTokens(m.TokensOut),
-					money(*m.CostEstimate, cur))
+					fmtutil.FmtCurrency(*m.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", "", money(modelTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", "", fmtutil.FmtCurrency(modelTot.sum, cur))
 		if modelTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(modelTot.unpriced, modelTot.priced+modelTot.unpriced, t.UnitModels) + "\n\n")
 		}
@@ -108,10 +106,10 @@ func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string)
 		for _, e := range rep.EndpointsAll {
 			if e.CostEstimate != nil {
 				tbl.row(e.Endpoint, fmtutil.FmtTokens(e.TokensInFresh), fmtutil.FmtTokens(e.TokensOut),
-					money(*e.CostEstimate, cur))
+					fmtutil.FmtCurrency(*e.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", money(epTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", fmtutil.FmtCurrency(epTot.sum, cur))
 		if epTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(epTot.unpriced, epTot.priced+epTot.unpriced, t.UnitEndpoints) + "\n\n")
 		}
@@ -145,10 +143,10 @@ func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) c
 		for _, c := range rep.ByClient {
 			if c.CostEstimate != nil {
 				tbl.row(c.ClientKey, fmtutil.FmtTokens(c.TokensInFresh), fmtutil.FmtTokens(c.TokensOut),
-					money(*c.CostEstimate, cur))
+					fmtutil.FmtCurrency(*c.CostEstimate, cur))
 			}
 		}
-		tbl.row(t.TotalLabel, "", "", money(clientTot.sum, cur))
+		tbl.row(t.TotalLabel, "", "", fmtutil.FmtCurrency(clientTot.sum, cur))
 		if clientTot.unpriced > 0 {
 			tbl.note(t.UnpricedNote(clientTot.unpriced, clientTot.priced+clientTot.unpriced, t.UnitClients) + "\n\n")
 		}
@@ -185,10 +183,4 @@ func costTotalOf(n int, get func(i int) *float64) costTotal {
 		}
 	}
 	return ct
-}
-
-// money renders one $ cell — one place, so the totals row and the detail
-// rows can never drift in precision or currency placement.
-func money(v float64, currency string) string {
-	return fmt.Sprintf("%.4f %s", v, currency)
 }

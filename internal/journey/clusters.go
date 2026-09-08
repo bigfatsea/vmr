@@ -16,6 +16,7 @@ type ClusterMember struct {
 	Steps        int      `json:"steps,omitempty"`
 	Rendered     string   `json:"rendered,omitempty"`
 	Cost         *float64 `json:"cost,omitempty"`
+	Currency     string   `json:"currency,omitempty"`
 	NetWorkingMS int64    `json:"net_working_ms,omitempty"`
 	Model        string   `json:"model,omitempty"`
 }
@@ -96,6 +97,7 @@ func ComputeTaskClusters(rows []JourneyIndexRow) []TaskCluster {
 					Steps:        item.row.Steps,
 					Rendered:     item.row.Rendered,
 					Cost:         item.row.Cost,
+					Currency:     item.row.Currency,
 					NetWorkingMS: item.row.NetWorkingMS,
 					Model:        item.row.Model,
 				})

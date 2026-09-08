@@ -8,7 +8,6 @@
 package report
 
 import (
-	"fmt"
 	"sort"
 	"strconv"
 
@@ -61,7 +60,7 @@ func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
 		cells := []string{r.endpoint, strconv.Itoa(r.requestsOK), fmtutil.FmtTokens(r.tokensOut)}
 		if priced {
 			if r.hasCost {
-				cells = append(cells, fmt.Sprintf("%.4f", r.costPer1MOut), fmt.Sprintf("%.4f", r.costPerReq))
+				cells = append(cells, fmtutil.FmtCurrencyPrecise(r.costPer1MOut, rep.Pricing.Currency), fmtutil.FmtCurrencyPrecise(r.costPerReq, rep.Pricing.Currency))
 			} else {
 				cells = append(cells, "-", "-")
 			}

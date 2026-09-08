@@ -58,6 +58,7 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 // no built Journey (the bare listing pass).
 type journeyRowFacts struct {
 	cost         *float64
+	costCurrency string
 	netWorkingMS int64
 	model        string
 }
@@ -76,6 +77,7 @@ func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, re
 			}
 			if facts != nil {
 				idx.Journeys[i].Cost = facts.cost
+				idx.Journeys[i].Currency = facts.costCurrency
 				idx.Journeys[i].NetWorkingMS = facts.netWorkingMS
 				idx.Journeys[i].Model = facts.model
 			}
@@ -85,10 +87,14 @@ func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, re
 }
 
 // rowFacts projects a built Journey's metrics/cost onto a journeyRowFacts.
+// The cost's currency rides along — the cluster line renders it via
+// fmtutil.FmtCurrency, and a bare number under -currency CNY would mislabel
+// the unit.
 func rowFacts(m journey.Metrics, cost *journey.CostFact) *journeyRowFacts {
 	f := &journeyRowFacts{netWorkingMS: m.NetWorkingMS, model: journey.DominantModel(m)}
 	if cost != nil && cost.Total != nil {
 		f.cost = cost.Total
+		f.costCurrency = cost.Currency
 	}
 	return f
 }
