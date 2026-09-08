@@ -89,7 +89,7 @@ func EnsureRendered(dir string, rec *audit.Record, path string, line int, m, pre
 // readRenderFingerprint reads just target's first line — a bounded read,
 // not the whole file, since EnsureRendered calls this on every invocation
 // including ones that end up skipping, and a detail page can run to
-// several MB (see the architecture doc's §7.6c). Returns ("", nil), not an
+// several MB. Returns ("", nil), not an
 // error, when target doesn't exist or is empty: the caller's fingerprint
 // comparison naturally fails either way and falls through to rendering,
 // which is exactly the desired behavior for "no file yet" — no separate

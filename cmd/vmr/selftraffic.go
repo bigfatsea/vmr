@@ -26,9 +26,9 @@ import (
 // configured report.yaml self_traffic_client_tags (for the edge case where
 // -llm-addr traffic was generated under a different/rotated credential).
 // llmKey == "" contributes nothing (most `vmr analyze
-// -macro-only` runs never resolve one at all — cmd_report.go's -llm-key
-// flag, added P15.3, only ever identifies PAST self-analysis traffic to
-// exclude; `vmr analyze` never makes a new LLM call itself).
+// -macro-only` runs never resolve one at all — the -llm-key flag only ever
+// identifies PAST self-analysis traffic to exclude; `vmr analyze` never
+// makes a new LLM call itself).
 // Returns nil (not an empty map) when there is nothing to exclude, so
 // callers can pass it straight through as "exclude nothing" without a
 // separate nil check.

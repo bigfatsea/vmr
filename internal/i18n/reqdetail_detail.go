@@ -66,8 +66,8 @@ type DetailText struct {
 	ResponseHeadersDiffSummary func(union, changed int) string
 	EmptyBody                  string
 	ModelOutputSSE             func(events int) string
-	// RawSSERef (P13.2) points at the coordinate-based retrieval primitive
-	// (`vmr replay -print -req <coord>`, P3.2) instead of inlining the raw
+	// RawSSERef points at the coordinate-based retrieval primitive
+	// (`vmr replay -print -req <coord>`) instead of inlining the raw
 	// SSE bytes a second time — renderStreamSummary just reassembled the
 	// same bytes into reasoning/content/tool_calls above this line, which
 	// is interpretation and stays; this was pure duplication.

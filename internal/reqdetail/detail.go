@@ -57,8 +57,8 @@ const toolArgsInlineThreshold = 600
 // through this one shared formatter instead of each re-deriving the format.
 //
 // The outcome segment is deliberately just the outcome string (e.g. "ok",
-// "error"), without the structured error-class suffix the pre-P2 naming
-// used to append (detailFileName's "outcome + "-" + errorClass"). That
+// "error"), without the structured error-class suffix an earlier naming
+// scheme appended (detailFileName's "outcome + "-" + errorClass"). That
 // extra detail lives on audit.Attempt, which a bare Manifest does not
 // carry — and this name must be reconstructible identically from either
 // shape. It stays one click away inside the page itself (renderAttempts
@@ -85,7 +85,7 @@ func FileNameForRecord(rec *audit.Record, path string, line int) string {
 
 // FileNameForManifest computes a record's filename from just its Manifest —
 // the shape a "previous turn" link, or a future spine Step's "→ detail"
-// link (see the architecture doc's P5.2), has on hand instead of the full
+// link, has on hand instead of the full
 // record: correlating every record across a run and retaining each one's
 // full body for this purpose would defeat the point of not physicalizing
 // detail pages up front. real is parsed from m.Endpoint (the last attempt's
@@ -298,7 +298,7 @@ func renderSessionHeader(b *strings.Builder, m, prev *ctxgraph.Manifest, f sessi
 	// Tags are intentionally NOT shown in the header: per-record tags
 	// like "compacted_session" fire on every turn after compaction
 	// (the OpenClaw summary message re-injects it), so they look like
-	// noise. (This carries the reasoning forward from the pre-P2
+	// noise. (This carries the reasoning forward from an earlier
 	// implementation; the tag computation itself never moved here — it
 	// was always report-side aggregation, not a per-record fact.)
 	if len(meta) > 0 {
@@ -528,7 +528,7 @@ func writeNorms(b *strings.Builder, norms []string, t i18n.DetailText) {
 
 // renderClientResponse emits section ③: what the client received, with the
 // stream reassembled into the actual model output. path/line are the
-// record's own coordinate (ctxgraph.ReqCoord) — P13.2's raw-SSE reference
+// record's own coordinate (ctxgraph.ReqCoord) — the raw-SSE reference
 // line uses it to point at `vmr replay -print -req <coord>` instead of
 // inlining rec.Client.Response.Body's raw bytes a second time (see below).
 func renderClientResponse(b *strings.Builder, rec *audit.Record, path string, line int, t i18n.DetailText) {
@@ -566,11 +566,10 @@ func renderClientResponse(b *strings.Builder, rec *audit.Record, path string, li
 			// copy of what renderStreamSummary just reassembled above —
 			// unlike that reassembly (reasoning/content/tool_calls, which
 			// IS interpretation), inlining the wire bytes a second time is
-			// pure duplication (41% of a real-corpus detail page's size,
-			// per the 2026-08-21 review). ctxgraph.ReqCoord + `vmr replay
-			// -print -req` (P3.2) already exists as the "fetch this exact
-			// record's raw bytes on demand" primitive — reuse it instead
-			// of a second physical copy.
+			// pure duplication (~41% of a real-corpus detail page's size).
+			// ctxgraph.ReqCoord + `vmr replay -print -req` already exists
+			// as the "fetch this exact record's raw bytes on demand"
+			// primitive — reuse it instead of a second physical copy.
 			w("%s", t.RawSSERef(s.Events, fmtutil.FmtBytes(int64(len(body))), ctxgraph.ReqCoord(path, line)))
 		} else {
 			renderRawBody(b, t.BodyNonJSONSSE, body, t)

@@ -8,7 +8,7 @@
 // requirement this comment satisfies). Not part of the vmr binary — a
 // one-off/periodic maintenance tool, run by hand:
 //
-//	go run ./tools/gen_standard_pricing -input docs/data/model_prices_and_context_window.json -output internal/pricing/standard_price_generated.yaml
+//	go run ./tools/gen_standard_pricing   # -url/-input/-output/-generated-at all default; fetches upstream, rewrites the snapshot and the generated yaml
 //
 // Two rules that are NOT optional (see the design doc's §4.2① "缺失比过期更
 // 危险" and its §9.1 validation checklist):

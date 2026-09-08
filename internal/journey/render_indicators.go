@@ -1,6 +1,6 @@
-// Deprecated: legacy renderBehaviorIndicators was deleted in Phase 3
-// in favor of viewmodel_build.go's buildVMIndicators (D11).
-// asciiSparklineChars retained here for sparkline rendering.
+// asciiSparklineChars for text sparklines — the last survivor of this file
+// after the *Journey-based renderBehaviorIndicators it sat next to was
+// replaced by viewmodel_build.go's buildVMIndicators (D11).
 package journey
 
 // asciiSparklineChars provides 8 vertical bar levels for text sparklines.

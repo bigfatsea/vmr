@@ -10,9 +10,8 @@
 // This file does no rendering or aggregation of its own: every branch below
 // calls the same functions cmd_report.go/cmd_journey.go already expose
 // (runReport, setupJourneyRun + renderJourney/renderJourneys/renderAllJourneys/
-// compareJourneys/renderBenchmarks) — "pure CLI-layer routing", per the
-// ActionPlan's own constraint. `internal/report`/`internal/journey` are not
-// touched by this file at all.
+// compareJourneys/renderBenchmarks) — pure CLI-layer routing.
+// `internal/report`/`internal/journey` are not touched by this file at all.
 package main
 
 import (

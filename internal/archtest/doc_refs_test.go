@@ -85,12 +85,10 @@ func docHasSymbols(docRel string) bool {
 // what it means in a normal Markdown document: a same-repo cross-reference
 // that must resolve. .go source files are excluded — a `[label](x.md)`
 // string inside a Go source file is, in this codebase, i18n/render text
-// being assembled into a *generated* report (e.g. i18n/report_doc.go's
-// "[vmr-requests.md](./vmr-requests.md)", which names an output artifact
-// that will exist next to the rendered file at runtime, and
-// report/render_doc.go's `[-%s](./vmr-requests-%s.md)`, a printf template
-// with no meaning as a repo path at all) — not a claim that some path
-// exists in this checkout right now.
+// being assembled into a *generated* report (e.g. i18n/reqdetail_detail.go's
+// PrevTurnLink, `[<ts>](./<file>)`, which names a sibling detail page that
+// will exist next to the rendered file at runtime) — not a claim that some
+// path exists in this checkout right now.
 func docHasMarkdownLinks(docRel string) bool {
 	return !strings.HasSuffix(docRel, ".go")
 }

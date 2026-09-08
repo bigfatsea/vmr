@@ -1,6 +1,6 @@
 // Ver 2026-09-15, by pi
 
-// The journey-side ViewModel layer (architecture redesign §5.0/§5.2, D3/D4/D11/D12):
+// The journey-side ViewModel layer (design decisions D3/D4/D11/D12):
 // the single rendering path for j-<id>.md. BuildJourneyVM consumes ONLY the
 // self-contained JourneySummary — the shape j-<id>.json publishes — and absorbs
 // every business formatting decision (argument shape-picking, multi-level step

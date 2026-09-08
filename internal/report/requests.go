@@ -153,11 +153,10 @@ func orDashModel(m string) string {
 }
 
 // buildDetailFileSet lists detailDir once and returns its .md basenames as
-// a set — detailCell's existence check (P13.4) would otherwise be one
+// a set — detailCell's existence check would otherwise be one
 // os.Stat per row, and a full request index re-renders every row across
 // several tables (per-session cards, the scheduled rollup, the failed
-// index): a real full-corpus run (11k+ requests,
-// story_report_full_review_opus-5.md's M12) would issue 20,000+ redundant
+// index): a real full-corpus run (11k+ requests) would issue 20,000+ redundant
 // stat syscalls — most of them ENOENT lookups against an empty or
 // nonexistent directory on the common (default suite) path — for
 // information one os.ReadDir already gives in full. A missing directory

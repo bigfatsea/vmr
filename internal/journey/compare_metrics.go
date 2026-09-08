@@ -146,7 +146,7 @@ func abs(f float64) float64 {
 
 // journeyMetric is one single-journey behavior-indicator row — the same
 // metric universe as metricSpecs above, plus the journey-view formatting
-// rule. renderBehaviorIndicators (Markdown) iterates this one slice, so
+// rule. buildVMIndicators iterates this one slice, so
 // the journey view can never again drift about
 // WHICH metrics a journey view shows: the difference between surfaces
 // is only how one row is rendered, never which rows exist. Label is NOT

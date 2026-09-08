@@ -35,7 +35,8 @@ func CanonicalProtocol(p string) string {
 // are left byte-for-byte intact, and a label whose protocol is already
 // current (or that has no separator) is returned unchanged.
 //
-// TODO(2026-10): transitional, remove with CanonicalProtocol.
+// Transitional: removed together with CanonicalProtocol, on the same
+// condition (a zero-hit corpus grep, not a date — see that function's doc).
 func NormalizeEndpointLabel(label string) string {
 	ci := strings.IndexByte(label, ':')
 	si := strings.IndexByte(label, '/')

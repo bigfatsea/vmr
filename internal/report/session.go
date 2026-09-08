@@ -531,7 +531,8 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 
 // assignNames gives every record its deterministic detail filename, so
 // WriteDetails and the requests export agree on links. No batch-order
-// state (the pre-P2 "used" collision-counter map) is needed any more: the
+// state (an earlier design threaded a "used" collision-counter map through
+// the batch) is needed any more: the
 // name is keyed by this record's own coordinate hash
 // (reqdetail.FileName/ctxgraph.ReqCoord), which is unique on its own.
 func assignNames(recs []*ReqInfo) {

@@ -1,14 +1,14 @@
 // Ver 2026-09-06, by Claude
 
 // Package dashboard delivers vmr analyze's static skeleton dashboard pages
-// (§6 of the analyze architecture redesign doc): six self-contained HTML
-// files with zero business data, written to the report output root on every
-// analyze run. All rendering happens browser-side — the pages fetch
+// (see the Analytics design doc's skeleton-page section): six self-contained
+// HTML files with zero business data, written to the report output root on
+// every analyze run. All rendering happens browser-side — the pages fetch
 // relative-path JSON slices (manifest.json, macro/*.json, requests/,
 // journeys/, compares/) and render DOM + inline SVG from them, so writing
 // the JSON slices is what "delivers the dashboard". The Go side is embed +
 // WriteSkeletons only; the bulk of the work lives in the embedded
-// assets/*.html files (§6.2), whose line budget archtest deliberately does
+// assets/*.html files, whose line budget archtest deliberately does
 // not track. Leaf package: stdlib only, zero vmr/internal dependencies.
 package dashboard
 

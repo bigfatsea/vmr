@@ -39,11 +39,11 @@ type SpineText struct {
 	SpineFindingTag           string                      // appended to a spine Step header that hit a Finding
 	SpineValueTruncated       func(more int) string       // appended to a tool-call payload block capped at spineFullCap
 	SpineResultValueTruncated func(more int) string       // same, for a paired tool RESULT — the full text lives in the NEXT Step's record
-	SpineDetailLink           func(relPath string) string // "→ detail" link to this Step's own record, P5.2 (link mode)
+	SpineDetailLink           func(relPath string) string // "→ detail" link to this Step's own record
 	// SpineDetailCoord is the coordinate form of the same "→ detail"
 	// pointer, used by the default batch suite where detail pages are not
-	// materialized (P13.1 volume discipline) — an inline `file:line`
-	// coordinate instead of a link that would 404 (B10 / review §12.5).
+	// materialized — an inline `file:line` coordinate instead of a link
+	// that would 404.
 	SpineDetailCoord func(coord string) string
 	// SpineCoordNote is the one-time explainer printed at the top of a
 	// coordinate-mode decision spine, so a reader knows why the Steps show

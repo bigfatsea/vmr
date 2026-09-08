@@ -1,20 +1,16 @@
 // Ver 2026-09-15, by pi
 
-// Finding display-trust tiers: the shared ordering source for both render
-// paths' findings grouping (render_spine.go's renderFindingsSection and
-// viewmodel_spine.go's buildVMFindings). Split out of severity.go when that
-// file's only remaining live consumers were these two maps, and out of
-// render_spine.go when the viewmodel layer joined them as a second consumer —
-// one tier definition, two renderers, no drift.
+// Finding display-trust tiers: the ordering source for viewmodel_spine.go's
+// buildVMFindings grouping. Split out of the retired severity.go when its
+// only remaining live consumers were the two maps below.
 package journey
 
-// findingTrustTier ranks a FindingCode for display grouping (问题 15):
-// critical codes (real failure modes) read first, low-confidence codes
+// findingTrustTier ranks a FindingCode for display grouping: critical codes
+// (real failure modes) read first, low-confidence codes
 // (unverified_entity_reference) last, everything else in between. Tier ties
 // within the same rank break by earliest StepSeq — deterministic, independent
-// of findings-slice order. The two maps below moved here from the retired
-// severity.go (whose only remaining consumers were this tier ranking): they
-// are the shared source of truth for which codes are trustworthy.
+// of findings-slice order. The two maps below are the source of truth for
+// which codes are trustworthy.
 func findingTrustTier(c FindingCode) int {
 	if criticalFindings[c] {
 		return 0

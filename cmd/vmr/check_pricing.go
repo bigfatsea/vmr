@@ -26,8 +26,8 @@ import (
 // (gemini-3.7-flash, deepseek-v4-flash-vision-exp, kimi-k3, and a renamed
 // glm row). A threshold that only fires after the table has been wrong for
 // half a year is not a guardrail. Refresh is one command with no arguments
-// (`go run ./tools/gen_standard_pricing -generated-at <today>` fetches
-// upstream itself), so the reminder is cheap to act on.
+// (`go run ./tools/gen_standard_pricing` fetches upstream itself), so the
+// reminder is cheap to act on.
 const pricingStaleAfter = 60 * 24 * time.Hour
 
 // pricingTableLine describes the standard price table backing this config's

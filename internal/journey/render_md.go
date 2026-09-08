@@ -1,8 +1,8 @@
 // Ver 2026-09-15, by pi
 
-// Deprecated: legacy RenderMarkdown eating *Journey was deleted in Phase 3
-// in favor of viewmodel.go's RenderMarkdownFromSummary (D11).
-// Pure formatting helpers (codeFence, escapeHTML, escapeCell, pctStr) retained here.
+// Pure Markdown formatting helpers (codeFence, escapeHTML, escapeCell,
+// pctStr). The *Journey-based RenderMarkdown that used to live here is now
+// viewmodel.go's RenderMarkdownFromSummary (D11).
 package journey
 
 import (
