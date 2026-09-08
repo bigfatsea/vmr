@@ -410,7 +410,7 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"CLAUDE.md", "see internal/router/router.go and docs/UserGuide.md"},
 		{"CLAUDE.md", "one section per internal/report/viewmodel_*.go"},
 		{"CLAUDE.md", "`time.Duration` and `json.RawMessage` are out of scope"},
-		{"internal/report/detail.go", "see docs/future-strategy/analyze_architecture_redesign_opus-5.md"},
+		{"internal/report/detail.go", "see docs/future-strategy/agent_session_visualization_deepdive_v1.0.md"},
 		{"internal/report/detail.go", "moved to internal/reqdetail/render.go"},
 		// Symbol noise in a .go comment stays silent: only packages this repo
 		// owns are checkable, so parameter-shaped mentions and stdlib types

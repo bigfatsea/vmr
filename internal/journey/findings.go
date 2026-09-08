@@ -65,10 +65,10 @@ type Finding struct {
 	// Finding/Evidence/Action are narrative text, localized per the lang
 	// ComputeFindings was called with. j-<id>.json and
 	// j-<id>.md are both built from the same target-lang call
-	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's macro slices	// matches, via cmd_report.go's report.LocalizeEfficiency call before
+	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's macro slices
+	// match, via cmd_report.go's report.LocalizeEfficiency call before
 	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
-	// do NOT follow lang — see docs/future-strategy/analyze_architecture_redesign_opus-5.md
-	// §5.5 for the reasoning.
+	// do NOT follow lang.
 	Finding  string `json:"finding"`
 	Evidence string `json:"evidence,omitempty"`
 	Action   string `json:"action,omitempty"`

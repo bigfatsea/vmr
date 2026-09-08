@@ -3,9 +3,8 @@
 // Shared evidence blobs: content that many detail pages would otherwise
 // repeat verbatim (a session's system prompt, a request's declared tool
 // set) written once, content-addressed, under evidenceDir — every detail
-// page that used to inline it now links to it instead. See
-// docs/future-strategy/analyze_architecture_redesign_opus-5.md §1.1: the
-// project already applies this "same content, one address" rule to
+// page that used to inline it now links to it instead. The project
+// already applies this "same content, one address" rule to
 // ctxgraph's message hashing and to ToolsSig's fingerprint; this file is
 // the first place it's actually materialized to disk. Both functions here
 // compute their own hash directly from rec — never from a caller-supplied

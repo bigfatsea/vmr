@@ -15,9 +15,8 @@
 // in recextract.go — this file is buildInternal's own orchestration:
 // aggState plus its three phases (scanFiles/finishBuckets/sortBuckets).
 //
-// See docs/future-strategy/analyze_architecture_redesign_opus-5.md for the
-// slice/ViewModel/manifest architecture, and
-// docs/VirtualModelRouter_Design_v4_Analytics.md for the section-level
+// See docs/VirtualModelRouter_Design_v4_Analytics.md for the
+// slice/ViewModel/manifest architecture and the section-level
 // data semantics.
 //
 // Meta.Format (const Format, rows.go) encodes one invariant: every bucket
@@ -231,9 +230,7 @@ func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInf
 // also populates cache for next time. The cache-hit shortcut only applies
 // when onRecord is nil (-details off): a caller that needs the raw
 // audit.Record for detail rendering needs the file open regardless, so
-// there is nothing to save by skipping decode in that case (see
-// docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.4 on why
-// -details' own cost stays separate).
+// there is nothing to save by skipping decode in that case.
 func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(*audit.Record, *ReqInfo), cache *ctxgraph.FileCache) error {
 	for fileIdx, path := range paths {
 		fileStart := time.Now()

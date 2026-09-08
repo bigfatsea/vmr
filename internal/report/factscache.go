@@ -6,8 +6,7 @@
 // reopening and re-decoding that file too, not just AnalyzeSessionsCached's
 // manifest pass. Before this, only the manifest half was cached — the
 // reason report's own hot-cache runs used to be barely faster than cold
-// ones (see docs/future-strategy/analyze_architecture_redesign_opus-5.md
-// §1.3). Marshaled into ctxgraph.CachedFile.Facts, a field that package
+// ones. Marshaled into ctxgraph.CachedFile.Facts, a field that package
 // treats as opaque (round-trips it, never interprets it) — see that
 // field's own doc comment for why the type lives here, not there.
 package report

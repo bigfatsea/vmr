@@ -77,8 +77,7 @@ type JourneySummary struct {
 // canonical identifiers across languages, while human-readable Finding/Action
 // texts follow lang, keeping .json and .md outputs fully aligned —
 // compare-*.json's MetricDiff.Label and macro/summary.json's efficiency[]
-// follow the same lang-follows-everywhere policy (P8,
-// docs/future-strategy/analyze_architecture_redesign_opus-5.md §5.5).
+// follow the same lang-follows-everywhere policy (P8).
 //
 // The -compare path (cmd/vmr/cmd_journey.go's compareJourneys) calls this on both
 // sides purely to get Metrics for Compare(sA, sB, lang) — Compare/journeyRef

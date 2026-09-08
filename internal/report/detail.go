@@ -83,8 +83,7 @@ func (j detailJob) manifestsFor() (m, prev *ctxgraph.Manifest) {
 // same-named .json copy of the raw record: that used to be a byte-for-byte
 // duplicate of data that already exists, addressably, in the source audit
 // log (see internal/audit.LineAt and `vmr replay -req COORD -print`, its
-// replacement) — see docs/future-strategy/analyze_architecture_redesign_opus-5.md
-// §3.6. Errors are reported through recordErr rather than returned, since
+// replacement). Errors are reported through recordErr rather than returned, since
 // this runs on a worker goroutine, not the caller's.
 func writeOneDetail(dir, evidenceDir string, lang i18n.Lang, prof taskseg.Profile, j detailJob, n *int64, recordErr func(error)) {
 	m, prev := j.manifestsFor()
