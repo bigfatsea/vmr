@@ -288,6 +288,11 @@ const mockMacro = {
             endpoint: 'anthropic-messages:anthropic:sonnet', outcome: 'ok', finish: 'stop', dur_ms: 1200,
             usage: { in: 2000, out: 150 }, resp_ref: 'R', resp_is_reasoning: false,
             tool_calls: [{ name: 'exec', args_ref: 'A', result: { ref: 'B', match: 'exact', is_error: false } }]
+          }, {
+            seq: 2, ts_display: '2026-08-24 10:02:00', model: 'sonnet', protocol: 'anthropic-messages',
+            endpoint: 'anthropic-messages:anthropic:sonnet', outcome: 'ok', finish: 'stop', dur_ms: 1000,
+            usage: { in: 3000, out: 100 }, resp_ref: 'R', resp_is_reasoning: false,
+            cache_break: 'unexplained', cache_break_ratio_from: 0.95, cache_break_ratio_to: 0.31
           }]
         }]
       },
@@ -300,7 +305,7 @@ const mockMacro = {
   if (!jvDetail.includes('Test Journey 1') || jvDetail.includes('undefined') || jvDetail.includes('NaN')) {
     throw new Error('journey-viewer detail failed: ' + jvDetail);
   }
-  for (const section of ['Behavior Indicators', 'Model Usage', 'Decision Spine', 'the tool result body', 'Final Deliverable']) {
+  for (const section of ['Behavior Indicators', 'Model Usage', 'Decision Spine', 'the tool result body', 'Final Deliverable', 'Cache: unexplained drop (95%→31%)']) {
     if (!jvDetail.includes(section)) {
       throw new Error('journey-viewer detail missing "' + section + '": ' + jvDetail);
     }

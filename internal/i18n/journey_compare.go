@@ -62,11 +62,12 @@ type CompareText struct {
 	EndpointsDiff  string
 	NoEndpoints    string
 
-	CacheTitle        string
-	CacheNoData       string
-	CacheTableHeader  string
-	CacheCurveSummary string
-	CacheCurveNoData  string
+	CacheTitle             string
+	CacheNoData            string
+	CacheTableHeader       string
+	CacheBreaksTableHeader string
+	CacheCurveSummary      string
+	CacheCurveNoData       string
 
 	SysPromptTitle        string
 	SysPromptTableHeader  string
@@ -163,11 +164,12 @@ func Compare(lang Lang) CompareText {
 			EndpointsDiff:  "两侧模型/端点**不同**——这本身可能是效果差异的一个直接原因，不要默认排除。\n\n",
 			NoEndpoints:    "(未识别到任何端点)",
 
-			CacheTitle:        "## Prompt 缓存命中率\n\n",
-			CacheNoData:       "两侧均未取得可用的 usage/缓存数据。\n\n",
-			CacheTableHeader:  "| | 首轮 | 稳态均值（除首轮） | 最小 | 最大 |\n|---|---|---|---|---|\n",
-			CacheCurveSummary: "<details><summary>逐轮曲线</summary>\n\n> 轮次编号只对能算出命中率的轮次连续标注；缺号表示该轮未返回 usage，不是编号错误。\n\n",
-			CacheCurveNoData:  "(无数据)",
+			CacheTitle:             "## Prompt 缓存命中率\n\n",
+			CacheNoData:            "两侧均未取得可用的 usage/缓存数据。\n\n",
+			CacheTableHeader:       "| | 首轮 | 稳态均值（除首轮） | 最小 | 最大 |\n|---|---|---|---|---|\n",
+			CacheBreaksTableHeader: "| | 异常骤降 | 端点切换 | 系统提示词 | 工具定义 | 历史断裂 |\n|---|---|---|---|---|---|\n",
+			CacheCurveSummary:      "<details><summary>逐轮曲线</summary>\n\n> 轮次编号只对能算出命中率的轮次连续标注；缺号表示该轮未返回 usage，不是编号错误。\n\n",
+			CacheCurveNoData:       "(无数据)",
 
 			SysPromptTitle:        "## System Prompt 规模与稳定性\n\n",
 			SysPromptTableHeader:  "| | tokens | 变更次数 |\n|---|---|---|\n",
@@ -287,11 +289,12 @@ func Compare(lang Lang) CompareText {
 		EndpointsDiff:  "Model/endpoint **differ** between the two sides — this alone may be a direct cause of any outcome difference; don't rule it out by default.\n\n",
 		NoEndpoints:    "(no endpoint identified)",
 
-		CacheTitle:        "## Prompt Cache Hit Rate\n\n",
-		CacheNoData:       "Neither side has usable usage/cache data.\n\n",
-		CacheTableHeader:  "| | First Turn | Steady-State Mean (excl. first) | Min | Max |\n|---|---|---|---|---|\n",
-		CacheCurveSummary: "<details><summary>Per-turn curve</summary>\n\n> Turn numbers are shown only for turns with a computable hit rate; a gap means that turn returned no usage, not a numbering error.\n\n",
-		CacheCurveNoData:  "(no data)",
+		CacheTitle:             "## Prompt Cache Hit Rate\n\n",
+		CacheNoData:            "Neither side has usable usage/cache data.\n\n",
+		CacheTableHeader:       "| | First Turn | Steady-State Mean (excl. first) | Min | Max |\n|---|---|---|---|---|\n",
+		CacheBreaksTableHeader: "| | Unexplained Drop | Provider Switch | System Prompt | Tools Churn | History Break |\n|---|---|---|---|---|---|\n",
+		CacheCurveSummary:      "<details><summary>Per-turn curve</summary>\n\n> Turn numbers are shown only for turns with a computable hit rate; a gap means that turn returned no usage, not a numbering error.\n\n",
+		CacheCurveNoData:       "(no data)",
 
 		SysPromptTitle:        "## System Prompt Size & Stability\n\n",
 		SysPromptTableHeader:  "| | tokens | Changes |\n|---|---|---|\n",

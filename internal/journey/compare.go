@@ -248,11 +248,13 @@ type CachePoint struct {
 // numbers this Journey actually has (no assumption that either side
 // stabilizes at all).
 type CacheStats struct {
-	FirstRatio float64      `json:"first_ratio"`
-	SteadyMean float64      `json:"steady_mean"` // mean over steps 2..N; 0 if fewer than 2 usable steps
-	Min        float64      `json:"min"`
-	Max        float64      `json:"max"`
-	Series     []CachePoint `json:"series"`
+	FirstRatio  float64        `json:"first_ratio"`
+	SteadyMean  float64        `json:"steady_mean"` // mean over steps 2..N; 0 if fewer than 2 usable steps
+	Min         float64        `json:"min"`
+	Max         float64        `json:"max"`
+	Series      []CachePoint   `json:"series"`
+	Breaks      map[string]int `json:"breaks,omitempty"`
+	Unexplained int            `json:"unexplained,omitempty"`
 }
 
 type CacheFact struct {
@@ -417,8 +419,9 @@ func sameSet(a, b []string) bool {
 }
 
 func cacheStats(j *Journey) CacheStats {
+	steps := journeySteps(j)
 	var series []CachePoint
-	for _, s := range journeySteps(j) {
+	for _, s := range steps {
 		// Cache ratios are In-side quantities (cacheRead/In).
 		u := s.Manifest.Usage
 		if !s.Manifest.UsageInOK || u.In <= 0 {
@@ -426,10 +429,31 @@ func cacheStats(j *Journey) CacheStats {
 		}
 		series = append(series, CachePoint{Seq: s.Seq, Ratio: float64(u.CacheRead) / float64(u.In)})
 	}
-	if len(series) == 0 {
-		return CacheStats{}
+	breaks := map[string]int{}
+	for i := 1; i < len(steps); i++ {
+		prev := steps[i-1].Manifest
+		cur := steps[i].Manifest
+		cb := ComputeCacheBreak(prev, cur, steps[i].Edge, steps[i].StitchEdge)
+		if cb != CacheBreakNone {
+			breaks[string(cb)]++
+		}
 	}
-	stats := CacheStats{FirstRatio: series[0].Ratio, Min: series[0].Ratio, Max: series[0].Ratio, Series: series}
+	unexp := breaks[string(CacheBreakUnexplained)]
+	var b map[string]int
+	if len(breaks) > 0 {
+		b = breaks
+	}
+	if len(series) == 0 {
+		return CacheStats{Breaks: b, Unexplained: unexp}
+	}
+	stats := CacheStats{
+		FirstRatio:  series[0].Ratio,
+		Min:         series[0].Ratio,
+		Max:         series[0].Ratio,
+		Series:      series,
+		Breaks:      b,
+		Unexplained: unexp,
+	}
 	var steadySum float64
 	for i, p := range series {
 		if p.Ratio < stats.Min {

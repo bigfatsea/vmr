@@ -116,6 +116,40 @@ func TestBuildStructure_GraphLevelFactsCarried(t *testing.T) {
 	}
 }
 
+func TestBuildStructure_CacheBreak(t *testing.T) {
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	sys1 := msg("system", "sys prompt 1")
+	sys2 := msg("system", "sys prompt 2")
+	u1 := msg("user", "step 1")
+	a1 := msg("assistant", "reply 1")
+	u2 := msg("user", "step 2")
+
+	// Step 1: first step -> CacheBreak == ""
+	r1 := goldenRec(at(0), 1000, []any{sys1, u1}, goldenSSE("reply 1", 100, 10, 80))
+	// Step 2: sys prompt changed -> CacheBreak == "system"
+	r2 := goldenRec(at(1), 1000, []any{sys2, u1, a1, u2}, goldenSSE("reply 2", 120, 10, 90))
+
+	path := writeJSONL(t, []audit.Record{r1, r2})
+	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	structure := BuildStructure(j)
+	var ssteps []StepStructure
+	for _, task := range structure.Tasks {
+		ssteps = append(ssteps, task.Steps...)
+	}
+	if len(ssteps) != 2 {
+		t.Fatalf("got %d steps, want 2", len(ssteps))
+	}
+	if ssteps[0].CacheBreak != "" {
+		t.Errorf("step 1 CacheBreak = %q, want empty", ssteps[0].CacheBreak)
+	}
+	if ssteps[1].CacheBreak != "system" {
+		t.Errorf("step 2 CacheBreak = %q, want system", ssteps[1].CacheBreak)
+	}
+}
+
 // TestBuildStructure_ToolCallRefHasNoResultText locks in the fix for the
 // second review's T3 finding: a tool call's RESULT is conversation-history
 // content (the client echoes it back verbatim as the next Step's tool-role

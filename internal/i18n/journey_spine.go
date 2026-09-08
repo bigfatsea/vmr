@@ -9,7 +9,10 @@
 // Findings section's text comes from journey_findings.go.
 package i18n
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // SpineText is render_spine.go's text, in one language.
 type SpineText struct {
@@ -50,6 +53,7 @@ type SpineText struct {
 	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
 	SpinePositionalMatch string                   // appended to a tool result paired by position, not id (level 3)
+	CacheBreakBadge      func(kind string, from, to string) string
 
 	SpineFinalDeliverableTitle        string
 	SpineFinalDeliverableFound        func(stepSeq int, toolName string) string
@@ -132,6 +136,26 @@ func Spine(lang Lang) SpineText {
 			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
 			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
 			SpinePositionalMatch: "（按位置推测，ID 未匹配）",
+			CacheBreakBadge: func(kind string, from, to string) string {
+				switch kind {
+				case "unexplained":
+					return fmt.Sprintf("Cache: 异常骤降 (%s→%s)", from, to)
+				case "provider_switch":
+					return "Cache: 服务端点切换"
+				case "system":
+					return "Cache: 系统提示词变更"
+				case "tools":
+					return "Cache: 工具定义变更"
+				case "history:stitch":
+					return "Cache: 跨会话缝合"
+				case "history:contract":
+					return "Cache: 上下文压缩截断"
+				case "history:fork":
+					return "Cache: 上下文分叉"
+				default:
+					return ""
+				}
+			},
 
 			SpineFinalDeliverableTitle: "## 最终交付物\n\n",
 			SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
@@ -212,6 +236,26 @@ func Spine(lang Lang) SpineText {
 		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
 		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },
 		SpinePositionalMatch: " (matched by position — ID unmatched)",
+		CacheBreakBadge: func(kind string, from, to string) string {
+			switch kind {
+			case "unexplained":
+				return fmt.Sprintf("Cache: unexplained drop (%s→%s)", from, to)
+			case "provider_switch":
+				return "Cache: provider switched"
+			case "system":
+				return "Cache: system prompt changed"
+			case "tools":
+				return "Cache: tool definitions changed"
+			case "history:stitch":
+				return "Cache: context stitched"
+			case "history:contract":
+				return "Cache: context contracted"
+			case "history:fork":
+				return "Cache: context forked"
+			default:
+				return ""
+			}
+		},
 
 		SpineFinalDeliverableTitle: "## Final Deliverable\n\n",
 		SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {

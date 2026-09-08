@@ -671,3 +671,72 @@ func TestFormatDelta(t *testing.T) {
 		}
 	}
 }
+
+func TestCompare_CacheAttribution(t *testing.T) {
+	at := func(sec int) time.Time { return time.Date(2026, 7, 28, 0, 0, sec, 0, time.UTC) }
+	sys := msg("system", "sys prompt")
+	u1 := msg("user", "u1")
+	u2 := msg("user", "u2")
+	a1 := msg("assistant", "a1")
+
+	// Side A has an unexplained drop: 1000 tok (900 cached = 90%) -> 2000 tok (800 cached = 40%)
+	recA1 := goldenRec(at(0), 1000, []any{sys, u1}, goldenSSE("a1", 1000, 10, 900))
+	recA2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("a2", 2000, 10, 800))
+	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA1, recA2})), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build A: %v", err)
+	}
+
+	// Side B has a provider switch: step 2 served by a different endpoint
+	recB1 := goldenRec(at(0), 1000, []any{sys, u1}, goldenSSE("b1", 1000, 10, 900))
+	recB1.Attempts = []audit.Attempt{{Endpoint: "openai-completions:provider_a:agent", DurMS: 1000, Response: &audit.Message{Status: 200}}}
+	recB2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("b2", 1200, 10, 950))
+	recB2.Attempts = []audit.Attempt{{Endpoint: "openai-completions:provider_b:agent", DurMS: 1000, Response: &audit.Message{Status: 200}}}
+	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB1, recB2})), taskseg.Generic, i18n.EN)
+	if err != nil {
+		t.Fatalf("Build B: %v", err)
+	}
+
+	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
+	cmp := Compare(sa, sb, i18n.EN)
+	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, nil, "")
+	cmp.Extras = &extras
+
+	// Check CacheFact stats
+	if extras.Cache.A.Unexplained != 1 {
+		t.Errorf("A.Unexplained = %d, want 1", extras.Cache.A.Unexplained)
+	}
+	if extras.Cache.A.Breaks["unexplained"] != 1 {
+		t.Errorf("A.Breaks[unexplained] = %d, want 1", extras.Cache.A.Breaks["unexplained"])
+	}
+	if extras.Cache.B.Breaks["provider_switch"] != 1 {
+		t.Errorf("B.Breaks[provider_switch] = %d, want 1", extras.Cache.B.Breaks["provider_switch"])
+	}
+
+	// Check markdown rendering
+	mdEN := RenderComparisonMarkdown(cmp, i18n.EN)
+	for _, want := range []string{
+		"## Prompt Cache Hit Rate",
+		"Unexplained Drop",
+		"Provider Switch",
+		"| A | 1 | 0 | 0 | 0 | 0 |",
+		"| B | 0 | 1 | 0 | 0 | 0 |",
+	} {
+		if !strings.Contains(mdEN, want) {
+			t.Errorf("rendered comparison missing %q:\n%s", want, mdEN)
+		}
+	}
+
+	mdZH := RenderComparisonMarkdown(cmp, i18n.ZH)
+	for _, want := range []string{
+		"## Prompt 缓存命中率",
+		"异常骤降",
+		"端点切换",
+		"| A | 1 | 0 | 0 | 0 | 0 |",
+		"| B | 0 | 1 | 0 | 0 | 0 |",
+	} {
+		if !strings.Contains(mdZH, want) {
+			t.Errorf("rendered ZH comparison missing %q:\n%s", want, mdZH)
+		}
+	}
+}

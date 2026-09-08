@@ -286,10 +286,38 @@ func renderCache(w func(string, ...any), c CacheFact, t i18n.CompareText) {
 	w("%s", t.CacheTableHeader)
 	w("| A | %s | %s | %s | %s |\n", pctStr(c.A.FirstRatio), pctStr(c.A.SteadyMean), pctStr(c.A.Min), pctStr(c.A.Max))
 	w("| B | %s | %s | %s | %s |\n\n", pctStr(c.B.FirstRatio), pctStr(c.B.SteadyMean), pctStr(c.B.Min), pctStr(c.B.Max))
+	w("%s", t.CacheBreaksTableHeader)
+	w("| A | %d | %d | %d | %d | %d |\n",
+		c.A.Breaks[string(CacheBreakUnexplained)],
+		c.A.Breaks[string(CacheBreakProviderSwitch)],
+		c.A.Breaks[string(CacheBreakSystem)],
+		c.A.Breaks[string(CacheBreakTools)],
+		historyBreakCount(c.A.Breaks),
+	)
+	w("| B | %d | %d | %d | %d | %d |\n\n",
+		c.B.Breaks[string(CacheBreakUnexplained)],
+		c.B.Breaks[string(CacheBreakProviderSwitch)],
+		c.B.Breaks[string(CacheBreakSystem)],
+		c.B.Breaks[string(CacheBreakTools)],
+		historyBreakCount(c.B.Breaks),
+	)
 	w("%s", t.CacheCurveSummary)
 	w("A: %s\n\n", cacheCurveLine(c.A.Series, t))
 	w("B: %s\n\n", cacheCurveLine(c.B.Series, t))
 	w("</details>\n\n")
+}
+
+func historyBreakCount(breaks map[string]int) int {
+	if len(breaks) == 0 {
+		return 0
+	}
+	tot := 0
+	for k, v := range breaks {
+		if strings.HasPrefix(k, string(CacheBreakHistory)) {
+			tot += v
+		}
+	}
+	return tot
 }
 
 func cacheCurveLine(series []CachePoint, t i18n.CompareText) string {

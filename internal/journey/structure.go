@@ -212,6 +212,13 @@ type StepStructure struct {
 	SysChanged bool           `json:"sys_changed,omitempty"`
 	Compaction *CompactionRef `json:"compaction,omitempty"`
 
+	// CacheBreak is the prompt cache breakdown attribution for this step
+	// ("system", "tools", "provider_switch", "history:stitch", "history:replace_tail",
+	// "unexplained", etc.). "" when first step or normal append with no drop.
+	CacheBreak          string  `json:"cache_break,omitempty"`
+	CacheBreakRatioFrom float64 `json:"cache_break_ratio_from,omitempty"`
+	CacheBreakRatioTo   float64 `json:"cache_break_ratio_to,omitempty"`
+
 	HumanInitiated bool   `json:"human_initiated,omitempty"`
 	NoReply        bool   `json:"no_reply,omitempty"`
 	Finish         string `json:"finish,omitempty"`
@@ -402,20 +409,8 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore, repeats
 	if s.StitchEdge != nil {
 		ss.StitchEdge = &StitchRef{Kind: s.StitchEdge.Kind.String(), Score: s.StitchEdge.Score, Confidence: s.StitchEdge.Confidence}
 	}
-	if s.Compaction != nil {
-		var excerptRef string
-		if s.Compaction.PredecessorTextExcerpt != "" {
-			excerpt, _ := truncateText(s.Compaction.PredecessorTextExcerpt, maxBodyExcerptChars)
-			excerptRef = bodies.put(excerpt)
-		}
-		ss.Compaction = &CompactionRef{
-			TokensBefore:          s.Compaction.TokensBefore,
-			TokensAfter:           s.Compaction.TokensAfter,
-			PredecessorExcerptRef: excerptRef,
-			SwallowedEntities:     s.Compaction.SwallowedEntities,
-			SurvivedEntities:      s.Compaction.SurvivedEntities,
-		}
-	}
+	populateStepCacheBreak(&ss, steps, i, s)
+	populateStepCompaction(&ss, s, bodies)
 
 	if len(s.ToolCalls) > 0 {
 		paired := pairToolResults(steps, i)
@@ -456,4 +451,41 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore, repeats
 	}
 
 	return ss
+}
+
+func populateStepCacheBreak(ss *StepStructure, steps []*Step, i int, s *Step) {
+	if i <= 0 || steps[i-1] == nil || steps[i-1].Manifest == nil || s.Manifest == nil {
+		return
+	}
+	prevM := steps[i-1].Manifest
+	curM := s.Manifest
+	cb := ComputeCacheBreak(prevM, curM, s.Edge, s.StitchEdge)
+	if cb == CacheBreakNone {
+		return
+	}
+	ss.CacheBreak = string(cb)
+	if rFrom, ok := CacheRatio(prevM); ok {
+		ss.CacheBreakRatioFrom = rFrom
+	}
+	if rTo, ok := CacheRatio(curM); ok {
+		ss.CacheBreakRatioTo = rTo
+	}
+}
+
+func populateStepCompaction(ss *StepStructure, s *Step, bodies blobStore) {
+	if s.Compaction == nil {
+		return
+	}
+	var excerptRef string
+	if s.Compaction.PredecessorTextExcerpt != "" {
+		excerpt, _ := truncateText(s.Compaction.PredecessorTextExcerpt, maxBodyExcerptChars)
+		excerptRef = bodies.put(excerpt)
+	}
+	ss.Compaction = &CompactionRef{
+		TokensBefore:          s.Compaction.TokensBefore,
+		TokensAfter:           s.Compaction.TokensAfter,
+		PredecessorExcerptRef: excerptRef,
+		SwallowedEntities:     s.Compaction.SwallowedEntities,
+		SurvivedEntities:      s.Compaction.SurvivedEntities,
+	}
 }
