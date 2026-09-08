@@ -34,17 +34,6 @@ type ProviderPricingConfig struct {
 	Aliases map[string]string `yaml:"aliases"`
 	// Rates is a first-match-wins rule list — see PricingOverrideConfig.
 	Rates []PricingOverrideConfig `yaml:"rates"`
-
-	// Legacy field-name shims for the pre-simplification names — see
-	// UnmarshalYAML. Only consulted at unmarshal time, never carried into
-	// the resolved value. Kept as exported yaml tags so a migrated config
-	// file (one that still says `pricing.map:` / `pricing.overrides:`)
-	// decodes cleanly into the new fields with a deprecation note, instead
-	// of erroring with the generic "field X not found" the rest of strict
-	// YAML produces. Kept exported for symmetry with the named fields and
-	// so go test can pin a behavior via struct literals if it ever needs to.
-	MapLegacy       map[string]string       `yaml:"map,omitempty"`
-	OverridesLegacy []PricingOverrideConfig `yaml:"overrides,omitempty"`
 }
 
 // UnmarshalYAML implements the legacy `map`/`overrides` rename shim
@@ -93,11 +82,9 @@ func (p *ProviderPricingConfig) UnmarshalYAML(node *yaml.Node) error {
 	p.Rates = raw.Rates
 	if len(raw.MapOld) > 0 {
 		p.Aliases = raw.MapOld
-		p.MapLegacy = raw.MapOld
 	}
 	if len(raw.OldOver) > 0 {
 		p.Rates = raw.OldOver
-		p.OverridesLegacy = raw.OldOver
 	}
 	return nil
 }

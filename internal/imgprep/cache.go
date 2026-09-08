@@ -124,13 +124,12 @@ func maybeSweepCache(dir string, ttlDays int, now time.Time) {
 // disables time-based eviction (kept-forever) is exactly the case that most
 // needs a disk-space backstop.
 const DefaultCacheCapBytes int64 = 50 << 20
-const defaultCacheCapBytes = DefaultCacheCapBytes
 
 // sweepCacheDir deletes cache entries whose mtime is older than ttlDays, plus
 // any stray ".tmp-" temp file left behind by a cacheStore that crashed
 // mid-write (cacheStore's rename is atomic, but a kill -9 between CreateTemp
 // and Rename leaks the temp file forever otherwise), and enforces
-// defaultCacheCapBytes by evicting the oldest entries once accumulated size
+// DefaultCacheCapBytes by evicting the oldest entries once accumulated size
 // exceeds it. Best-effort throughout: an unreadable/unremovable entry is
 // skipped, not fatal. ttlDays<=0 disables only the time-based eviction
 // (entries are kept forever by mtime); the capacity cap still applies. Runs
@@ -139,7 +138,7 @@ const defaultCacheCapBytes = DefaultCacheCapBytes
 // distinct new images within a day can push the directory over 50MB until
 // the next triggered sweep catches up.
 func sweepCacheDir(dir string, ttlDays int, now time.Time) {
-	sweepCacheDirWithCap(dir, ttlDays, now, defaultCacheCapBytes)
+	sweepCacheDirWithCap(dir, ttlDays, now, DefaultCacheCapBytes)
 }
 
 func sweepCacheDirWithCap(dir string, ttlDays int, now time.Time, capBytes int64) {
