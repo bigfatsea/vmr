@@ -239,8 +239,8 @@ type StepStructure struct {
 	NewEvents    []EventRef    `json:"new_events,omitempty"`
 
 	// SysHash/SysChars identify this Step's leading system block — the
-	// (HasSys, SysHash) grouping systemPromptEras (render_md_sysprompt.go,
-	// mirrored over this shape by the viewmodel) needs, plus the char
+	// (HasSys, SysHash) grouping the system-prompt-era rendering
+	// (buildVMSysPrompt) needs, plus the char
 	// count that era line shows. SysHash nil = no leading system block;
 	// SysChars is 0 for those Steps and for a manifest without a count.
 	SysHash  *ctxgraph.Hash `json:"sys_hash,omitempty"`

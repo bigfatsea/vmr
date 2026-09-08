@@ -21,19 +21,11 @@ type AttemptFact struct {
 	Model    string
 }
 
-// parseManifestBody is buildFrom's per-manifest preamble: decode the
-// request body once and derive the message list, its raw form, the
-// index offset between them, and the real-user-instruction index every
+// parseManifestBodyIncremental is buildFrom's per-manifest preamble: decode
+// the request body once and derive the message list, its raw form, the index
+// offset between them, and the real-user-instruction index (via
+// stepFactState.computeRU, which reuses the previous step's prefix) every
 // downstream step-level decision reads.
-func parseManifestBody(rec *audit.Record, prof taskseg.Profile) (msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers) {
-	body, _ := rec.Client.Request.Body.(map[string]any)
-	msgs = chatmsg.Messages(body)
-	rawMsgs = chatmsg.RawArray(body)
-	off = chatmsg.MsgOffset(body)
-	ru = taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
-	return
-}
-
 func parseManifestBodyIncremental(rec *audit.Record, prof taskseg.Profile, deltaStart, curLeadSys int, sysChanged bool, state *stepFactState) (msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers) {
 	body, _ := rec.Client.Request.Body.(map[string]any)
 	msgs = chatmsg.Messages(body)
@@ -88,20 +80,6 @@ func leadingSystemParts(msgs []chatmsg.Message, leadSys int) []string {
 		parts[i] = msgs[i].Text
 	}
 	return parts
-}
-
-// stepContextPoint sums a request body's estimated tokens by message role —
-// the per-Step composition metrics.go's contextCurve renders. Formerly
-// recomputed in metrics.go by re-parsing Step.Rec's body; extracted here so
-// the body parse happens once, in buildFrom, alongside every other use of
-// the same message list.
-func stepContextPoint(seq int, msgs []chatmsg.Message) ContextPoint {
-	p := ContextPoint{Seq: seq}
-	for _, msg := range msgs {
-		tk := tokenutil.EstimateText(msg.Text)
-		accumulateContextToken(&p, msg.Role, tk)
-	}
-	return p
 }
 
 type roleTokens struct {

@@ -303,7 +303,7 @@ func planExecRatio(steps []*Step) float64 {
 
 // contextCurve is each Step's own request-body role/token composition, one
 // point per Step — extracted once at build time by fillStepFacts
-// (journey_stepfacts.go's stepContextPoint), collected here.
+// (journey_stepfacts.go's stepFactState.updateContext), collected here.
 func contextCurve(steps []*Step) []ContextPoint {
 	out := make([]ContextPoint, 0, len(steps))
 	for _, s := range steps {

@@ -1,12 +1,12 @@
 // Ver 2026-08-12 23:40, by Opus 5
 
-// Pairs with internal/journey/render_modelusage.go — one Journey's upstream
-// model usage/switches.
+// One Journey's upstream model usage/switches text — consumed by
+// internal/journey/viewmodel_build.go's vmModelUsage.
 package i18n
 
 import "strconv"
 
-// ModelUsageText is render_modelusage.go's text, in one language.
+// ModelUsageText is the model-usage block's text, in one language.
 type ModelUsageText struct {
 	Title           string
 	UsageHeader     string // header+separator row: model, steps, in, cached, out

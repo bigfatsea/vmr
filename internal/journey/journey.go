@@ -58,8 +58,8 @@ type Journey struct {
 	InitialInstruction string
 	// SysText maps each leading-system-block SysHash the Journey used to
 	// that block's individual message texts — populated by fillStepFacts,
-	// deduped by hash. compare.go's sysPromptStats and
-	// render_md_sysprompt.go read it instead of re-parsing a Step's Record.
+	// deduped by hash. compare.go's sysPromptStats and viewmodel_build.go's
+	// buildVMSysPrompt read it instead of re-parsing a Step's Record.
 	SysText map[ctxgraph.Hash][]string
 }
 
@@ -180,7 +180,7 @@ type Step struct {
 	// re-scanning that Step's raw body.
 	NewToolResults []chatmsg.ToolResult
 	// SysChars is the rune length of this Step's leading system block (the
-	// text behind Manifest.SysHash) — render_md_sysprompt.go / compare.go
+	// text behind Manifest.SysHash) — buildVMSysPrompt / compare.go
 	// show it per system-prompt era. 0 when the request had no leading
 	// system message.
 	SysChars int

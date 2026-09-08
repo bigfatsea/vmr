@@ -2,10 +2,10 @@
 
 // Journey ViewModel builders for the document's front half — header, system
 // prompt eras, overview card, behavior indicators, model usage — over the
-// self-contained JourneySummary (viewmodel.go). Every function here is the
-// viewmodel-side counterpart of its render_md.go / render_md_sysprompt.go /
-// render_spine.go namesake: same bytes, different input (JourneySummary
-// instead of *Journey), structured VM output instead of direct writes.
+// self-contained JourneySummary (viewmodel.go). These builders and
+// render_md.go / render_spine.go share the same output bytes but take
+// different input (JourneySummary instead of *Journey) and emit structured
+// VM blocks instead of writing directly.
 package journey
 
 import (
@@ -235,9 +235,10 @@ func buildVMOverview(s *JourneySummary, lang i18n.Lang) []VMBlock {
 
 // --- detector-coverage disclosure ----------------------------------------------
 
-// vmAnthropicCoverageCodes is journeyAnthropicCoverageCodes's viewmodel
-// counterpart: the same "no Anthropic-messages Steps at all" rule, tallied
-// over StepStructure.Protocol.
+// vmAnthropicCoverageCodes applies the detector-coverage disclosure rule to a
+// single journey: when it has no Anthropic-messages Steps at all (tallied over
+// StepStructure.Protocol), return the affected detector/metric list so the
+// spine can disclose that those checks could not run.
 func vmAnthropicCoverageCodes(s *JourneySummary) (codes string, ok bool) {
 	steps := vmSteps(s)
 	if len(steps) == 0 {

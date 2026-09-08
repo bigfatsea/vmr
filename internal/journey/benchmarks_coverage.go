@@ -70,38 +70,11 @@ func anthropicCoverageNote(protocolShare map[string]float64, t i18n.BenchmarksTe
 	return t.AnthropicOnlyCoverageNote(fmtutil.FmtPercent(protocolShare[core.ProtocolAnthropicMessages], 1), strings.Join(names, ", "))
 }
 
-// journeyAnthropicCoverageNote is anthropicCoverageNote's per-journey
-// counterpart (P14.2 follow-up — an independent review, 2026-08-21, found
-// scoping this disclosure to -benchmark only left it unreachable from the
-// default suite, the path most readers actually use). Fires only when j
-// has NO anthropic-messages Steps at all — unlike the corpus note's "not
-// literally 100%" rule, a single journey's traffic is normally not
-// mixed-protocol, so "any Anthropic Steps present" is the meaningful
-// binary here, not a percentage.
-func journeyAnthropicCoverageNote(j *Journey, t i18n.SpineText) string {
-	codes, ok := journeyAnthropicCoverageCodes(j)
-	if !ok {
-		return ""
-	}
-	return t.AnthropicOnlyCoverageNote(codes)
-}
-
-// journeyAnthropicCoverageCodes returns the affected detector/metric list
-// when j has zero anthropic-messages Steps (ok=false otherwise) —
-// language-independent, so the Markdown note above can wrap the list in
-// its own localized prose.
-func journeyAnthropicCoverageCodes(j *Journey) (codes string, ok bool) {
-	share := protocolShare([]*Journey{j})
-	if len(share) == 0 || share[core.ProtocolAnthropicMessages] > 0 {
-		return "", false
-	}
-	return strings.Join(anthropicOnlyCoverageNames(anthropicOnlyCoverage.JourneySections), ", "), true
-}
-
 // anthropicOnlyCoverageNames flattens anthropicOnlyCoverage's Finding/Metric
 // codes plus the given free-text section names into one ordered list —
-// shared by anthropicCoverageNote and journeyAnthropicCoverageNote so the
-// two can't silently drift on which codes they each remember to include.
+// shared by anthropicCoverageNote and viewmodel_build.go's
+// vmAnthropicCoverageCodes so the two can't silently drift on which codes
+// they each remember to include.
 func anthropicOnlyCoverageNames(sections []string) []string {
 	names := make([]string, 0, len(anthropicOnlyCoverage.Findings)+len(anthropicOnlyCoverage.Metrics)+len(sections))
 	for _, c := range anthropicOnlyCoverage.Findings {

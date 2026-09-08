@@ -33,17 +33,6 @@ import (
 	"vmr/internal/i18n"
 )
 
-// BenchmarksFile and BenchmarksJSONFile define the artifact filenames for corpus benchmarks (D19 / §3.6).
-const (
-	BenchmarksFile     = "benchmarks.md"
-	BenchmarksJSONFile = "benchmarks.json"
-)
-
-// BenchmarksReportFile returns the filename for corpus benchmarks: "benchmarks.md".
-func BenchmarksReportFile() string {
-	return BenchmarksFile
-}
-
 // Distribution summarizes one metric's values across a corpus — mean/
 // median/min/max/p90, deliberately nothing fancier (no skewness, no
 // confidence interval) since the corpus sizes this runs on don't support

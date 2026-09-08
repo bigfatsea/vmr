@@ -9,7 +9,6 @@
 package journey
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -85,22 +84,6 @@ func vmEquivalenceFixture(t *testing.T) *Journey {
 	return j
 }
 
-// vmEquivalenceSysChangeFixture is a 2-record journey whose second request
-// carries a different system prompt (two sysprompt eras).
-func vmEquivalenceSysChangeFixture(t *testing.T) *Journey {
-	t.Helper()
-	at := func(sec int) time.Time { return time.Date(2026, 7, 15, 9, 0, sec, 0, time.UTC) }
-	u1 := msg("user", "keep going")
-	r1 := mkRec(at(0), "", []any{msg("system", "sys v1"), u1}, sseText("ok"))
-	r2 := mkRec(at(2), "", []any{msg("system", "sys v2 — tool set changed"), u1, msg("assistant", "reply")}, sseText("ok2"))
-	path := writeJSONL(t, []audit.Record{r1, r2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	return j
-}
-
 // vmStepHeaderSeq reports whether blk is a spine Step header ("**<tag>
 // Step N · ts>**"), returning its Seq.
 func vmStepHeaderSeq(blk VMBlock) (int, bool) {
@@ -126,13 +109,6 @@ func vmStepHeaderSeq(blk VMBlock) (int, bool) {
 	return seq, true
 }
 
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
-
 // buildGoldenJourney is goldenFixture through the real Build pipeline, shared
 // with the equivalence matrix so the golden corpus is covered there too.
 func buildGoldenJourney(t *testing.T) *Journey {
@@ -150,22 +126,6 @@ func buildGoldenJourney(t *testing.T) *Journey {
 		t.Fatalf("Build: %v", err)
 	}
 	return j
-}
-
-// jsonRoundTripSummary marshals s to JSON and unmarshals it back — the
-// published j-<id>.json shape is the rendering input, so the equivalence
-// claims rest on what survives the file, not on the in-memory struct.
-func jsonRoundTripSummary(t *testing.T, s JourneySummary) *JourneySummary {
-	t.Helper()
-	data, err := json.Marshal(s)
-	if err != nil {
-		t.Fatalf("marshal summary: %v", err)
-	}
-	var out JourneySummary
-	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("unmarshal summary: %v", err)
-	}
-	return &out
 }
 
 // TestVM_MatchConsistentWithSpineRendering is §9's pairing guard: the spine's
