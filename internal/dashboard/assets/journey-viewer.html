@@ -449,6 +449,18 @@
           }
         }
 
+        // --- touched artifacts ---
+        if (Array.isArray(j.artifacts) && j.artifacts.length > 0) {
+          out.push(`<div class="section-title">Touched Artifacts (${j.artifacts.length})</div>`);
+          out.push(`<table class="kv-table"><thead><tr><th>Target Path</th><th>Operation</th><th>First Step</th><th class="num">Calls</th><th>Detection</th></tr></thead><tbody>`);
+          j.artifacts.forEach(a => {
+            const stepId = `step-${a.first_step}`;
+            const basis = a.heuristic ? 'Shell heuristic' : 'Structured parameter';
+            out.push(`<tr><td><code>${esc(a.path)}</code></td><td>${esc(a.op)}</td><td><a href="#${stepId}" onclick="document.getElementById('${stepId}')?.scrollIntoView({behavior:'smooth'})">Step ${a.first_step}</a></td><td class="num">${a.count}</td><td>${basis}</td></tr>`);
+          });
+          out.push(`</tbody></table>`);
+        }
+
         // --- decision spine (tasks & steps) ---
         out.push(`<div class="section-title">Decision Spine · Tasks &amp; Steps</div>`);
         (structure.tasks || []).forEach((task, ti) => {
@@ -490,7 +502,7 @@
               }
             }
             const cls = (s.outcome === 'error' || s.has_error_marker) ? 'error' : ((s.compaction || s.stitch_edge) ? 'flagged' : '');
-            out.push(`<div class="step ${cls}">
+            out.push(`<div class="step ${cls}" id="step-${s.seq}">
               <div class="step-top">
                 <span class="step-seq">${stepRoleTag(s, repeated, why)} Step ${s.seq}</span>
                 <span class="step-ts">${esc(s.ts_display || '')}</span>
