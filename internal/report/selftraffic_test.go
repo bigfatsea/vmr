@@ -95,7 +95,7 @@ func TestSelfTrafficExclusion_ConfiguredButNothingMatched(t *testing.T) {
 	if !rep.Meta.SelfTrafficExclusionActive {
 		t.Fatal("SelfTrafficExclusionActive = false, want true (a non-empty exclusion set was passed)")
 	}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if !strings.Contains(md, "Self-traffic: exclusion active") {
 		t.Errorf("appendix should say exclusion is active:\n%s", md)
 	}

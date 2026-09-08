@@ -491,8 +491,8 @@ token/成本是分析行为本身的开销，不是被分析工作负载的一�
 不是重新解析——真正的单遍扫描收益因此有限，而实现成本（把 `AnalyzeSessionsCached` 的扫描与它的
 图构建拆开，让 report/journey 都能接受一个已经建好的 `*ctxgraph.Graph`）不成比例，予以搁置。
 
-**顺序不是任意的**：journey 半区必须先跑、report 半区后跑——`report.Markdown` 只在渲染时
-`journeys/index.json` 已存在才会挂链接（`loadStoriesLink`），叙事半区先跑能让这条边
+**顺序不是任意的**：journey 半区必须先跑、report 半区后跑——`report.MacroMarkdown` 只在渲染时
+`journeys/index.json` 已存在才会挂链接（`loadJourneysLink`），叙事半区先跑能让这条边
 在**第一次** `vmr analyze` 调用就命中，而不是要等到第二次运行。
 
 默认路径是当前目录下的 `report.yaml`（不存在就安静跳过，回退默认值，不报错），也可以用 `-report-config path` 显式指定。schema 与解析（`cmd/vmr/reportconfig.go`）不经过 `internal/config`——字段不多，不需要那套面向路由配置的复杂校验，但同样用 `yaml.Decoder.KnownFields(true)` 严格解码：拼错字段名是加载错误，不是静默的无操作。

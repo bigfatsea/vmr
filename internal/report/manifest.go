@@ -72,20 +72,6 @@ func NewTimePoint(t time.Time) TimePoint {
 	}
 }
 
-// ParseTimePoint parses an RFC3339 timestamp into a TimePoint.
-func ParseTimePoint(s string) TimePoint {
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return TimePoint{TSDisplay: s}
-	}
-	return NewTimePoint(t)
-}
-
-// Time converts the epoch millisecond timestamp back to a time.Time.
-func (tp TimePoint) Time() time.Time {
-	return time.UnixMilli(tp.TS)
-}
-
 // InputFile pairs an input audit log path with its SHA-256 digest (§3.4).
 type InputFile struct {
 	Path   string `json:"path"`
@@ -343,12 +329,6 @@ func requireMacroSlices(slices map[string]SliceRef) error {
 		}
 	}
 	return nil
-}
-
-// HashBytes computes the lowercase hex-encoded SHA-256 digest of b.
-func HashBytes(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }
 
 // HashFile computes the lowercase hex-encoded SHA-256 digest of the file at path.

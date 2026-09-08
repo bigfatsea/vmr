@@ -71,11 +71,6 @@ func MacroMarkdown(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo, j
 	return RenderMarkdown(BuildMacroReportVM(rep, lang, journeyIdx, journeyLink))
 }
 
-// Markdown renders rep via the single ViewModel path.
-func Markdown(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo, journeyLink map[string]string) string {
-	return MacroMarkdown(rep, lang, journeyIdx, journeyLink)
-}
-
 // LoadReport assembles the macro report's in-memory shape from the on-disk
 // slice set (D2/D11: with the monolithic vmr-report.json gone, the slices
 // are the only persisted macro data, so the markdown rebuild reads exactly

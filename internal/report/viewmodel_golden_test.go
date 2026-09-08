@@ -75,11 +75,6 @@ func withWorkload(class string, reqs, ok, errs int, in, cached, out int64, known
 	return w
 }
 
-func withSessionErrs(s SessionRow) SessionRow {
-	s.Errors = 1
-	return s
-}
-
 func withDate(r Row, cost *float64) Row {
 	r.CostEstimate = cost
 	return r

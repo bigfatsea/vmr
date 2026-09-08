@@ -224,7 +224,7 @@ func TestMarkdownAndJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if !containsAll(md, []string{"# VMR Usage Report", "## §0 Summary", "## §1 Cost & Token Economy", "## §2 Pay-As-You-Go Equivalent Cost", "## §8 Request Detail Index"}) {
 		t.Fatalf("Markdown missing expected sections")
 	}
@@ -765,7 +765,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if !strings.Contains(md, "Quirk Fix × Endpoint") {
 		t.Fatalf("markdown missing the quirk-by-endpoint section:\n%s", md)
 	}
@@ -789,7 +789,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md2 := Markdown(rep2, i18n.EN, nil, nil)
+	md2 := MacroMarkdown(rep2, i18n.EN, nil, nil)
 	if strings.Contains(md2, "Quirk Fix") {
 		t.Errorf("quirk section must not render when no endpoint has a non-zero NormCounts:\n%s", md2)
 	}
@@ -1414,7 +1414,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 		t.Errorf("swallowed entities = %v, want [drop.go]", c.SwallowedEntities)
 	}
 
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if !strings.Contains(md, "§6.7 Compaction Reconstruction") {
 		t.Error("rendered Markdown missing the §6.7 Compaction section header")
 	}
@@ -1437,7 +1437,7 @@ func TestRenderCompactionsTSConvertsToDisplayZone(t *testing.T) {
 	rep := &Report2{Compactions: []CompactionRow{
 		{TS: "2026-07-24T00:00:00Z", TokensIn: 100, TokensOut: 10},
 	}}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if !strings.Contains(md, "2026-07-24 05:00:00") {
 		t.Errorf("compaction TS should render as 05:00:00 in DisplayZone (TEST+05:00), not the source 00:00:00 UTC:\n%s", md)
 	}
@@ -1454,7 +1454,7 @@ func TestRenderCompactionsZeroUsageIsNotAMeasuredZero(t *testing.T) {
 	rep := &Report2{Compactions: []CompactionRow{
 		{TS: "2026-07-24T00:00:00Z", Summarizes: "l-77c20384", SwallowedEntities: []string{"~/ENV.md"}},
 	}}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if strings.Contains(md, "0 → 0") {
 		t.Errorf("zero-usage compaction rendered a literal \"0 → 0\":\n%s", md)
 	}
@@ -1474,7 +1474,7 @@ func TestMarkdownTableCellsWithPercentRenderVerbatim(t *testing.T) {
 				ErrorClasses: map[string]int{"transient": 1}},
 		},
 	}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if strings.Contains(md, "MISSING") {
 		t.Fatalf("rendered Markdown contains a corrupted Printf verb (percent sign in a table cell mishandled):\n%s", md)
 	}
@@ -1497,7 +1497,7 @@ func TestMarkdownEscapesUserDerivedTitles(t *testing.T) {
 				Title:        "run `ps aux | grep vmr` <!-- unclosed"},
 		},
 	}
-	md := Markdown(rep, i18n.EN, nil, nil)
+	md := MacroMarkdown(rep, i18n.EN, nil, nil)
 	if strings.Contains(md, "aux | grep") {
 		t.Errorf("raw pipe in a session title leaked into the table (row corruption):\n%s", md)
 	}

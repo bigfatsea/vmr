@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -151,60 +150,6 @@ func orDashModel(m string) string {
 		return "-"
 	}
 	return m
-}
-
-func turnCell(t int) string {
-	if t == 0 {
-		return "-"
-	}
-	return strconv.Itoa(t)
-}
-
-func msgsCell(n int) string {
-	if n == 0 {
-		return "-"
-	}
-	return strconv.Itoa(n)
-}
-
-func msOrDash(v int64) string {
-	if v <= 0 {
-		return "-"
-	}
-	return fmtDurMS(v)
-}
-
-func finishCell(r RequestRow) string {
-	if r.Outcome != "ok" {
-		// An error/canceled turn with no ErrorClass (pre-routing reject:
-		// unreadable/oversized body, missing model; or a cancel while
-		// queued for a slot — none of these ever reach an upstream, so
-		// nothing classifies them) would otherwise fall through to a bare
-		// "-" and read as a normal finish. Mirror outcomeCell's fallback.
-		ec := r.ErrorClass
-		if ec == "" {
-			ec = "unclassified"
-		}
-		return "❌" + ec
-	}
-	if r.Truncated {
-		return "⚠️trunc"
-	}
-	return orDash(r.Finish)
-}
-
-func freshCachedOut(r RequestRow) string {
-	if r.TokensIn == 0 && r.TokensOut == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(r.TokensInFresh), fmtutil.FmtTokens(r.TokensInCached), fmtutil.FmtTokens(r.TokensOut))
-}
-
-func cacheEffTurn(r RequestRow) string {
-	if r.TokensIn == 0 {
-		return "-"
-	}
-	return pctStr(r.CacheEff)
 }
 
 // buildDetailFileSet lists detailDir once and returns its .md basenames as

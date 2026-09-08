@@ -139,11 +139,11 @@ func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
 		loaded := *base
 		loaded.Meta.ReportConfigPath = "/etc/vmr/report.yaml"
-		if md := Markdown(&loaded, lang, nil, nil); !strings.Contains(md, "/etc/vmr/report.yaml") {
+		if md := MacroMarkdown(&loaded, lang, nil, nil); !strings.Contains(md, "/etc/vmr/report.yaml") {
 			t.Errorf("lang=%v: loaded report.yaml path missing from the meta header", lang)
 		}
 		absent := *base
-		md := Markdown(&absent, lang, nil, nil)
+		md := MacroMarkdown(&absent, lang, nil, nil)
 		if strings.Contains(md, "report.yaml)") || !strings.Contains(md, i18n.Doc(lang).MetaReportConfig("")) {
 			t.Errorf("lang=%v: 'no report.yaml loaded' must still say so explicitly:\n%s", lang, md)
 		}

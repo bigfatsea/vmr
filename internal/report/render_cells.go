@@ -189,16 +189,6 @@ func sortedKeysInt(m map[string]int) []string {
 	return out
 }
 
-func sanitize(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // ---- mermaid charts ----
 
 // hourLabels returns the fixed 24-hour x-axis category list ("00".."23"),
