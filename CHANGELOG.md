@@ -22,6 +22,10 @@ commits and design docs hold the full reasoning.
 ## [Unreleased]
 
 ### Added
+- `vmr diff <coordA> <coordB>`: request-level structural comparison CLI command for comparing two audit records on header, system prompt, tools, message sequence LCP/divergence, and automated structural verdict
+- Prompt cache break attribution: ctxgraph manifests now capture `tools_hash` (cache schema version bumped to 9); steps record structured `cache_break` attribution (`system`, `tools`, `provider_switch`, `history:*`, and `unexplained` sudden drops) rendered across decision spine markdown, journey-viewer timeline badges, and compare views
+- Touched artifacts tracking: journey extraction now identifies workspace files mutated or touched by structured file tools and bash command heuristics, persisted in `j-<id>.json`'s `artifacts` and rendered with step anchor jumps in journey-viewer
+- Repeated task clustering: `journeys/index.json` and `index.md` now automatically group candidate journeys sharing similar opening instructions into task clusters, identifying multi-run experiments and suggesting one-click `vmr analyze -compare` commands
 - `-llm-addr` interpretation results now persist into the JSON products (design doc §3.6): `j-<id>.json` carries `llm_interpretation` and the compare JSON carries `llm_interpretation` + `llm_divergence`, each holding the model, duration, status, and the model's own text; the `.md`'s interpretation section(s) render from those records, so `-render-only` reproduces them from the JSON instead of scraping the previous `.md` (a failed call is recorded with `status: "failed"` and renders nothing, matching the previous degrade behavior)
 
 ### Changed
