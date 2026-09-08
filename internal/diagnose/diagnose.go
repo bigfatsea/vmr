@@ -60,7 +60,7 @@ const (
 
 // Result is one line of diagnostic output.
 type Result struct {
-	Phase  string `json:"phase"`           // config | env | connect | route
+	Phase  string `json:"phase"`           // config | check | env | connect | route
 	Group  string `json:"group,omitempty"` // route phase only: "<virtual model> [<protocol>]", groups its endpoints together
 	Target string `json:"target"`          // what this result is about (provider, endpoint, or — within a route Group — just that endpoint's rank/name)
 	Status Status `json:"status"`

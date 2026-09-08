@@ -86,11 +86,10 @@ func WriteSkeletons(dir string) error {
 	return nil
 }
 
-// AssetNames exposes the embedded skeleton page names (walked from the
-// embed FS, not the hardcoded list) — Group 2B's analyze wiring uses this
-// to report what it refreshed; the filesystem walk over the embed FS is the
-// source of truth, so a page added to assets/ but missed in skeletonPages
-// would show up here as a test failure instead of silently not shipping.
+// AssetNames exposes the embedded skeleton page names, walked from the
+// embed FS rather than the hardcoded skeletonPages list — a test asserts
+// the two agree, so a page added to assets/ but missed in skeletonPages
+// shows up as a test failure instead of silently not shipping.
 func AssetNames() ([]string, error) {
 	var out []string
 	err := fs.WalkDir(assets, "assets", func(path string, d fs.DirEntry, err error) error {

@@ -122,7 +122,7 @@ func truncCell(s string, n int, t i18n.DetailText) string {
 }
 
 // jsonIndent pretty-prints any decoded JSON value with SetEscapeHTML(false)
-// so HTML characters (<, >, &) are not mangled into \u003c, \u003e, \u0026 (问题 14).
+// so HTML characters (<, >, &) are not mangled into \u003c, \u003e, \u0026.
 func jsonIndent(v any) string {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

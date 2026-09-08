@@ -35,8 +35,9 @@ func positiveFinite(v float64) bool {
 
 // nonNegativeFinite is positiveFinite's variant for price components, where
 // 0.0 is a meaningful value (explicitly free) but a negative or non-finite
-// one never is — a negative rate would drive Counters.Cost DOWN on every
-// charge, making an account look progressively more (not less) unused.
+// one never is — a negative rate would understate spend in vmr analyze's $
+// estimates, making an account with a data-entry typo look progressively
+// cheaper.
 func nonNegativeFinite(v float64) bool {
 	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0
 }

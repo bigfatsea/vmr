@@ -119,9 +119,9 @@ type StitchResolution struct {
 
 // Thresholds — same calibration philosophy as edit.go's (code constants,
 // not config; see edit.go's own comment for why). Initial values, not yet
-// corpus-recalibrated the way contractLenRatio/forkCoverage were (design
-// a corpus re-run recorded the resulting distribution these produce on
-// the 2026-07-14..28 corpus — tune here if a wider corpus disagrees).
+// corpus-recalibrated the way contractLenRatio/forkCoverage were: a
+// one-time corpus run recorded the distribution these produce on the
+// 2026-07-14..28 corpus — re-check and tune here if a wider corpus disagrees.
 const (
 	// stitchCompactionScore: a Contract-origin break stitches as
 	// StitchCompaction when the successor's opening manifest shares at

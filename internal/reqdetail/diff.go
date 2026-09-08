@@ -1,9 +1,9 @@
 // Ver 2026-08-20 00:00, by Sonnet 5
 
-// Full-list diffs（全部列出，仅标记变化）— split out of detail.go once it
-// crossed the archtest file-size budget; this half is the "compare two
-// versions of the same shape" half (headers, body fields, messages, tools),
-// detail.go is the document skeleton that calls into it.
+// Full-list diffs (every item listed, only the changes marked) — split out
+// of detail.go once it crossed the archtest file-size budget; this half is
+// the "compare two versions of the same shape" half (headers, body fields,
+// messages, tools), detail.go is the document skeleton that calls into it.
 package reqdetail
 
 import (

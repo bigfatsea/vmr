@@ -91,7 +91,7 @@ type Options struct {
 // the common inline-data shape ({"type":"input_image","image_url":"data:..."})
 // is already caught by the first check via the "image_url" key itself, but a
 // Files-API-referenced block ({"type":"input_image","file_id":"..."}, no
-// image_url field at all) has no "image_url` substring anywhere — only the
+// image_url field at all) has no "image_url" substring anywhere — only the
 // type value "input_image" names it, and that value's leading '"' is
 // preceded by "input_" rather than immediately followed by "image", so it
 // doesn't match the first check either. Checking for the bare type-value

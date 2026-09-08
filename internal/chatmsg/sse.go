@@ -17,7 +17,7 @@ type StreamSummary struct {
 	Content   string
 	ToolCalls []ToolCall
 	Finish    string // finish_reason / stop_reason
-	Model     string // model名 as seen in events (post-rewrite on client side)
+	Model     string // model name as seen in events (post-rewrite on client side)
 }
 
 // ReassembleSSE rebuilds the assistant message from a raw SSE body. Handles

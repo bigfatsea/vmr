@@ -11,8 +11,9 @@ import (
 	"vmr/internal/jsonscan"
 )
 
-// modelKeyLiteral/streamKeyLiteral/messagesKeyLiteral/inputKeyLiteral are
-// this package's own copies of the same protocol-field literals jsonscan's
+// systemKeyLiteral/instructionsKeyLiteral/modelKeyLiteral/streamKeyLiteral/
+// messagesKeyLiteral/inputKeyLiteral are this package's own copies of the
+// same protocol-field literals jsonscan's
 // RewriteModel/RewriteStream/RewriteRoles/RewriteInputRoles use internally —
 // duplicated on purpose rather than exported from jsonscan and imported here:
 // they're immutable byte constants, not shared state, and TopLevelProbe/

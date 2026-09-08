@@ -130,13 +130,13 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 
 	now := time.Now()
 	cs := rt.buildCandidates(snap, protocol, creq, route, r, now)
-	w.Header().Set("X-VMR-Route-Reason", cs.reason.String())
-
-	// Failover walks the whole candidate sequence	// max_attempts (>0) optionally caps the walk to bound tail latency.
 	// Set once, up front: w.Header() is just a map until something calls
 	// WriteHeader, and every path that does so (forwardSuccess,
 	// handleErrorResponse, the all-failed branch below) runs after this.
+	w.Header().Set("X-VMR-Route-Reason", cs.reason.String())
 
+	// Failover walks the whole candidate sequence; max_attempts (>0)
+	// optionally caps the walk to bound tail latency.
 	attempts := 0
 	var last *upstreamError
 	var trail failoverTrail

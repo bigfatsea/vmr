@@ -287,9 +287,10 @@ type Status struct {
 	// reports Available==true here even though Classify — what the router
 	// actually consults this request round — returns available=false for
 	// it (only a background probe gets dispatched, never real traffic,
-	// until that probe reports success). Kept as-is for backward
-	// compatibility with existing consumers of this field; Serving below is
-	// the field that answers "would real traffic route here right now".
+	// until that probe reports success). Kept because vmr status's renderer
+	// uses it to tell a cooled-down endpoint apart from a half-open one;
+	// Serving below is the field that answers "would real traffic route
+	// here right now".
 	Available bool `json:"available"`
 	// Probing is true while a single-flight probe holds this endpoint's
 	// slot — a background probe (see internal/router/probe.go) is

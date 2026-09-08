@@ -37,12 +37,11 @@ type Message struct {
 // pruning) can push the delta boundary far back and sweep an old user
 // message into the "new" range; those must not open a task. Consumed by
 // internal/taskseg.HasNewInstruction — the one shared implementation
-// report's session.go and journey's journey.go both call through (the
-// converged what used to be two independent
-// copies of this same boundary rule). Declared here rather than in taskseg
-// so the two can't silently drift apart even before B3, and so taskseg
-// itself doesn't have to own a constant that's really about message-list
-// shape, not agent-dialect knowledge.
+// report's session.go and journey's journey.go both call through, converged
+// from what used to be two independent copies of this same boundary rule.
+// Declared here rather than in taskseg so the two can't silently drift
+// apart, and so taskseg itself doesn't have to own a constant that's really
+// about message-list shape, not agent-dialect knowledge.
 const NewUserWindow = 8
 
 // ErrorResultMarker is the literal text RenderPart embeds for an Anthropic
