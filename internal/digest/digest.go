@@ -1,7 +1,7 @@
 // Ver 2026-09-07, by Claude (pi)
 
-// Package digest owns the system's single cache-digest construction (D8 /
-// analyze architecture redesign §7.2): a length-prefixed, ordered sha256
+// Package digest owns the system's single cache-digest construction (D8):
+// a length-prefixed, ordered sha256
 // chain. Every cache-admission judgment in the analytics half is a call site
 // of Digest — the properties below are what make the chain safe, and none of
 // them may be weakened:
@@ -21,13 +21,12 @@
 // never via fmt.Sprintf, where a format-verb tweak would silently rotate
 // every fingerprint. This is a cache-criterion hash only: ctxgraph's md5
 // content-addressing base is a separate, deliberately untouched identity
-// system (§7.2's "摘要函数" rule).
+// system.
 package digest
 
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"math"
 )
 
@@ -43,12 +42,6 @@ func Digest(components ...[]byte) [32]byte {
 	var out [32]byte
 	copy(out[:], h.Sum(nil))
 	return out
-}
-
-// DigestHex computes Digest and returns the lowercase hex string.
-func DigestHex(components ...[]byte) string {
-	d := Digest(components...)
-	return hex.EncodeToString(d[:])
 }
 
 // EncodeInt64 encodes an int64 scalar as 8 bytes, big-endian.

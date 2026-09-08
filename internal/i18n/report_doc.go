@@ -46,7 +46,6 @@ type DocText struct {
 	TopErrorSuffix         func(cls string, n int) string
 	RequestIndexTitle      string
 	RequestIndexBody       string
-	PerClientLabel         string
 	DetailsCaptureBody     string
 	// DetailsOnDemandBody is DetailsCaptureBody's counterpart for the
 	// default (-details=false) run, where details/*.md was never
@@ -119,7 +118,6 @@ func Doc(lang Lang) DocText {
 			},
 			RequestIndexTitle:  "§8 请求详单",
 			RequestIndexBody:   "每条请求的机读明细在 `requests/index.json`（含会话/任务标题投影与 journey 交叉链接）；按客户端/模型/端点/耗时/token 筛选、排序、定位单条请求用 `request-browser.html`。\n",
-			PerClientLabel:     "per-client: ",
 			DetailsCaptureBody: "单请求全量捕获（req/resp/SSE）见 `requests/details/*.md`。\n\n",
 			DetailsOnDemandBody: func(example string) string {
 				s := "本次运行未生成 `requests/details/*.md`（默认按需生成）。用坐标（`requests/index.json` 的 `req` 字段，形如 `basename:line`）随时取出单条记录：`vmr replay -print -req <坐标>`"
@@ -196,7 +194,6 @@ func Doc(lang Lang) DocText {
 		},
 		RequestIndexTitle:  "§8 Request Detail Index",
 		RequestIndexBody:   "Machine-readable per-request detail is in `requests/index.json` (with the session/task title projection and journey cross-links); filter by client/model/endpoint/duration/tokens, sort, and locate one request with `request-browser.html`.\n",
-		PerClientLabel:     "per-client: ",
 		DetailsCaptureBody: "Full single-request capture (req/resp/SSE) is in `requests/details/*.md`.\n\n",
 		DetailsOnDemandBody: func(example string) string {
 			s := "This run did not write `requests/details/*.md` (generated on demand by default). Fetch a single record any time by its coordinate (the `req` field of `requests/index.json`, `basename:line`): `vmr replay -print -req <coord>`"

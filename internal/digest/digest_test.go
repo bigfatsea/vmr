@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"math"
 	"testing"
 )
@@ -74,11 +73,6 @@ func TestDigest_Determinism(t *testing.T) {
 	d2 := Digest(c1, c2)
 	if !bytes.Equal(d1[:], d2[:]) {
 		t.Fatalf("Digest must be deterministic: %x != %x", d1, d2)
-	}
-
-	hex1 := DigestHex(c1, c2)
-	if hex1 != hex.EncodeToString(d1[:]) {
-		t.Fatalf("DigestHex mismatch: got %s, want %x", hex1, d1)
 	}
 }
 

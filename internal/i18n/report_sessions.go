@@ -13,9 +13,8 @@ type SessionsText struct {
 	OutcomeFallback     func(n int) string
 	CompactionChainNote func(child, parent string) string
 	// LongTailOpen opens the <details> that folds a client's short-session
-	// tail (n sessions, each at most turnCap turns); LongTailClose ends it.
-	LongTailOpen  func(n, turnCap int) string
-	LongTailClose string
+	// tail (n sessions, each at most turnCap turns); the serializer closes it.
+	LongTailOpen func(n, turnCap int) string
 }
 
 func Sessions(lang Lang) SessionsText {
@@ -33,7 +32,6 @@ func Sessions(lang Lang) SessionsText {
 			LongTailOpen: func(n, turnCap int) string {
 				return "<details><summary>+ 其余 " + itoa64(int64(n)) + " 个会话（均 ≤ " + itoa64(int64(turnCap)) + " 轮）</summary>\n\n"
 			},
-			LongTailClose: "\n</details>\n\n",
 		}
 	}
 	return SessionsText{
@@ -49,6 +47,5 @@ func Sessions(lang Lang) SessionsText {
 		LongTailOpen: func(n, turnCap int) string {
 			return "<details><summary>+ " + itoa64(int64(n)) + " more sessions (all ≤ " + itoa64(int64(turnCap)) + " turns)</summary>\n\n"
 		},
-		LongTailClose: "\n</details>\n\n",
 	}
 }

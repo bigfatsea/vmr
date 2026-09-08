@@ -12,7 +12,6 @@ type LatencyText struct {
 	StreamNote      string
 	ByEndpointTitle string
 	LowSampleOpen   func(n int) string
-	LowSampleClose  string
 }
 
 func Latency(lang Lang) LatencyText {
@@ -33,7 +32,6 @@ func Latency(lang Lang) LatencyText {
 			LowSampleOpen: func(n int) string {
 				return "<details><summary>+ 另有 " + itoa64(int64(n)) + " 个低样本端点（样本 < 20）</summary>\n\n"
 			},
-			LowSampleClose: "\n</details>\n\n",
 		}
 	}
 	return LatencyText{
@@ -52,6 +50,5 @@ func Latency(lang Lang) LatencyText {
 		LowSampleOpen: func(n int) string {
 			return "<details><summary>+ " + itoa64(int64(n)) + " more low-sample endpoints (n < 20)</summary>\n\n"
 		},
-		LowSampleClose: "\n</details>\n\n",
 	}
 }

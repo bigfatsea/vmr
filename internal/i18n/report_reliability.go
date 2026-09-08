@@ -18,7 +18,6 @@ type ReliabilityText struct {
 	ErrorTimelineChart     func() (title, axis string)
 	PeakHourNote           func(hour int, count int64) string
 	LowSampleOpen          func(n int) string
-	LowSampleClose         string
 }
 
 func Reliability(lang Lang) ReliabilityText {
@@ -41,7 +40,6 @@ func Reliability(lang Lang) ReliabilityText {
 			LowSampleOpen: func(n int) string {
 				return "<details><summary>+ 另有 " + itoa64(int64(n)) + " 个低样本端点（尝试 < 20）</summary>\n\n"
 			},
-			LowSampleClose: "\n</details>\n\n",
 		}
 	}
 	return ReliabilityText{
@@ -62,6 +60,5 @@ func Reliability(lang Lang) ReliabilityText {
 		LowSampleOpen: func(n int) string {
 			return "<details><summary>+ " + itoa64(int64(n)) + " more low-sample endpoints (attempts < 20)</summary>\n\n"
 		},
-		LowSampleClose: "\n</details>\n\n",
 	}
 }
