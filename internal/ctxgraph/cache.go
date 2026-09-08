@@ -45,7 +45,11 @@ import (
 // EstIn/EstOut become per-side fills. A cached v6 manifest decodes with
 // both OK flags false and would silently degrade every side to the
 // estimate, so cached v6 entries must not be reused — hence the bump.
-const CacheSchemaVersion = 8
+// v8 (2026-09): Manifest's SessKey prefix changed to anchor:<hash>.
+// v9 (2026-09): Manifest gains ToolsHash / HasTools (digest of top-level
+// tools array) for cache-break attribution. Cached v8 manifests lack
+// tool hashes and must not be reused, hence the bump.
+const CacheSchemaVersion = 9
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

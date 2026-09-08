@@ -9,7 +9,10 @@
 // Findings section's text comes from journey_findings.go.
 package i18n
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // SpineText is render_spine.go's text, in one language.
 type SpineText struct {
@@ -50,6 +53,7 @@ type SpineText struct {
 	SpineInstructionLine func(text string) string // a mid-task Step whose opening carries a new user instruction
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
 	SpinePositionalMatch string                   // appended to a tool result paired by position, not id (level 3)
+	CacheBreakBadge      func(kind string, from, to string) string
 
 	ArtifactsTitle       string
 	ArtifactsSummary     func(count int) string
@@ -138,6 +142,26 @@ func Spine(lang Lang) SpineText {
 			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
 			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
 			SpinePositionalMatch: "（按位置推测，ID 未匹配）",
+			CacheBreakBadge: func(kind string, from, to string) string {
+				switch kind {
+				case "unexplained":
+					return fmt.Sprintf("Cache: 异常骤降 (%s→%s)", from, to)
+				case "provider_switch":
+					return "Cache: 服务端点切换"
+				case "system":
+					return "Cache: 系统提示词变更"
+				case "tools":
+					return "Cache: 工具定义变更"
+				case "history:stitch":
+					return "Cache: 跨会话缝合"
+				case "history:contract":
+					return "Cache: 上下文压缩截断"
+				case "history:fork":
+					return "Cache: 上下文分叉"
+				default:
+					return ""
+				}
+			},
 
 			ArtifactsTitle:       "## 触达文件与资产\n\n",
 			ArtifactsSummary:     func(count int) string { return "任务过程共记录 " + strconv.Itoa(count) + " 个触达目标：\n\n" },
@@ -224,6 +248,26 @@ func Spine(lang Lang) SpineText {
 		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
 		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },
 		SpinePositionalMatch: " (matched by position — ID unmatched)",
+		CacheBreakBadge: func(kind string, from, to string) string {
+			switch kind {
+			case "unexplained":
+				return fmt.Sprintf("Cache: unexplained drop (%s→%s)", from, to)
+			case "provider_switch":
+				return "Cache: provider switched"
+			case "system":
+				return "Cache: system prompt changed"
+			case "tools":
+				return "Cache: tool definitions changed"
+			case "history:stitch":
+				return "Cache: context stitched"
+			case "history:contract":
+				return "Cache: context contracted"
+			case "history:fork":
+				return "Cache: context forked"
+			default:
+				return ""
+			}
+		},
 
 		ArtifactsTitle:       "## Touched Artifacts\n\n",
 		ArtifactsSummary:     func(count int) string { return "Recorded " + strconv.Itoa(count) + " target(s) touched during execution:\n\n" },

@@ -463,6 +463,32 @@
             if (s.stitch_edge) flags.push('<span class="badge-pill badge-warn">stitch</span>');
             if (s.compaction) flags.push('<span class="badge-pill badge-warn">compaction</span>');
             if (s.human_initiated) flags.push('<span class="badge-pill badge-ok">human</span>');
+            if (s.cache_break) {
+              const cb = s.cache_break;
+              let cbText = '';
+              let cbClass = 'badge-warn';
+              if (cb === 'unexplained') {
+                cbClass = 'badge-alert';
+                const from = pct0(s.cache_break_ratio_from || 0);
+                const to = pct0(s.cache_break_ratio_to || 0);
+                cbText = `Cache: unexplained drop (${from}→${to})`;
+              } else if (cb === 'provider_switch') {
+                cbText = 'Cache: provider switched';
+              } else if (cb === 'system') {
+                cbText = 'Cache: system prompt changed';
+              } else if (cb === 'tools') {
+                cbText = 'Cache: tool definitions changed';
+              } else if (cb === 'history:contract') {
+                cbText = 'Cache: context contracted';
+              } else if (cb === 'history:fork') {
+                cbText = 'Cache: context forked';
+              } else if (cb === 'history:stitch') {
+                cbText = 'Cache: context stitched';
+              }
+              if (cbText) {
+                flags.push(`<span class="badge-pill ${cbClass}">${esc(cbText)}</span>`);
+              }
+            }
             const cls = (s.outcome === 'error' || s.has_error_marker) ? 'error' : ((s.compaction || s.stitch_edge) ? 'flagged' : '');
             out.push(`<div class="step ${cls}">
               <div class="step-top">

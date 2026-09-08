@@ -70,7 +70,11 @@ func vmDetailFileName(ss *StepStructure) string {
 }
 
 func vmStepHeader(ss *StepStructure, repeated, flagged bool, reply, reasoning string, t i18n.SpineText, linkDetails bool) string {
-	header := "**" + vmStepRoleTag(ss, repeated, reply, reasoning, t) + " Step " + strconv.Itoa(ss.Seq) + " · " + vmStepTS(ss) + "**"
+	header := "**" + vmStepRoleTag(ss, repeated, reply, reasoning, t) + " Step " + strconv.Itoa(ss.Seq) + " · " + vmStepTS(ss)
+	if cbBadge := vmCacheBreakBadge(ss, t); cbBadge != "" {
+		header += " · " + cbBadge
+	}
+	header += "**"
 	if flagged {
 		header += t.SpineFindingTag
 	}
@@ -84,6 +88,15 @@ func vmStepHeader(ss *StepStructure, repeated, flagged bool, reply, reasoning st
 		header += t.SpineDetailCoord(ss.Req)
 	}
 	return header
+}
+
+func vmCacheBreakBadge(ss *StepStructure, t i18n.SpineText) string {
+	if ss == nil || !ShouldDisplayCacheBreak(ss.CacheBreak) || t.CacheBreakBadge == nil {
+		return ""
+	}
+	from := fmtutil.FmtPercent(ss.CacheBreakRatioFrom, 0)
+	to := fmtutil.FmtPercent(ss.CacheBreakRatioTo, 0)
+	return t.CacheBreakBadge(ss.CacheBreak, from, to)
 }
 
 // vmStepRoleTag is stepRoleTag's viewmodel counterpart — same priority order,

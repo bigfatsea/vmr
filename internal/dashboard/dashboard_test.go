@@ -262,7 +262,7 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 				"metrics.ToolCallCount", "metrics.DuplicateActionRate", "metrics.PlanExecRatio",
 				"cost.Total", "cost.Currency", "f.Severity", "f.Title", "f.Message",
 				"usage.In", "usage.Out", "m.ContextCompositionCurve", "m.ModelUsage",
-				"u.TokensIn", "tc.ArgsRef", "res.Ref", "s.ToolCalls",
+				"u.TokensIn", "tc.ArgsRef", "res.Ref", "s.ToolCalls", "s.CacheBreak",
 			},
 			want: []string{
 				"metrics.model_ms", "metrics.human_idle_ms", "metrics.tool_call_count",
@@ -273,6 +273,7 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 				"cost.total", "cost.resolved", "f.finding", "f.step_seq", "f.evidence",
 				"s.ts_display", "s.tool_calls", "s.resp_ref", "s.resp_is_reasoning",
 				"s.reasoning_ref", "s.instruction", "s.stitch_edge", "s.compaction",
+				"s.cache_break",
 				"usage.in", "usage.out", "u.tokens_in", "u.tokens_out",
 				"tc.args_ref", "tc.result", "res.ref", "res.is_error", "res.match",
 				"j.deliverable", "d.step_seq", "d.tool_name",

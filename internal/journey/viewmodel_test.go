@@ -238,3 +238,104 @@ func TestVM_SpineRendersEveryStep(t *testing.T) {
 		t.Errorf("spine rendered %d step headers for %d steps", len(spine), len(vmSteps(&summary)))
 	}
 }
+
+func TestViewModel_CacheBreakBadge(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		cb      string
+		rFrom   float64
+		rTo     float64
+		wantEN  string
+		wantZH  string
+		notShow bool
+	}{
+		{
+			cb:     "unexplained",
+			rFrom:  0.95,
+			rTo:    0.31,
+			wantEN: "Cache: unexplained drop (95%→31%)",
+			wantZH: "Cache: 异常骤降 (95%→31%)",
+		},
+		{
+			cb:     "provider_switch",
+			wantEN: "Cache: provider switched",
+			wantZH: "Cache: 服务端点切换",
+		},
+		{
+			cb:     "system",
+			wantEN: "Cache: system prompt changed",
+			wantZH: "Cache: 系统提示词变更",
+		},
+		{
+			cb:     "tools",
+			wantEN: "Cache: tool definitions changed",
+			wantZH: "Cache: 工具定义变更",
+		},
+		{
+			cb:     "history:stitch",
+			wantEN: "Cache: context stitched",
+			wantZH: "Cache: 跨会话缝合",
+		},
+		{
+			cb:     "history:contract",
+			wantEN: "Cache: context contracted",
+			wantZH: "Cache: 上下文压缩截断",
+		},
+		{
+			cb:     "history:fork",
+			wantEN: "Cache: context forked",
+			wantZH: "Cache: 上下文分叉",
+		},
+		{
+			cb:      "history:append",
+			notShow: true,
+		},
+		{
+			cb:      "history:replace_tail",
+			notShow: true,
+		},
+		{
+			cb:      "history:splice",
+			notShow: true,
+		},
+		{
+			cb:      "",
+			notShow: true,
+		},
+	}
+
+	for _, tc := range cases {
+		ss := &StepStructure{
+			Seq:                 2,
+			CacheBreak:          tc.cb,
+			CacheBreakRatioFrom: tc.rFrom,
+			CacheBreakRatioTo:   tc.rTo,
+		}
+		gotEN := vmCacheBreakBadge(ss, i18n.Spine(i18n.EN))
+		gotZH := vmCacheBreakBadge(ss, i18n.Spine(i18n.ZH))
+
+		if tc.notShow {
+			if gotEN != "" {
+				t.Errorf("cb %q should be suppressed in EN, got %q", tc.cb, gotEN)
+			}
+			if gotZH != "" {
+				t.Errorf("cb %q should be suppressed in ZH, got %q", tc.cb, gotZH)
+			}
+		} else {
+			if gotEN != tc.wantEN {
+				t.Errorf("cb %q EN = %q, want %q", tc.cb, gotEN, tc.wantEN)
+			}
+			if gotZH != tc.wantZH {
+				t.Errorf("cb %q ZH = %q, want %q", tc.cb, gotZH, tc.wantZH)
+			}
+
+			// Also verify that vmStepHeader embeds the badge inside the ** bold step title
+			headerEN := vmStepHeader(ss, false, false, "", "", i18n.Spine(i18n.EN), false)
+			expectedFragment := " · " + tc.wantEN + "**"
+			if !strings.Contains(headerEN, expectedFragment) {
+				t.Errorf("vmStepHeader missing badge fragment %q:\n%s", expectedFragment, headerEN)
+			}
+		}
+	}
+}
