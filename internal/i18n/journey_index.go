@@ -27,6 +27,13 @@ type JourneyIndexText struct {
 	ClustersTitle     func(n int) string
 	ClusterHeader     func(idx int, anchor string, size int) string
 	ClusterCompareCmd func(idA, idB string) string
+	// ClusterMemberLine renders one run in a cluster: id, dominant model,
+	// net working time, cost (already formatted or an "unpriced" string), and
+	// two badge slots (⭐ cheapest / ⚡ fastest, each "" when not this row).
+	ClusterMemberLine func(id, model, wall, cost, badges string) string
+	ClusterUnpriced   string
+	ClusterCheapest   string // ⭐ badge
+	ClusterFastest    string // ⚡ badge
 }
 
 func JourneyIndexT(lang Lang) JourneyIndexText {
@@ -49,7 +56,7 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 				return "心跳任务（" + strconv.Itoa(n) + " 个，默认折叠）"
 			},
 			ClustersTitle: func(n int) string {
-				return "## 重复任务对照分组（" + strconv.Itoa(n) + " 组）\n\n> 基于任务初始指令的相似度聚类，可快速定位同一任务的多次尝试。\n\n"
+				return "## 重复任务对照分组（" + strconv.Itoa(n) + " 组）\n\n> 基于任务标题的相似度聚类，可快速定位同一任务的多次尝试，以及哪次最省 / 最快。\n\n"
 			},
 			ClusterHeader: func(idx int, anchor string, size int) string {
 				return "### 分组 " + strconv.Itoa(idx) + " · " + anchor + " (" + strconv.Itoa(size) + " 次执行)\n\n"
@@ -57,6 +64,23 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 			ClusterCompareCmd: func(idA, idB string) string {
 				return "建议对比命令：`vmr analyze -compare " + idA + "," + idB + "`\n\n"
 			},
+			ClusterMemberLine: func(id, model, wall, cost, badges string) string {
+				line := "- `" + id + "`"
+				if model != "" {
+					line += " · " + model
+				}
+				if wall != "" {
+					line += " · 净工作 " + wall
+				}
+				line += " · 成本 " + cost
+				if badges != "" {
+					line += " " + badges
+				}
+				return line + "\n"
+			},
+			ClusterUnpriced: "未定价",
+			ClusterCheapest: "⭐最省",
+			ClusterFastest:  "⚡最快",
 		}
 	}
 	return JourneyIndexText{
@@ -77,7 +101,7 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 			return "Heartbeat journeys (" + strconv.Itoa(n) + ", collapsed by default)"
 		},
 		ClustersTitle: func(n int) string {
-			return "## Task Clusters (" + strconv.Itoa(n) + " groups)\n\n> Clustered by initial task instruction similarity to identify multiple runs of the same goal.\n\n"
+			return "## Task Clusters (" + strconv.Itoa(n) + " groups)\n\n> Clustered by task-title similarity to surface multiple runs of the same goal — and which run was cheapest / fastest.\n\n"
 		},
 		ClusterHeader: func(idx int, anchor string, size int) string {
 			return "### Cluster " + strconv.Itoa(idx) + " · " + anchor + " (" + strconv.Itoa(size) + " runs)\n\n"
@@ -85,5 +109,22 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 		ClusterCompareCmd: func(idA, idB string) string {
 			return "Suggested compare command: `vmr analyze -compare " + idA + "," + idB + "`\n\n"
 		},
+		ClusterMemberLine: func(id, model, wall, cost, badges string) string {
+			line := "- `" + id + "`"
+			if model != "" {
+				line += " · " + model
+			}
+			if wall != "" {
+				line += " · net " + wall
+			}
+			line += " · cost " + cost
+			if badges != "" {
+				line += " " + badges
+			}
+			return line + "\n"
+		},
+		ClusterUnpriced: "unpriced",
+		ClusterCheapest: "⭐cheapest",
+		ClusterFastest:  "⚡fastest",
 	}
 }

@@ -75,6 +75,14 @@ type JourneyIndexRow struct {
 	Stitched int       `json:"stitched,omitempty"` // len(chain), only when >1
 	Files    []string  `json:"files"`
 	Rendered string    `json:"rendered,omitempty"` // journey-<id>(-partial).md path, once rendered
+	// Cost / NetWorkingMS / Model are the same "which run was cheapest / fastest"
+	// facts the per-journey j-<id>.json already carries, projected onto the row so
+	// task-cluster comparison (ComputeTaskClusters) needs no per-file read. Filled
+	// only once the full Journey has been built (same gate as Tasks/Steps); absent
+	// on a bare listing pass.
+	Cost         *float64 `json:"cost,omitempty"`
+	NetWorkingMS int64    `json:"net_working_ms,omitempty"`
+	Model        string   `json:"model,omitempty"`
 	// Lineages is every ctxgraph.Lineage.LineageID() this Journey's chain
 	// is built from (P6.1) — report's SessionRow.ID uses the same
 	// identity for the single Lineage it represents, so "does report
@@ -314,11 +322,32 @@ func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
 		for cIdx, c := range idx.Clusters {
 			b.WriteString(t.ClusterHeader(cIdx+1, c.AnchorTitle, c.Size))
 			for _, m := range c.Members {
-				b.WriteString("- `" + m.ID + "` · requests=" + strconv.Itoa(m.Requests) + "\n")
+				wall := ""
+				if m.NetWorkingMS > 0 {
+					wall = fmtutil.FmtSeconds(time.Duration(m.NetWorkingMS)*time.Millisecond, 1)
+				}
+				cost := t.ClusterUnpriced
+				if m.Cost != nil {
+					cost = strconv.FormatFloat(*m.Cost, 'f', 4, 64)
+				}
+				badges := ""
+				if m.ID == c.Cheapest {
+					badges = t.ClusterCheapest
+				}
+				if m.ID == c.Fastest {
+					if badges != "" {
+						badges += " "
+					}
+					badges += t.ClusterFastest
+				}
+				b.WriteString(t.ClusterMemberLine(m.ID, m.Model, wall, cost, badges))
 			}
 			b.WriteString("\n")
-			if len(c.Members) >= 2 {
-				b.WriteString("> " + t.ClusterCompareCmd(c.Members[0].ID, c.Members[1].ID))
+			// Suggest the highest-leverage comparison: cheapest vs priciest when
+			// cost separates them, else the first two.
+			a, bID := clusterComparePair(c)
+			if a != "" {
+				b.WriteString("> " + t.ClusterCompareCmd(a, bID))
 			}
 		}
 	}

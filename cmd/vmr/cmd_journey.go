@@ -53,11 +53,20 @@ func resolveLLMOptions(addr, model, key string, dryRun bool) (llmCLIOptions, err
 	return llmCLIOptions{LLMOptions: journey.LLMOptions{Addr: addr, Model: model, APIKey: key}, DryRun: dryRun}, nil
 }
 
+// journeyRowFacts carries the metrics a built Journey contributes to its index
+// row (for task-cluster cheapest/fastest comparison). nil when the caller has
+// no built Journey (the bare listing pass).
+type journeyRowFacts struct {
+	cost         *float64
+	netWorkingMS int64
+	model        string
+}
+
 // updateJourneyRow finds id's row in idx.Journeys and fills in the
 // full-Journey-only fields (only known once journey.BuildChain has actually
 // run) — a no-op if id isn't present (shouldn't happen: every id passed
 // here was itself resolved from idx's own candidate set moments earlier).
-func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, rendered string) {
+func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, rendered string, facts *journeyRowFacts) {
 	for i := range idx.Journeys {
 		if idx.Journeys[i].ID == id {
 			idx.Journeys[i].Tasks = tasks
@@ -65,9 +74,23 @@ func updateJourneyRow(idx *journey.JourneyIndex, id string, tasks, steps int, re
 			if rendered != "" {
 				idx.Journeys[i].Rendered = rendered
 			}
+			if facts != nil {
+				idx.Journeys[i].Cost = facts.cost
+				idx.Journeys[i].NetWorkingMS = facts.netWorkingMS
+				idx.Journeys[i].Model = facts.model
+			}
 			return
 		}
 	}
+}
+
+// rowFacts projects a built Journey's metrics/cost onto a journeyRowFacts.
+func rowFacts(m journey.Metrics, cost *journey.CostFact) *journeyRowFacts {
+	f := &journeyRowFacts{netWorkingMS: m.NetWorkingMS, model: journey.DominantModel(m)}
+	if cost != nil && cost.Total != nil {
+		f.cost = cost.Total
+	}
+	return f
 }
 
 // saveJourneyIndex writes index.json + index.md into journeysDir
@@ -293,7 +316,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		return err
 	}
 	fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
-	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", journeyBaseName(j)+".md")))
+	updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", journeyBaseName(j)+".md")), rowFacts(m, &cost))
 	return saveJourneyIndex(idx, outDir, lang)
 }
 
@@ -414,8 +437,8 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 		return err
 	}
 	fmt.Printf("%s\n", mdPath)
-	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), filepath.ToSlash(filepath.Join("details", journeyBaseName(jA)+".md")))
-	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), filepath.ToSlash(filepath.Join("details", journeyBaseName(jB)+".md")))
+	updateJourneyRow(idx, jA.ID, len(jA.Tasks), journeySteps(jA), filepath.ToSlash(filepath.Join("details", journeyBaseName(jA)+".md")), rowFacts(sA.Metrics, &costA))
+	updateJourneyRow(idx, jB.ID, len(jB.Tasks), journeySteps(jB), filepath.ToSlash(filepath.Join("details", journeyBaseName(jB)+".md")), rowFacts(sB.Metrics, &costB))
 	return saveJourneyIndex(idx, outDir, lang)
 }
 
@@ -518,7 +541,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 				return err
 			}
 			fmt.Print(t.RenderedNote(outPath, len(j.Tasks), journeySteps(j)))
-			updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", filepath.Base(outPath))))
+			updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), filepath.ToSlash(filepath.Join("details", filepath.Base(outPath))), rowFacts(m, &cost))
 		}
 		rendered += len(journeys)
 	}
@@ -608,7 +631,9 @@ func renderBenchmarks(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage
 	}
 	fmt.Printf("%d journey(s) analyzed → %s\n", len(journeys), mdPath)
 	for _, j := range journeys {
-		updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), "")
+		// -benchmark doesn't price journeys, so the row carries timing/model
+		// only — enough for the cluster "fastest" mark, not "cheapest".
+		updateJourneyRow(idx, j.ID, len(j.Tasks), journeySteps(j), "", rowFacts(journey.ComputeMetrics(j), nil))
 	}
 	return saveJourneyIndex(idx, outDir, lang)
 }
