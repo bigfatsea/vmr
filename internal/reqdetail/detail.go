@@ -372,7 +372,7 @@ func renderClientRequest(b *strings.Builder, rec *audit.Record, m, prev *ctxgrap
 	}
 	if len(msgs) > 0 {
 		w("\n### %s\n\n", t.MessagesTitle(len(msgs)))
-		if line := roleStatLine(RoleTokens(req.Body), true, true); line != "" {
+		if line := roleStatLine(RoleTokens(req.Body)); line != "" {
 			w("%s", t.RoleTokenShare(line))
 		}
 		// leadSys is recomputed here (not read off m.LeadSys) so this

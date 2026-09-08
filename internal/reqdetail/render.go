@@ -138,10 +138,9 @@ func jsonIndent(v any) string {
 // (rare) is appended alphabetically.
 var roleOrder = []string{"system", "user", "assistant", "tool"}
 
-// roleStatLine renders per-role character stats as one line, e.g.
-// "system 62.3k (18.2%) · user 45.1k (13.2%)"; withChars=false drops the
-// absolute counts and keeps only the shares.
-func roleStatLine(chars map[string]int64, withChars, bold bool) string {
+// roleStatLine renders per-role character stats as one bold line, e.g.
+// "**system 62.3k (18.2%)** · **user 45.1k (13.2%)**".
+func roleStatLine(chars map[string]int64) string {
 	var total int64
 	for _, c := range chars {
 		total += c
@@ -169,13 +168,7 @@ func roleStatLine(chars map[string]int64, withChars, bold bool) string {
 	parts := make([]string, 0, len(order))
 	for _, r := range order {
 		share := fmt.Sprintf("%.1f%%", float64(chars[r])/float64(total)*100)
-		val := share
-		if withChars {
-			val = fmt.Sprintf("%s (%s)", fmtCount(int(chars[r])), share)
-		}
-		if bold {
-			val = "**" + val + "**"
-		}
+		val := fmt.Sprintf("**%s (%s)**", fmtCount(int(chars[r])), share)
 		parts = append(parts, fmt.Sprintf("%s %s", r, val))
 	}
 	return strings.Join(parts, " · ")

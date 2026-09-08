@@ -341,16 +341,12 @@ func TestRoleTokens(t *testing.T) {
 
 func TestRoleStatLine(t *testing.T) {
 	chars := map[string]int64{"system": 10, "user": 30, "assistant": 20, "tool": 40}
-	got := roleStatLine(chars, false, false)
-	want := "system 10.0% · user 30.0% · assistant 20.0% · tool 40.0%"
+	got := roleStatLine(chars)
+	want := "system **10 (10.0%)** · user **30 (30.0%)** · assistant **20 (20.0%)** · tool **40 (40.0%)**"
 	if got != want {
-		t.Errorf("share-only line:\ngot  %q\nwant %q", got, want)
+		t.Errorf("role stat line:\ngot  %q\nwant %q", got, want)
 	}
-	withChars := roleStatLine(chars, true, false)
-	if !strings.Contains(withChars, "tool 40 (40.0%)") {
-		t.Errorf("withChars line missing counts: %q", withChars)
-	}
-	if roleStatLine(nil, false, false) != "" {
+	if roleStatLine(nil) != "" {
 		t.Error("empty map should render empty line")
 	}
 }
