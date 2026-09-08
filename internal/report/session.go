@@ -199,9 +199,10 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 
 // AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache,
 // always interpreting agent-dialect conventions through taskseg.OpenClawAware.
-// The stable entry point every existing caller/test uses — the same "always
-// the default profile" role Build plays relative to BuildCached. Callers
-// needing a cache or a caller-chosen Profile go to AnalyzeSessionsCached.
+// A test-only convenience — the same "always the default profile, no cache"
+// role Build plays relative to BuildCached; production goes through
+// AnalyzeSessionsCached (via report.BuildCached), which cmd/vmr always calls
+// with a resolved Profile and cache.
 func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
 	return a, err
