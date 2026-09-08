@@ -51,6 +51,12 @@ type SpineText struct {
 	SpineReportLine      func(text string) string // a non-tool-calling Step's plain report/reasoning one-liner
 	SpinePositionalMatch string                   // appended to a tool result paired by position, not id (level 3)
 
+	ArtifactsTitle       string
+	ArtifactsSummary     func(count int) string
+	ArtifactsTableHeader string
+	ArtifactsHeuristic   string
+	ArtifactsStructured  string
+
 	SpineFinalDeliverableTitle        string
 	SpineFinalDeliverableFound        func(stepSeq int, toolName string) string
 	SpineFinalDeliverableExcerptLabel string
@@ -133,6 +139,12 @@ func Spine(lang Lang) SpineText {
 			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
 			SpinePositionalMatch: "（按位置推测，ID 未匹配）",
 
+			ArtifactsTitle:       "## 触达文件与资产\n\n",
+			ArtifactsSummary:     func(count int) string { return "任务过程共记录 " + strconv.Itoa(count) + " 个触达目标：\n\n" },
+			ArtifactsTableHeader: "| 目标路径 | 操作 | 首次步骤 | 频次 | 判定依据 |\n| :--- | :--- | :--- | :--- | :--- |\n",
+			ArtifactsHeuristic:   "Shell 启发式",
+			ArtifactsStructured:  "结构化参数",
+
 			SpineFinalDeliverableTitle: "## 最终交付物\n\n",
 			SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
 				return "Step " + strconv.Itoa(stepSeq) + " · `" + toolName + "`\n\n"
@@ -212,6 +224,12 @@ func Spine(lang Lang) SpineText {
 		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
 		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },
 		SpinePositionalMatch: " (matched by position — ID unmatched)",
+
+		ArtifactsTitle:       "## Touched Artifacts\n\n",
+		ArtifactsSummary:     func(count int) string { return "Recorded " + strconv.Itoa(count) + " target(s) touched during execution:\n\n" },
+		ArtifactsTableHeader: "| Target Path | Operation | First Step | Calls | Detection |\n| :--- | :--- | :--- | :--- | :--- |\n",
+		ArtifactsHeuristic:   "Shell heuristic",
+		ArtifactsStructured:  "Structured parameter",
 
 		SpineFinalDeliverableTitle: "## Final Deliverable\n\n",
 		SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {

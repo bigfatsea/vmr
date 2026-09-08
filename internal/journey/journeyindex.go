@@ -97,6 +97,7 @@ type JourneyIndexRow struct {
 // above journeys/), so this index stays purely human-scale.
 type JourneyIndex struct {
 	Journeys []JourneyIndexRow `json:"journeys"`
+	Clusters []TaskCluster     `json:"clusters,omitempty"`
 	// Cache is this run's own ScanCached result, carried on JourneyIndex
 	// purely as a convenience — every journey branch already threads idx
 	// through to saveJourneyIndex, so riding along here saves plumbing it as
@@ -306,6 +307,22 @@ func RenderJourneyIndexMarkdown(idx *JourneyIndex, lang i18n.Lang) string {
 	if !anyRendered {
 		b.WriteString(t.ListOnlyNote)
 	}
+
+	// Render task clusters if present
+	if idx != nil && len(idx.Clusters) > 0 {
+		b.WriteString(t.ClustersTitle(len(idx.Clusters)))
+		for cIdx, c := range idx.Clusters {
+			b.WriteString(t.ClusterHeader(cIdx+1, c.AnchorTitle, c.Size))
+			for _, m := range c.Members {
+				b.WriteString("- `" + m.ID + "` · requests=" + strconv.Itoa(m.Requests) + "\n")
+			}
+			b.WriteString("\n")
+			if len(c.Members) >= 2 {
+				b.WriteString("> " + t.ClusterCompareCmd(c.Members[0].ID, c.Members[1].ID))
+			}
+		}
+	}
+
 	var visible, noisy []JourneyIndexRow
 	for _, r := range rows {
 		if IsNoiseCategory(r.Category) {

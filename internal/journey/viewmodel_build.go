@@ -337,3 +337,24 @@ func vmModelUsage(m Metrics, lang i18n.Lang) []VMBlock {
 // the already-stringified kind, and spineTransitionLines' "ordinary Append is
 // silent" rule compares against exactly this value.
 var ctxgraphAppend = ctxgraph.Append.String()
+func buildVMArtifacts(s *JourneySummary, lang i18n.Lang) []VMBlock {
+	if s == nil || len(s.Artifacts) == 0 {
+		return nil
+	}
+	t := i18n.Spine(lang)
+	var blocks []VMBlock
+	blocks = append(blocks, vmTextBlock(t.ArtifactsTitle))
+	blocks = append(blocks, vmTextBlock(t.ArtifactsSummary(len(s.Artifacts))))
+
+	tbl := &VMTable{Header: t.ArtifactsTableHeader}
+	for _, a := range s.Artifacts {
+		basis := t.ArtifactsStructured
+		if a.Heuristic {
+			basis = t.ArtifactsHeuristic
+		}
+		tbl.Rows = append(tbl.Rows, fmt.Sprintf("| `%s` | %s | Step %d | %d | %s |\n",
+			a.Path, a.Op, a.FirstStep, a.Count, basis))
+	}
+	blocks = append(blocks, VMBlock{Kind: vmTable, Table: tbl})
+	return blocks
+}

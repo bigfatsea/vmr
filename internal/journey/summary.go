@@ -56,6 +56,9 @@ type JourneySummary struct {
 	// *pricing.Resolver, so it's threaded in by the caller rather than
 	// computed by Summarize.
 	Cost *CostFact `json:"cost,omitempty"`
+	// Artifacts lists workspace file mutation targets extracted across this
+	// Journey's tool calls (both structured file tools and bash heuristics).
+	Artifacts []Artifact `json:"artifacts,omitempty"`
 	// Break is j.Break's edit classification (the unresolved lineage break
 	// the .md opens with a warning about, render_md.go's BreakWarning). nil
 	// when the Journey's head lineage broke from nothing — the common case.
@@ -109,6 +112,7 @@ func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, c
 		Structure:         s,
 		Bodies:            s.Bodies,
 		Cost:              cost,
+		Artifacts:         ExtractArtifacts(j),
 		LLMInterpretation: llmInterp,
 	}
 	if !j.From.IsZero() {

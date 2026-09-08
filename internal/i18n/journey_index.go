@@ -23,6 +23,10 @@ type JourneyIndexText struct {
 	// block (P6.3, narrowed to heartbeat-only by P14.1's IsNoiseCategory —
 	// cron/subagent moved into the main table) — n is how many rows it holds.
 	NoiseFoldSummary func(n int) string
+
+	ClustersTitle func(n int) string
+	ClusterHeader func(idx int, anchor string, size int) string
+	ClusterCompareCmd func(idA, idB string) string
 }
 
 func JourneyIndexT(lang Lang) JourneyIndexText {
@@ -44,6 +48,15 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 			NoiseFoldSummary: func(n int) string {
 				return "心跳任务（" + strconv.Itoa(n) + " 个，默认折叠）"
 			},
+			ClustersTitle: func(n int) string {
+				return "## 重复任务对照分组（" + strconv.Itoa(n) + " 组）\n\n> 基于任务初始指令的相似度聚类，可快速定位同一任务的多次尝试。\n\n"
+			},
+			ClusterHeader: func(idx int, anchor string, size int) string {
+				return "### 分组 " + strconv.Itoa(idx) + " · " + anchor + " (" + strconv.Itoa(size) + " 次执行)\n\n"
+			},
+			ClusterCompareCmd: func(idA, idB string) string {
+				return "建议对比命令：`vmr analyze -compare " + idA + "," + idB + "`\n\n"
+			},
 		}
 	}
 	return JourneyIndexText{
@@ -62,6 +75,15 @@ func JourneyIndexT(lang Lang) JourneyIndexText {
 		SelfTrafficInactive: "> Self-traffic exclusion: not active (no `llm_key` / `self_traffic_client_tags` configured, or disabled via `-include-self-traffic`).\n\n",
 		NoiseFoldSummary: func(n int) string {
 			return "Heartbeat journeys (" + strconv.Itoa(n) + ", collapsed by default)"
+		},
+		ClustersTitle: func(n int) string {
+			return "## Task Clusters (" + strconv.Itoa(n) + " groups)\n\n> Clustered by initial task instruction similarity to identify multiple runs of the same goal.\n\n"
+		},
+		ClusterHeader: func(idx int, anchor string, size int) string {
+			return "### Cluster " + strconv.Itoa(idx) + " · " + anchor + " (" + strconv.Itoa(size) + " runs)\n\n"
+		},
+		ClusterCompareCmd: func(idA, idB string) string {
+			return "Suggested compare command: `vmr analyze -compare " + idA + "," + idB + "`\n\n"
 		},
 	}
 }

@@ -69,6 +69,7 @@ type JourneyVM struct {
 	SysPrompt  []VMBlock `json:"sys_prompt,omitempty"` // system-prompt era list
 	Overview   []VMBlock `json:"overview,omitempty"`   // 3-second overview card
 	Indicators []VMBlock `json:"indicators,omitempty"` // behavior indicators + model usage
+	Artifacts  []VMBlock `json:"artifacts,omitempty"`  // workspace file mutation targets
 	Spine      []VMBlock `json:"spine,omitempty"`      // the decision spine incl. final deliverable
 	Timeline   []VMBlock `json:"timeline,omitempty"`   // tool-call timeline
 	Findings   []VMBlock `json:"findings,omitempty"`   // findings section
@@ -114,6 +115,7 @@ func SerializeJourneyVM(vm *JourneyVM) string {
 	write(vm.SysPrompt)
 	write(vm.Overview)
 	write(vm.Indicators)
+	write(vm.Artifacts)
 	write(vm.Spine)
 	write(vm.Timeline)
 	write(vm.Findings)
@@ -140,6 +142,7 @@ func BuildJourneyVM(s *JourneySummary, lang i18n.Lang, reportMDExists, linkDetai
 		SysPrompt:  buildVMSysPrompt(s, lang, linkDetails),
 		Overview:   buildVMOverview(s, lang),
 		Indicators: buildVMIndicators(s, lang),
+		Artifacts:  buildVMArtifacts(s, lang),
 		Spine:      buildVMSpine(s, lang, linkDetails),
 		Timeline:   buildVMTimeline(s, lang),
 		Findings:   buildVMFindings(s, lang),
