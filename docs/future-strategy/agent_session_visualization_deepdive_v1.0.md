@@ -547,14 +547,18 @@ Cache 击穿断点归因（claude-tap `diffCachedRegion` 的机读等价形态�
 真实流量降维形态）等均已落地。初版 §11.2 第 3 条（自包含单文件 HTML 导出器）与设计裁决 D6 冲突，
 按 D6 废弃——零依赖骨架形态已覆盖其交互能力，唯一让渡是 `file://` 直开。
 
-### 11.2 第一阶段：夯实第一梯队缺口（v0.7.0 · 短期速胜）—— **已全部落地（2026-09-08，实施细节与任务分组见附录 A.3）**
+### 11.2 第一阶段：夯实第一梯队缺口（v0.7.0 · 短期速胜）—— **四项均已落地，聚类的 viewer 分组/阈值配置按第一性原理不做（2026-09-08，实施细节见附录 A.3）**
 
 1. **Cache 击穿断点归因补全**（对齐 claude-tap `diffCachedRegion`）—— ✅ 已落地：
    - `Manifest` 增加 `ToolsHash`/`HasTools`（`ctxgraph.CacheSchemaVersion` 8→9）；journey 侧
      `ComputeCacheBreak` 按 system / tools / provider_switch / history:<editkind> / history:stitch /
-     unexplained（Append 且各哈希未变但命中率骤降）六类归因，盖进每步 `cache_break`
-     （附 `cache_break_ratio_from/to`）；decision spine、journey-viewer 徽标、compare 三处渲染。
-   - 请求级定位由 `vmr diff` 的消息哈希 LCP 补齐：差异出现在第几条历史消息可机器精确回答。
+     unexplained 六类归因，盖进每步 `cache_break`（附 `cache_break_ratio_from/to`）。`tools` 覆盖工具集
+     新增、移除与 schema 变更；`unexplained` 要求 Append 且各哈希/端点未变、命中率相对骤降**且当前命中率
+     跌到近零**（一个已建立的缓存整段被重编码才算击穿；健康命中率的正常 token 稀释不算——阈值 `CacheDropAbsFloor`）。
+   - 渲染四处：decision spine 脊柱行、journey-viewer 步骤徽标、compare `.md` 的 Cache Breaks 对照表、
+     `journey-compare.html` 同款表。
+   - 请求级定位由 `vmr diff` 的消息哈希 LCP 补齐：差异出现在第几条历史消息可机器精确回答；tools 行并入
+     `Manifest.ToolsHash` 比对，"工具名相同但 schema 变了" 也能报出。
 2. **资产突变追踪器（Artifacts Extractor）** —— ✅ 已落地：
    - `internal/journey/artifacts.go` 在 build 时从结构化文件参数（`path/file_path/filepath/filename/file`
      键）与 bash 窄正则启发式（重定向 / `tee` / `rm` / `sed -i` / `patch`）提取触达清单，
@@ -566,8 +570,12 @@ Cache 击穿断点归因（claude-tap `diffCachedRegion` 的机读等价形态�
      附免责措辞。纯 CLI：英文输出、不落 reports/、不进缓存指纹。
 
 另：原 §11.3 第 3 条的水平级联比对，经附录 A.1.6 的第一性原理重估**替换为重复任务聚类**并随阶段一落地
-（真实流量无用例真值，promptfoo 矩阵范式错位）——Jaccard 相似度聚合重复执行，`journeys/index.{json,md}`
-输出分组与一键 `vmr analyze -compare` 建议。
+（真实流量无用例真值，promptfoo 矩阵范式错位）——`clusters.go` 按任务标题的 Jaccard 相似度聚合重复执行，
+每个成员携带 dominant model / net working time / 成本，`journeys/index.{json,md}` 输出分组、标注每簇
+`⭐最省` / `⚡最快`、给出"最省 vs 最贵"的可复制 `vmr analyze -compare` 命令。
+**两处按第一性原理未做**（3 人团队 + 单场景下属过度设计，A.1.6 步骤 2/3 相应作废）：相似度阈值仍硬编码
+`0.45`（未进 report.yaml / L2 指纹）；journey-viewer 候选列表未按簇分组（聚类分组只在 `index.md`）。
+聚类键用标题而非初始指令全文——taskseg 的标题多由开场指令派生，是可接受的近似。
 
 ### 11.3 第二阶段：突破第二梯队壁垒（v0.8.0 · 中期跨越）
 
@@ -789,13 +797,15 @@ Cache 击穿断点归因（claude-tap `diffCachedRegion` 的机读等价形态�
 
 **为什么不做初版原案**：promptfoo 的 `mergeComparisonTables` 以**受控评测集的用例为锚**（同一 testIdx 跨 Run 拼接），前提是存在稳定的用例身份与 pass/fail 真值。VMR 分析的是**真实流量**：没有人工标注的用例集、没有裁判打分，硬套"用例 × Run 矩阵"没有锚点也没有判据。第一性原理下，真实语料能回答的问题是：**"这个任务跑过几次？哪次花得最少/最快/结果最好？"**——这才是水平比对的正确形态。
 
-**具体做法**：
-1. `internal/journey` 新增聚类：键 = 初始指令的归一化 token 集合 Jaccard 相似度 ≥ 阈值（无 LLM、可解释；
-   taskseg 已有指令边界切割 `NewUserWindow`，锚点文本质量有保证）；输出
-   `clusters: [{anchor_title, members: [{id, model, cost, wall, net_working_ms}]}]` 落 `journeys/index.json`。
-2. 消费端：`journeys/index.md` 聚类分组呈现 + 每簇给出"最快/最省"标注；
-   journey-viewer 候选列表按簇分组；每成员旁附可复制的 `vmr analyze -compare <a>,<b>`。
-3. 阈值进 report.yaml 并入 L2 分析参数指纹（`ComputeAnalysisParamsFingerprint` 已有位，加一个字段）。
+**落地形态（`clusters.go`，随阶段一）**：
+1. 键 = 任务标题的归一化 token Jaccard ≥ 0.45（无 LLM、可解释）。标题多由 taskseg 从开场指令派生，
+   作近似可接受；用初始指令全文是一个后续可选精化。noise（heartbeat）类排除，cron/subagent 计入。
+2. `clusters: [{anchor_title, size, cheapest, fastest, members:[{id, client, requests, steps, model,
+   cost, net_working_ms}]}]` 落 `journeys/index.json`（在 manifest 盖章范围内）。
+3. 消费端：`journeys/index.md` 分组呈现，每成员一行 `model · 净工作时间 · 成本`，标注 `⭐最省` / `⚡最快`，
+   每簇给一条"最省 vs 最贵"的可复制 `vmr analyze -compare`。锚点标题剥去 `[cron:<uuid> ]` 装饰。
+4. **未做（第一性原理裁决）**：journey-viewer 候选列表按簇分组、阈值进 report.yaml + L2 指纹——3 人团队
+   单场景下属过度设计；阈值硬编码 + 注释，需要调再说。
 
 **步骤**：相似度 + 聚类 + 单测（1d）→ index.json/md 渲染（0.5d）→ viewer 分组（0.5d）。
 
@@ -879,16 +889,16 @@ golden 测试钉住映射。
 
 #### 阶段一（v0.7.0 · "把度量变成法医学"）—— **已全部实施落地（2026-09-08）**
 
-> 实施状态：全四项任务已全部落地并通过全套单元测试、回归守卫与真实审计日志实测验证。
-> 包括：ToolsHash 入库与 schema bump 9、Step 层 CacheBreak 归因事实与三处渲染、Touched Artifacts 资产突变追踪与跳步、
-> `vmr diff` 请求级结构化对比命令、以及基于 Jaccard 相似度的任务聚类（Task Clusters）。
+> 实施状态：四项任务落地并通过单元测试、回归守卫与真实审计日志实测。独立叠加验收
+> （`analyze_redesign_final_audit_claude-sonnet-5.md`）后收敛的现状如下——聚类的 viewer 分组与阈值配置
+> 按第一性原理不做（3 人单场景过度设计）。
 
 | # | 任务 | 状态 | 落地内容概要 |
 |---|---|:---:|---|
-| 1 | ToolsHash 入 Manifest + Cache 击穿归因 fact + 三处渲染 | ✅ 已完成 | `ctxgraph.CacheSchemaVersion` 8→9；Manifest 增加 `ToolsHash`；Step 增加 `cache_break`（`system`/`tools`/`provider_switch`/`history:*`/`unexplained`）；在 decision spine、journey-viewer 徽标及 compare 渲染 |
+| 1 | ToolsHash 入 Manifest + Cache 击穿归因 fact + 渲染 | ✅ 已完成 | `ctxgraph.CacheSchemaVersion` 8→9；Manifest 增加 `ToolsHash`/`HasTools`；Step 增加 `cache_break`（`system`/`tools`/`provider_switch`/`history:*`/`unexplained`）。`tools` 含工具集新增/移除/schema 变更；`unexplained` 需相对骤降 **且** 当前命中率近零（`CacheDropAbsFloor`，排除正常 token 稀释误报）。渲染四处：decision spine、journey-viewer 徽标、compare `.md` 的 Cache Breaks 表、`journey-compare.html` 同款表 |
 | 2 | 资产突变追踪器 + journey-viewer 跳步面板 | ✅ 已完成 | `internal/journey/artifacts.go` 提取结构化文件参数与 Shell 启发式；`JourneySummary.Artifacts` 落盘并在 Markdown 附录与看板表格呈现，支持一键平滑滚动跳步 |
-| 3 | `vmr diff` 请求级结构化对比 | ✅ 已完成 | `cmd/vmr/cmd_diff.go` 支持坐标解析，对比 Header/System/Tools/Messages LCP 与差异，输出结构化免责 Verdict |
-| 4 | 重复任务聚类 + index/viewer 呈现 | ✅ 已完成 | `internal/journey/clusters.go` Jaccard 相似度聚合重复任务，`journeys/index.json` 与 `index.md` 输出对比分组与一键 `vmr analyze -compare` 建议 |
+| 3 | `vmr diff` 请求级结构化对比 | ✅ 已完成 | `cmd/vmr/cmd_diff.go` 复用 `vmr replay` 坐标定位器；对比 Header/System/Tools/Messages LCP 与差异（tools 行并入 `Manifest.ToolsHash` 检 schema 变更），输出结构化免责 Verdict |
+| 4 | 重复任务聚类 + index 呈现 | 🟡 部分完成 | `clusters.go` 按标题 Jaccard 聚合；`journeys/index.json` 落 `clusters`（含每成员 model/cost/net_working_ms + 每簇 cheapest/fastest），`index.md` 分组呈现、标注 `⭐最省`/`⚡最快`、给"最省 vs 最贵"的 compare 命令。**未做**：viewer 候选列表按簇分组；阈值进 report.yaml/L2 指纹（硬编码 0.45）——按第一性原理裁决 |
 
 合计 ~9 人天；全部产出进 manifest 盖章范围或为纯 CLI；失效矩阵 / L2 指纹按既定纪律同步
 （新增 report.yaml 键入 `ComputeAnalysisParamsFingerprint`）。

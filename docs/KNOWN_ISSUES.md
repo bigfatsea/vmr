@@ -150,7 +150,8 @@
 - **分析产物 ZH 术语的 loanword / 全译两套约定并存，刻意不统一**：Markdown/报表侧保留英文特性名 + 中文描述词（`§6.5 Sticky 有效性`、`§6.7 Compaction 还原`、`§2.5 账户（Provider）消耗与额度`，journey 叙事正文里 `system prompt` 也一贯是外来词）；看板侧全译（`系统提示词` / `上下文压缩`）。两套各自内部自洽。全量统一要改约 15 处 i18n 字符串 + 发给 LLM 的 prompt 正文 + `UserGuide.zh.md` / Analytics 设计文档里的既有章节名，收益纯观感、还牵出「Compaction 该不该译」之争（类比 `prompt cache` 通常不译）。**触发条件**：同一 section 内出现自相矛盾的形态（如标题译、紧邻正文不译），才值得局部收敛。新增 i18n 字符串时跟随同 section 已有正文的形态。
 - **不自建 Markdown→HTML 的渲染层**（2026-09 收敛，原 journey 侧的 mdlite 微渲染器已随自包含 HTML 退役删除）：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。已知瑕疵 §2.51 随之失去载体。**推论**：`journey-compare.html` 复刻 `compare-*.md` 的章节结构时，`llm_interpretation.text` 这类携带 markdown 表格/标题的正文按 `white-space: pre-wrap` 原样铺开，不做结构化渲染。
 - **看板骨架页的 chrome 是英文单版，数据侧才本地化**（2026-09，`WriteSkeletons(dir)` 只吃目录不吃语言，同一份 HTML 同时写进 `reports/` 与 `reports-en/`）：导航、tab、表头、banner、章节标题、`formatDelta` 的 `new` 之类**渲染器计算出的**文本恒英文；`rows[].label`、findings 叙述、LLM 正文、excerpt 等**由 JSON 携带语言**（设计 D4/D10 lang-follows-everywhere）的部分跟随 `-lang`。于是 `reports/`（中文数据）下看板是「英文 chrome + 中文数据」，与 `vmr-report.md` 之外的既有看板现状一致。**触发重新裁决**：要 chrome 也双语，正解是 `common.js` 持 `UI_TEXT[lang]` 字典 + `WriteSkeletons` 按产物语言注入 `window.__LANG`，约 1 人天；在那之前不要因为「中文用户看到英文导航」单独报 bug。
-- **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`journey.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。
+- **索引折叠与默认渲染范围只把 `heartbeat` 归为噪声，不含 cron / subagent**（`journey.IsNoiseCategory`）：真实语料实测——heartbeat 每候选最多 7 请求（107 个候选无一到 10），而 cron 与 subagent 都有双位数请求的候选，含全语料最长的一条 journey（subagent，91 请求）。索引显示分割与 CLI 默认渲染范围共用这一个判据，避免二者对同类候选给出不同答案。cron 因此也会进重复任务聚类（`clusters.go`）——同一 cron 多次运行聚在一起有诊断价值（如首次失败重跑）；锚点标题剥掉 `[cron:<uuid> ]` 装饰再展示。
+- **重复任务聚类（`clusters.go`）：相似度阈值硬编码、不在 report.yaml / L2 指纹里，候选列表看板不按簇分组**：设计（deepdive A.1.6 步骤 2/3）曾列这两项，独立叠加验收时按第一性原理裁掉——3 人团队 + 单一使用场景下，一个永不会调的阈值做成配置项、以及在 `index.md` 之外再做一套看板分组，都是过度设计。阈值 `0.45` 写在代码里带注释；`journeys/index.json` 已带 `clusters` 字段，将来真要看板分组时前端自取即可。聚类键用任务标题（taskseg 多由开场指令派生）而非初始指令全文，是可接受的近似；换成全文是一个后续可选精化。**触发条件**：出现反复 A/B 阈值的需求，或看板成为聚类的主要入口。
 - **stitch 缝合同时要求比例阈值与绝对下限（共享去重键 ≥3）**：断裂后的开头 manifest 天然很短（system + 摘要 + 第一条指令），一条共享消息就能把比例顶过任何阈值——而那条消息往往正是 SessKey 本身的构成成分，它共享是**因为**这是同一个会话的锚，不是因为发生了 compaction（证据循环）。比例防长会话、绝对值防短会话，两道闸正交。不满足下限**降级为 `AmbiguousMatch` 而非淘汰**，候选仍可供人工查看。论证谱系与 `edit.go` 的 `spliceMinTailMatch = 2` 相同。
 - **同 SessKey 候选有 72h 宽松时间上界（`stitchSameKeyMaxGap`），超窗候选预过滤出局，最强者仅作诊断兜底**：旧规则豁免同桶候选的理由是“用户可以走开几天再回来接同一个 anchor”——**对人类成立，对机器相反**。同一 anchor SessKey 下堆积最多的是定时/心跳任务：开头模板相同、彼此无关、可跨数百小时，正是当初促成 `stitchCrossBucketMaxGap` 的那批假匹配，只是发生在桶内所以那道闸从没管过。2026-09 收敛为**淘汰优先于排序**（与 `strategy` 包 `Condition`/`Dimension` 分离同型）：超窗候选不参与赢家竞争，避免「高分超窗者先赢再降级」遮蔽窗内合法前驱；仅当过滤后无任何窗内候选时，最强超窗者作为降级 `AmbiguousMatch` 边保留供人查看——真的走开三天回来接着聊的人不会消失进 `NoPredecessorFound`。
 - **消息内容哈希剥离 Anthropic 的 `cache_control` 标记**：`cache_control` 是缓存控制元数据，不是对话内容；客户端逐轮移动缓存断点会改变哈希，把一次纯 Append 误判成内容编辑，整条 lineage 谱系失真。**证据状态要如实说**：机制已从代码确认（`hashJSON` 对原始消息对象全字段哈希，标记确实进哈希输入），但本机语料太小（36KB / 1 条 anthropic 记录 / 0 条 `cache_control` 命中），**按协议拆 Append 比例无法产生统计意义，未能从语料实证**。剥离本身严格更正确，故仍实施。**已知副作用**：消息内容载荷里键名恰为 `cache_control` 的（如工具结果回显）也会被剥离——只影响哈希与 lineage 判定，不影响存储内容与渲染。
@@ -483,7 +484,12 @@
 - **为什么暂不做**：真实工作量约 1–1.5 人日（双语内嵌 HTML 锁步、真实计费请求、streaming、错误面、虚拟模型选择器、内嵌 JS 无 Go 测试）。这是 onboarding 漏斗功能，被 `vmr init`/`vmr connect`（战略文档第一梯队）完全压制——真做漏斗应先做那两个。战略文档里本就列在第三梯队。2026-08-30 增长打磨批次评估确认延后。
 
 
-#### 2.8 [低] `archtest` 函数长度豁免的键无法区分同文件重名方法
+#### 2.55 [中，发版前处理] `CHANGELOG.md [Unreleased]` 需一次归整才能发版
+
+- **现状**：`[Unreleased]` 下有重复的 `### Added` / `### Changed` / `### Fixed` 段（多轮 feature 分支各自 append 未合并），且 analyze 架构重构**之前**就在 `[Unreleased]` 里的条目通篇引用被本次同版删除的东西（退役的 vmr-story / vmr-report 子命令、旧包名、vmr-stories.md、vmr-requests-*.md 全家、-corpus flag）——发版体裁会同时说「删掉了 X」和「在 X 里修了 bug」。`release.yml` 逐字提取该段作 GitHub Release body。
+- **为什么现在不动**（2026-09-08 独立叠加验收裁决）：合并同类段是机械活但需逐条核对不漏；把「在已删命令里修 bug」类条目改写为现名 / 并进 breaking 条目需逐条判断十几个特性「重构后去哪了」，有编辑判断成分；且 CHANGELOG 是 trail，不做 patch-on-patch。
+- **发版前必做**：并段成每类型一段（Keep a Changelog 顺序）；`[Unreleased]` 内容重读为「vN vs vN-1 的净变更」，退役术语条目改写或折叠。
+- **触发条件**：准备打第一个含 analyze 重构的 tag。
 
 - **现状**：`funcLineExemptions` 以 `文件:函数名` 为键，同文件重名方法共用一条（如 `report/ingest.go` 6 个 `Ingest`）。今天全部远低于默认限额，无影响；一旦为其一登记豁免，其余会一并放宽。
 - **可能方案**：键改 `文件:接收者类型.函数名`（`ast.FuncDecl.Recv` 已有类型信息）。

@@ -41,7 +41,10 @@
 
 > 本清单是本次独立审计的核验基准。汇集自两份基准方案 + 6 份历史评审文档中出现过的
 > 全部 feature / 模块 / 任务 / 问题编号。**不预设任何一条的落地状态。**
-> 标记（第二部分回填）：✅ 已核实完成 ｜ 🟡 部分完成 ｜ ❌ 未完成 ｜ ✔️fixed 本轮直接修复 ｜ ⚖️ 待裁决。
+>
+> 组 A（D1–D21）/ 组 B（Phase 1–4）/ 组 C（守卫+不变量）/ 组 E（历史遗留 T/F/N/G/C/N-B/NEW）的**逐项核验结论见 §2.1**
+> （抽查独立取证，整体判为"实质、正确落地"）；组 D（Stage 1）的**逐项结论见 §2.2 / §3.2**。
+> 下方各表只作核验基准清单，状态不逐格回填——结论集中在第二、三、四部分。
 
 ### 组 A —— analyze 架构重构：核心裁决 D1–D21
 
@@ -227,6 +230,8 @@
 ### 2.2 组 D（可视化 Stage 1）—— 本轮审计重点，逐项结论
 
 > 代码基线：`8cda62c`（ToolsHash）· `7f381ae`（vmr diff）· `34162a3`（cache break）· `159d6e5`（artifacts + clusters）· `05e96a5`（viewer artifacts 面板）。历史评审均在这些提交**之前**结束，本组基本无独立评审覆盖。
+>
+> **下表是审计当时的"如发现"状态**；修复与裁决后的最终状态见 §3.2 与 §4.1。
 
 | ID | 结论 | 证据 / 缺口 |
 |---|:---:|---|
@@ -257,23 +262,23 @@ archtest）未发现新的数据正确性 / 缓存失效 / 安全 / 不变量层
 
 **唯一在本组直接修复的是 FIX-1（gofmt 回归）**——见下。其余组 A/B/C/E 事项标记为 **✅ 已核实完成**。
 
-### 3.2 组 D（可视化 Stage 1）—— 完成度逐项
+### 3.2 组 D（可视化 Stage 1）—— 完成度逐项（本轮修复后）
 
 | ID | 状态 | 说明 |
 |---|:---:|---|
 | D-S1-1 ToolsHash + schema 9 | ✅ 已完成 | |
-| D-S1-2 CacheBreak 归因事实 | 🟡 部分完成 | 六类归因结构完整，但 `unexplained` 阈值逻辑产生大量假阳性（S1-L） |
-| D-S1-3 三处渲染 | 🟡 部分完成 | spine / viewer / compare.md 三处 ✅；compare **看板** 缺 breaks 表（S1-F） |
-| D-S1-4 `vmr diff` | 🟡 部分完成 | 主体 ✅；未用 `Manifest.ToolsHash`，漏检工具 schema 变更 + stale TODO（S1-G） |
+| D-S1-2 CacheBreak 归因事实 | ✅ 已完成 | 六类归因；`unexplained` 补 `CacheDropAbsFloor(0.15)` 消除假阳性（S1-L）；`tools` 覆盖新增/移除（S1-E） |
+| D-S1-3 渲染 | ✅ 已完成 | spine / viewer / compare.md / compare 看板 四处（S1-F 补齐看板） |
+| D-S1-4 `vmr diff` | ✅ 已完成 | 并入 `Manifest.ToolsHash` 检工具 schema 变更（S1-G） |
 | D-S1-5 artifacts 提取器 | ✅ 已完成 | |
 | D-S1-6 artifacts 消费端 | ✅ 已完成 | |
-| D-S1-7 clusters 聚类 | 🟡 部分完成 | member 缺 cost/timing 字段（S1-A）；键用 Title（S1-B） |
-| D-S1-8 聚类消费端 | 🟡 部分完成 | index.md ✅；viewer 分组 ❌（S1-D）；最快/最省标注 ❌（S1-A） |
-| D-S1-9 阈值进 report.yaml + paramsFP | ❌ 未完成 | 硬编码 0.45（S1-C） |
+| D-S1-7 clusters 聚类 | ✅ 已完成 | member 带 cost/net_working_ms/model；`cheapest`/`fastest`（S1-A）；键用 Title 为可接受近似（S1-B，已注明） |
+| D-S1-8 聚类消费端 | 🟡 部分完成 | `index.md` 分组 + 最省/最快 + compare 建议 ✅；**viewer 候选列表分组按 YAGNI 裁决不做**（S1-D，已登记 KNOWN_ISSUES） |
+| D-S1-9 阈值进 report.yaml + paramsFP | ⚖️ 裁决不做 | 硬编码 0.45（S1-C）——3 人单场景过度设计，KNOWN_ISSUES §1.5 登记 |
 | D-S1-10 失效矩阵 / 盖章同步 | ✅ 已完成 | |
-| D-S1-11 文档同步 | 🟡 部分完成 | CHANGELOG 结构损坏（S1-I）；UserGuide 缺失（S1-H）；deepdive §11.2 过度声称 |
-| D-S1-12 守卫测试 | 🟡 部分完成 | artifacts / clusters 测试偏薄 |
-| D-S1-13 看板字段对齐 | 🟡 部分完成 | 见 S1-F / S1-D |
+| D-S1-11 文档同步 | 🟡 部分完成 | UserGuide 双语已补（S1-H）；deepdive §11.2/A.1.6/A.3 已回写；**CHANGELOG `[Unreleased]` 结构问题按用户裁决留待发版前**（S1-I，KNOWN_ISSUES §2.55） |
+| D-S1-12 守卫测试 | ✅ 已完成 | 新增 `TestComputeTaskClusters_CheapestFastest` / `TestCleanAnchorTitle`；cachebreak 测试补假阳性用例；`vmr diff` 补同名不同 schema 用例 |
+| D-S1-13 看板字段对齐 | 🟡 部分完成 | compare 看板 breaks 表补齐（S1-F）；journey-viewer 读 `cache_break`/`artifacts` ✅；clusters 未在看板消费（同 S1-D，裁决不做） |
 
 ### 3.3 部分完成 / 未完成事项详述（问题描述 / 根因 / 建议方案 / ROI）
 
@@ -283,25 +288,28 @@ archtest）未发现新的数据正确性 / 缓存失效 / 安全 / 不变量层
 
 ## 第四部分 · 过程新发现问题与处理
 
-### 4.1 汇总
+### 4.1 汇总（含用户裁决后的最终处置）
 
-| 编号 | 问题 | 严重度 | 处置 |
+> 用户裁决（本轮）：S1-L → 加 `cur<0.15` 绝对门槛；S1-A/B/C/D → 补 cost/timing + 最省/最快标注，viewer 分组与阈值配置按 YAGNI 不做；S1-I → 不动，发版前处理；Phase B → 先跳过真实 LLM 用例。
+
+| 编号 | 问题 | 严重度 | 最终处置 |
 |---|---|:---:|:---:|
-| FIX-1 | `gofmt -l` 报 3 文件非 canonical（CI 门禁失败），由 3135487 / 159d6e5 引入 | 中（CI 红） | ✔️ **已直接修复** |
-| S1-L | Step `cache_break` 的 `unexplained` 归因把正常命中率波动（如 98%→70%）误判为"击穿" | **中-高**（核心特性信噪比） | ⚖️ 待裁决（含具体阈值建议 + 实测数据） |
-| S1-F | `journey-compare.html` 不渲染 Cache Breaks 归因表（`.md` 有、JSON 有数据） | 中（看板↔.md parity 回归） | ✔️ **已直接修复** |
-| S1-G | `vmr diff` 未使用 `Manifest.ToolsHash`，漏检"工具名相同但 schema 变更"；stale TODO | 中（漏报） | ✔️ **已直接修复** |
-| S1-I | CHANGELOG `[Unreleased]` (a) 结构损坏——2× `### Added` / 3× `### Changed` / 2× `### Fixed`；(b) block-2（重构前既有条目）大量引用 `vmr story` / `vmr report` / `internal/story` / `-corpus` / `vmr-stories.md` / `vmr-requests-*.md`——与同一发版内"删除这些"的 breaking 条目自相矛盾 | 中（发版 Release body 畸形 + 自相矛盾） | ⚖️ 待裁决（方案见 4.2；比初判更大，不宜盲改） |
-| S1-A | 任务聚类 `ClusterMember` 缺 `cost`/`wall`/`model`/`net_working_ms`（设计 A.1.6 明列），"哪次最省/最快"无法回答 | 中（特性价值折损） | ⚖️ 待裁决 |
-| S1-C | 聚类相似度阈值 `0.45` 硬编码，未进 report.yaml、未进 L2 分析参数指纹（设计明确要求） | 低-中 | ⚖️ 待裁决（YAGNI 讨论） |
-| S1-D | 任务聚类未在 journey-viewer 候选列表按簇分组（设计 A.1.6 明列） | 低-中 | ⚖️ 待裁决 |
-| S1-B | 聚类键用 `JourneyIndexRow.Title` 而非"初始指令归一化 token 集合"（设计明列） | 低（可能可接受） | ⚖️ 待裁决 |
-| S1-H | `docs/UserGuide.md` + `.zh` 完全没有 `vmr diff` / cache 击穿归因 / 触达文件 / 任务聚类 | 低-中（用户文档欠账） | ⚖️ 待裁决（可代做，需双语） |
-| S1-E | `ComputeCacheBreak` 对"工具集新增/移除"不归因（`system` 对称处理了新增/移除，`tools` 只在两侧都有工具时才判） | 低（归因盲区） | ⚖️ 待裁决 |
-| S1-M | 聚类纳入 `cron` 类 journey；锚点标题带原始 `[cron:UUID` 前缀（UUID token 使同 cron 必然聚类） | 低（噪音 / 观感） | ⚖️ 待裁决 |
-| S1-J | `cachebreak.go` / `digest.go` 版本头是未来日期（`2026-09-16` / `-15`，今天 09-08） | 极低 | 仅记录（CLAUDE.md：头日期不值得单独修） |
-| S1-K | `artifacts.go` bash 启发式质量瑕疵（`bashApplyRe` 捕获 `patch -p1` 的 `-p1` 而非文件名；op 升级注释与代码不符） | 极低（heuristic 已免责标注） | 仅记录 |
-| deepdive §11.2 | 对聚类落地的描述过度声称（"每成员旁 compare 建议""viewer 分组"实际未做） | 低（文档失实） | ⚖️ 随 S1-A/D 裁决后一并回写 |
+| FIX-1 | `gofmt -l` 报 3 文件非 canonical（CI 门禁失败） | 中 | ✔️ **已修复** `c6b533b` |
+| S1-L | `cache_break` 的 `unexplained` 把正常命中率波动误判为"击穿"（实测约 44% 假阳性） | 中-高 | ✔️ **已修复** `0813fc0`：第 6 档加 `curRatio < CacheDropAbsFloor(0.15)`；重跑实测 `98%→70%` 类不再报、`97%→0%` 类保留 |
+| S1-E | `cache_break` 不归因工具集新增/移除 | 低 | ✔️ **已修复**（随 `0813fc0`）：第 3 档改 `cur.HasTools != prev.HasTools \|\| (两侧都有 && ToolsHash 变)` |
+| S1-F | `journey-compare.html` 不渲染 Cache Breaks 归因表 | 中 | ✔️ **已修复** `7741d85` |
+| S1-G | `vmr diff` 未用 `Manifest.ToolsHash` 检工具 schema 变更 + stale TODO | 中 | ✔️ **已修复** `8307151` |
+| S1-A | 任务聚类 member 缺 cost/timing，"最省/最快"无法回答 | 中 | ✔️ **已修复** `5fcb114`：`JourneyIndexRow`+`ClusterMember` 加 `cost`/`net_working_ms`/`model`，`TaskCluster` 加 `cheapest`/`fastest`；`index.md` 每成员一行 `model·净工作·成本` + `⭐最省`/`⚡最快` + 最省vs最贵 compare |
+| S1-M | 聚类锚点标题带原始 `[cron:UUID` 装饰 | 低 | ✔️ **已修复**（随 `5fcb114`）`cleanAnchorTitle`（截断/未截断两种） |
+| S1-C | 聚类阈值硬编码 | 低-中 | ⚖️ **裁决不做**（YAGNI）：`KNOWN_ISSUES` §1.5 + deepdive A.1.6/A.3 回写 |
+| S1-D | 聚类未在 journey-viewer 分组 | 低-中 | ⚖️ **裁决不做**（YAGNI）：同上登记 |
+| S1-B | 聚类键用 Title 而非初始指令全文 | 低 | ⚖️ **接受近似**：deepdive 已注明；改全文列为后续可选精化 |
+| S1-H | UserGuide + `.zh` 缺 `vmr diff` / cache 击穿 / 触达文件 / 任务聚类 | 低-中 | ✔️ **已补**（本轮 docs 提交，双语同步） |
+| RD-1 | `TestCmdAnalyze_JourneyWithRealLLM` 直连真实端点硬断言，端点慢时 `go test ./...` 红（实测单次 60–206s） | 中 | ✔️ **已修复** `f8915c0`：断言改为"真跑一次 + `llm_interpretation.status ∈ {ok,failed}`"，`-short` 跳过 |
+| S1-I | CHANGELOG `[Unreleased]` 结构损坏 + 退役术语泄漏 | 中 | ⚖️ **不动（用户裁决）**：`KNOWN_ISSUES` §2.55 登记为"发版前必做" |
+| S1-J | `cachebreak.go` / `digest.go` 版本头未来日期 | 极低 | 仅记录（CLAUDE.md：头日期不值得单独修） |
+| S1-K | `artifacts.go` bash 启发式质量瑕疵（`bashApplyRe` 捕获 flag 而非文件名） | 极低（已 `heuristic` 免责） | 仅记录 |
+| deepdive §11.2 | 对聚类落地过度声称 | 低 | ✔️ **已回写**（本轮 docs：§11.2 + A.1.6 + A.3 表如实） |
 
 ### 4.2 详述
 
@@ -386,6 +394,20 @@ archtest）未发现新的数据正确性 / 缓存失效 / 安全 / 不变量层
 - **建议方案**：UserGuide 的 §"Agent task narratives (journeys)" 补 cache 击穿归因 + 触达文件 + 任务聚类三小段；`vmr diff` 在 §"The audit log" 或命令总览处补一段（含"纯 CLI、英文、不落 reports/"）；`.zh` 同步。约 1–1.5 小时（含中译）。
 - **ROI**：中低。用户文档欠账，不阻塞功能。**我可以代做**——若你同意，纳入本轮。
 
+#### RD-1 — `TestCmdAnalyze_JourneyWithRealLLM` 直连真实 LAN 端点 —— ⚖️ 待裁决
+
+- **问题描述**：`cmd/vmr/cmd_analyze_test.go` 的 `TestCmdAnalyze_JourneyWithRealLLM`（随 N2/§3.6 `llm_interpretation` 落地）读 `../../report.yaml`，若有 `llm_addr` 则用 2s 超时探 `/v1/models`，探通就跑一次**真实 `-journey` LLM 解读调用**，然后**硬断言** `.md` 里必须有 `## LLM` / `解读` 段。
+- **实测**（本轮，端点 `192.168.0.22:8800` model `cheap`）：
+  - `ping`（`max_tokens:10`）1.5s；但 317-token 的 journey 解读 prompt 单次 **206s**（另一次 58.77s）——`cheap` 后端是 Gemini 系，生成几千 token 中文分析 + 可能触发 `llm.go` 的 `120s timeout → retry`。
+  - `go test ./...` 因此变得极慢，且**至少 2 次因 cmd/vmr 红**（并发/负载下端点更慢，解读调用整体 `failed` → `RenderLLMSection` 渲染空段 → `.md` 无 `## LLM` → `t.Errorf`）。
+- **根因**：单元/集成测试硬依赖一个外部 LAN LLM 的**延迟与可靠性**。设计的降级行为（"failed → 渲染空段"）是**对的**，但这个测试把降级当失败。CI 上端点不可达 → `t.Skip`（CI 安全）；但在端点可达的 dev 机上是地雷。其它 LLM 测试（`cmd_journey_llm_interpretation_test.go` 等）都用 `httptest.NewServer` mock——这一个是例外。
+- **建议方案**（三选一）：
+  - **A（推荐）**：断言放宽为"`cmdAnalyze` 无 error 返回 **且**（`.md` 有 LLM 段 **或** `j-<id>.json.llm_interpretation.status == "failed"`）"——即"真实调用被尝试了"，不强求它成功。端点慢/挂时测试仍绿（降级路径本就是设计的一部分）。
+  - **B**：加 `-short` 跳过 / build tag `//go:build realllm`——`go test ./...` 默认不跑，需要时显式 `-tags realllm`。
+  - **C**：改用 mock（与其它 LLM 测试一致），真实端点验证移到手动/Phase-B 式验收。
+- **ROI**：中。A 约 5 行，保留"真跑一次真实端点"的价值同时消除脆弱性。当前状态下这个测试让 `go test ./...` 在 dev 机上不可靠。
+- **对 Phase B 的直接影响**：见 4.4 / OBS-1——端点当前对真实 prompt 慢（分钟级），Phase B 的 UC-3/UC-4（真实 LLM）会很慢甚至产出 `failed` 段。**进 Phase B 前请确认端点对 ~13K token 的 compare evidence pack 能在合理时间（<60s）响应。**
+
 #### S1-B / S1-E / S1-M / S1-J / S1-K
 
 - **S1-B（聚类键用 Title）**：`ComputeTaskClusters` 对 `r.Title` 分词做 Jaccard，设计要求"初始指令归一化 token"。Title 对 coding agent 多由 taskseg 从首条指令派生（≈ 截断的初始指令），实测 2 簇质量尚可。**根因**：`InitialInstructionFact` 提取器在 `compare.go`，聚类为省一次全量读 `j-<id>.json` 用了现成的 Title。**建议**：若做 S1-A（member 已要读 `j-<id>.json`），顺带改用初始指令全文；否则维持 Title + 在注释/deepdive 写明这是有意的近似。**ROI**：低。
@@ -420,22 +442,32 @@ archtest）未发现新的数据正确性 / 缓存失效 / 安全 / 不变量层
 
 ## 第五部分 · 真实数据 + 真实 LLM 端到端验收测试（Phase B）
 
-**前置**：Phase A 结论为"重构组实质落地、Stage 1 有若干落地未尽项（多为待裁决，无阻塞性大问题）"。
-按任务定义 → 执行 Phase B。**Phase B 需你先确认 `report.yaml` 的 LLM 端点对大 prompt 秒级响应
-（见 4.4 / OBS-1）。**
+**前置**：Phase A 闭环——所有可直接修复项已修（8 个 commit），待裁决项已由用户拍板并落实。
+用户裁决 Phase B "先跳过真实 LLM 的用例"（端点对真实 prompt 分钟级慢，见 4.4 / OBS-1）。
 
-（待端点就绪后执行；用例 UC-1..10 与结果回填于此。产物落 `reports/`（zh 主）、`reports-en/`（en 抽测）。）
+**本轮执行的非-LLM 用例**（真实数据 `logs/`，产物落 `reports/` zh 主、`reports-en/` en 抽测）：
+UC-1 默认套件（zh）/ UC-2 benchmark / UC-5 render-only 字节等价 / UC-6 英文变体 / UC-7 冷热一致 + `-no-cache`
+/ UC-8 看板真实数据渲染 / UC-9 大输入生存性 / UC-10 内容复核。**UC-3（compare + 真实 LLM）/ UC-4（journey + 真实 LLM）
+延后**——端点提速后补。
+
+（执行记录与逐用例结果回填于此。）
 
 ---
 
 ## 附 · 本轮提交清单
 
-| # | 内容 | 文件 |
-|---|---|---|
-| FIX-1 | gofmt 回归（CI 门禁） | `cmd/vmr/cmd_journey_setup.go`、`internal/i18n/journey_index.go`、`internal/journey/viewmodel_build.go` |
-| S1-G | `vmr diff` 用 `Manifest.ToolsHash` 检工具 schema 变更 + 删 stale TODO | `cmd/vmr/cmd_diff.go`、`cmd/vmr/cmd_diff_test.go` |
-| S1-F | `journey-compare.html` 补 Cache Breaks 归因表（对齐 `compare-*.md`） | `internal/dashboard/assets/journey-compare.html`、`internal/dashboard/js_test.go` |
-| 文档 | 本审计报告 | `docs/future-strategy/analyze_redesign_final_audit_claude-sonnet-5.md` |
+| commit | 内容 |
+|---|---|
+| `c6b533b` | style: gofmt realign（FIX-1，CI 门禁） |
+| `8307151` | fix(diff): 用 `Manifest.ToolsHash` 标记同名不同 schema 的工具集（S1-G） |
+| `7741d85` | fix(dashboard): journey-compare 渲染 Cache Breaks 归因表（S1-F） |
+| `82ab7f8` | docs(review): 本审计报告 Phase A findings |
+| `0813fc0` | fix(journey): `cache_break` unexplained 加近零门槛 + 归因工具集新增/移除（S1-L / S1-E） |
+| `5fcb114` | feat(journey): 任务聚类携带每次执行的 cost/timing，标注最省/最快（S1-A / S1-M） |
+| `f8915c0` | test(cli): `TestCmdAnalyze_JourneyWithRealLLM` 容忍慢/失败端点，`-short` 跳过（RD-1） |
+| `<docs>` | UserGuide + `.zh`（S1-H）、deepdive §11.2/A.1.6/A.3、KNOWN_ISSUES §1.5+§2.55、CHANGELOG `[Unreleased]` 条目校正 |
+
+**基线 → 修复后**：`go build` / `go vet` / `go test ./...` 全绿（38 包，`-short` 亦全绿）；`gofmt -l` clean；`archtest` 全绿。
 
 ---
 
