@@ -679,9 +679,10 @@ func TestCompare_CacheAttribution(t *testing.T) {
 	u2 := msg("user", "u2")
 	a1 := msg("assistant", "a1")
 
-	// Side A has an unexplained drop: 1000 tok (900 cached = 90%) -> 2000 tok (800 cached = 40%)
+	// Side A has an unexplained break: 1000 tok (900 cached = 90%) -> 2000 tok (100 cached = 5%),
+	// an established cache collapsing to near-zero with no structural cause.
 	recA1 := goldenRec(at(0), 1000, []any{sys, u1}, goldenSSE("a1", 1000, 10, 900))
-	recA2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("a2", 2000, 10, 800))
+	recA2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("a2", 2000, 10, 100))
 	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA1, recA2})), taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)

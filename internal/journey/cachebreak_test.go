@@ -96,15 +96,26 @@ func TestComputeCacheBreak_ToolsChurn(t *testing.T) {
 		t.Errorf("tools churn: got %q, want %q", got, CacheBreakTools)
 	}
 
-	// One side has_tools=false -> should NOT attribute to tools
+	// A toolset appearing mid-conversation breaks the prefix -> tools
 	prevNoTools := &ctxgraph.Manifest{
 		HasSys:         true,
 		SysHash:        sysHash,
 		HasTools:       false,
 		ServedEndpoint: "openai:prov:m1",
 	}
-	if got := ComputeCacheBreak(prevNoTools, cur, edge, nil); got == CacheBreakTools {
-		t.Errorf("single side tools should not attribute to tools, got %q", got)
+	if got := ComputeCacheBreak(prevNoTools, cur, edge, nil); got != CacheBreakTools {
+		t.Errorf("toolset added: got %q, want %q", got, CacheBreakTools)
+	}
+
+	// ...and disappearing likewise
+	curNoTools := &ctxgraph.Manifest{
+		HasSys:         true,
+		SysHash:        sysHash,
+		HasTools:       false,
+		ServedEndpoint: "openai:prov:m1",
+	}
+	if got := ComputeCacheBreak(prev, curNoTools, edge, nil); got != CacheBreakTools {
+		t.Errorf("toolset removed: got %q, want %q", got, CacheBreakTools)
 	}
 }
 
@@ -200,9 +211,9 @@ func TestComputeCacheBreak_UnexplainedDrop(t *testing.T) {
 		}
 	}
 
-	// 1. Drop: 90% -> 40% (drop 50%, prev >= 50%) -> unexplained
+	// 1. Genuine break: 90% -> ~3% (established cache collapsed to near-zero) -> unexplained
 	prev := mkManifest(1000, 900, true)
-	cur := mkManifest(2000, 800, true) // 800/2000 = 40%
+	cur := mkManifest(2000, 60, true) // 60/2000 = 3%
 	if got := ComputeCacheBreak(prev, cur, edge, nil); got != CacheBreakUnexplained {
 		t.Errorf("unexplained drop: got %q, want %q", got, CacheBreakUnexplained)
 	}
@@ -211,6 +222,14 @@ func TestComputeCacheBreak_UnexplainedDrop(t *testing.T) {
 	curNormal := mkManifest(1200, 900, true) // 900/1200 = 75%
 	if got := ComputeCacheBreak(prev, curNormal, edge, nil); got != CacheBreakNone {
 		t.Errorf("normal append: got %q, want %q", got, CacheBreakNone)
+	}
+
+	// 2b. Steep *relative* drop but the cache is still healthy: 90% -> 60%
+	// (drop 30% > 25%, prev >= 50%, but cur 60% >= abs floor 15%). A big tool
+	// result diluting fresh input tokens does this — it is not a break.
+	curDiluted := mkManifest(1500, 900, true) // 900/1500 = 60%
+	if got := ComputeCacheBreak(prev, curDiluted, edge, nil); got != CacheBreakNone {
+		t.Errorf("healthy cache after dilution: got %q, want %q", got, CacheBreakNone)
 	}
 
 	// 3. Prev had low ratio: 40% -> 10% (prev < 50%) -> none
@@ -225,7 +244,7 @@ func TestComputeCacheBreak_UnexplainedDrop(t *testing.T) {
 	if got := ComputeCacheBreak(prevNoOK, cur, edge, nil); got != CacheBreakNone {
 		t.Errorf("prev UsageInOK=false: got %q, want %q", got, CacheBreakNone)
 	}
-	curNoOK := mkManifest(2000, 800, false)
+	curNoOK := mkManifest(2000, 30, false) // break-shaped, but usage not computable
 	if got := ComputeCacheBreak(prev, curNoOK, edge, nil); got != CacheBreakNone {
 		t.Errorf("cur UsageInOK=false: got %q, want %q", got, CacheBreakNone)
 	}

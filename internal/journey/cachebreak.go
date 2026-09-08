@@ -19,19 +19,25 @@ const (
 	CacheBreakUnexplained    CacheBreakKind = "unexplained"
 )
 
-// Threshold constants for detecting sudden unexplained cache drop:
+// Threshold constants for detecting a sudden unexplained cache drop. All three
+// must hold — a break is genuine only when a well-established cache collapses to
+// near nothing, which is what a full-prefix re-encode looks like.
 //
-// CacheDropPrevMin (0.50): Multi-turn agent conversations establish high prefix cache
-// hit rates (>= 50%) during normal tool execution. A drop is only judged as a sudden
-// break if cache reuse was already established on the prior turn.
+// CacheDropPrevMin (0.50): the prior turn must have had real cache reuse (>= 50%)
+// — otherwise there is nothing to "break".
 //
-// CacheDropDiffThreshold (0.25): In incremental multi-turn contexts, normal message appends
-// slightly dilute the cache hit ratio by adding fresh input tokens. A drop of 25 percentage
-// points between consecutive turns cannot be explained by incremental growth and indicates
-// an upstream cache invalidation or node routing jitter.
+// CacheDropDiffThreshold (0.25): the drop must be steeper than incremental append
+// dilution. A big tool result adding fresh input tokens routinely dilutes the
+// ratio a little; 25 points between consecutive turns cannot be that.
+//
+// CacheDropAbsFloor (0.15): the *current* ratio must be near-zero. A genuine
+// break re-encodes the whole prefix, so the ratio collapses; 0.98 -> 0.70 is
+// still a healthy cache and is normal token dilution, not a break. Without this
+// floor the attribution fires on ~half of ordinary multi-turn appends.
 const (
 	CacheDropPrevMin       = 0.50
 	CacheDropDiffThreshold = 0.25
+	CacheDropAbsFloor      = 0.15
 )
 
 // CacheRatio computes the prompt-cache hit ratio (CacheRead / In) from manifest usage.
@@ -61,8 +67,9 @@ func ComputeCacheBreak(prev, cur *ctxgraph.Manifest, edge *ctxgraph.Edit, stitch
 		return CacheBreakSystem
 	}
 
-	// 3. Tool declarations churned: only attributed when both sides declared tools
-	if prev.HasTools && cur.HasTools && prev.ToolsHash != cur.ToolsHash {
+	// 3. Tool declarations churned: a toolset appearing, disappearing, or changing
+	// shape all break the cache prefix (tools sit ahead of the messages).
+	if cur.HasTools != prev.HasTools || (prev.HasTools && cur.HasTools && prev.ToolsHash != cur.ToolsHash) {
 		return CacheBreakTools
 	}
 
@@ -77,10 +84,12 @@ func ComputeCacheBreak(prev, cur *ctxgraph.Manifest, edge *ctxgraph.Edit, stitch
 	}
 
 	// 6. Expected full reuse (Append + same sys + same tools + same endpoint),
-	// but hit ratio dropped steeply without explanation.
+	// but an established cache collapsed to near-zero without explanation.
 	if prevRatio, ok1 := CacheRatio(prev); ok1 {
 		if curRatio, ok2 := CacheRatio(cur); ok2 {
-			if prevRatio >= CacheDropPrevMin && curRatio < prevRatio-CacheDropDiffThreshold {
+			if prevRatio >= CacheDropPrevMin &&
+				curRatio < prevRatio-CacheDropDiffThreshold &&
+				curRatio < CacheDropAbsFloor {
 				return CacheBreakUnexplained
 			}
 		}
