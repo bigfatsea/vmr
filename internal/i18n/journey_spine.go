@@ -163,8 +163,10 @@ func Spine(lang Lang) SpineText {
 				}
 			},
 
-			ArtifactsTitle:       "## 触达文件与资产\n\n",
-			ArtifactsSummary:     func(count int) string { return "任务过程共记录 " + strconv.Itoa(count) + " 个触达目标：\n\n" },
+			ArtifactsTitle: "## 触达文件与资产\n\n",
+			ArtifactsSummary: func(count int) string {
+				return "任务过程共记录 " + strconv.Itoa(count) + " 个触达目标：\n\n"
+			},
 			ArtifactsTableHeader: "| 目标路径 | 操作 | 首次步骤 | 频次 | 判定依据 |\n| :--- | :--- | :--- | :--- | :--- |\n",
 			ArtifactsHeuristic:   "Shell 启发式",
 			ArtifactsStructured:  "结构化参数",
@@ -269,8 +271,10 @@ func Spine(lang Lang) SpineText {
 			}
 		},
 
-		ArtifactsTitle:       "## Touched Artifacts\n\n",
-		ArtifactsSummary:     func(count int) string { return "Recorded " + strconv.Itoa(count) + " target(s) touched during execution:\n\n" },
+		ArtifactsTitle: "## Touched Artifacts\n\n",
+		ArtifactsSummary: func(count int) string {
+			return "Recorded " + strconv.Itoa(count) + " target(s) touched during execution:\n\n"
+		},
 		ArtifactsTableHeader: "| Target Path | Operation | First Step | Calls | Detection |\n| :--- | :--- | :--- | :--- | :--- |\n",
 		ArtifactsHeuristic:   "Shell heuristic",
 		ArtifactsStructured:  "Structured parameter",
