@@ -104,12 +104,13 @@ func computeDiff(coordA, coordB string, recA, recB *audit.Record, mA, mB *ctxgra
 	}
 
 	// 3. Tools rows
-	// Tools are extracted directly from request body via chatmsg.ToolNames.
-	// TODO: switch to Manifest.ToolsHash once W1 lands.
+	// Names come from chatmsg.ToolNames (a readable +/- diff); the digest comes
+	// from the manifest and catches an identical-name toolset whose schema
+	// (a description or parameter shape) changed — itself a real cache break.
 	toolsA := chatmsg.ToolNames(recA.Client.Request.Body)
 	toolsB := chatmsg.ToolNames(recB.Client.Request.Body)
 	rep.toolsRows = []diffRow{
-		makeToolsRow(toolsA, toolsB),
+		makeToolsRow(toolsA, toolsB, mA, mB),
 	}
 
 	// 4. Messages
@@ -218,10 +219,16 @@ func makeSystemRow(mA, mB *ctxgraph.Manifest) diffRow {
 	return diffRow{label: "sys_hash", valA: valA, valB: valB, ann: ann}
 }
 
-func makeToolsRow(toolsA, toolsB []string) diffRow {
+func makeToolsRow(toolsA, toolsB []string, mA, mB *ctxgraph.Manifest) diffRow {
 	valA := formatToolCount(len(toolsA))
 	valB := formatToolCount(len(toolsB))
 	ann := diffToolsets(toolsA, toolsB)
+	// Identical names but a different manifest ToolsHash means a tool's schema
+	// (description / parameters) changed without any name being added or removed.
+	if ann == "(same)" && mA != nil && mB != nil &&
+		mA.HasTools && mB.HasTools && mA.ToolsHash != mB.ToolsHash {
+		ann = "(same names, tool schema changed)"
+	}
 	return diffRow{label: "toolset", valA: valA, valB: valB, ann: ann}
 }
 

@@ -386,6 +386,35 @@ func TestCmdDiff_ToolsRemovedAndReplaced(t *testing.T) {
 	}
 }
 
+// A toolset with identical names but a changed schema (description / parameters)
+// is a real cache break the name-only diff misses — the manifest ToolsHash catches it.
+func TestCmdDiff_ToolSchemaChangedSameNames(t *testing.T) {
+	mkRec := func(desc string) audit.Record {
+		rec := makeTestRecord("coding", "openai-completions", "", []map[string]string{{"role": "user", "content": "hi"}}, nil, 10, 10, 0)
+		body := rec.Client.Request.Body.(map[string]any)
+		body["tools"] = []any{map[string]any{
+			"type": "function",
+			"function": map[string]any{
+				"name":        "search",
+				"description": desc,
+			},
+		}}
+		return rec
+	}
+	content := recordLine(mkRec("search the web")) + recordLine(mkRec("search the web and local files"))
+	auditPath := writeTempFile(t, "audit_tool_schema.jsonl", content)
+
+	out := captureStdout(t, func() {
+		if err := cmdDiff([]string{fmt.Sprintf("%s:1", auditPath), fmt.Sprintf("%s:2", auditPath)}); err != nil {
+			t.Fatalf("cmdDiff failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "(same names, tool schema changed)") {
+		t.Errorf("expected tools row to flag a schema change, got:\n%s", out)
+	}
+}
+
 func TestCmdDiff_SearchLogDir(t *testing.T) {
 	// Write audit log inside a specific log directory
 	dir := t.TempDir()
