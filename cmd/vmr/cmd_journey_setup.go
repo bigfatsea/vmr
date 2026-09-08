@@ -22,8 +22,8 @@ import (
 type journeySetup struct {
 	g         *ctxgraph.Graph
 	byIdx     map[int]*ctxgraph.Lineage
-	cands     []*ctxgraph.Lineage     // ListCandidates' output, self-traffic filtered
-	chains    [][]*ctxgraph.Lineage   // cands[i]'s full stitched chain, same index
+	cands     []*ctxgraph.Lineage       // ListCandidates' output, self-traffic filtered
+	chains    [][]*ctxgraph.Lineage     // cands[i]'s full stitched chain, same index
 	freshRows []journey.JourneyIndexRow // cands[i]'s index row, same index — .Category already computed (P9.2 reads this)
 	idx       *journey.JourneyIndex
 	firstPath string

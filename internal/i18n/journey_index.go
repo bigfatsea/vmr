@@ -24,8 +24,8 @@ type JourneyIndexText struct {
 	// cron/subagent moved into the main table) — n is how many rows it holds.
 	NoiseFoldSummary func(n int) string
 
-	ClustersTitle func(n int) string
-	ClusterHeader func(idx int, anchor string, size int) string
+	ClustersTitle     func(n int) string
+	ClusterHeader     func(idx int, anchor string, size int) string
 	ClusterCompareCmd func(idA, idB string) string
 }
 
