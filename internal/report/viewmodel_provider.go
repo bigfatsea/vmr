@@ -183,7 +183,7 @@ func quotaRowProviderCell(provider string, models []string) string {
 
 // topErrorClassProviderCell renders a provider's dominant error class as
 // "rate_limit 12(63%)" — the share of FAILED attempts, mirroring
-// section_reliability's topErrorClassShort in spirit but against
+// viewmodel_reliability.go's topErrorClassShort in spirit but against
 // ProviderRow.
 func topErrorClassProviderCell(p ProviderRow) string {
 	if len(p.ErrorClasses) == 0 {

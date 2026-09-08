@@ -230,8 +230,9 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 // TestWriteDetailsByTag covers that ClientKeyTag never affects
 // WriteDetails' own output: details/ stays one shared, unfiltered,
 // un-duplicated pool of per-request files regardless of how many distinct
-// tags the records carry (per-tag *views* over this data are the report's
-// job now — vmr-requests-<tag>.md — not WriteDetails').
+// tags the records carry (per-request *views* over this data now live in
+// requests/index.json — the old per-tag index family vmr-requests-<tag>.md
+// was retired per D7 — not in WriteDetails').
 func TestWriteDetailsByTag(t *testing.T) {
 	zone := time.FixedZone("CST", 8*3600)
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }

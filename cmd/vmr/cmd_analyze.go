@@ -362,7 +362,7 @@ func runMacroOnly(r *analyzeRun) error {
 	return finishAnalyze(r, rep)
 }
 
-// runBenchmark finishes the -benchmark zoom: corpus statistics.
+// runBenchmark finishes the -benchmark zoom: benchmark statistics.
 func runBenchmark(r *analyzeRun, su *journeySetup) error {
 	return renderBenchmarks(su.cands, su.byIdx, su.firstPath, su.prof, r.includePartial, r.outDir, r.lang, su.idx)
 }

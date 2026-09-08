@@ -72,7 +72,7 @@ Task 1: Search codebase and outline implementation
 - **统一分析入口 (`vmr analyze`)**：一条命令、一个输出目录——默认一次调用产出完整可导航套件（聚合报表 + 任务 journey），或用 `-journey`/`-compare`/`-benchmark` 只变焦进某一个视图。
 - **聚合统计报告 (`vmr analyze`)**：自动归组为会话 → 任务 → 轮次，标注增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费。
 - **Agent 任务叙事 (`vmr analyze -journey <id>`)**：把单个任务的完整执行过程还原成逐 Step 的故事——进了什么上下文、模型拿它做了什么、哪一次压缩事件悄悄丢了信息。
-- **行为剖面与分叉点对比 (`vmr analyze -compare id1,id2`)**：自动对比 9 项行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
+- **行为剖面与分叉点对比 (`vmr analyze -compare id1,id2`)**：自动对比核心行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
 
 ## 快速开始
 

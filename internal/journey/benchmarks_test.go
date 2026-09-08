@@ -127,7 +127,7 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 // compare.go's single metricSpecs list) locks in that MetricModelSwitchCount
 // has exactly one entry in metricSpecs, with KindCount and a Value that
 // extracts len(Metrics.ModelSwitches), not always 0 — both -compare's rows
-// and -corpus' distribution/correlation tables read this same entry, so
+// and -benchmark's distribution/correlation tables read this same entry, so
 // there's nothing left to register a second time.
 func TestMetricValue_ModelSwitchCount_Registered(t *testing.T) {
 	var found *metricSpec

@@ -88,7 +88,7 @@ const llmHTTPTimeout = 120 * time.Second
 // "what phases did this Journey go through" itself (design doc plan review:
 // phase classification needs semantic judgment, which the LLM is better and
 // more honest at than a maintained if/else threshold ladder). Nothing here
-// is a judgment call; it's the same data journey-<id>.md already renders,
+// is a judgment call; it's the same data j-<id>.md already renders,
 // just condensed to one line per Step instead of the full body.
 type ToolIndexEntry struct {
 	Seq int `json:"seq"`

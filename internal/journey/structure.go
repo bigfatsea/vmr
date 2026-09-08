@@ -1,6 +1,6 @@
 // Ver 2026-08-20, by Sonnet 5
 
-// The Task/Step/Event/ToolCall structural skeleton journey-<id>.json
+// The Task/Step/Event/ToolCall structural skeleton j-<id>.json
 // publishes as its "structure" field (architecture doc §7.4b). This is assembly,
 // not new computation: everything here already sits on Journey/Step/Event
 // (see journey.go); the judgment call this file makes is the inline-vs-reference
@@ -63,7 +63,7 @@ func (b blobStore) put(text string) string {
 // A consumer that needs the actual TEXT follows the owning Step's Req
 // coordinate to the audit record (audit.LineAt + chatmsg, or a fresh
 // ctxgraph.BuildManifest to recover the Hash↔position mapping) or the
-// record's rendered detail page (internal/reqdetail) — journey-<id>.json is
+// record's rendered detail page (internal/reqdetail) — j-<id>.json is
 // tree, the audit log is blob, tree only holds references.
 type EventRef struct {
 	Hash ctxgraph.Hash `json:"hash"`
@@ -253,7 +253,7 @@ type TaskStructure struct {
 	Steps []StepStructure `json:"steps"`
 }
 
-// JourneyStructure is journey-<id>.json's "structure" field — the complete
+// JourneyStructure is j-<id>.json's "structure" field — the complete
 // Task/Step/Event/ToolCall skeleton plus self-contained bodies blob store (D18 / §3.6).
 type JourneyStructure struct {
 	Tasks  []TaskStructure   `json:"tasks"`

@@ -111,7 +111,7 @@ func TestEnsureJourneyDetails_UsesProvidedRecords(t *testing.T) {
 // policy: a detail-export failure (here, detailDir cannot be created
 // because a same-named regular file already occupies that path) is
 // reported as a warning and does NOT panic or otherwise abort — `vmr
-// story` is a read-only offline analysis tool and one bad Step must not
+// analyze` is a read-only offline analysis tool and one bad Step must not
 // cost the reader the rest of an otherwise-renderable Journey.
 func TestEnsureJourneyDetails_GracefulDegradation(t *testing.T) {
 	j := buildTestJourney(t, 2, false)

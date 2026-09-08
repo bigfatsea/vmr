@@ -64,7 +64,7 @@ func pctStr2(num, den int) string {
 
 // pctStr64 is pctStr2's int64 version — must keep the same den<=0 guard,
 // otherwise a zero denominator renders "NaN%" instead of "-". Added instead
-// of narrowing int64 to int at call sites (section_client_endpoint.go's
+// of narrowing int64 to int at call sites (viewmodel_client_endpoint.go's
 // TokensIn/clientTotal are int64, and truncating to int before formatting a
 // percentage is loss-of-precision for no reason on any of the four release
 // targets, even though none is anywhere near overflowing int on any of

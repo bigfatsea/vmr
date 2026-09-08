@@ -192,7 +192,7 @@ func TestComputeModelUsage_UnresolvableStepsContributeNothing(t *testing.T) {
 
 // Determinism: two (provider,model) pairs tied on TokensIn must always
 // sort the same way, or two runs over the same input could produce
-// byte-different journey-<id>.json/.md.
+// byte-different j-<id>.json/.md.
 func TestComputeModelUsage_DeterministicTieBreak(t *testing.T) {
 	steps := []*Step{
 		{Seq: 1, Manifest: &ctxgraph.Manifest{UsageInOK: true, UsageOutOK: true, Usage: chatmsg.Usage{In: 100}},

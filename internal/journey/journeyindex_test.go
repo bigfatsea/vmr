@@ -63,7 +63,7 @@ func TestMergeJourneyIndexRows_CarriesForwardBuiltFields(t *testing.T) {
 		{ID: "j-b", Requests: 1, Title: "fresh title B"},
 	}
 	prior := []JourneyIndexRow{
-		{ID: "j-a", Requests: 2, Title: "stale title A", Tasks: 3, Steps: 7, Rendered: "journey-j-a.md"},
+		{ID: "j-a", Requests: 2, Title: "stale title A", Tasks: 3, Steps: 7, Rendered: "j-a.md"},
 		{ID: "j-gone", Requests: 5, Title: "no longer derivable from current files"},
 	}
 	merged := MergeJourneyIndexRows(fresh, prior)
@@ -86,7 +86,7 @@ func TestMergeJourneyIndexRows_CarriesForwardBuiltFields(t *testing.T) {
 	if a.Title != "fresh title A" {
 		t.Errorf("a.Title = %q, want fresh's title (fresh always wins for cheap fields)", a.Title)
 	}
-	if a.Tasks != 3 || a.Steps != 7 || a.Rendered != "journey-j-a.md" {
+	if a.Tasks != 3 || a.Steps != 7 || a.Rendered != "j-a.md" {
 		t.Errorf("a should carry forward prior's built fields, got Tasks=%d Steps=%d Rendered=%q", a.Tasks, a.Steps, a.Rendered)
 	}
 	if b.Tasks != 0 || b.Steps != 0 || b.Rendered != "" {
@@ -96,16 +96,16 @@ func TestMergeJourneyIndexRows_CarriesForwardBuiltFields(t *testing.T) {
 
 func TestMergeJourneyIndexRows_FreshBuiltFieldsWinOverPrior(t *testing.T) {
 	fresh := []JourneyIndexRow{
-		{ID: "j-a", Requests: 2, Tasks: 4, Steps: 9, Rendered: "journey-j-a.md"},
+		{ID: "j-a", Requests: 2, Tasks: 4, Steps: 9, Rendered: "j-a.md"},
 	}
 	prior := []JourneyIndexRow{
-		{ID: "j-a", Requests: 2, Tasks: 3, Steps: 7, Rendered: "journey-j-a-partial.md"},
+		{ID: "j-a", Requests: 2, Tasks: 3, Steps: 7, Rendered: "j-a.md"},
 	}
 	merged := MergeJourneyIndexRows(fresh, prior)
 	if len(merged) != 1 {
 		t.Fatalf("got %d rows, want 1", len(merged))
 	}
-	if merged[0].Tasks != 4 || merged[0].Steps != 9 || merged[0].Rendered != "journey-j-a.md" {
+	if merged[0].Tasks != 4 || merged[0].Steps != 9 || merged[0].Rendered != "j-a.md" {
 		t.Errorf("this run's own freshly built fields should win, got %+v", merged[0])
 	}
 }

@@ -8,9 +8,9 @@
 # three escalating Vegeta load rounds at all 12 scenarios, computes the
 # per-scenario server-side breakdown directly from the resulting audit log,
 # writes reports/loadtest-report.md) and cleans up its own subprocesses on
-# exit. The runner never shells out to `vmr report` (an earlier version
-# did; see runner/main.go's own history note) — a load test's result must
-# not depend on a separate command's rendering pipeline.
+# exit. The runner never shells out to `vmr analyze` — a load test's result
+# must not depend on a separate command's rendering pipeline (an earlier
+# version did; see runner/main.go's own history note).
 #
 # Generated files land in the project's normal logs/reports/ directories,
 # not loadtest/ itself — namespaced (logs/loadtest/, reports/loadtest-*) so

@@ -74,7 +74,7 @@ type JourneyIndexRow struct {
 	Partial  bool      `json:"partial,omitempty"`
 	Stitched int       `json:"stitched,omitempty"` // len(chain), only when >1
 	Files    []string  `json:"files"`
-	Rendered string    `json:"rendered,omitempty"` // journey-<id>(-partial).md path, once rendered
+	Rendered string    `json:"rendered,omitempty"` // j-<id>.md path, once rendered
 	// Cost / NetWorkingMS / Model are the same "which run was cheapest / fastest"
 	// facts the per-journey j-<id>.json already carries, projected onto the row so
 	// task-cluster comparison (ComputeTaskClusters) needs no per-file read. Filled

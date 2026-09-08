@@ -130,7 +130,7 @@ warn_if_stale() {
 # config.
 #
 # Audit files rotate daily and auto-compress to .zst on rotation (20-75x
-# smaller; vmr report reads both transparently). They're kept for 90 days by
+# smaller; vmr analyze reads both transparently). They're kept for 90 days by
 # default; set ttl.audit_retention in config.yaml to change that (a large
 # value like 90000d for effectively-forever, since there's no literal
 # "forever" setting) — see the design doc §9.5 (the standalone compression analysis was folded in there).

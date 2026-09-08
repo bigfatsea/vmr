@@ -440,11 +440,11 @@ rates:
 }
 
 // TestWriteRequestsJSONL covers WriteRequestsJSONL as a generic row writer.
-// The only production caller today is vmr-requests-failed.jsonl (see
+// The only production caller today is requests/failed.jsonl (see
 // cmd_report.go) — requests/index.json, the main per-request export, is
 // WriteRequestsJSON (no "L"), a different function with its own
 // "files" cache section. The filename below is deliberately generic
-// (not vmr-requests-failed.jsonl) so this test doesn't imply the function
+// (not requests/failed.jsonl) so this test doesn't imply the function
 // is single-purpose.
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
@@ -453,7 +453,7 @@ func TestWriteRequestsJSONL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jsonlPath := filepath.Join(dir, "vmr-requests-failed.jsonl")
+	jsonlPath := filepath.Join(dir, "rows-failed.jsonl")
 	n, err := WriteRequestsJSONL(rep.RequestRows(), jsonlPath)
 	if err != nil {
 		t.Fatal(err)
@@ -476,18 +476,18 @@ func TestWriteRequestsJSONL(t *testing.T) {
 	}
 }
 
-// TestWriteRequestsIndexGrouping covers vmr-requests.md's Chat User grouping
+// TestWriteRequestsIndexGrouping covers requests/index.json's session grouping
 // end to end — no prior test exercised WriteRequestsIndex at all, only the
 // aggregate Report2 (via smallAuditRecords, whose records all share
 // identical message content and so fold into a single session, useless for
 // testing grouping). Two distinct-content records under client "alice"
-// become two separate one-turn sessions (so "alice"'s Chat User header can
-// be checked for the "N 会话 N 任务 N 轮" count); one heartbeat-tagged
+// become two separate one-turn sessions (so the "alice" group can be
+// checked for the "N 会话 N 任务 N 轮" count); one heartbeat-tagged
 // record under "bob" is a single-shot scheduled session and must collapse
-// into the top-level 定时任务 rollup (its own vmr-requests-cron-heartbeat.md,
-// linked from the main index) instead of getting its own Chat User section
-// or per-tag sibling — "bob" never had any interactive traffic, so no
-// vmr-requests-bob.md is written at all.
+// into the top-level 定时任务 rollup (its own scheduled-class grouping,
+// surfaced in the sessions projection) instead of getting its own
+// interactive-session group — "bob" never had any interactive traffic, so
+// no interactive session group is written for it at all.
 func TestWriteRequestsIndexGrouping(t *testing.T) {
 	// Override DisplayZone to something other than UTC (this package's
 	// TestMain default) and other than a plausible "real" timezone, so the

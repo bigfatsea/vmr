@@ -416,8 +416,8 @@ func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
 }
 
 // TestProviderQuotaSkippedJSON pins the JSON contract: the skip stats ride
-// on vmr-report.json as omitempty fields — present when there is something
-// to disclose, absent (not zero) when there is not.
+// on the finance slice (macro/finance.json) as omitempty fields — present
+// when there is something to disclose, absent (not zero) when there is not.
 func TestProviderQuotaSkippedJSON(t *testing.T) {
 	withSkip, err := json.Marshal(&Report2{ProviderQuotaSkippedAttempts: 3, ProviderQuotaSkippedProviders: []string{"ghost"}})
 	if err != nil {

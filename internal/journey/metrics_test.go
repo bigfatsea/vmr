@@ -340,7 +340,7 @@ func TestComputeMetrics_CompactionTotals(t *testing.T) {
 
 // TestSummarize covers JourneySummary's own construction: identity fields
 // copied straight from the Journey, Metrics computed fresh (not just
-// zero-valued) — the shape journey-<id>.json actually serializes and Step
+// zero-valued) — the shape j-<id>.json actually serializes and Step
 // 4's 4d module (Compare) consumes.
 func TestSummarize(t *testing.T) {
 	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }

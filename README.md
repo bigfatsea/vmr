@@ -72,7 +72,7 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-benchmark` to zoom into exactly one view.
 - **Aggregate Report (`vmr analyze`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
 - **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a step-by-step narrative — what context went in, what the model did with it, where a compaction event silently dropped information.
-- **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diff 9 core metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
+- **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diffs core behavior metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
 
 ## Quick Start
 

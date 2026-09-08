@@ -414,7 +414,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 // TestComputeFindingsIsDeterministic mirrors
 // internal/report/aggregate_test.go's TestBuildFindingsIsDeterministic: the
 // SELECTION of findings (Code/StepSeq/RelatedSeq) must be identical whether
-// ComputeFindings is called with EN (feeding journey-<id>.json) or a
+// ComputeFindings is called with EN (feeding j-<id>.json) or a
 // different lang (feeding the rendered Markdown) — only the text may vary.
 // If a detector's selection logic ever accidentally reads i18n text instead
 // of raw data, this catches it.

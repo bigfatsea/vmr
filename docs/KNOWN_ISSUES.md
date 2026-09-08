@@ -42,7 +42,7 @@
 
 ### 1.0 永久不做（架构红线）
 
-语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上）｜Web UI / 内嵌 DB / RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / corpus 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外）。
+语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上）｜Web UI / 内嵌 DB / RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / benchmark 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外）。
 
 ### 1.1 运行时与并发
 
@@ -238,7 +238,7 @@
 
 ### B. 分析半区 · 指标与口径正确性
 
-#### 2.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 corpus 均值
+#### 2.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 benchmark 均值
 
 - **现状**：`internal/journey/metrics.go` 的 `computeTimeSplit` 对每对相邻 Step，把「上一步响应落地 → 下一步请求到达」的整段 wall-clock 间隙按「下一步是否 `HumanInitiated`」二分为 human idle 或 `AgentExecMS`，间隙不设上限。跨天/跨周的 lineage 上，一段几十天的空档会整段计入「Agent 执行时间」——`vmr analyze -benchmark` 的 `Agent-Side Execution` 因此出现 `Median 8s / Mean 数小时` 乃至 36 天量级的均值。
 - **当前缓解**：`-benchmark` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」（2026-08-31）。只是免责，没动根因。
@@ -342,11 +342,11 @@
 
 #### 2.22 [低，决定不做] `chatmsg.ToolResultList`/`ToolCallList` 未覆盖 OpenAI Responses API 的 `function_call`/`function_call_output` 形状
 
-- **现状**：`chatmsg.Messages` 已能把 `function_call_output` 渲染成人读文本，但结构化提取层只覆盖 OpenAI Chat Completions 与 Anthropic 两种形状。纯 Responses API 流量下脊柱不展示工具结果、三个 Finding 检测器无证据、`journey-<id>.json` 的 `tool_calls` 会静默报告「这一步没有工具调用」（机读契约降级读者看不出来）。
+- **现状**：`chatmsg.Messages` 已能把 `function_call_output` 渲染成人读文本，但结构化提取层只覆盖 OpenAI Chat Completions 与 Anthropic 两种形状。纯 Responses API 流量下脊柱不展示工具结果、三个 Finding 检测器无证据、`j-<id>.json` 的 `tool_calls` 会静默报告「这一步没有工具调用」（机读契约降级读者看不出来）。
 - **决定不做**：真实语料按 `protocol` 统计 `openai-responses` **0 条 / 0.0%**——一次都没触发过。**触发条件（量化）**：任意一次 `vmr analyze` 的 `requests/index.json` 出现 `protocol == "openai-responses"` 的记录，即重新排期。
 
 
-#### 2.29 [已消解] `journey-<id>.json` 的 `structure` 字段没有 schema 版本戳
+#### 2.29 [已消解] `j-<id>.json` 的 `structure` 字段没有 schema 版本戳
 
 - **已闭环**：`journeys/details/j-<id>.json` 的版本戳统一收在 `manifest.json` 的 `format`（整套产物一个版本单位）；`.cache/parse/` 分片仍自带 `CacheSchemaVersion`。
 - **消解方式（2026-09，analyze 架构重构落地时）**：整份产物收敛为一个版本单位——版本探测统一走输出根 `manifest.json` 的 `format` 字段（读取方准入 + 骨架页启动时探测 banner，见设计提案裁决 D14），单文件不再各自长版本戳；切片 schema 此后收敛为加性优先，删改字段必须 bump manifest `format` 并在 CHANGELOG 标注 Breaking。原有的「JSON 无外部脚本消费」前提随骨架页（用户可复制定制面板）落地而失效——从 Phase 2 起，用户副本面板就是事实上的 schema 消费者。

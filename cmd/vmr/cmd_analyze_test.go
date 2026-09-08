@@ -224,7 +224,7 @@ func TestCmdAnalyze_DefaultSuiteExcludesHeartbeat(t *testing.T) {
 // TestCmdAnalyze_DefaultSuiteRendersCronAndSubagent: cron/subagent
 // candidates once appeared in
 // the index but the default suite never rendered them, so their index row
-// linked to a journey-*.md that was never written — real-corpus measurement
+// linked to a j-*.md that was never written — real-corpus measurement
 // found both categories had double-digit-request candidates (subagent's
 // largest was the biggest journey in the whole corpus), so folding them out
 // of the default render scope was hiding legitimate work, not noise. Only
@@ -425,11 +425,11 @@ func TestCmdAnalyze_JourneySelectorMaterializesOnlyItsOwnDetails(t *testing.T) {
 
 // TestCmdAnalyze_CompareMaterializesDetailsEvenIfReportAlreadyExists covers
 // a P13.1 regression an independent review of this phase's ActionPlan
-// caught before it shipped: ensureJourneyFile's "journey-<id>.md already
+// caught before it shipped: ensureJourneyFile's "j-<id>.md already
 // exists, nothing to do" early return predates P13.1, back when a
 // journey's .md existing WAS proof its Step details existed too (every
 // write always materialized both). P13.1 broke that assumption — the
-// default suite can leave a journey-<id>.md on disk with none of its
+// default suite can leave a j-<id>.md on disk with none of its
 // details/. Running the default suite first, then -compare naming one of
 // those same candidates, must still materialize that journey's details —
 // not silently leave every "→ detail" link 404 forever because the .md

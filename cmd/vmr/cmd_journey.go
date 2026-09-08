@@ -393,7 +393,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	}
 
 	detailDir, evidenceDir := detailAndEvidenceDirs(outDir)
-	// Each side's own journey-<id>.json picks up the same per-side cost the
+	// Each side's own j-<id>.json picks up the same per-side cost the
 	// tale-of-the-tape shows, computed off cmp.Extras.Cost rather than a
 	// second ComputeJourneyCost pass.
 	costA, costB := extras.Cost.A, extras.Cost.B
@@ -494,7 +494,7 @@ func compareLLMRecords(jA, jB *journey.Journey, cmp journey.Comparison, extras j
 // passes false — see writeJourneyFile's doc comment for what false means.
 //
 // priceRes/ccy thread the same pricing resolution the single-journey
-// renderJourney uses, so a batch-rendered journey-<id>.{md,json} is
+// renderJourney uses, so a batch-rendered j-<id>.{md,json} is
 // byte-identical to what -journey <id> would have produced (same CostFact,
 // same overview cost line). priceRes may be nil (no pricing resolvable at
 // all) — ComputeJourneyCost then yields the documented unresolved fact,
@@ -572,8 +572,8 @@ func renderAllJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineag
 }
 
 // renderBenchmarks builds every non-partial candidate journey (same
-// batched BuildAll path renderAllJourneys uses) and compute/write corpus-
-// level statistics (journeys/benchmarks.{md,json}) instead of per-Journey
+// batched BuildAll path renderAllJourneys uses) and computes/writes
+// benchmark statistics (journeys/benchmarks.{md,json}) instead of per-Journey
 // files. Journeys are built here only to feed ComputeBenchmarkStats — none of
 // them are individually rendered or written to disk by this path.
 func renderBenchmarks(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, firstPath string, prof taskseg.Profile, includePartial bool, outDir string, lang i18n.Lang, idx *journey.JourneyIndex) error {
@@ -595,7 +595,7 @@ func renderBenchmarks(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage
 
 	// Build in byte-budgeted batches (same bound renderJourneys uses): each
 	// batch's records are released before the next fetch, but the built
-	// Journeys are ~1% of that and all accumulate cheaply — the corpus
+	// Journeys are ~1% of that and all accumulate cheaply — the benchmark
 	// stats need every one of them at once, and 586 of them is ~300 MB.
 	var journeys []*journey.Journey
 	for _, br := range batchByBytes(toRender, renderBatchBudgetBytes) {
@@ -685,7 +685,7 @@ func journeyBaseName(j *journey.Journey) string {
 // ensureJourneyFile (re)writes j's journey report (.md + .json) and
 // materializes its Step detail pages, so running `vmr analyze -compare`
 // directly also produces the individual journey reports with working
-// links. Unconditionally re-renders even when journey-<id>.md already
+// links. Unconditionally re-renders even when j-<id>.md already
 // exists: the default suite (materializeDetails=false) can have written
 // this exact file with inline coordinates and no materialized details, and
 // -compare naming that same journey is a user-named target that must get

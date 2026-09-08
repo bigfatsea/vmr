@@ -187,7 +187,7 @@ func TestCacheKey_DiffersAcrossPackTypes(t *testing.T) {
 }
 
 // TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness is P4.3's
-// acceptance test: journey-<id>.json's new (P4.1) "structure" field can, in
+// acceptance test: j-<id>.json's new (P4.1) "structure" field can, in
 // principle, be large — but EvidencePack (llm.go, the -compare LLM
 // interpretation input) must not grow because of it. This is not
 // hypothetical: BuildEvidencePack takes the full in-memory *Journey (not

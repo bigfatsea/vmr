@@ -67,7 +67,7 @@ func WriteRequestsJSON(rows []RequestRow, path string) (n int, err error) {
 }
 
 // WriteRequestsJSONL writes one RequestRow per line — used for
-// vmr-requests-failed.jsonl, a filtered dump with no cache section of its
+// requests/failed.jsonl, a filtered dump with no cache section of its
 // own (see RequestsIndex's doc comment).
 func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)

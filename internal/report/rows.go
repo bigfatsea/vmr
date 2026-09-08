@@ -851,7 +851,7 @@ type ProviderQuotaRow struct {
 
 // ClientEndpointRow is one (client_key_tag, upstream endpoint) pair's token
 // consumption — §5.5 按客户端的上游归属. Rendered grouped by ClientKey
-// (section_client_endpoint.go), not as a client×endpoint matrix — see this
+// (viewmodel_client_endpoint.go), not as a client×endpoint matrix — see this
 // file's package doc comment / the dev doc's §3.2 for why. Streaming-
 // collected (clientendpoint.go) since no existing bucket is keyed this way.
 // Deliberately token/request-only: no $ (already answered by §2's by-client

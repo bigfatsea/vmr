@@ -64,7 +64,7 @@ func clientEndpointScale(rows []ClientEndpointRow) (clients, rowCount int) {
 
 // result returns rows grouped by client, token-descending within each
 // group — see ClientEndpointRow's doc comment (rows.go) for the sort/
-// tie-break contract section_client_endpoint.go's grouping relies on.
+// tie-break contract viewmodel_client_endpoint.go's grouping relies on.
 func (c *clientEndpointCollector) result() []ClientEndpointRow {
 	out := make([]ClientEndpointRow, 0, len(c.byKey))
 	for _, row := range c.byKey {

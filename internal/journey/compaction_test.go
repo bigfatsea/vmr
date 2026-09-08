@@ -273,7 +273,7 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 	// list. There is no inlined message list left to disambiguate: the
 	// decision spine never lists individual NewEvents, and the underlying
 	// fact this test locks in — Event.Revises being computed correctly —
-	// still reaches journey-<id>.json's structure field as EventRef.Revises
+	// still reaches j-<id>.json's structure field as EventRef.Revises
 	// (P4), which is what a consumer needing this relationship now reads.
 	// The assertions above are the ones that matter for this test's name.
 }

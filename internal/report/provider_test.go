@@ -110,7 +110,7 @@ func TestBuildProvidersQuotaRef(t *testing.T) {
 
 // Determinism: two providers tied on TokensIn must always sort the same way
 // (alphabetical tie-break), or two runs over the same input could produce
-// byte-different vmr-report.json (TestBuildIsDeterministic's failure mode).
+// byte-different report output (TestBuildIsDeterministic's failure mode).
 func TestBuildProvidersDeterministicTieBreak(t *testing.T) {
 	rep := &Report2{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:zeta:m", TokensIn: 100},
