@@ -432,6 +432,14 @@
               <tr><td>B</td><td class="num">${pct0(cb.first_ratio)}</td><td class="num">${pct0(cb.steady_mean)}</td><td class="num">${pct0(cb.min)}</td><td class="num">${pct0(cb.max)}</td></tr>
             </tbody>
           </table></div>`);
+          // cache-break attribution counts (mirrors compare-*.md's Cache Breaks table)
+          const brk = (b) => b || {};
+          const hist = (b) => Object.keys(brk(b)).reduce((n, k) => n + (k.indexOf('history:') === 0 ? (brk(b)[k] || 0) : 0), 0);
+          const brkRow = (label, b) => `<tr><td>${label}</td><td class="num">${brk(b).unexplained || 0}</td><td class="num">${brk(b).provider_switch || 0}</td><td class="num">${brk(b).system || 0}</td><td class="num">${brk(b).tools || 0}</td><td class="num">${hist(b)}</td></tr>`;
+          out.push(`<div class="table-wrap"><table>
+            <thead><tr><th></th><th>Unexplained Drop</th><th>Provider Switch</th><th>System Prompt</th><th>Tools Churn</th><th>History Break</th></tr></thead>
+            <tbody>${brkRow('A', ca.breaks)}${brkRow('B', cb.breaks)}</tbody>
+          </table></div>`);
           const curve = (s) => (s || []).map(p => `R${p.seq} ${pct0(p.ratio)}`).join(' → ') || '(no data)';
           out.push(`<details><summary>Per-turn curve</summary><pre>A: ${esc(curve(ca.series))}\n\nB: ${esc(curve(cb.series))}</pre></details>`);
         }

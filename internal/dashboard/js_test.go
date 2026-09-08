@@ -341,8 +341,8 @@ const mockMacro = {
       tools: [{ name: 'exec', a_calls: 5, b_calls: 3 }],
       extras: {
         endpoints: { a: ['openai:p:m1'], b: ['openai:p:m2'], same: false },
-        cache: { a: { first_ratio: 0.2, steady_mean: 0.9, min: 0, max: 1, series: [{ seq: 1, ratio: 0.2 }, { seq: 2, ratio: 0.9 }] },
-                 b: { first_ratio: 0.1, steady_mean: 0.95, min: 0, max: 1, series: [{ seq: 1, ratio: 0.1 }] } },
+        cache: { a: { first_ratio: 0.2, steady_mean: 0.9, min: 0, max: 1, series: [{ seq: 1, ratio: 0.2 }, { seq: 2, ratio: 0.9 }], breaks: { unexplained: 2, 'history:replace_tail': 1 } },
+                 b: { first_ratio: 0.1, steady_mean: 0.95, min: 0, max: 1, series: [{ seq: 1, ratio: 0.1 }], breaks: { provider_switch: 1 } } },
         sys_prompt: { a: { tokens: 0, changes: 0, excerpt: '', truncated: false }, b: { tokens: 0, changes: 0, excerpt: '', truncated: false } },
         final_context: { a: { seq: 10, system_tokens: 0, user_tokens: 100, assistant_tokens: 200, tool_tokens: 50 },
                          b: { seq: 8, system_tokens: 0, user_tokens: 80, assistant_tokens: 150, tool_tokens: 40 } },
