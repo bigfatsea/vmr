@@ -376,7 +376,7 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	cmp.Extras = &extras
 
 	// -llm-dry-run: print the evidence-pack size estimate and return
-	// immediately — deliberately checked BEFORE ensureStoriesDir below, so a
+	// immediately — deliberately checked BEFORE ensureJourneysDir below, so a
 	// dry run never leaves so much as an empty journeys/ directory
 	// behind (design doc C.7: "should I even run this" is a pure query, not
 	// a partial run).

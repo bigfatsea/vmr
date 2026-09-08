@@ -323,7 +323,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 		fmt.Fprintf(tw, "%d detail file(s) (.md) in %s\n", n, detailDir)
 	}
 
-	_, lineageToJourney := loadStoriesLink(opts.outDir)
+	_, lineageToJourney := loadJourneysLink(opts.outDir)
 
 	// Requests index (requests/index.json, the machine-readable single
 	// source of truth with the session projection and journey cross-links;
@@ -398,8 +398,8 @@ func renderMacroReportFromDisk(outDir string, lang i18n.Lang) error {
 	if err != nil {
 		return fmt.Errorf("load report json: %w", err)
 	}
-	storiesLink, lineageToJourney := loadStoriesLink(outDir)
-	md := report.MacroMarkdown(rep, lang, storiesLink, lineageToJourney)
+	journeysLink, lineageToJourney := loadJourneysLink(outDir)
+	md := report.MacroMarkdown(rep, lang, journeysLink, lineageToJourney)
 	mdPath := filepath.Join(outDir, "vmr-report.md")
 	return os.WriteFile(mdPath, []byte(md), 0o600)
 }

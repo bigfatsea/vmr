@@ -1,12 +1,11 @@
 // Ver 2026-08-20 16:30, by Sonnet 5
 
-// The "vmr-report.md → journeys/index.md" navigation edge (P6.2a) and
-// the "request index session row → journey" edge (P6.2c) — both need the
-// same read of journeys/index.json, so they're built together here.
-// This is the one place the report half looks at the journey half's
-// output: it only reads an already-written index (see the architecture
-// doc §7.5's "report doesn't generate journeys" ruling) and degrades to
-// "nothing to link" when that file isn't there — report must work
+// The "vmr-report.md → journeys/index.md" navigation edge and the
+// "request index session row → journey" edge both need the same read of
+// journeys/index.json, so they're built together here. This is the one
+// place the report half looks at the journey half's output: it only reads
+// an already-written index (report never generates journeys) and degrades
+// to "nothing to link" when that file isn't there — report must work
 // standalone.
 package main
 
@@ -18,14 +17,14 @@ import (
 	"vmr/internal/report"
 )
 
-// loadStoriesLink reads {outDir}/journeys/index.json if present and
+// loadJourneysLink reads {outDir}/journeys/index.json if present and
 // returns both navigation aids it feeds: the header-line summary
 // (JourneysLinkInfo, nil when absent) and a lineage-id -> rendered-journey-
 // filename map (nil/empty when absent or nothing's been rendered yet) for
 // requests.go's session-card links. A missing or unreadable index is not
 // an error — the report half running on its own, with no journey-half pass
 // ever having touched this output root, is a normal, fully supported case.
-func loadStoriesLink(outDir string) (*report.JourneysLinkInfo, map[string]string) {
+func loadJourneysLink(outDir string) (*report.JourneysLinkInfo, map[string]string) {
 	indexPath := filepath.Join(outDir, "journeys", "index.json")
 	idx := journey.LoadJourneyIndex(indexPath)
 	if len(idx.Journeys) == 0 {

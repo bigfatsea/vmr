@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -131,10 +132,10 @@ func TestWriteSkeletons_InlinesCommonRuntime(t *testing.T) {
 			t.Fatal(err)
 		}
 		s := string(data)
-		if contains(s, `src="common.js"`) {
+		if strings.Contains(s, `src="common.js"`) {
 			t.Errorf("%s still references src=\"common.js\" after write — the runtime was not inlined", name)
 		}
-		if !contains(s, "function versionBehavior") {
+		if !strings.Contains(s, "function versionBehavior") {
 			t.Errorf("%s does not carry common.js's versionBehavior after write — the runtime is missing", name)
 		}
 	}
@@ -181,8 +182,8 @@ func TestSkeletonPages_NoExternalDependencies(t *testing.T) {
 			// The SVG favicon data-URI embeds "http://www.w3.org" — the SVG
 			// namespace declaration, not a network fetch. Everything else
 			// must be clean.
-			cleaned := replaceAll(s, "http://www.w3.org/2000/svg", "")
-			if contains(cleaned, bad) {
+			cleaned := strings.ReplaceAll(s, "http://www.w3.org/2000/svg", "")
+			if strings.Contains(cleaned, bad) {
 				t.Errorf("%s contains external reference %q — pages must be self-contained", name, bad)
 			}
 		}
@@ -207,13 +208,13 @@ func TestRequestBrowser_ReadsSnakeCaseFields(t *testing.T) {
 		"r.CacheEff", "r.Fallbacks", "r.ErrorClass", "r.DetailFile",
 		"r.Session", "r.Task", "r.Title", "sm.Title", "sm.Alias",
 	} {
-		if contains(s, bad) {
+		if strings.Contains(s, bad) {
 			t.Errorf("request-browser.html reads %q, but requests/index.json has no such key (snake_case json tags)", bad)
 		}
 	}
 	// And it must read the real keys.
 	for _, want := range []string{"r.client_key", "r.dur_ms", "r.tokens_in_fresh", "r.ts_display"} {
-		if !contains(s, want) {
+		if !strings.Contains(s, want) {
 			t.Errorf("request-browser.html does not read %q", want)
 		}
 	}
@@ -319,40 +320,15 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 			}
 			s := string(data)
 			for _, bad := range tc.bad {
-				if contains(s, bad) {
+				if strings.Contains(s, bad) {
 					t.Errorf("%s reads %q, but slices emit snake_case keys", tc.file, bad)
 				}
 			}
 			for _, want := range tc.want {
-				if !contains(s, want) {
+				if !strings.Contains(s, want) {
 					t.Errorf("%s does not read expected key %q", tc.file, want)
 				}
 			}
 		})
 	}
-}
-
-func replaceAll(s, old, new string) string {
-	out := ""
-	for {
-		i := indexOf(s, old)
-		if i < 0 {
-			return out + s
-		}
-		out += s[:i] + new
-		s = s[i+len(old):]
-	}
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
-}
-
-func contains(s, sub string) bool {
-	return indexOf(s, sub) >= 0
 }
