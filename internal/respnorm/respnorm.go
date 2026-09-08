@@ -268,13 +268,13 @@ func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, pro
 	case !isSSE:
 		rs.mode = modeBuffered
 	case protocol == core.ProtocolOpenAIResponses:
-		// The modeUndecided/classifyEvent machinery below exists purely to
+		// The modeUndecided/classifyEventAcc machinery below exists purely to
 		// detect MiniMax's two thinking-mode shapes, both defined by
 		// inline text inside "content"/"text" fields. The Responses
 		// protocol has no such shape to detect: reasoning is always a
 		// separate typed Item (response.output[].type == "reasoning"),
 		// never mixed into text content — and its SSE events don't carry
-		// the "content"/"text" field markers classifyEvent looks for in
+		// the "content"/"text" field markers classifyEventAcc looks for in
 		// the first place, so every response on this protocol would
 		// otherwise sit in modeUndecided until EOF and silently degrade
 		// from true streaming to full buffering. Going straight to
@@ -851,12 +851,6 @@ func classifyEventAcc(ev []byte, acc *[]byte, isContent *bool) verdict {
 	}
 	*acc = append(*acc, strVal...)
 	return matchThinkingPrefix(*acc, *isContent)
-}
-
-func classifyEvent(ev []byte) verdict {
-	var acc []byte
-	var isContent bool
-	return classifyEventAcc(ev, &acc, &isContent)
 }
 
 // outTokenMeter accumulates token statistics for the degraded token estimate

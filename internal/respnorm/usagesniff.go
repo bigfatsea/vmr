@@ -22,7 +22,6 @@ import (
 // "cheap substring gate before an expensive parse" idiom modelFieldPattern
 // and the other markers in this package already use.
 var usageFieldMarker = []byte(`"usage"`)
-var messageStartMarker = []byte(`"type":"message_start"`)
 
 // noteUsage looks for a "usage" object in b and folds it into the running
 // total, tracking WHICH SIDE of the usage ledger the block carried (see

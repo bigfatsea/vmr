@@ -555,12 +555,12 @@ func TestRespStream_TrueStreamingPassthrough(t *testing.T) {
 // counterpart, proving the fix for the bug newStream's protocol-gated
 // modePassthrough short-circuit exists to close: Responses' typed SSE
 // events carry payload in a "delta" field, never the "content"/"text"
-// field names classifyEvent looks for, so without that short-circuit these
+// field names classifyEventAcc looks for, so without that short-circuit these
 // events would never resolve out of modeUndecided and the whole response
 // would silently buffer to EOF instead of streaming. This event
 // deliberately contains neither "content" nor "text" anywhere, so a
 // passing test here can only mean the protocol-gated branch fired, not
-// that classifyEvent happened to recognize the shape.
+// that classifyEventAcc happened to recognize the shape.
 func TestRespStream_ResponsesTrueStreamingPassthrough(t *testing.T) {
 	t.Parallel()
 	ev1 := `data: {"type":"response.output_text.delta","item_id":"msg_1","delta":"hello"}` + "\n\n"

@@ -127,16 +127,6 @@ func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
 	return u, u.In > 0 || u.Out > 0
 }
 
-// messageStartMarker identifies Anthropic's message_start SSE event, whose
-// usage object is the INPUT side of the ledger plus a placeholder output
-// count (see ExtractUsageSides for why that placeholder must never mark
-// the output side seen). Same byte sequence as respnorm's
-// messageStartMarker — kept in sync because the side-classification rule
-// is the single shared concept, but the predicate itself lives only here:
-// respnorm now delegates to ExtractUsageSides rather than carrying its
-// own copy. See internal/archtest's chatmsg-isolation rule.
-var messageStartMarker = []byte(`"type":"message_start"`)
-
 // ExtractUsageSides is the side-aware form of ExtractUsageWithProtocol:
 // returns (usage, inOK, outOK) where each bool reports whether THAT side
 // of the usage ledger was actually parsed, not a merged "saw anything".
@@ -188,7 +178,8 @@ func usageObjectSides(obj map[string]any, protocol string) (u Usage, inOK, outOK
 	// (a parsed JSON object) cannot tell us whether this object was a
 	// message_start or some other Anthropic event, but the protocol
 	// is anthropic-messages — and the same message_start gate
-	// (messageStartMarker byte sequence) is the rule. We only get a
+	// (a "type":"message_start" field, via isAnthropicMessageStart) is
+	// the rule. We only get a
 	// raw object here, not a byte slice, so we apply the conservative
 	// form: the object MUST carry the message_start type marker to
 	// qualify (rare on a JSON object body — this is a streamed-event
