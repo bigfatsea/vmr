@@ -33,6 +33,7 @@ coverage.html
 # Scratch
 _tmp
 _review
+_subtasks
 /scratch_vmr
 
 # OS / editor
