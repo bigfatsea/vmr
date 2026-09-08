@@ -925,7 +925,6 @@ service 模式（`service install/uninstall/start/stop/restart/status/logs`）�
 | --- | --- | --- |
 | `cmdCheck`/`cmdStart` 与 `vmr diagnose` 的"按生效顺序打印路由表"：排序已统一为 `router.ModelRoute.EffectiveOrder()`，打印格式仍分别实现 | 输出目标（stdout/logger）不同，diagnose 还要标注连通性结果 | 统一打印格式需要 writer+格式抽象，比各自 10 来行的格式化代码更复杂；会演进的排序逻辑已经不重复了 |
 | `internal/respnorm`（原 `router.respStream`）的 `Read` 会返回 `(0, nil)`（等待更多字节时） | io.Reader 文档不鼓励该形态 | 唯一消费方是 `copyFlush`（显式处理）；改成阻塞式内部循环会让 idle 看门狗失去以读取为粒度的心跳 |
-| 健康注册表中被配置删除的端点条目跨热重载残留 | 每条目几十字节，重启清零 | 有界（≤ 历史配置的端点总数），加清理逻辑需要 diff 新旧快照，复杂度不成比例 |
 | 测试里存在三个各自为政的 mock 上游（`upstream`/`probeUpstream`/`stallingUpstream`） | 各 30~50 行，职责不同（脚本化状态 / 探针时序 / 停滞） | 测试代码合并会互相牵连；等真实收敛需求出现再说 |
 | `runProbe`（半开端点后台探测）是 fire-and-forget goroutine，不挂在 `vmr start` 优雅关闭的 `srv.Shutdown` drain 之下 | SIGTERM/SIGINT 时正在跑的探测协程不会被主动取消，自己跑到 `timeouts.probe` 或拿到响应为止 | 最坏情况只是丢一次探测结果（下次启动从零状态开始，不是数据损坏或死锁）；接上关闭信号需要新增一条 context 传递链路，复杂度不成比例 |
 | `audit.Logger.Close` 不等待后台 housekeeping 收尾 | `hkWG.Wait()` 只给测试用 | 压缩 crash-safe（tmp+rename+重启续跑），housekeeping 只碰已轮转的历史文件、与 Close 关闭的当日 fd 零交集；让关停阻塞在一次可能数 GB 的 zstd 上没有收益。Close 后的迟到 Write 由 `closed` 标志拒绝，不会重开文件 |

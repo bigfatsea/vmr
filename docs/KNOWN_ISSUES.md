@@ -100,7 +100,7 @@
 - **`vmr status -addr` 回退读取本地 config 的 `api_keys[0]` 并发送到目标地址**：`-addr` 显式指向别的实例时，把本地 key 当 Bearer 发过去。设计意图是让 `./vmr.sh ps` 对本机多实例免手工传 key；只发 key、不进 URL 或日志。目标地址是使用者自己敲的，不是网络层漏洞。
 - **看板（`/status.html` / `/log.html`）把 API key 存 `localStorage`，静态外壳免鉴权直出**：外壳不含数据，数据请求走 `s.auth()`；key 只在浏览器本地持久化，不进 URL、不进服务端日志。所有配置派生字符串内插进 `innerHTML` 前均 `esc()` HTML 转义。`/log` 输出 `text/plain` 而非 SSE/JSONL（源头已是格式化文本）；无查询参数（回放窗口固定 512 行缓冲）。
 - **`/help.html` / `/help.zh.html` 的 Agent 配置片段在浏览器就地装配，不做服务端模板渲染**：`/help` 按架构必须公开免鉴权，服务端渲染会逼它强制鉴权、或让服务端拿不到用户 Key。API Key 复用 `localStorage['vmr_status_key']`。服务端下发的 HTML 保留写死默认值（`coding` / `claude`、200k context、`high` effort），保证无 JS / 未鉴权时也自洽。四点取舍：max-output 预算按 context 分档经验估计（VMR 无模型级元数据）；片段一律 vision-on（空 capabilities = 不受约束）；四个列表型生成器只枚举 `openai-completions` 模型；无浏览器 JS 测试基建，`TestHelpPage_SnippetFillEngine` 只做构建期字符串守卫。
-- **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `journey.BuildChain`/`BuildAll`/`PreviewTitle`/`PreviewTitles` 五个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
+- **`nil` 校验只加在跨包公共入口且一律 fail-fast，绝不静默兜底**：已加的是 `report.AnalyzeSessionsCached` 与 `journey.BuildChain`/`BuildAll`/`PreviewTitles` 四个入口——判据是「跨包公共 API + 后接并发扇出或递归组装」。包内被这些入口保护的函数不重复校验。
 - **持续性故障的日志按"错误文本相同"去重，不做事件级审计**：quota flush 失败（磁盘满、权限变更）与时钟回退都是持续性的，10 秒一次刷屏会淹没日志。flush 侧按错误文本去重（首次 + 每 10 次，附连续失败计数），时钟回退侧每进程最多一条 WARN。**已知代价**：两种错误交替出现时 flush 侧不去重（每 tick 一条——但交替本身就是有效信号）；时钟"回退→恢复→再回退"的第二次不再 WARN。**边界**：需要回退事件级审计的话，这里要换成带去抖窗口的计数器。
 - **`vmr-quota.json` 的结构损坏整文件拒绝，绝不部分采纳**：静默丢掉一个 provider 的账本比报错更危险。版本戳不匹配、nil account map、null bucket 三者任一即视为损坏，由调用方 WARN + 从零开始——与既有的语法损坏路径同构。`version` 字段从"写而不校验"改为真正的门：有版本戳却不校验比没有更危险，下一个人会以为"有版本号所以安全"。
 - **配额周期的惰性重置方向敏感**：只有周期真正前进（`ps > PeriodStart`）才重置计数。NTP 向后校正、VM 快照回滚、容器 TZ 变更都会让周期起点向后跳，而“不等即重置”会抹掉整个计费周期且随下次 Flush 落盘、不可恢复。反方向保留计数并 WARN。
@@ -125,7 +125,7 @@
 - **`jsonscan` 的 `RewriteModel`/`RewriteRoles`/`RewriteInputRoles` 留在 `jsonscan`，不迁 `adapter`**（2026-09 Q17 收敛）：原评审指出「同批协议字面量在 `jsonscan` 包文档与 `adapter` 得出两个相反归属结论」，最终以重写 `jsonscan` 包文档的边界规则消除，而非移动代码——「字节级扫描与 splice 改写引擎」整体归 `jsonscan`（含带协议字段字面量的改写函数，fuzz 覆盖在此包），「协议路由语义、适配器构造、错误分类」归 `adapter` 及以上。旧表述「需要具体字段名的函数不属于 `jsonscan`」已废止，**不要再提案移动这批改写函数或恢复旧措辞**。
 - **`core` 准入规则的例外清单是显式豁免，不是待清理项**（2026-09 Q18 收敛）：`Endpoint.HealthKey`/`Name`/`Freeze` 保留在 `core`——它们是「双半区无主、纯计算于 Endpoint 自身字段」的值对象方法（`HealthKey` 是 health/sticky/quota 共用的端点身份，`Freeze` 只是把两个纯函数 memoize 供快照构建），外移到任何单侧都会制造反向依赖或循环。已落地的清理：`SortedKeys` 下沉 `fmtutil`；`ModelLabel` 也下沉 `fmtutil`（2026-09 复核：其签名不含任何 core 类型，是纯展示格式化，两个调用方本就 import `fmtutil`，无依赖两难，不构成例外）；`StickyBackstopTTL` 以「canonical 在 core」如实标注（见上文）。准入规则从「绝对禁令」变为「禁令 + 显式豁免清单」，新增符号仍需逐个过审。**不要再逐个提案外移这批豁免符号**。
 - **`archtest` 的包边界守卫是单向的，与规则本身同构**：CLAUDE.md 的不变量「分析半区不 import 路由半区」是单向禁令，`import_boundaries_test` 只需要守这一半；「audit JSONL 记录是唯一耦合」那半句是**数据流事实**，不是另一条可机检的 import 规则，不存在对应护栏也不需要有。不要因为「只守了一半」提案加反向守卫——反向（路由 import 分析）本来就是合法的依赖方向。
-- **2026-09-07 已闭环**：`Digest` 构造曾以 report/journey 两份实现 + 差分测试钉住落地（当时裁决：为 ~40 行纯函数建共享叶子包不划算）；实施 review 裁决消除重复，现下沉为叶子包 `internal/digest`（纯 stdlib，零内部依赖，archtest 的 zero-internal-dep 清单已登记），report/journey 均为其调用方，D8 的「全系统一个 Digest 构造」由结构而非测试保证。线格式（uvarint 长度前缀 + sha256）由 `internal/digest` 的手算向量测试钉死。
+- **2026-09-07 已闭环**：`Digest` 构造曾以 report/journey 两份实现 + 差分测试钉住落地（当时裁决：为 ~40 行纯函数建共享叶子包不划算）；实施 review 裁决消除重复，现下沉为叶子包 `internal/digest`（纯 stdlib，零内部依赖，archtest 的 zero-internal-dep 清单已登记）。`internal/report` 是其唯一调用方（journey 侧曾有一个 §7.2 单-journey 指纹包装，从未接线，随本轮清理删除）；D8 的「全系统一个 Digest 构造」由结构而非测试保证。线格式（uvarint 长度前缀 + sha256）由 `internal/digest` 的手算向量测试钉死。
 - **金额展示统一收敛在 `fmtutil` 一处（2026-09，review NEW-01 落地）**：`FmtCurrency`（恒定两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（§6.6 的成本/1M out 与成本/成功请求）。此前三套互斥策略（宏观 `%.4f USD`、journey ≥100 抹分、看板恒两位）已全部替换；跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCost/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**——新金额渲染点一律走 fmtutil；表格列的货币也可在表头标注（如 §2.5/§6.6），此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
@@ -505,12 +505,15 @@
 - **为什么暂不做**：真实工作量约 1–1.5 人日（双语内嵌 HTML 锁步、真实计费请求、streaming、错误面、虚拟模型选择器、内嵌 JS 无 Go 测试）。这是 onboarding 漏斗功能，被 `vmr init`/`vmr connect`（战略文档第一梯队）完全压制——真做漏斗应先做那两个。战略文档里本就列在第三梯队。2026-08-30 增长打磨批次评估确认延后。
 
 
-#### 2.55 [中，发版前处理] `CHANGELOG.md [Unreleased]` 需一次归整才能发版
+#### 2.97 [中，发版前处理] `CHANGELOG.md [Unreleased]` 需一次归整才能发版
 
 - **现状**：`[Unreleased]` 下有重复的 `### Added` / `### Changed` / `### Fixed` 段（多轮 feature 分支各自 append 未合并），且 analyze 架构重构**之前**就在 `[Unreleased]` 里的条目通篇引用被本次同版删除的东西（退役的 vmr-story / vmr-report 子命令、旧包名、vmr-stories.md、vmr-requests-*.md 全家、-corpus flag）——发版体裁会同时说「删掉了 X」和「在 X 里修了 bug」。`release.yml` 逐字提取该段作 GitHub Release body。
 - **为什么现在不动**（2026-09-08 独立叠加验收裁决）：合并同类段是机械活但需逐条核对不漏；把「在已删命令里修 bug」类条目改写为现名 / 并进 breaking 条目需逐条判断十几个特性「重构后去哪了」，有编辑判断成分；且 CHANGELOG 是 trail，不做 patch-on-patch。
 - **发版前必做**：并段成每类型一段（Keep a Changelog 顺序）；`[Unreleased]` 内容重读为「vN vs vN-1 的净变更」，退役术语条目改写或折叠。
 - **触发条件**：准备打第一个含 analyze 重构的 tag。
+
+
+#### 2.98 [低，待触发] `archtest` 的 `funcLineExemptions` 以「文件:函数名」为键，同文件重名方法共用一条
 
 - **现状**：`funcLineExemptions` 以 `文件:函数名` 为键，同文件重名方法共用一条（如 `report/ingest.go` 6 个 `Ingest`）。今天全部远低于默认限额，无影响；一旦为其一登记豁免，其余会一并放宽。
 - **可能方案**：键改 `文件:接收者类型.函数名`（`ast.FuncDecl.Recv` 已有类型信息）。
