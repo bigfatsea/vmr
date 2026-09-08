@@ -477,6 +477,9 @@
 
 ### 11.1 能力对照矩阵（按当前代码逐项重核）
 
+> **2026-09-08 更新**：阶段一（A.3）四项任务已全部落地，矩阵同步重核——第 3/4/5 项升至 ✅、第 7 项随聚类
+> 落地升至 🟡、第 15 项按 A.1.8 勘察结论修正为 🟡（透传/入图已具备）。
+
 ```
 ┌────────────────────────────────────────┬──────────┬────────────────────────────────────────────┐
 │ 核心能力项                             │ 所属梯队 │ VMR 当前实现状态与差距评估                  │
@@ -487,22 +490,27 @@
 │                                        │          │    ≤160 内联 / <details> 展开、bodies 结果  │
 │                                        │          │    正文、三级 match 徽标；request-browser   │
 │                                        │          │    全量明细 + 分面筛选）                    │
-│ 3. Cache 显式度量与击穿断点诊断        │ 第一梯队 │ 🟡 部分具备（cache_efficiency/cache_hit_rate│
-│                                        │          │    双口径、逐轮命中率曲线、SysPrompt 稳定性 │
-│                                        │          │    changes+excerpt/diff；缺工具签名变动检测 │
-│                                        │          │    与 per-request 击穿断点定位）            │
-│ 4. 任务资产突变追踪 (Artifacts)        │ 第一梯队 │ 🔴 缺失（未解析 edit/write 类工具产出触碰  │
-│                                        │          │    文件清单；仅 compare 有 Final Deliverable│
-│                                        │          │    单点）                                   │
-│ 5. 确定性两两跨步结构 Diff             │ 第一梯队 │ 🟡 会话级已具备（compare 结构化分叉点 +    │
-│                                        │          │    Extras + 看板 13 章节并排）；请求级两两  │
-│                                        │          │    diff（vmr diff）缺失                     │
+│ 3. Cache 显式度量与击穿断点诊断        │ 第一梯队 │ ✅ 基本具备（阶段一落地：双口径度量 +     │
+│                                        │          │    逐步 cache_break 归因 system/tools/    │
+│                                        │          │    provider_switch/history:*/unexplained，│
+│                                        │          │    ToolsHash 入 Manifest（schema 9）；    │
+│                                        │          │    vmr diff 消息级 LCP 定位断点；仅缺     │
+│                                        │          │    浏览器侧逐字节击穿区域高亮，事实已全机读）│
+│ 4. 任务资产突变追踪 (Artifacts)        │ 第一梯队 │ ✅ 已具备（阶段一落地：结构化文件参数 +   │
+│                                        │          │    bash 窄正则启发式提取触达清单，落      │
+│                                        │          │    j-<id>.json 的 artifacts 字段；        │
+│                                        │          │    .md 附录表 + viewer 面板一键跳步）     │
+│ 5. 确定性两两跨步结构 Diff             │ 第一梯队 │ ✅ 已具备（会话级 compare 分叉点 + Extras │
+│                                        │          │    + 看板 13 章节并排；请求级 vmr diff    │
+│                                        │          │    消息哈希 LCP + 结构化 verdict，阶段一落地）│
 ├────────────────────────────────────────┼──────────┼────────────────────────────────────────────┤
 │ 6. 工具调用序列对齐矩阵 (Tool Align)   │ 第二梯队 │ 🟡 部分具备（分叉点用对齐前缀算法；        │
 │                                        │          │    benchmarks 有 N-gram 序列挖掘；缺       │
 │                                        │          │    compare 逐步 LCS 并排矩阵与缺步补齐）    │
-│ 7. 跨历史水平级联比对 (`Different`)    │ 第二梯队 │ 🔴 缺失（benchmarks 是群体统计/分组对照，  │
-│                                        │          │    非以用例为锚的水平拼接矩阵）             │
+│ 7. 跨历史水平级联比对 (`Different`)    │ 第二梯队 │ 🟡 重复任务聚类已落地（Jaccard 相似度     │
+│                                        │          │    聚合重复执行 + 一键 compare 建议；     │
+│                                        │          │    promptfoo 式 Different 过滤矩阵按     │
+│                                        │          │    A.1.6 重定向不做——真实流量无用例真值）│
 │ 8. 死循环在线熔断 (Loop Breaker)       │ 第二梯队 │ 🟡 检测✅ / 拦截❌（分析半区 13 种 finding │
 │                                        │          │    + N-gram 挖掘；路由半区无会话级在线熔断）│
 │ 9. 零依赖单文件离线 HTML               │ 第二梯队 │ 🟡 零依赖✅ / file://❌（六骨架页零外部   │
@@ -517,40 +525,49 @@
 │ 11. 状态机 DAG 拓扑渲染                │ 第三梯队 │ 🟡 部分具备（ctxgraph 内存图 + lineage；   │
 │                                        │          │    journey .md 有 ASCII/mermaid 工具时序；  │
 │                                        │          │    无交互式 DAG UI）                        │
-│ 12. 时间伸缩平滑录像回放               │ 第三梯队 │ 🟡 部分具备（replay 单请求 -print -req；   │
-│                                        │          │    全旅程重放缺失）                         │
+│ 12. 时间伸缩平滑录像回放               │ 第三梯队 │ 🟡 部分具备（replay 单请求重放；全旅程顺序   │
+│                                        │          │    重放按 A.1.9 裁决不做，第三阶段以多目标 │
+│                                        │          │    单步影子对比替代）                       │
 │ 13. 嵌入式即席 SQL 数仓视图            │ 第三梯队 │ 🔴 缺失（切片 JSON + jq/DuckDB read_json   │
 │                                        │          │    即可查询，优先级低）                     │
 │ 14. 静态站点 Range-Request 分片发布    │ 第三梯队 │ 🔴 暂不需要（D6 裁决：极简坚守，规模未到） │
-│ 15. ATIF / W3C TraceContext 互通       │ 第三梯队 │ 🔴 缺失（内部 RequestFacts/coord 私有约定）│
+│ 15. ATIF / W3C TraceContext 互通       │ 第三梯队 │ 🟡 透传/入图已具备（traceparent 不在     │
+│                                        │          │    blocklist → 字节保真转发，TraceID 已作 │
+│                                        │          │    新任务信号；缺生成注入；ATIF 导出未做，│
+│                                        │          │    触发驱动）                              │
 └────────────────────────────────────────┴──────────┴────────────────────────────────────────────┘
 ```
 
-**已吸收项对照初版各维度"VMR 借鉴点"清单**：Cache 显式百分比渲染（macro/compare 双口径，trace.evot.ai 范式）、
+**已吸收项对照初版各维度“VMR 借鉴点”清单**：Cache 显式百分比渲染（macro/compare 双口径，trace.evot.ai 范式）、
 Context Flow 增量区分（journey-viewer 的 new_events 与 compaction 转场行）、Activity 智能折叠（看板
 `<details>` 折叠 + journey 索引心跳类折叠）、会话级结构 Diff（compare Extras + 分叉点）、行为指纹检测
-（13 finding 码 + N-gram）、Idle/低样本诚实呈现（`dur_low_n` / `n/a`，对应 Inspect AI 的 NaN 哨兵精神）等
-均已落地。初版 §11.2 第 3 条（自包含单文件 HTML 导出器）与设计裁决 D6 冲突，按 D6 废弃——零依赖骨架形态
-已覆盖其交互能力，唯一让渡是 `file://` 直开。
+（13 finding 码 + N-gram）、Idle/低样本诚实呈现（`dur_low_n` / `n/a`，对应 Inspect AI 的 NaN 哨兵精神）、
+Cache 击穿断点归因（claude-tap `diffCachedRegion` 的机读等价形态：逐步 `cache_break` + `vmr diff` 消息级 LCP）、
+资产突变追踪与跳步（ATIF 生态 RunArtifacts Jump 范式）、重复任务发现（promptfoo 水平比对的
+真实流量降维形态）等均已落地。初版 §11.2 第 3 条（自包含单文件 HTML 导出器）与设计裁决 D6 冲突，
+按 D6 废弃——零依赖骨架形态已覆盖其交互能力，唯一让渡是 `file://` 直开。
 
-### 11.2 第一阶段：夯实第一梯队缺口（v0.7.0 · 短期速胜）
+### 11.2 第一阶段：夯实第一梯队缺口（v0.7.0 · 短期速胜）—— **已全部落地（2026-09-08，实施细节与任务分组见附录 A.3）**
 
-1. **Cache 击穿断点归因补全**（对齐 claude-tap `diffCachedRegion`）：
-   - 现有底座：`SysPromptFact`（系统提示词漂移已检测）、`ctxgraph` 逐消息哈希与 compaction/编辑分类、
-     compare 的逐轮 CacheFact 曲线。缺口是**工具签名（toolset）变动检测**与**逐请求"击穿因素定位"**。
-   - 落法：在 journey/compare 侧增加 toolset-stability fact（manifest 已持有每步工具集数据）；request-browser
-     明细行在 cache_read 显著低于前序请求时给出一行归因（`system changed` / `tools changed` /
-     `history truncated`），数据来自既有哈希对比，不引入新解析。
-2. **资产突变追踪器（Artifacts Extractor）**：
-   - 在 `internal/chatmsg`（单点解析层，report/journey/ctxgraph 共享）增加工具调用特征识别：
-     `edit`/`write`/`str_replace` 类结构化参数与 bash 写命令启发式，产出 (file, op, first_step, count) 清单，
-     落 `j-<id>.json`（blob 去重底座已有）。
-   - 消费端两处：journey-viewer 详情页"触达文件"面板 + 时间轴跳步（点文件名定位首次修改步，即 ATIF 生态
-     RunArtifacts Jump 范式）；macro 侧 workloads 增加每任务触碰文件数分布。
-3. **请求级两两 Diff（`vmr diff <coordA> <coordB>`）**：
-   - 复用 `ctxgraph.ReqCoord` 请求身份与 reqdetail 已有的 `(record, manifest, prev)` 渲染底座，输出结构化差分：
-     模型/端点/参数、system 差异（哈希对比）、messages 增量（ctxgraph 消息哈希集合差）、usage/缓存对比。
-     比 claude-tap 的 JSON 树 diff 更强：消息级哈希让"差异出现在第几条历史消息"可精确定位。
+1. **Cache 击穿断点归因补全**（对齐 claude-tap `diffCachedRegion`）—— ✅ 已落地：
+   - `Manifest` 增加 `ToolsHash`/`HasTools`（`ctxgraph.CacheSchemaVersion` 8→9）；journey 侧
+     `ComputeCacheBreak` 按 system / tools / provider_switch / history:<editkind> / history:stitch /
+     unexplained（Append 且各哈希未变但命中率骤降）六类归因，盖进每步 `cache_break`
+     （附 `cache_break_ratio_from/to`）；decision spine、journey-viewer 徽标、compare 三处渲染。
+   - 请求级定位由 `vmr diff` 的消息哈希 LCP 补齐：差异出现在第几条历史消息可机器精确回答。
+2. **资产突变追踪器（Artifacts Extractor）** —— ✅ 已落地：
+   - `internal/journey/artifacts.go` 在 build 时从结构化文件参数（`path/file_path/filepath/filename/file`
+     键）与 bash 窄正则启发式（重定向 / `tee` / `rm` / `sed -i` / `patch`）提取触达清单，
+     落 `JourneySummary.Artifacts`；`.md` 附录表 + journey-viewer 面板支持一键平滑滚动跳步
+     （RunArtifacts Jump 范式）。bash 启发式带 `heuristic` 免责标注。
+3. **请求级两两 Diff（`vmr diff <coordA> <coordB>`）** —— ✅ 已落地：
+   - 复用 replay 坐标定位器；对比 Header/System/Tools/Messages（消息哈希 LCP + 首分歧位置 +
+     双侧尾部增量）与 usage/缓存，输出 3-5 条窄规则的结构化 verdict（结构事实而非根因断言），
+     附免责措辞。纯 CLI：英文输出、不落 reports/、不进缓存指纹。
+
+另：原 §11.3 第 3 条的水平级联比对，经附录 A.1.6 的第一性原理重估**替换为重复任务聚类**并随阶段一落地
+（真实流量无用例真值，promptfoo 矩阵范式错位）——Jaccard 相似度聚合重复执行，`journeys/index.{json,md}`
+输出分组与一键 `vmr analyze -compare` 建议。
 
 ### 11.3 第二阶段：突破第二梯队壁垒（v0.8.0 · 中期跨越）
 
@@ -558,25 +575,23 @@ Context Flow 增量区分（journey-viewer 的 new_events 与 compaction 转场�
    - 现有分叉点计算已实现"对齐前缀"概念，把它升级为全序列 LCS 对齐并排矩阵（缺步补虚线），落
      `compare-*.json` 的 `extras.alignment`（数据先行，看板与 .md 同步消费），并排标注
      `Redundant Retry` / `Thrashing`（`exact_repeat_tool_call` finding 已提供判定依据）。
-2. **路由半区 Loop Breaker（会话级在线熔断）**：
-   - 复用分析半区已验证的指纹思路（工具名 + 归一化参数哈希滑窗），在 `internal/server` 请求事实层维护每会话
-     滑动窗口；同一会话连续 N 步指纹重复即对该请求返回 `422` 并在响应头标注原因，冷却后放行。与既有熔断
-     （上游健康 cooldown）正交：那是"上游不可用"，这是"下游在空转"。
-   - 需要专门裁决：误杀率阈值标定（Agent 合法重试 vs 死循环），且默认关闭、按客户端 tag 开启。
-3. **水平级联比对大盘 + `Different` 过滤**：
-   - 以任务初始指令相似度 / 相同 taskseg profile 为锚，把多次 `-compare` 与 `-benchmark` 语料水平拼接为
-     用例 × Run 矩阵（复用 `compares/index` 发现入口与 benchmarks 分组底座）；默认开启"仅显示分歧行"。
-   - 这是把现有"一次一组"的 compare 升维成"跨历史批量"，数据层切片化后增量成本可控。
+2. **路由半区 Loop Breaker（会话级在线熔断）**—— 按附录 A.1.5 拆半：
+   - 先做检测（warn-only）：复用分析半区已验证的指纹思路（工具名 + 归一化参数哈希滑窗），在
+     `internal/server` 请求事实层按 sticky 会话键维护滑动窗口；命中则盖进审计记录
+     （路由半区盖章、分析半区消费，`Attempt.IsForwarded` 同款模式）+ `/status` 计数器，**不拦截请求**。
+   - 拦截（`422` + 响应头标注）后置：需用检测阶段的真实数据标定误杀率，过 Part 1 设计裁决，
+     默认关闭、按客户端 tag 白名单开启。与既有熔断正交：那是"上游不可用"，这是"下游在空转"。
 
-### 11.4 第三阶段：有节制地吸收第三梯队（v1.0.0 · 远期布局）
+### 11.4 第三阶段：有节制地吸收第三梯队（v1.0.0 · 远期布局，按附录 A 修正）
 
-1. **ATIF v1.x 规范导出**（`vmr export --format atif`）：journey JSON 已自包含（tree + bodies），到 ATIF 的
-   映射是纯转换层；价值在对接外部评测/微调工具链，属开放生态投资，按需启动。
-2. **W3C `traceparent` 透传**：VMR 是路由层，注入/透传 trace 上下文的成本集中在 `server` 入口与上游
-   transport 两处；受益场景是接入 Langfuse/Phoenix 的团队，非自研看板必需。
-3. **全旅程重放（`vmr replay -journey <id>`）**：把一条 journey 的请求序列按序重放到另一个虚拟模型，
-   复用 `replay` 既有真实 Adapter 底座；难点在会话状态的确定性重建（failover/sticky 语义需冻结），
-   宜在请求级 diff 引擎（§11.2 第 3 条）稳定后实施。
+1. **多目标影子对比（`vmr replay -req <coord> -provider A,B,C`）**：同一条上下文逐个发往多个 provider，
+   输出并排对比表。原"全旅程顺序重放"经 A.1.9 重估**语义不成立**（第 2 步起的请求体携带原环境工具结果，
+   换模型后历史与实测脱节）——单步同上下文 A/B 才是 VMR 作为路由器能诚实提供的评测原语。
+2. **ATIF v1.x 规范导出**（`vmr export --format atif`）：journey JSON 已自包含（tree + bodies），到 ATIF 的
+   映射是纯转换层；价值在对接外部评测/微调工具链，属开放生态投资，触发驱动（出现实际对接需求再启动）。
+3. **W3C `traceparent` 生成注入**：勘察结论（A.1.8）——透传与入图解析**已具备**（traceparent 不在
+   `headerBlocklist`，字节保真转发；`Manifest.TraceID` 已作新任务信号消费），残余仅"客户端未发时生成"
+   半天工作量，仅在用户接入 Langfuse/Phoenix 等外部 OTel 观测时启动。
 4. **维持不做**（与初版一致的裁决）：嵌入式 SQL 视图（切片 JSON 已机读可查）、Range-Request 静态发布
    （产物规模未到阈值）。另按 D6 裁决，`file://` 自包含单文件不回归；若未来出现强离线分发需求，
    以"可选 bundle 模式"单独评审，不推翻骨架 + fetch 主形态。
