@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by pi — STATIC DEMO v2, mock data only, no network. -->
+<!-- Ver 2026-09-14, by pi — STATIC DEMO v3, mock data only, no network. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -120,6 +120,8 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 .v-main small{font-size:var(--fs-md);color:var(--text-muted);font-weight:400}
 .v-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px}
 .v-sub .g{color:var(--green)}.v-sub .r{color:var(--red)}.v-sub .y{color:var(--yellow)}.v-sub .a{color:var(--accent)}
+.sysline{border-top:1px solid var(--border-soft);padding:9px 16px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);display:flex;flex-wrap:wrap;gap:4px 22px}
+.sysline b{color:var(--text);font-weight:400}
 
 /* pri tiers + stall */
 .pri{font-family:var(--font-mono);font-size:10px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid}
@@ -133,8 +135,11 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 .chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px}
 .chart-legend .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .chart-legend .line{display:inline-block;width:16px;height:2px;background:var(--yellow);margin-right:5px;vertical-align:3px}
-.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:var(--sp-4)}
+.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:var(--sp-4);position:relative}
 .chart-wrap svg{display:block;width:100%;height:auto}
+.chart-tip{position:absolute;z-index:60;display:none;pointer-events:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 11px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);box-shadow:0 8px 24px rgba(1,4,9,.55);white-space:nowrap}
+.chart-tip b{color:var(--text-bright)}
+.chart-tip .tr{color:var(--text-muted)}
 
 /* warning list rows */
 .wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
@@ -175,8 +180,9 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
         <svg height="11" width="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
         <span id="cd">5:00</span>
       </button>
-      <span class="badge b-dim" title="vmr v4.2.1 · go1.24 · darwin/arm64">v4.2.1</span>
-      <span class="pill p-live" id="hd-conn" title="page data every 5m · live table every 1s · paused while hidden">live</span>
+      <span class="badge b-dim" title="vmr v4.2.1 · go1.24 · darwin/arm64">v4.2.1 · pid 48211</span>
+      <span class="badge b-dim" title="time since process start">up 3d 4h</span>
+      <span class="pill p-live" id="hd-conn" title="whole page refreshes on the countdown — click the countdown to refresh now">live</span>
       <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
     </div>
   </div>
@@ -201,26 +207,23 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
       </div>
       <div class="vseg">
         <div class="v-label">Tokens</div>
-        <div class="v-main" id="v-tok">48.2M</div>
-        <div class="v-sub"><span>in 31.4M</span><span>out 16.8M</span><span class="g">cache hit 62%</span></div>
+        <div class="v-main" id="v-tok">48.20M</div>
+        <div class="v-sub"><span>in 31.40M</span><span>out 16.80M</span><span class="g">cache hit 62%</span></div>
       </div>
       <div class="vseg">
         <div class="v-label">System</div>
         <div class="v-main" style="font-size:var(--fs-xl);padding-top:4px">412 MB · 233 gor</div>
-        <div class="v-sub"><span>disk 489G free</span></div>
+        <div class="v-sub"><span>disk 489.00G free</span></div>
       </div>
     </div>
-    <details class="disc" style="padding:10px 16px;border-top:1px solid var(--border-soft)">
-      <summary style="font-size:var(--fs-sm)"><span style="font-weight:400;color:var(--text-muted)">System details &amp; storage</span></summary>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 24px;padding:10px 2px 2px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted)">
-        <span>heap <span style="color:var(--text)">412 MB</span> / sys 586 MB</span>
-        <span>goroutines <span style="color:var(--text)">233</span></span>
-        <span>disk free <span style="color:var(--text)">489 GB</span> (volume /)</span>
-        <span>audit <span style="color:var(--green)">on</span> · 1.2 GB · 38 files</span>
-        <span>image cache <span style="color:var(--green)">on</span> · 256 MB · ttl 7d</span>
-        <span>pid <span style="color:var(--text)">48211</span> · 127.0.0.1:8800 · darwin/arm64 (go1.24)</span>
-      </div>
-    </details>
+    <!-- system detail: single line, no folding, no heading (v2 review) -->
+    <div class="sysline">
+      <span>heap <b>412 MB</b> / sys 586 MB</span>
+      <span>goroutines <b>233</b></span>
+      <span>disk free <b>489.00G</b></span>
+      <span>audit <b>on</b> · 1.20G · 38 files</span>
+      <span>image cache <b>on</b> · 256.00M · ttl 7d</span>
+    </div>
   </div>
 
   <!-- ============ quota budgets ============ -->
@@ -236,9 +239,9 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
           <td>packycode : <span class="b-purple badge" style="padding:1px 7px">main</span></td>
           <td><span class="badge b-info" title="bucket — longest-period limit; unused allowance is real waste, so spare headroom raises routing priority">tokens / 1mo</span></td>
           <td style="color:var(--text-muted)">all models</td>
-          <td class="num">100M</td><td class="num">68.2M</td>
-          <td><div class="progress"><span class="warn" style="width:68%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 2.1%</span></td>
-          <td class="num" style="color:var(--yellow)">31.8M (32%)</td>
+          <td class="num">100.00M</td><td class="num">68.20M</td>
+          <td><div class="progress"><span class="warn" style="width:68%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 2.10%</span></td>
+          <td class="num" style="color:var(--yellow)" title="(1 - used_frac) / time_left_frac — on pace = 1.00, >1 underused, <1 overspent, 0 exhausted">0.60</td>
           <td style="color:var(--text-muted)">in 16d</td>
         </tr>
         <tr>
@@ -246,8 +249,8 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
           <td><span class="badge b-err" title="gate — shorter-period rate cap; near-saturation lowers routing priority, never boosts it">requests / 1d</span></td>
           <td style="color:var(--text-muted)">cheap</td>
           <td class="num">25,000</td><td class="num">3,211</td>
-          <td><div class="progress"><span style="width:13%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.0%</span></td>
-          <td class="num" style="color:var(--green)">21,789 (87%)</td>
+          <td><div class="progress"><span style="width:13%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.00%</span></td>
+          <td class="num" style="color:var(--green)">2.33</td>
           <td style="color:var(--text-muted)">04:00 (9h)</td>
         </tr>
         <tr>
@@ -255,8 +258,8 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
           <td><span class="badge b-err" title="gate — shorter-period rate cap">requests / 1d</span></td>
           <td style="color:var(--text-muted)">all models</td>
           <td class="num">10,000</td><td class="num">9,800</td>
-          <td><div class="progress"><span class="danger" style="width:98%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.0%</span></td>
-          <td class="num" style="color:var(--red)">200 (2%)</td>
+          <td><div class="progress"><span class="danger" style="width:98%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.00%</span></td>
+          <td class="num" style="color:var(--red)">0.61</td>
           <td style="color:var(--text-muted)">in 47m</td>
         </tr>
       </tbody>
@@ -271,11 +274,11 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
         <th>Virtual Model</th><th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th class="num">Ctx</th><th class="num">Headroom</th>
       </tr></thead>
       <tbody>
-        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">coding</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
-        <tr><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
-        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">agent</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-opus-4.6</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
-        <tr><td class="num"><span class="pri pri-2">P2</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-r2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128k</td><td class="num" style="color:var(--green)">21,789 req (87%)</td></tr>
-        <tr><td style="color:var(--text-bright);font-weight:600">cheap</td><td class="num"><span class="pri pri-1">P1</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-chat</td><td><span class="badge b-warn">half-open</span></td><td class="num">128k</td><td class="num" style="color:var(--green)">21,789 req (87%)</td></tr>
+        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">coding</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
+        <tr><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
+        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">agent</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-opus-4.6</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
+        <tr><td class="num"><span class="pri pri-2">P2</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-r2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128.00K</td><td class="num" style="color:var(--green)">2.33</td></tr>
+        <tr><td style="color:var(--text-bright);font-weight:600">cheap</td><td class="num"><span class="pri pri-1">P1</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-chat</td><td><span class="badge b-warn">half-open</span></td><td class="num">128.00K</td><td class="num" style="color:var(--green)">2.33</td></tr>
       </tbody>
     </table>
   </div>
@@ -283,19 +286,21 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
   <div class="section-head" style="font-size:var(--fs-lg);margin-top:14px">Fallback Endpoints <span class="badge b-dim">2</span></div>
   <div class="table-wrap">
     <table class="c">
-      <thead><tr><th>Virtual Model</th><th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th>Note</th></tr></thead>
+      <thead><tr>
+        <th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th class="num">Ctx</th><th>Capabilities</th>
+      </tr></thead>
       <tbody>
-        <tr><td>coding</td><td class="num"><span class="pri pri-2">P9</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td><span class="badge b-ok">healthy</span></td><td style="color:var(--text-muted)">trailing fallback</td></tr>
-        <tr><td>agent</td><td class="num"><span class="pri pri-2">P9</span></td><td>openrouter : <span style="color:var(--purple)">backup</span> : anthropic/claude-opus-4.6</td><td><span class="badge b-err">cooldown 2m 13s</span></td><td style="color:var(--text-muted)">trailing fallback</td></tr>
+        <tr><td class="num"><span class="pri pri-2">P9</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128.00K</td><td style="color:var(--text-muted)">tools</td></tr>
+        <tr><td class="num"><span class="pri pri-2">P9</span></td><td>openrouter : <span style="color:var(--purple)">backup</span> : anthropic/claude-opus-4.6</td><td><span class="badge b-err">cooldown 2m 13s</span></td><td class="num">200.00K</td><td style="color:var(--text-muted)">tools · image · thinking</td></tr>
       </tbody>
     </table>
   </div>
 
-  <!-- ============ live requests ============ -->
+  <!-- ============ live requests (refreshes with the page) ============ -->
   <div class="section-head" id="live">Live Requests
     <span class="badge b-cyan" id="live-running">0 running</span>
     <span class="badge b-warn" id="live-queued">0 queued</span>
-    <span class="count">every 1s · paused while hidden</span>
+    <span class="count">refreshes with the page</span>
   </div>
   <div class="table-wrap">
     <table class="c">
@@ -303,18 +308,33 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
         <th>State</th><th class="num">Seq</th><th>Model</th><th>Caller</th><th>Provider : Key : Model</th>
         <th class="num">Att</th><th class="num">Elapsed</th><th class="num">First / Last Tok</th><th class="num">Tok in</th><th class="num">Tok out</th>
       </tr></thead>
-      <tbody id="live-body"><tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests — the simulator will start new ones shortly</td></tr></tbody>
+      <tbody id="live-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ============ performance ============ -->
+  <div class="section-head" id="perf">Performance by Provider &amp; Model
+    <span class="count">nearest-rank percentiles · tok/s = all four token components / dur</span>
+    <span class="spacer"></span>
+    <span style="display:flex;gap:6px">
+      <button class="btn sm" data-basis="10">last 10</button>
+      <button class="btn sm on" data-basis="100">last 100</button>
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>Provider : Key : Model</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th>
+        <th class="num">TTFT p50 / p90</th><th class="num">TPS p50 / p90</th><th class="num">Tok/s p50 / p90</th>
+      </tr></thead>
+      <tbody id="perf-body"></tbody>
     </table>
   </div>
 
   <!-- ============ requests & tokens chart ============ -->
   <div class="section-head" id="charts">Requests &amp; Tokens
     <span class="spacer"></span>
-    <span style="display:flex;gap:6px">
-      <button class="btn sm on" data-range="24h">24h</button>
-      <button class="btn sm" data-range="3d">3d</button>
-      <button class="btn sm" data-range="7d">7d</button>
-    </span>
+    <span data-rangescope></span>
   </div>
   <div class="chart-wrap">
     <div class="chart-legend">
@@ -327,45 +347,27 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
     <div id="chart"></div>
   </div>
 
-  <!-- ============ performance ============ -->
-  <div class="section-head" id="perf">Performance by Provider &amp; Model <span class="count">p50/p90 over last 100 ok samples</span></div>
-  <div class="table-wrap">
-    <table class="c">
-      <thead><tr>
-        <th>Provider : Key : Model</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th>
-        <th class="num">TTFT p50 / p90</th><th class="num">TPS p50 / p90</th>
-      </tr></thead>
-      <tbody>
-        <tr><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td class="num">4,120 / 31</td><td class="num">8.1M / 2.4M</td><td class="num">4.2M</td><td class="num">812ms / 2.41s</td><td class="num">68.2 / 41.0</td></tr>
-        <tr><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td class="num">1,904 / 12</td><td class="num">3.9M / 1.1M</td><td class="num">2.0M</td><td class="num">934ms / 2.88s</td><td class="num">61.5 / 38.2</td></tr>
-        <tr><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td class="num">2,381 / 88</td><td class="num">5.6M / 2.0M</td><td class="num">3.1M</td><td class="num">1.62s / 4.10s</td><td class="num">44.8 / 27.9</td></tr>
-      </tbody>
-    </table>
-  </div>
-
+  <!-- ============ usage by key / caller (range-synced) ============ -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
     <div>
-      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Upstream Key Label</div>
+      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Upstream Key Label
+        <span class="spacer"></span><span data-rangescope></span>
+      </div>
       <div class="table-wrap">
         <table class="c">
           <thead><tr><th>Key Label</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
-          <tbody>
-            <tr><td><span class="badge b-purple">main</span></td><td class="num">6,024 / 43</td><td class="num">12.0M / 3.5M</td><td class="num">6.2M</td></tr>
-            <tr><td><span class="badge b-dim">a1b2c3</span></td><td class="num">2,381 / 88</td><td class="num">5.6M / 2.0M</td><td class="num">3.1M</td></tr>
-          </tbody>
+          <tbody id="usage-key"></tbody>
         </table>
       </div>
     </div>
     <div>
-      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Caller</div>
+      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Caller
+        <span class="spacer"></span><span data-rangescope></span>
+      </div>
       <div class="table-wrap">
         <table class="c">
           <thead><tr><th>Client Key Tag</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
-          <tbody>
-            <tr><td><span class="badge b-info">jason</span></td><td class="num">3,855 / 40</td><td class="num">7.7M / 2.3M</td><td class="num">4.0M</td></tr>
-            <tr><td><span class="badge b-info">openclaw</span></td><td class="num">4,006 / 71</td><td class="num">8.8M / 2.6M</td><td class="num">4.5M</td></tr>
-            <tr><td><span class="badge b-info">cron</span></td><td class="num">544 / 20</td><td class="num">1.1M / 0.6M</td><td class="num">0.8M</td></tr>
-          </tbody>
+          <tbody id="usage-caller"></tbody>
         </table>
       </div>
     </div>
@@ -375,7 +377,7 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 <!-- ===== unified footer ===== -->
 <footer class="console-footer">
   <div class="ft-inner">
-    <div>Virtual Model Router (VMR) · v4.2.1 · uptime <span id="ft-uptime">3d 4h 12m</span></div>
+    <div>Virtual Model Router (VMR) · v4.2.1</div>
     <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
       <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
   </div>
@@ -385,7 +387,7 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 <div class="demo-panel" id="demo-panel">
   <b>DEMO CONTROLS</b>
   <div class="row">
-    <button class="btn" id="dp-pause">⏸ Pause sim</button>
+    <button class="btn" id="dp-pause">⏸ Pause auto-refresh</button>
     <button class="btn" id="dp-stall">⚡ Inject stall</button>
   </div>
   <div class="row">
@@ -452,12 +454,29 @@ function syncKeyBtn() {
 document.getElementById('hd-key').onclick = openKeyModal;
 
 // --- shared helpers ---
+// Formatting discipline: every K/M/G humanized value keeps exactly two decimals.
+function fmtKMG(v) {
+  if (!isFinite(v)) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+  return String(Math.round(v));
+}
+function fmtInt(v) { return Math.round(v).toLocaleString('en-US'); }
 function toast(msg) {
   let t = document.querySelector('.toast');
   if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
   t.textContent = msg; t.classList.add('show');
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
 }
+function fmtAge(rfc3339) {
+  if (!rfc3339) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - new Date(rfc3339).getTime()) / 1000));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+  return Math.floor(s / 3600) + 'h' + Math.floor((s % 3600) / 60) + 'm';
+}
+function fmtMMSS(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
 function copyText(txt, btn) {
   const done = () => { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = o, 1200); };
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -470,14 +489,6 @@ function fallbackCopy(txt, done) {
   try { document.execCommand('copy'); done(); } catch (e) {}
   ta.remove();
 }
-function fmtAge(rfc3339) {
-  if (!rfc3339) return '—';
-  const s = Math.max(0, Math.floor((Date.now() - new Date(rfc3339).getTime()) / 1000));
-  if (s < 60) return s + 's';
-  if (s < 3600) return Math.floor(s / 60) + 'm' + (s % 60) + 's';
-  return Math.floor(s / 3600) + 'h' + Math.floor((s % 3600) / 60) + 'm';
-}
-function fmtMMSS(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
 
 /* ===== warning bell (count in header, details on click) ===== */
 const WARNINGS = [
@@ -510,25 +521,26 @@ function openWarnModal() { const m = warnOverlay(); if (m) m.classList.remove('h
 function closeWarnModal() { const m = warnOverlay(); if (m) m.classList.add('hidden'); }
 document.getElementById('warn-bell').onclick = openWarnModal;
 
-/* ===== 5-minute auto-refresh countdown (click = refresh now) ===== */
+/* ===== 5-minute auto-refresh countdown (click = refresh now).
+   The WHOLE page refreshes together — live table included (v2 review). ===== */
 let countdown = 300;
 function refreshNow() {
   countdown = 300;
-  // vitals micro-bump to make the refresh visible (mock)
+  simTick();                       // live table advances with the page
   const req = 12847 + Math.floor(Math.random() * 3 + 1);
-  document.getElementById('v-req').textContent = req.toLocaleString();
-  document.getElementById('v-ok').textContent = (12702 + Math.floor(Math.random() * 2)).toLocaleString() + ' ok';
+  document.getElementById('v-req').textContent = fmtInt(req);
+  document.getElementById('v-ok').textContent = (12702 + Math.floor(Math.random() * 2)) + ' ok';
   toast('Data refreshed (mock)');
 }
 document.getElementById('hd-refresh').onclick = refreshNow;
 setInterval(() => {
   if (SIM.paused || document.hidden) return;
   countdown--;
-  if (countdown <= 0) { refreshNow(); }
+  if (countdown <= 0) refreshNow();
   document.getElementById('cd').textContent = fmtMMSS(Math.max(0, countdown));
 }, 1000);
 
-/* ===== live request simulator (mock of per-chunk milestone stamping) ===== */
+/* ===== live request simulator — one tick per page refresh (v2 review) ===== */
 const PROTOS = ['openai-completions', 'anthropic-messages', 'openai-responses'];
 const PROVIDERS = [
   { p: 'packycode', k: 'main', m: 'claude-sonnet-4' },
@@ -564,9 +576,8 @@ function promote(e) {
   if (Math.random() < 0.04) e.doneAt = Date.now() + 900;
 }
 function simTick() {
-  if (SIM.paused || document.hidden) return;
-  if (SIM.entries.length < 9 && Math.random() < 0.5) spawn();
   const now = Date.now();
+  if (SIM.entries.length < 9 && Math.random() < 0.85) spawn();
   SIM.entries = SIM.entries.filter(e => !(e.doneAt && now >= e.doneAt));
   for (const e of SIM.entries) {
     if (e.state === 'queued' && now >= e.promoteAt) promote(e);
@@ -576,11 +587,11 @@ function simTick() {
         if (e.stallUntil && now < e.stallUntil) { /* frozen: no lastAt update */ }
         else {
           e.lastAt = nowISO();
-          e.estOut += 6 + Math.floor(Math.random() * 70);
-          if (SIM.injectStall && e.stream) { e.stallUntil = now + 14000; SIM.injectStall = false; toast('Stall injected on #' + e.seq); }
-          else if (Math.random() < 0.015) e.stallUntil = now + 9000 + Math.random() * 9000;
+          e.estOut += 200 + Math.floor(Math.random() * 900);  // ~5min of streaming per page refresh
+          if (SIM.injectStall && e.stream) { e.stallUntil = now + 120000; SIM.injectStall = false; toast('Stall injected on #' + e.seq); }
+          else if (Math.random() < 0.06) e.stallUntil = now + 30000 + Math.random() * 90000;
         }
-        const totalMs = (e.stream ? 9000 : 4000) + Math.random() * 18000;
+        const totalMs = (e.stream ? 240000 : 90000) + Math.random() * 180000;
         if (now - new Date(e.sentAt).getTime() > totalMs) e.doneAt = now + 60;
       }
     }
@@ -601,7 +612,7 @@ function renderLive() {
   document.getElementById('live-running').textContent = es.filter(e => e.state === 'running').length + ' running';
   document.getElementById('live-queued').textContent = es.filter(e => e.state === 'queued').length + ' queued';
   if (!es.length) {
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests — the simulator will start new ones shortly</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests at last refresh</td></tr>';
     return;
   }
   const rows = es.slice(-10).map(e => `<tr>
@@ -613,8 +624,8 @@ function renderLive() {
     <td class="num">${e.attempt || '—'}</td>
     <td class="num">${fmtAge(e.ts)}</td>
     <td class="num">${firstLastCell(e)}</td>
-    <td class="num">${e.estIn.toLocaleString()}</td>
-    <td class="num">${e.estOut.toLocaleString()}</td>
+    <td class="num">${fmtInt(e.estIn)}</td>
+    <td class="num">${fmtInt(e.estOut)}</td>
   </tr>`).join('');
   const more = es.length > 10 ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted)">… ${es.length - 10} more in flight</td></tr>` : '';
   body.innerHTML = rows + more;
@@ -626,6 +637,35 @@ function updateVitals() {
   document.getElementById('v-queued').textContent = queued;
 }
 
+/* ===== performance: last 10/100 basis toggle + tok/s column ===== */
+const PERF = {
+  '10': [
+    { pk: 'packycode : main : claude-sonnet-4', ok: 9, err: 1, incw: '0.19M', cr: '0.05M', out: '0.10M', ttft: '742ms / 1.88s', tps: '71.4 / 44.0', toks: '26.10 / 19.20' },
+    { pk: 'packycode : backup : claude-sonnet-4', ok: 1, err: 0, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.02s / 1.02s', tps: '58.0 / 58.0', toks: '21.40 / 21.40' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', ok: 0, err: 0, incw: '0.00M', cr: '0.00M', out: '0.00M', ttft: '— / —', tps: '— / —', toks: '— / —' },
+  ],
+  '100': [
+    { pk: 'packycode : main : claude-sonnet-4', ok: 96, err: 3, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', tps: '68.2 / 41.0', toks: '24.80 / 17.60' },
+    { pk: 'packycode : backup : claude-sonnet-4', ok: 46, err: 1, incw: '0.93M', cr: '0.27M', out: '0.48M', ttft: '934ms / 2.88s', tps: '61.5 / 38.2', toks: '22.30 / 15.90' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', ok: 57, err: 9, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', tps: '44.8 / 27.9', toks: '18.90 / 12.40' },
+  ],
+};
+function renderPerf(basis) {
+  document.getElementById('perf-body').innerHTML = PERF[basis].map(r => `<tr>
+    <td>${r.pk}</td>
+    <td class="num">${fmtInt(r.ok)} / ${fmtInt(r.err)}</td>
+    <td class="num">${r.incw} / ${r.cr}</td>
+    <td class="num">${r.out}</td>
+    <td class="num">${r.ttft}</td>
+    <td class="num">${r.tps}</td>
+    <td class="num">${r.toks}</td>
+  </tr>`).join('');
+}
+document.querySelectorAll('[data-basis]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-basis]').forEach(x => x.classList.toggle('on', x === b));
+  renderPerf(b.dataset.basis);
+});
+
 /* ===== Requests & Tokens chart (pure SVG, no chart lib) ===== */
 function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const RANGES = {
@@ -636,7 +676,7 @@ const RANGES = {
 function genSeries(key) {
   const cfg = RANGES[key], rnd = mulberry32(cfg.seed), arr = [];
   for (let i = 0; i < cfg.n; i++) {
-    const hourOfDay = (new Date().getHours() - (cfg.n - 1 - i) * cfg.bh % 24 + 24 * 4) % 24;
+    const hourOfDay = (new Date().getHours() - (cfg.n - 1 - i) * cfg.bh % 24 + 96) % 24;
     const work = 0.4 + 0.6 * Math.exp(-Math.pow(((hourOfDay - 14 + 24) % 24 - 4) / 7, 2));
     const base = (0.55 + rnd() * 0.7) * (0.6 + 0.4 * work);
     arr.push({
@@ -649,21 +689,31 @@ function genSeries(key) {
   }
   return arr;
 }
-function fmtM(v) { return (v / 1e6).toFixed(1) + 'M'; }
+function bucketRange(i, cfg) {
+  const end = new Date(Date.now() - (cfg.n - 1 - i) * cfg.bh * 3600 * 1000);
+  const start = new Date(end.getTime() - cfg.bh * 3600 * 1000);
+  const f = d => cfg.bh === 1
+    ? String(d.getHours()).padStart(2, '0') + ':00'
+    : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':00';
+  return f(start) + ' – ' + f(end);
+}
 function bucketLabel(i, cfg) {
   const d = new Date(Date.now() - (cfg.n - 1 - i) * cfg.bh * 3600 * 1000);
   if (cfg.bh === 1) return String(d.getHours()).padStart(2, '0') + ':00';
   return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0');
 }
+function fmtM(v) { return (v / 1e6).toFixed(2) + 'M'; }
+
+const chartState = { range: '24h', data: null, cfg: null, W: 1200, padL: 52, padR: 52 };
 function renderChart(key) {
-  const cfg = RANGES[key], data = genSeries(key);
-  const W = 1200, H = 260, padL = 52, padR = 52, padT = 12, padB = 26;
+  chartState.range = key; chartState.cfg = RANGES[key]; chartState.data = genSeries(key);
+  const cfg = chartState.cfg, data = chartState.data;
+  const W = chartState.W, H = 260, padL = chartState.padL, padR = chartState.padR, padT = 12, padB = 26;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxTok = Math.max(...data.map(d => d.fresh + d.cw + d.cr + d.out)) * 1.12;
   const maxReq = Math.max(...data.map(d => d.req)) * 1.15;
   const groupW = plotW / cfg.n, barW = Math.min(16, groupW * 0.26);
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="font-family:var(--font-mono)">`;
-  // gridlines + y labels
   for (let g = 0; g <= 4; g++) {
     const y = padT + plotH - (plotH * g / 4);
     s += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(48,54,61,.5)" stroke-dasharray="3 4"/>`;
@@ -671,23 +721,17 @@ function renderChart(key) {
     s += `<text x="${W - padR + 7}" y="${y + 3.5}" fill="#8b949e" font-size="10">${Math.round(maxReq * g / 4)}</text>`;
   }
   const x = i => padL + groupW * i + groupW / 2;
-  // bars per bucket
   data.forEach((d, i) => {
     const gx = x(i) - barW - 2;
     const hFresh = plotH * d.fresh / maxTok, hCw = plotH * d.cw / maxTok, hCr = plotH * d.cr / maxTok, hOut = plotH * d.out / maxTok;
-    const tip = `${bucketLabel(i, cfg)} · ${d.req} requests\ntok in ${fmtM(d.fresh + d.cw + d.cr)} (fresh ${fmtM(d.fresh)} · cw ${fmtM(d.cw)} · cr ${fmtM(d.cr)})\ntok out ${fmtM(d.out)}`;
-    s += `<g><title>${tip}</title>`;
     s += `<rect x="${gx}" y="${padT + plotH - hFresh}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1.5"/>`;
     s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1.5"/>`;
     s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw - hCr}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1.5"/>`;
     s += `<rect x="${x(i) + 2}" y="${padT + plotH - hOut}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1.5"/>`;
-    s += `</g>`;
   });
-  // requests polyline
   const pts = data.map((d, i) => `${x(i)},${padT + plotH - plotH * d.req / maxReq}`).join(' ');
   s += `<polyline points="${pts}" fill="none" stroke="#d29922" stroke-width="2" stroke-linejoin="round"/>`;
-  data.forEach((d, i) => { s += `<circle cx="${x(i)}" cy="${padT + plotH - plotH * d.req / maxReq}" r="2.6" fill="#d29922"><title>${bucketLabel(i, cfg)} · ${d.req} requests</title></circle>`; });
-  // x labels
+  data.forEach((d, i) => { s += `<circle cx="${x(i)}" cy="${padT + plotH - plotH * d.req / maxReq}" r="2.6" fill="#d29922"/>`; });
   data.forEach((d, i) => {
     if (i % Math.ceil(cfg.n / 8) === 0 || i === cfg.n - 1)
       s += `<text x="${x(i)}" y="${H - 8}" fill="#8b949e" font-size="10" text-anchor="middle">${bucketLabel(i, cfg)}</text>`;
@@ -695,28 +739,102 @@ function renderChart(key) {
   s += '</svg>';
   document.getElementById('chart').innerHTML = s;
 }
-document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
-  document.querySelectorAll('[data-range]').forEach(x => x.classList.toggle('on', x === b));
-  renderChart(b.dataset.range);
-});
+// hover tooltip: one entry lists requests + every token component + in total
+(function chartTooltip() {
+  const wrap = document.querySelector('.chart-wrap');
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip'; wrap.appendChild(tip);
+  wrap.addEventListener('mousemove', ev => {
+    const cfg = chartState.cfg, data = chartState.data; if (!data) return;
+    const svg = wrap.querySelector('svg'); if (!svg) return;
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * (chartState.W / r.width);
+    if (px < chartState.padL || px > chartState.W - chartState.padR) { tip.style.display = 'none'; return; }
+    const i = Math.min(cfg.n - 1, Math.max(0, Math.floor((px - chartState.padL) / (plotGroupW(cfg)))));
+    const d = data[i];
+    const tin = d.fresh + d.cw + d.cr;
+    tip.innerHTML =
+      `<b>${bucketRange(i, cfg)}</b><br>` +
+      `requests: ${fmtInt(d.req)}<br>` +
+      `tok in: <b>${fmtM(tin)}</b> <span class="tr">(fresh ${fmtM(d.fresh)} · cw ${fmtM(d.cw)} · cr ${fmtM(d.cr)})</span><br>` +
+      `tok out: <b>${fmtM(d.out)}</b>`;
+    const wrapR = wrap.getBoundingClientRect();
+    let left = ev.clientX - wrapR.left + 14;
+    if (left + 300 > wrapR.width) left = ev.clientX - wrapR.left - 300 - 6;
+    tip.style.left = left + 'px';
+    tip.style.top = (ev.clientY - wrapR.top + 14) + 'px';
+    tip.style.display = 'block';
+  });
+  wrap.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  function plotGroupW(cfg) { return (chartState.W - chartState.padL - chartState.padR) / cfg.n; }
+})();
+
+/* ===== usage tables (range-synced with the chart) ===== */
+function genUsage(key) {
+  const mult = { '24h': 1, '3d': 2.7, '7d': 6.1 }[key];
+  const rnd = mulberry32({ '24h': 7, '3d': 8, '7d': 9 }[key]);
+  const row = (okBase, errBase, inBase, crBase, outBase) => ({
+    ok: Math.round(okBase * mult * (0.9 + rnd() * 0.2)),
+    err: Math.round(errBase * mult * (0.9 + rnd() * 0.2)),
+    incw: inBase * mult * (0.9 + rnd() * 0.2),
+    cr: crBase * mult * (0.9 + rnd() * 0.2),
+    out: outBase * mult * (0.9 + rnd() * 0.2),
+  });
+  return {
+    keys: [
+      { name: 'main', ...row(6024, 43, 9.6e6, 2.8e6, 4.9e6) },
+      { name: 'a1b2c3', ...row(2381, 88, 4.5e6, 1.6e6, 2.5e6) },
+    ],
+    callers: [
+      { name: 'jason', ...row(3855, 40, 6.2e6, 1.8e6, 3.2e6) },
+      { name: 'openclaw', ...row(4006, 71, 7.0e6, 2.1e6, 3.6e6) },
+      { name: 'cron', ...row(544, 20, 0.9e6, 0.5e6, 0.6e6) },
+    ],
+  };
+}
+function usageRows(rows) {
+  return rows.map(r => `<tr>
+    <td>${r.name}</td>
+    <td class="num">${fmtInt(r.ok)} / ${fmtInt(r.err)}</td>
+    <td class="num">${fmtKMG(r.incw)} / ${fmtKMG(r.cr)}</td>
+    <td class="num">${fmtKMG(r.out)}</td>
+  </tr>`).join('');
+}
+function renderUsage(key) {
+  const u = genUsage(key);
+  document.getElementById('usage-key').innerHTML = usageRows(u.keys);
+  document.getElementById('usage-caller').innerHTML = usageRows(u.callers);
+}
+
+/* ===== range selector: three section heads, one shared state ===== */
+const RANGE_BTNS = ['24h', '3d', '7d'];
+function setRange(key) {
+  document.querySelectorAll('[data-rangescope]').forEach(scope => {
+    scope.innerHTML = RANGE_BTNS.map(r =>
+      `<button class="btn sm ${r === key ? 'on' : ''}" data-range="${r}">${r}</button>`).join('');
+    scope.querySelectorAll('[data-range]').forEach(b => b.onclick = () => setRange(b.dataset.range));
+  });
+  renderChart(key);
+  renderUsage(key);
+}
 
 /* ===== demo panel ===== */
 document.getElementById('dp-pause').onclick = function () {
   SIM.paused = !SIM.paused;
-  this.textContent = SIM.paused ? '▶ Resume sim' : '⏸ Pause sim';
+  this.textContent = SIM.paused ? '▶ Resume auto-refresh' : '⏸ Pause auto-refresh';
   document.getElementById('hd-conn').className = 'pill ' + (SIM.paused ? 'p-paused' : 'p-live');
   document.getElementById('hd-conn').textContent = SIM.paused ? 'paused' : 'live';
-  toast(SIM.paused ? 'Live simulation paused' : 'Live simulation resumed');
+  toast(SIM.paused ? 'Auto-refresh paused' : 'Auto-refresh resumed');
 };
-document.getElementById('dp-stall').onclick = () => { SIM.injectStall = true; toast('Will stall the next streaming request…'); document.getElementById('live').scrollIntoView({ behavior: 'smooth' }); };
+document.getElementById('dp-stall').onclick = () => { SIM.injectStall = true; toast('Stall injected — it becomes visible on the next page refresh (click the countdown)'); };
 document.getElementById('dp-401').onclick = () => { SIM._401once = true; openKeyModal(); toast('Next Connect will fail with 401 (demo)'); };
 document.getElementById('dp-reset').onclick = () => DEMO.reset();
 
 /* ===== boot ===== */
 syncKeyBtn();
-setInterval(simTick, 1000);
 simTick();
-renderChart('24h');
+renderPerf('100');
+setRange('24h');
 </script>
 </body>
 </html>
