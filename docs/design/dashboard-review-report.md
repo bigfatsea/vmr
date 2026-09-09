@@ -458,3 +458,59 @@ Live 与 Recent Failures 的 Model 单元格里也一并换成同样的文字标
 | Performance | `Provider:Key:Model · Mode · Req ok/err · Tok in+cw/cr · Tok out · TTFT p50/p90 · Tok/s p50/p90`（7 列，整行同窗口） |
 | Live Requests | `State · Elapsed · Model+mode · Caller · Provider:Key:Model · Att · First/Last Byte · Tok in est · Tok out est`（9 列） |
 | Recent Failures | `When · Model+mode · Caller · Provider:Key:Model · Att · Outcome · Dur`（7 列） |
+
+---
+
+## Stage 7 — 第四轮：口径简化与文档对齐（2026-09-10）
+
+### 7.1 Performance 表：Requests 只有一个数
+
+**指令**：ring 只保留 `outcome=ok`；`Req` 不再分 ok/err，只写 `Requests`，显示窗口内**实际**
+样本数——满 100 就是 100，不满就要看得出是多少，避免把一个 43 样本的 p90 当成 100 样本的读。
+
+**已改**：列名 `Requests`，未填满窗口时转黄并在悬停里说明"这一行的分位建立在 N 个样本上"。
+连带的口径澄清写进方案：ring 只收成功样本，所以整行（样本数、token 求和、TTFT、Tok/s）
+都是同一批成功样本；**失败不是这张表的职责**——哪一条为什么失败看 Recent Failures，
+什么时候开始错看图上的红点，总体错误率看 vitals。这样 ring 也不必被改造成混合池。
+
+### 7.2 与 LiveStats 文档 / 现网实现的三方对账
+
+这一轮把"HTML 想要什么"和"代码现在给什么"逐字段对了一遍（读的是 `internal/livestats`、
+`internal/router/telemetry.go`、`internal/server/admin.go` 的实际结构体，不是文档描述）。
+结论：**Demo 跑在 payload 前面，共 8 处缺口**，已在方案里建表登记（§10.1 逐字段对照、
+§10.2 缺口清单 G1–G8），并在 `overview.html` 对应区块上留了 `<!-- GAP Gn -->` 注释——
+实施轮打开文件就能看见。
+
+对账中发现的、文档此前写错或写漏的地方：
+
+| 发现 | 处置 |
+| --- | --- |
+| ring key 是 `(provider, model, stream)`，**不含 `key_label`**。而展开后的 provider 名虽内含 label，LiveStats §3.1 自己判定"靠解析名字反推是脆弱的"——这条纪律只用在了写侧 | ring key 与 `by_provider_model[]` 行都补 `key_label`（G8） |
+| `Quantiles` 只有分位数，**没有 `n`**。ring 常常不满 100，消费者无从知道分位建立在几个样本上 | 窗口块补 `n` 与 `tokens`（G8） |
+| 全局 TTFT p50 **不可能由前端算**——分位数不可合并，`/stats` 只给分行数据 | 新增 `overall` 合并窗口块（G1） |
+| hourly 尾窗固定 48 小时，而图表的 3d(72h)、7d(168h) **都超了** | `?range=` 把尾窗放宽到 24/72/168，上限 7d（G6） |
+| fallback 端点被合并进每个模型的 `endpoints[]`，`/status` **没有输出 `FromFallback`** —— Demo 的 Fallback 独立表画不出来 | `/status` 补 `from_fallback`（G5） |
+| `/status` 端点行只有合成名 `adapterType/provider/model`，前端要渲染 `provider : key : model` 只能拆字符串 | 补身份拆分字段（G3） |
+| `traffic.tokens.total` 是**五分量**（含 `reasoning`），页面按四分量理解会对不上 | 对照表里点名，页面须写死总量与 cache 分母的口径 |
+| `modelStatus.protocol`、`capabilities`、`max_context_tokens` **现网早就有了**，前几轮的实施清单在重复要求 | 从清单里删掉，避免实施时白做一遍 |
+
+### 7.3 一处需要回看的：Quota 的 `estimated_pct`
+
+第二轮按指令删掉了 Quota 的 `est +2.10% in flight`，理由是"简化计算"。对账时发现
+**这个理由不成立，而且当时对该字段的描述是错的**：
+
+`/status` 的 quota 行早就有 `estimated_pct`，它的语义不是"在飞请求的预估增量"，而是
+**这一周期的消耗里有多少来自降级的字节数估算、而非上游真实上报的 usage**——也就是
+"`Used` 这个数你能信几分"。它已经算好了，取用零成本，删掉省不下任何计算。
+
+按指令保持删除状态，但登记在这里：如果要回补，正确的形态是挂在 `Used` 上的一个数据
+质量标记（仅在非零时出现），而不是第二轮那个被误标成"in flight"的百分比。
+
+### 7.4 其他修正
+
+- `Tok/s p50/p90` 回到 Performance，vitals 的 TTFT 段副行同步恢复 `tok/s p50`（§6.1 的落实）；
+  LiveStats 文档同步撤销 `tps`、只留 `toks`，并说明"首 token 慢不慢由 `ttft_p50/p90` 单独回答"。
+- 传输方式 stream/json 全线改为文字标签，Performance 里是独立的 `Mode` 列（§6.3 的落实）。
+- vitals 并发段的 `peak N` 删除——limiter 只给 `(limit, in_flight, waiting)`，没有水位线，
+  这个数在现网**取不到**。改显示 `limit N`。这类"页面写了但取不到"的字段，正是 §10.1
+  那张对照表要防的。

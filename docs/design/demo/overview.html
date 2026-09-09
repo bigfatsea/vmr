@@ -245,6 +245,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       <span class="badge b-dim hd-uptime" title="time since process start">up 3d 4h 12m</span>
       <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
       <!-- alerts sit at the far right: the last thing the eye lands on before leaving the header -->
+      <!-- GAP G2: /status returns no warnings[] yet; this list is mock. -->
       <button class="warn-btn" id="warn-bell" aria-label="Warnings and errors" title="Actionable warnings &amp; errors">
         <span class="ico" id="warn-ico">⚠️</span><span id="warn-count">0</span>
       </button>
@@ -274,7 +275,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       <div class="vseg">
         <div class="v-label">Concurrency <span class="win">· now</span></div>
         <div class="v-main" id="v-conc">0<small> / 8</small></div>
-        <div class="v-sub"><span id="v-queued-wrap"><span class="t-accent" id="v-queued">0</span> queued</span><span id="v-peak">peak 7</span></div>
+        <div class="v-sub"><span id="v-queued-wrap"><span class="t-accent" id="v-queued">0</span> queued</span><span class="help" title="max_concurrency from config — requests beyond it wait at the gate">limit 8</span></div>
       </div>
       <div class="vseg">
         <div class="v-label">Requests <span class="win">· since start</span></div>
@@ -287,6 +288,8 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
         <div class="v-sub"><span>in 31.40M</span><span>out 16.80M</span><span class="t-ok help" title="cache_read / (fresh + cache_write + cache_read) — share of prompt tokens served from the upstream prompt cache">cache 62%</span></div>
       </div>
       <div class="vseg">
+        <!-- GAP G1: /stats has no merged `overall` window block yet — percentiles cannot be
+             combined client-side, so this whole segment is mock until the server computes it. -->
         <div class="v-label">TTFT p50 <span class="win">· last 100</span></div>
         <div class="v-main" id="v-ttft">0.93<small>s</small></div>
         <div class="v-sub"><span>p90 2.88s</span><span class="help" title="per-request throughput: all four token components / total duration, p50 over the same window">tok/s 22.30</span></div>
@@ -360,6 +363,9 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   </div>
 
   <!-- ============ virtual models & endpoint topology ============ -->
+  <!-- GAP G3: /status gives one composite `endpoint` name, not provider/key_label/model.
+       GAP G4: no per-endpoint headroom (read-side join with quota.Registry).
+       GAP G6: Share 24h needs /stats?range=24h — the hourly tail is fixed at 48h today. -->
   <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology
     <span class="badge b-dim">3 models · 5 endpoints</span>
     <span class="count">share = this endpoint's share of all forwarded requests in the last 24h</span>
@@ -421,6 +427,8 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     </table>
   </div>
 
+  <!-- GAP G5: fallback endpoints are merged into each model's endpoints[] and /status does not
+       expose core.Endpoint.FromFallback, so this table cannot be split out yet. -->
   <div class="sub-head">Fallback Endpoints
     <span class="badge b-dim">2</span>
     <span class="count">tried after every priority tier of the matched virtual model is exhausted</span>
@@ -478,6 +486,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   </div>
 
   <!-- ============ recent failures: the gap between "now" and the hourly aggregates ============ -->
+  <!-- GAP G7: /stats has no recent_errors[] ring yet — this whole block is mock. -->
   <div class="section-head" id="failures">Recent Failures
     <span class="badge b-err" id="fail-count">0</span>
     <span class="count">in memory only — cleared on restart, never contains request bodies</span>
@@ -500,8 +509,10 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   </div>
 
   <!-- ============ performance ============ -->
+  <!-- GAP G8: by_provider_model[] lacks key_label; last_10/last_100 carry percentiles only
+       (no n, no token sums) and expose tps rather than toks. -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">one row per endpoint × mode; every column covers the selected window, so Req also shows how full it is</span>
+    <span class="count">one row per endpoint × mode; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
     <span class="spacer"></span>
     <span class="seg">
       <span class="seg-label">window</span>
@@ -514,7 +525,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       <thead><tr>
         <th>Provider : Key : Model</th>
         <th title="Transport mode — streaming and non-streaming samples are separate rows and never share a percentile">Mode</th>
-        <th class="num" title="Requests in the selected window. Fewer than the window size simply means the endpoint has not served that many yet.">Req <span class="dim">ok / err</span></th>
+        <th class="num" title="Successful requests in the window. Fewer than the window size simply means this row has not served that many yet — the ring only keeps ok samples.">Requests</th>
         <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
         <th class="num" title="Output tokens over the window">Tok out</th>
         <th class="num" title="Time to first token — nearest-rank percentiles over the successful requests in the window">TTFT p50 / p90</th>
@@ -525,6 +536,8 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   </div>
 
   <!-- ============ traffic & usage: one time window governs the chart and both tables ============ -->
+  <!-- GAP G6: the 3d (72h) and 7d (168h) windows both exceed the fixed 48h hourly tail;
+       /stats needs ?range=. The two usage tables fold the same hourly[] rows. -->
   <div class="section-head" id="traffic">Traffic &amp; Usage
     <span class="count">the window below applies to the chart and both usage tables</span>
     <span class="spacer"></span>
@@ -1007,41 +1020,48 @@ function renderFailures() {
 /* ===== performance: one window governs the whole row =====
    One row per (endpoint × transport mode) — the ring is keyed on `stream` and
    the design forbids mixing the two into one percentile.
-   Every column is scoped to the selected window (last 10 / last 100 requests of
-   that row): counts, token sums and percentiles all move together, so the row
-   never mixes two time bases. Req doubles as the window's fill level — a row
-   showing 43 under "last 100" simply has not served 100 requests yet. */
+   The ring holds only successful requests, so every column here is the same
+   window of ok samples: `Requests` is that window's actual fill level (a row
+   showing 43 under "last 100" simply has not served 100 yet — without the
+   number you would read its percentiles as if they came from 100 samples),
+   token sums are over the same samples, and the percentiles come from them
+   too. Failures are not this table's job — Recent Failures and the chart's
+   error markers cover them. */
 const PERF = {
   '10': [
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', ok: 9, err: 1, incw: '0.19M', cr: '0.06M', out: '0.10M', ttft: '742ms / 1.88s', toks: '26.10 / 19.20' },
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', ok: 2, err: 0, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.18s / 1.31s', toks: '20.80 / 18.40' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', ok: 6, err: 0, incw: '0.11M', cr: '0.03M', out: '0.06M', ttft: '1.02s / 1.44s', toks: '23.50 / 17.10' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', ok: 0, err: 0 },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', ok: 3, err: 1, incw: '0.05M', cr: '0.02M', out: '0.03M', ttft: '1.51s / 2.02s', toks: '17.60 / 11.90' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', ok: 0, err: 0 },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', n: 10, incw: '0.21M', cr: '0.06M', out: '0.11M', ttft: '742ms / 1.88s', toks: '26.10 / 19.20' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', n: 2, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.18s / 1.31s', toks: '20.80 / 18.40' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', n: 6, incw: '0.11M', cr: '0.03M', out: '0.06M', ttft: '1.02s / 1.44s', toks: '23.50 / 17.10' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', n: 0 },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', n: 3, incw: '0.05M', cr: '0.02M', out: '0.03M', ttft: '1.51s / 2.02s', toks: '17.60 / 11.90' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', n: 0 },
   ],
   '100': [
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', ok: 97, err: 3, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', toks: '24.80 / 17.60' },
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', ok: 41, err: 2, incw: '0.31M', cr: '0.09M', out: '0.14M', ttft: '1.24s / 3.02s', toks: '19.40 / 13.10' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', ok: 96, err: 4, incw: '1.86M', cr: '0.55M', out: '0.97M', ttft: '934ms / 2.88s', toks: '22.30 / 15.90' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', ok: 18, err: 0, incw: '0.12M', cr: '0.04M', out: '0.06M', ttft: '1.41s / 2.10s', toks: '18.70 / 14.20' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', ok: 89, err: 11, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', toks: '18.90 / 12.40' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', ok: 21, err: 2, incw: '0.14M', cr: '0.05M', out: '0.07M', ttft: '2.05s / 5.40s', toks: '15.20 / 10.30' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', n: 100, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', toks: '24.80 / 17.60' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', n: 43, incw: '0.31M', cr: '0.09M', out: '0.14M', ttft: '1.24s / 3.02s', toks: '19.40 / 13.10' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', n: 100, incw: '1.86M', cr: '0.55M', out: '0.97M', ttft: '934ms / 2.88s', toks: '22.30 / 15.90' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', n: 18, incw: '0.12M', cr: '0.04M', out: '0.06M', ttft: '1.41s / 2.10s', toks: '18.70 / 14.20' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', n: 89, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', toks: '18.90 / 12.40' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', n: 21, incw: '0.14M', cr: '0.05M', out: '0.07M', ttft: '2.05s / 5.40s', toks: '15.20 / 10.30' },
   ],
 };
 function renderPerf(basis) {
-  const rows = PERF[basis];
+  const rows = PERF[basis], cap = Number(basis);
   document.getElementById('perf-body').innerHTML = rows.map((r, i) => {
-    const n = r.ok + r.err;
-    const none = !n;
+    const none = !r.n;
     const first = i === 0 || rows[i - 1].pk !== r.pk;
     const cell = v => none ? '<span class="dim">—</span>' : v;
+    // a partially filled window is the one number people misread, so say it
+    const nCell = none
+      ? '<span class="dim">0</span>'
+      : (r.n < cap
+        ? `<span class="t-warn" title="Window not full: this row has only ${r.n} of ${cap} samples, so the percentiles rest on ${r.n} requests">${fmtInt(r.n)}</span>`
+        : fmtInt(r.n));
     return `<tr class="${none ? 'zero ' : ''}${first ? 'grp' : ''}">
       <td><span class="ep" title="${r.pk}">${r.pk.replace(/ : ([\w-]+) : /, ' : <span class="t-key">$1</span> : ')}</span>
-        ${none ? '<span class="badge b-dim tight" title="This endpoint has not served a request in this mode within the window">no samples</span>' : ''}</td>
+        ${none ? '<span class="badge b-dim tight" title="This endpoint has not completed a request in this mode within the window">no samples</span>' : ''}</td>
       <td><span class="mode m-${r.mode}" title="${r.mode === 'stream' ? 'streaming response (SSE)' : 'non-streaming response (single JSON body)'}">${r.mode}</span></td>
-      <td class="num">${none ? '<span class="dim">0</span>'
-        : `<span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}" title="${fmtPct(r.err / n * 100)} error rate over ${n} request(s)">${fmtInt(r.err)}</span>`}</td>
+      <td class="num">${nCell}</td>
       <td class="num">${none ? '<span class="dim">—</span>' : `${r.incw} <span class="dim">/</span> ${r.cr}`}</td>
       <td class="num">${cell(r.out)}</td>
       <td class="num">${cell(r.ttft)}</td>

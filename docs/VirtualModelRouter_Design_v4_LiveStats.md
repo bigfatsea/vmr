@@ -36,8 +36,8 @@ Adapter、调度与健康、审计日志格式）见 `docs/VirtualModelRouter_De
 | --- | --- | --- |
 | 请求量 / token 量 / 成功率（token 四项分列） | protocol × provider+model × client_key_tag × key_label × virtual model | 按小时、按天，累计 |
 | 进行中请求明细（到达/发出/首末块/est tokens × 状态） | per-request | 实时（当前 queued + running） |
-| Time to first token | provider+model | 最近 10 / 100 条，p50 / p90 |
-| tokens/s | provider+model | 最近 10 / 100 条，p50 / p90 |
+| Time to first token | provider+key_label+model+stream | 最近 10 / 100 条，p50 / p90 |
+| tokens/s（四分量 ÷ 总耗时） | provider+key_label+model+stream | 最近 10 / 100 条，p50 / p90 |
 
 `client_key_tag`（调用方凭据的尾部推导）与 `key_label`（上游凭据的 label）是**两个相互
 独立的概念**：前者回答"谁发来的"，后者回答"这个请求实际打到了哪个云厂商的哪个账号/哪把
@@ -73,13 +73,13 @@ key"。两者在所有统计面并列记录，互不替代。
 请求完成（server 的 audit done() 钩子，响应已提交、脱离主线）
   ├─ 内存聚合器（进程内，完成时账本的实时面，§3.4/§4.1）
   │    ├─ 当前小时 keyed 计数
-  │    └─ per provider+model 的 TTFT / TPS 环形缓冲
+  │    └─ per provider+key_label+model+stream 的性能 ring（TTFT / token 吞吐）
   └─ 追加写 slim 小时文件（~200B/请求，当小时的 WAL，§3.2）
 
 小时滚动（lazy：第一个跨小时请求触发；不搞 ticker）
   └─ 从 slim 文件整体聚合 → 追加进 rollup 历史 → 删除该 slim 文件（§6）
 
-GET /stats（auth-gated）+ 内嵌 stats.html 轮询页（§8）
+GET /stats（auth-gated）+ 内嵌控制台 Overview 页（§8）
   └─ 读时聚合：in-flight 快照 + rollup 内存映射 + 当前小时计数 + ring，JSON 输出
 ```
 
@@ -219,10 +219,21 @@ GET /stats（auth-gated）+ 内嵌 stats.html 轮询页（§8）
 
 1. **rollup 键表**：`(hour, dims) → counters`，即 §3.3 的内存映像；
 2. **当前小时计数**：`(dims) → counters`（hour 固定为当前），由钩子实时累加；
-3. **TTFT / TPS ring**：per `(provider, model, stream)` 各一个容量 100 的环形缓冲。
-   ring 条目存**原始四元组** `(ts, dur_ms, ttft_ms, tokens.out)`，分位数与 TPS 在读时算——
-   公式若要修，历史数据不用迁移。ring 只收 `outcome=ok` 且已转发的样本（见 §4.2 归因规则）。
-   容量 100 对"最近 10 / 100 条 p50/p90"刚好：最近 10 条是 ring 的尾部切片。
+3. **性能 ring**：per `(provider, key_label, model, stream)` 各一个容量 100 的环形缓冲。
+   ring 条目存**原始元组** `(ts, dur_ms, ttft_ms, tokens{in,out,cache_read,cache_write})`，
+   分位数与速率在读时算——公式若要修，历史数据不用迁移。ring 只收 `outcome=ok` 且已转发
+   的样本（见 §4.2 归因规则）。容量 100 对"最近 10 / 100 条 p50/p90"刚好：最近 10 条是
+   ring 的尾部切片。
+
+   两处与"只存 tokens.out"的旧形态不同，都是被读侧需求逼出来的：
+
+   - **key 里加 `key_label`**：展开后的 provider 名虽然内含 label（`p1-main`），但 §3.1 已经
+     判定"靠解析名字反推是脆弱的"——把这条纪律只用在写侧、却让读侧的消费者去拆
+     `p1-main`，等于自己破自己的规矩。ring key 与输出行都带上 label，下游拿到的就是
+     `(provider, key_label, model, stream)` 四元组本身。
+   - **条目存四分量而不只是 `out`**：读侧要的是"这一个窗口内的 token 用量"与
+     "单请求 token 吞吐"，两者都需要四分量。四个 int64 × 100 条 × 键数，量级可忽略——
+     这是拿确定的、可忽略的内存换掉一整类"窗口内的数字对不上"的歧义。
 
 in-flight 进行中请求的注册表**不在本包**——它是 router 运行态（§5），`/stats` 读时合并。
 
@@ -252,7 +263,7 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 | 事实层 | 归属维度 | 规则 |
 | --- | --- | --- |
 | 请求面（总能观测） | `ts/vmodel/protocol/stream/outcome/client_key_tag` | 直接取自 record；失败、取消、404 的请求也计入这些维度的 outcome 计数 |
-| 服务面（仅转发成功时有意义） | `provider/model/key_label`、token、TTFT、TPS | 只取 winning attempt（`IsForwarded` 的那个）；全尝试失败的请求在 provider 维度上**缺席**（outcome 计数已覆盖其存在性） |
+| 服务面（仅转发成功时有意义） | `provider/model/key_label`、token、TTFT、吞吐 | 只取 winning attempt（`IsForwarded` 的那个）；全尝试失败的请求在 provider 维度上**缺席**（outcome 计数已覆盖其存在性） |
 
 - `ttft_ms=0` 是"未测量"（Part 1 的既有语义：本地快速拒绝、瞬时响应），聚合时排除，
   不计入 `ttft_ms` 的 `{sum,n}`，也不入 ring；
@@ -265,7 +276,7 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 粗锁正确性一目了然；这与"init 注册表用原子读 + COW 写"的惯例不冲突（那条针对的是注册表，
 这里是一个整体状态的账本）。
 
-读时聚合是 O(rollup + 当前小时)，而 `stats.html` 每 1 秒轮询、可能多个标签页并存——"读低频"
+读时聚合是 O(rollup + 当前小时)，而展示页会定期轮询、可能多个标签页并存——"读低频"
 的假设不再成立。`CachedSnapshot()` 兜住这一点：它缓存上一次 `Snapshot()` 结果 1 秒，窗口内
 所有轮询者直接拿缓存，`Record` 写入**不**使缓存失效（监控容忍 ≤1s 滞后）。`/stats` 走
 `CachedSnapshot()`；`Snapshot()` 保持纯聚合，供测试和需要精确即时读的调用方。
@@ -337,7 +348,8 @@ in-flight 注册表只负责 per-request 明细。
 
 - **响应头到达时刻**：与 `first_byte_at`（体首块）只差毫秒级，单独一列是噪声；
 - **队列位次**：信号量队列不内省，`queued` 聚合计数已覆盖"压了几个"的问题；
-- **SSE 推送**：/stats 保持轮询（与 stats.html 同一立场），in-flight 快照随轮询返回；
+- **SSE 推送**：本轮 /stats 保持轮询，in-flight 快照随轮询返回；将来若要提升 in-flight 的
+  观测精度，走 SSE，而不是把轮询间隔压到秒级——单向推送不需要第二个刷新时钟；
 - **落盘/结算**：in-flight 永不写文件；条目结束即消失，完成时事实由 done() 钩子记账，
   两条路径不互写。重启后 in-flight 自然清空（本来就是瞬态）。
 
@@ -393,7 +405,7 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 
 ---
 
-## 8. 读路径：`GET /stats` 与 stats.html
+## 8. 读路径：`GET /stats`
 
 - **`GET /stats`**：与 `/status` 同一 auth 门槛（`s.auth`），同一契约家族——统计按
   `client_key_tag`（调用方）与 `key_label`（上游凭据）两个独立维度分组，等于暴露用量
@@ -401,24 +413,68 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   - `inflight[]` + `concurrency{limit,in_flight,waiting}`：进行中请求明细与并发门状态
     （§5 注册表快照 + limiter 聚合；键名逐字取自 `router.Concurrency()` 的返回，
     不是 in-flight 条目的 `state`（那是 per-request 的 `queued`/`running`））；
-  - `hourly[]`：近期逐小时 × dims 的计数（来自 rollup 尾部 + 当前小时），只保留最近
-    有数据的 `hourlyTail`（48）个小时；
+  - `hourly[]`：近期逐小时 × dims 的计数（来自 rollup 尾部 + 当前小时）。默认只保留最近
+    有数据的 `hourlyTail`（48）个小时；**`?range=24h|3d|7d` 把这个尾窗改为 24 / 72 / 168 小时**，
+    供控制台的时间序列图与按 key/caller 的区间用量表使用（三者共用同一份 `hourly[]`，
+    在客户端按 dims 折叠，服务端不为每个消费者各做一次聚合）。上限 7d 是刻意的：
+    rollup 永不自动删，无上限的 range 会让一次 `/stats` 变成全量构造。dims 基数在单机
+    路由上是个位数到几十（端点 × 调用方 × 协议），168 小时 × 几十行仍是几百 KB 量级；
   - `daily[]`：按天折叠的同一套计数，只保留最近 `dailyTail`（90）个有数据的日历日——
     rollup 永不自动删，无窗口会让 `daily[]` 随部署年限线性变大、每次 `/stats` 全量构造；
     折叠按 **server-local 日历日**（`time.Local`，与 slim 文件名同一时区权威；livestats 是
     leaf 不能 import `fmtutil.DisplayZone`，但生产态两者同值）；
-  - `by_provider_model[]`：累计与均值（token 四项、dur/ttft 均值），含 `last_10` /
-    `last_100` 的 TTFT、TPS p50/p90（来自 ring，nearest-rank，读时排序副本）；
-  - `by_client_key_tag[]`：按调用方 key 的用量画像；
-  - `by_key_label[]`：按上游凭据的用量画像（多账号/多 key 的 provider 由此分账）；
-- **`stats.html`**：`go:embed` 内嵌，与 `status.html`/`log.html` 同模式；JS 轮询
-  `/stats`（秒级间隔足够），不引入 SSE/websocket。从 `/help` 页与 status 页互链；
-  live 区块把 `last_byte_at` 渲染成"距今秒数"——它是流卡死的直接信号。
-- TPS 与 TTFT 的**分母定义**（读时应用，写在 §9 的决策表里防漂移）：
-  - 流式：`tps = tokens.out / ((dur_ms − ttft_ms) / 1000)`——纯生成段速率，首 token 慢不
-    惩罚 TPS；
-  - 非流式：`tps = tokens.out / (dur_ms / 1000)`——端到端吞吐；
-  - 两类样本在 ring 键里就分开了（`stream` 是 ring key 的一部分，§3.4），绝不互混分位数。
+  - `by_provider_model[]`：per `(provider, key_label, model, stream)` 一行——**`key_label`
+    是独立字段，不让消费者去拆展开后的 provider 名**（§3.4）。每行含累计计数与均值
+    （token 四项、dur/ttft 均值），以及 `last_10` / `last_100` 两个**窗口块**；
+  - **窗口块**（`last_10` / `last_100`）不只是分位数，它是"这一段最近样本"的完整画像：
+    `n`（**窗口内实际样本数**）、`tokens` 四项在该窗口内的和、`ttft_p50/p90`、
+    `toks_p50/p90`。`n` 必须出现在输出里——ring 常常不满 100，消费者不知道 `n` 就会把
+    一个 12 样本的 p90 当成 100 样本的 p90 来读；
+  - `overall`：把所有 ring 的样本并在一起后算出的同一个窗口块。分位数不可合并，所以
+    这一项**必须由服务端在读时对样本并集算**，消费者拿到分行数据后自己是算不出来的。
+    它存在的唯一理由是控制台首屏那个"全局 TTFT p50"——没有它，首屏就只能显示某一个
+    端点的延迟，或者干脆不显示延迟；
+  - `recent_errors[]`：最近 50 条失败/取消请求的明细环（§8.1）；
+  - `by_client_key_tag[]`：按调用方 key 的**累计**用量画像；
+  - `by_key_label[]`：按上游凭据的**累计**用量画像（多账号/多 key 的 provider 由此分账）。
+    这两项是全量累计画像；控制台的"按区间"用量表走 `hourly[]` 折叠，不走这里；
+- **展示页**：`/stats` 的消费者是内置控制台的 Overview 页（`go:embed`，与 `log.html` /
+  `help.html` 同模式）。独立的 `stats.html` 与 `/stats.html` 路由**已并入 Overview 并下线**
+  ——见 console-unification 设计文档；`/stats` 这个 **JSON 契约本身不变**，本节继续有效。
+  整页按固定节奏刷新，不做秒级轮询；要提升 in-flight 的观测精度时走 SSE，不加第二个轮询
+  时钟。live 区块把 `last_byte_at` 渲染成"距今秒数"——它是流卡死的直接信号。
+- **速率只有一个口径：`toks`**（读时应用，写在 §9 的决策表里防漂移）：
+  `toks = (tokens.in + tokens.out + tokens.cache_read + tokens.cache_write) / (dur_ms / 1000)`
+  ——单请求的四分量 token 总和 ÷ 整请求耗时，流式与非流式**同一个分母**。
+  - 早期设计里另有一个 `tps`（只看 `tokens.out`，且流式扣掉 `ttft_ms` 只算生成段）。
+    两者并列输出的结果是消费者要先分辨口径才能读数，而"首 token 慢不慢"这件事
+    `ttft_p50/p90` 已经单独回答了——**`tps` 因此撤销，只留 `toks`**；
+  - 流式与非流式仍在 ring 键里分开（`stream` 是 key 的一部分，§3.4）。分母虽然统一了，
+    但两类请求的时间构成本就不同，混进同一个分位池仍然是无意义的平均。
+
+### 8.1 `recent_errors[]`：失败明细环
+
+完成时账本回答"这一小时错了几个"，in-flight 回答"现在有什么在跑"，**中间缺一个"刚刚那条
+为什么失败"**——它既不在正在发生的集合里，也已经被小时聚合抹成一个计数。运维在这段空窗
+里只能去翻原始日志或跑离线的 `vmr analyze`，而这恰恰是最需要快的时刻。
+
+一个容量 50 的进程内环形缓冲补上它，与性能 ring 同族——**纯内存、瞬态、重启清空、
+永不落盘、不含任何正文**，因此不改变 §1.2 的隐私分级。每条：
+
+```json
+{"ts":"2026-09-07T14:32:01+08:00","vmodel":"agent","protocol":"anthropic-messages",
+ "stream":true,"client_key_tag":"openclaw","provider":"packycode-main","key_label":"main",
+ "model":"claude-opus-4.6","attempt":2,"outcome":"error","error_class":"upstream_5xx",
+ "status":502,"dur_ms":4100}
+```
+
+- 收 `outcome != ok` 的样本（`error` 与 `canceled` 都收——"客户端取消了"和"上游挂了"
+  在排障时是两种完全不同的结论，合并计数会把它们抹平）；
+- `error_class` **直接引用路由半区自己的 `core.ErrorClass`**，读侧绝不重新分类：分类逻辑
+  只有一份，在 `DefaultClassify`；
+- 从未转发成功的请求 `provider/key_label/model` 为空串，与 §4.2 的归因规则一致；
+- 与性能 ring 一样，它只反映当前进程这一段时间内发生的事，不追求完整——完整的取证
+  记录是 audit 的职责。
 
 ---
 
@@ -439,14 +495,19 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 | rollup append + last-wins，不 upsert | append 近乎原子，崩溃窗口最小 | 同 key 可能留重复行，读取侧消化 |
 | lazy 关账，不 ticker | 与 quota 同构；零流量零开销 | 停机跨小时由启动补滚兜住（§7）；触发滚动的那一个 `Record` 是 O(该小时 slim 行数)、持聚合器 mutex（§6）——每小时一次、脱离主线、本地量级，比 ticker + 内存搬家状态机简单，接受 |
 | rollup 存和不存直方图 | 历史分位数的需求从未成立，ring 覆盖"最近"语义 | 历史只能给均值；将来真要，加直方图块是向后兼容的 |
-| `/stats` 的 `hourly[]`/`daily[]` 只给尾窗（48 小时 / 90 天），不给全量 | rollup 永不删，全量会随年限线性膨胀读成本与 JSON 体积 | 要看更久的历史读 rollup 文件本身或跑 `vmr analyze`；`by_provider_model` 的累计仍是全 rollup fold（由读缓存兜） |
+| `/stats` 的 `hourly[]`/`daily[]` 只给尾窗（默认 48 小时 / 90 天，`?range=` 可把 hourly 放宽到 7d），不给全量 | rollup 永不删，全量会随年限线性膨胀读成本与 JSON 体积；7d 上限让最坏情况仍是可算的常数 | 要看更久的历史读 rollup 文件本身或跑 `vmr analyze`；`by_provider_model` 的累计仍是全 rollup fold（由读缓存兜） |
 | `daily[]` 按 server-local 日历日折叠（`time.Local`） | 时区一处权威——人类可见的"按天"跟运维本地墙钟；与 slim 文件名同一权威 | livestats 是 leaf 不能 import `fmtutil.DisplayZone`，直接用 `time.Local`（生产态同值）——CLAUDE.md 时区不变量的 documented exception |
-| ring 存原始四元组，读时算 TPS/分位 | 公式可修，数据不迁 | 读时排序 100 条，微不足道 |
+| ring 存原始元组（`ts/dur/ttft/tokens` 四分量），读时算速率与分位 | 公式可修，数据不迁；四分量让「窗口内用量」与「单请求吞吐」都能在读时算出来，不必让消费者去凑 | 每键 100 条 × 4 个 int64，量级可忽略；读时排序 100 条，微不足道 |
 | 钩子放 audit done() 内 | 响应已提交、计时已闭环、单点 | 与 audit 写共享收尾段；不嵌锁已写明（§4.1） |
 | 小时归属按到达时刻 | 与 audit 的请求语义一致 | 跨边界长请求把全部 token 记入到达小时——接受 |
 | 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用；`/stats` 读路径持锁做 O(rollup) fold，dashboard 1s 轮询 × 多标签页会放大——由 `CachedSnapshot()` 的 1s 读缓存兜住（N 个轮询者每秒最多算一次；`Record` 不使缓存失效，监控容忍 ≤1s 滞后），`Snapshot()` 仍是纯聚合供测试与需精确读的调用方 |
 | probe 流量不进统计 | 不写 audit 的既有决定自然延伸 | —— |
 | provider 维度在全失败请求上缺席 | 无服务发生就没有服务面事实 | outcome 计数（请求面）覆盖其存在性 |
+| ring key 带 `key_label`，输出行也带 | §3.1 已判定「靠解析展开后的 provider 名反推 label 是脆弱的」——这条纪律不能只用在写侧而让读侧去拆名字 | key 多一个字段；行数不变（展开名本就一账号一个） |
+| 窗口块输出 `n`（窗口内实际样本数） | ring 常常不满 100；不给 `n`，一个 12 样本的 p90 会被当成 100 样本的 p90 读 | 输出多一个整数 |
+| 撤销 `tps`，只留 `toks` | 两个速率口径并列，消费者要先分辨口径才能读数；「首 token 慢不慢」由 `ttft_p50/p90` 单独回答 | 失去「纯生成段速率」这个细分；真要时可由四分量与 ttft 在读时重算，数据都还在 |
+| 新增 `overall` 合并窗口块 | 分位数不可合并，消费者拿到分行数据算不出全局 p50；控制台首屏要的就是这一个数 | 读时多一次对样本并集的排序（键数 × 100 条） |
+| 新增 `recent_errors[]`（容量 50，纯内存） | 完成时账本与 in-flight 之间的空窗——「刚刚那条为什么失败」无处可查（§8.1） | 多一个环形缓冲；仍不含正文，隐私分级不变 |
 
 ---
 
@@ -460,15 +521,22 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   覆盖）与 `copyFlush`（逐块盖章）接盖章点。
 - `internal/server`：done() 钩子接线（对 livestats 加 `rec.Model != ""` 门槛，pre-probe
   失败不入统计——与"probe 不写 audit"同构）；chatHandler 注册/移除 in-flight 条目（probe
-  之后、`AcquireSlot` 之前注册，defer 链移除）；`/stats`（走 `CachedSnapshot()`）、
-  `stats.html`（含 live 区块）；`recorder` 的 `captureBody` 开关——`-audit=false` 时不缓冲
-  响应体，只留 status/ttft 供 livestats。
+  之后、`AcquireSlot` 之前注册，defer 链移除）；`/stats`（走 `CachedSnapshot()`，解析
+  `?range=`）；`recorder` 的 `captureBody` 开关——`-audit=false` 时不缓冲响应体，
+  只留 status/ttft 供 livestats。展示页并入控制台 Overview（见 console-unification）。
 - `internal/audit`：`Attempt.tokens` 与 `Attempt.key_label` 盖章字段（§3.1）。`internal/report`
   的 token 来源切到盖章值是连带义务，但工作量大（跨 viewmodel 层、golden fixture 变动），
   单列为后续任务——已登记 `KNOWN_ISSUES`，当前 report 仍从 body 反解析。
 - `internal/config`：`expandProviderAPIKeys` 在展开期携带 label（单一 `api_key` 推导尾 6 位），随快照进入 `core.Endpoint` 供盖章。
 - `archtest`：`livestats` 加入 leaf 包清单；行预算按增量常规调整。
+- **控制台 Overview 页所需的读侧增量**（与 console-unification 同一批落地，逐条都在本文
+  上面有出处）：ring key 加 `key_label`、ring 条目存四分量（§3.4）；`by_provider_model[]`
+  行带 `key_label`、`last_10`/`last_100` 升级为含 `n` 与 `tokens` 的窗口块、`tps` 撤销改
+  `toks`、新增 `overall`（§8）；新增 `recent_errors[]`（§8.1）；`/stats` 支持 `?range=`（§8）。
+  与之配套的 `/status` 增补（端点行的 `provider`/`key_label`/`model` 拆分字段与 quota
+  headroom join）属于 Part 1 的契约，记在 console-unification 的实施清单里。
 - 测试重点：滚动幂等（同文件滚两次 rollup 数值一致）；重启恢复（rollup + slim 补滚 + ring
   重建）；token 盖章 vs quota 扣费差分；`ttft=0` 排除；last-wins 消化重复 rollup 行；
   in-flight 快照一致性（`-race`）与 failover 覆盖、排队取消清理、TRUNCATED panic 路径
-  的注销。
+  的注销；窗口块的 `n` 在 ring 未满时等于实际条数（不是 10/100）；`overall` 与单键
+  窗口块在只有一个键时数值一致。

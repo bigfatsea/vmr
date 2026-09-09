@@ -233,10 +233,10 @@ Overview 页（单页，自上而下）
 
 | 段 | 主数 | 副行 | 窗口标签 |
 | --- | --- | --- | --- |
-| Concurrency | `running / limit` | `N queued`（非零转黄）· `peak N` | `· now` |
+| Concurrency | `running / limit` | `N queued`（非零转黄）· `limit N` | `· now` |
 | Requests | 累计请求数 | `ok` / `cancel` / `err + 错误率%` | `· since start` |
 | Tokens | 四分量总和 | `in` / `out` / `cache N%`（口径进 title） | `· since start` |
-| TTFT p50 | 全端点 p50 | `p90` · `tok/s p50`（口径进 title） | `· last 100` |
+| TTFT p50 | 全端点 p50（来自 `/stats` 的 `overall` 窗口块——分位数不可合并，必须服务端算） | `p90` · `tok/s p50` | `· last 100` |
 | Endpoints | `healthy / total` | `N half-open` · `N cooldown` | `· now` |
 
 原第四段 "System"（heap · goroutines · disk）**删除**：它与紧随其后的 `.sysline` 逐字重复，
@@ -330,10 +330,10 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 | --- | --- |
 | Provider : Key : Model | key_label 内嵌；独立 Key Label 列删除 |
 | Mode | `stream` / `json`，**独立一列、写字不用图标**（见下） |
-| Req ok / err | 窗口内的请求数；err 非零转红，悬停给错误率与窗口内样本数 |
-| Tok in+cw / cr | 输入侧两值：fresh+cache_write 与 cache_read |
-| Tok out | 输出侧 |
-| TTFT p50 / p90 | 首 token 延迟，nearest-rank，只取窗口内成功的样本 |
+| Requests | **窗口内的实际样本数**。ring 只收成功样本，所以它是「这一行的分位数究竟建立在多少个请求上」——不满窗口容量时转黄并在悬停里说明。失败不在这张表里，由 Recent Failures 与图上的错误标记承担 |
+| Tok in+cw / cr | 窗口内输入侧两值：fresh+cache_write 与 cache_read |
+| Tok out | 窗口内输出侧 |
+| TTFT p50 / p90 | 首 token 延迟，nearest-rank |
 | Tok/s p50 / p90 | **单请求四分量 token 总和 ÷ 该请求总耗时**，再取 nearest-rank 分位 |
 
 **一行 = 一个 (端点 × 传输方式)**：ring 的键含 `stream`，设计上"绝不互混分位数"，
@@ -341,13 +341,14 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 先学一遍图例才能读表，而这是一个只有两种取值的分类维度，直接写字的成本是一列宽度、
 收益是零学习成本。同一端点的两行之间加组分隔线。
 
-**整行同窗口，不混两个时间基**：`last 10 / last 100` 是这张表唯一的窗口，**计数、token
-求和、分位全部跟着它走**。`Req` 因此有第二个作用——**它同时是窗口的填充度**：在
-`last 100` 下显示 43，意思就是这个端点在这个模式下还没跑够 100 个请求。这是保留计数列的
-理由，而不是"顺便给个总量"。整行同窗口也让 `Req ok/err` 与 `Tok out` 可以直接互相解释。
+**整行同窗口，不混两个时间基**：`last 10 / last 100` 是这张表唯一的窗口，**样本数、token
+求和、分位全部跟着它走**，而且都来自同一批成功样本。`Requests` 因此不是"顺便给个总量"，
+它是**窗口的填充度**：显示 43 就是这一行只跑过 43 个请求，它的 p90 建立在 43 个样本上而
+不是 100 个——没有这个数，一个 12 样本的 p90 会被当成 100 样本的 p90 来读。
 
-**ok/err 分布是这一列的主要价值**：一个端点在最近 100 个请求里错了 11 个，比它历史累计
-错了 34 个有用得多——前者是现在的状态，后者是被时间稀释过的存量。
+**这张表不分 ok/err**：ring 只收成功样本，硬要在这里拼出错误分布就得让 ring 也收失败样本，
+为一列信息把一个纯粹的"性能样本池"变成混合池。失败该看的是**哪一条、为什么**，那是
+Recent Failures 的事；"什么时候开始错的"是图上的错误标记；总体错误率在 vitals。
 
 某行在窗口内无样本时，整行 `.zero` 淡显、`Req` 显示 `0`、其余列 `—` 并挂 `no samples`
 徽章，**不显示 `0.00M`**——0 是一个值，`—` 才是"没测到"。
@@ -357,14 +358,13 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 （含输入摊销的整请求吞吐），而 TPS 那种"流式剔除首块等待"的细分，价值已经由旁边的
 `TTFT` 列单独承担了。
 
-> **实施影响（必须与 LiveStats 文档同改）**：以上两条要求把 ring 条目从
-> `(ts, dur_ms, ttft_ms, tokens.out)` 拓宽为
-> `(ts, dur_ms, ttft_ms, outcome, tokens{in,out,cache_read,cache_write})`，并且
-> **ring 要接纳 error 样本**（当前 LiveStats 的规则是"只收 `outcome=ok` 且已转发的样本"）。
-> 两处理由：没有 outcome 就算不出窗口内的 ok/err 分布；没有四分量就算不出 Tok/s，也算不出
-> 窗口内的 token 求和。分位数计算仍**只用 ok 样本**，与现状一致。代价是每键 100 条 × 4 个
-> 额外 int64，量级可忽略。这条与 LiveStats 现行文字冲突，实施轮必须同时更新那份文档，
-> 不能只改代码。
+> **数据模型依赖（LiveStats 文档已同步改好，两边现在对得上）**：这张表要求 ring 条目从
+> `(ts, dur_ms, ttft_ms, tokens.out)` 拓宽为 `(ts, dur_ms, ttft_ms, tokens 四分量)`，ring key
+> 从 `(provider, model, stream)` 变为 `(provider, key_label, model, stream)`，
+> `last_10`/`last_100` 从纯分位升级为含 `n` 与 `tokens` 的**窗口块**，并撤销 `tps` 只留 `toks`。
+> **ring 的准入规则不变——仍然只收 `outcome=ok` 且已转发的样本**：把失败样本塞进性能池
+> 只为了凑一个错误分布，会把一个口径干净的样本池变成混合池，而失败明细已经由
+> Recent Failures 单独承担。
 
 **f. Requests & Tokens 组合图**
 
@@ -458,37 +458,90 @@ Log 页另有两条：断线用**独立横幅 + Reconnect 按钮**（不许把"�
 | `help.html` | Agent 指南 | Connection 卡（base_url 复制、模型 × 协议对照、auth 说明）、指南锚点导轨、手风琴、片段复制（✓ 反馈）、连接检查（读共享 Key）、Troubleshooting 直链 Overview 锚点 |
 | `index.html` | Demo 入口 | — |
 
+**Demo 按目标形态画，跑在现网 payload 前面**：其中一部分数据 `/status` / `/stats` 目前
+还给不出来（全局 TTFT、端点 headroom 与流量份额、Fallback 分表、Recent Failures、
+Performance 的窗口块、图表的 3d/7d 窗口、Header 告警列表）。逐字段的对照与缺口编号见
+§10.1 / §10.2——实施轮照那张表把后端补齐再接线，不要先把页面搭起来留一批空格子。
+
 所有页面右上 `DEMO · mock data` 缎带；Overview 右下 Demo 控制面板仅存在于 demo。
 Mock 无任何网络行为，数据形状与 `/status`、`/stats` 现有及增补后的 JSON 契约一致；
 虚拟模型与 ingress 协议的对应关系在 Live 表、Failures 表、拓扑表、Help 页四处保持同一份
 定义（一个虚拟模型只属于一个协议），mock 数据自身不许互相矛盾。
 
-## 10. 实施建议（下一轮代码落地，本轮不做）
+## 10. 实施轮：数据缺口与落地建议
 
-1. 落 `internal/server/assets/console.css` + `console.js`（单一来源），页面改模板 + 注入位；
+### 10.1 数据缺口对照表
+
+**Demo 是按目标形态画的，不是按现网 payload 画的。** 下表逐字段对照"页面上显示了什么"与
+"现在的 `/status` / `/stats` 到底给不给"，实施轮照着它一次把缺口补齐——否则会出现页面
+搭好了、某几格永远是 `—` 的局面。三种状态：**已有**（现网 payload 里就有）、
+**派生**（数据已有，前端算一下即可）、**缺**（后端必须新增，编号见 §10.2）。
+
+| 区块 | 页面上的数据 | 来源 | 状态 |
+| --- | --- | --- | --- |
+| vitals | 并发 running / limit / queued | `/status` `instance.concurrency{limit,in_flight,waiting}` | 已有 |
+| vitals | 请求 total · ok · cancel · err | `/status` `traffic.requests{total,by_status}`（键为 `ok`/`canceled`/`error`） | 已有 |
+| vitals | 错误率 % | 上一行前端相除 | 派生 |
+| vitals | token 总量 · in · out · cache% | `/status` `traffic.tokens.total`——**注意它是五分量**（`in`/`cache_write`/`cache_read`/`reasoning`/`out`），页面写死总量与 cache 分母的口径，别默认四分量 | 已有 |
+| vitals | 全端点 TTFT p50 / p90 · tok/s p50 | — | **缺 G1** |
+| vitals | 端点 healthy / total · half-open · cooldown | `/status` `models[].endpoints[].{available,serving,consecutive_failures,cooldown_until}`，三态由前端归类 | 派生 |
+| sysline | version · pid | `/status` `instance` | 已有 |
+| sysline | heap / sys · goroutines · disk free | `/status` `system` | 已有 |
+| sysline | audit 开关/占用/文件数 · image cache | `/status` `audit` / `image_cache` | 已有 |
+| Header | uptime | `/status` `instance.uptime` | 已有 |
+| Header | 告警列表（配置问题 / 降级端点 / 濒临耗尽的 gate） | — | **缺 G2** |
+| Quota | provider · role · metric/period · models · amount · used · pct · headroom · period_ends_at | `/status` `quota[]` | 已有 |
+| Quota | 「还剩 N」 | `amount - used`，前端算 | 派生 |
+| 拓扑 | 虚拟模型 + 协议 | `/status` `models[].{id,protocol}` | 已有 |
+| 拓扑 | PRI | `endpoints[].priority` | 已有 |
+| 拓扑 | `provider : key : model` 三段 | 现在只有合成的 `endpoint` 名（`adapterType/provider/model`），拆字符串正是 LiveStats 判定为脆弱的做法 | **缺 G3** |
+| 拓扑 | Health + 成因悬停 | `endpoints[]` 内嵌的 `health.Status{consecutive_failures,last_error,cooldown_until}` | 已有 |
+| 拓扑 | 端点级 Headroom | 需要 `core.Endpoint.Quota` 与 `quota.Registry` 的读侧 join（§8.5） | **缺 G4** |
+| 拓扑 | Share 24h | `hourly[]` 按 `(provider,key_label,model)` 折叠，前端算 | 派生（依赖 **G6**） |
+| 拓扑 | Context / Capabilities | `endpoints[].{max_context_tokens,capabilities}` | 已有 |
+| 拓扑 | **Fallback 独立表** | fallback 端点当前被**合并进每个模型的 `endpoints[]`**（`core.Endpoint.FromFallback` 有标记，但 `/status` 没把它输出），页面分不出哪几行是 fallback | **缺 G5** |
+| Live Requests | 全部列（state/elapsed/model/caller/endpoint/attempt/首末块/est in·out） | `/stats` `inflight[]`（`router.InflightEntry`） | 已有 |
+| Recent Failures | 整个区块 | — | **缺 G7** |
+| Recent Failures | 错误类别芯片与过滤 | 前端按 `error_class` 分组 | 派生（依赖 G7） |
+| Performance | 行键含 `key_label` | 现在 `by_provider_model[]` 只有 `provider`/`model`/`stream` | **缺 G8** |
+| Performance | Requests（窗口内样本数）· 窗口内 token 四项 | `last_10`/`last_100` 现在只有分位数，没有 `n` 与 `tokens` | **缺 G8** |
+| Performance | TTFT p50 / p90 | 已有，但要随窗口块改形状 | **缺 G8**（形状） |
+| Performance | Tok/s p50 / p90 | 现在输出的是 `tps`（口径不同） | **缺 G8** |
+| Performance | Mode（stream / json） | `by_provider_model[].stream` | 已有 |
+| Traffic 图 | 逐桶 requests · errors · token 四分量 | `/stats` `hourly[]` | 已有 |
+| Traffic 图 | 24h / 3d / 7d 窗口 | hourly 尾窗现在固定 48 小时，3d(72h)、7d(168h) 都超了 | **缺 G6** |
+| Usage 两表 | 按选定区间的 key_label / caller 用量 | `hourly[]` 折叠（`by_key_label[]`/`by_client_key_tag[]` 是全量累计，口径不同，不能直接用） | 派生（依赖 G6） |
+
+### 10.2 缺口清单
+
+| # | 缺口 | 归属 | 备注 |
+| --- | --- | --- | --- |
+| G1 | `/stats` 新增 `overall` 合并窗口块 | livestats | 分位数不可合并，首屏那个全局 TTFT p50 只能服务端算 |
+| G2 | `/status` 新增告警列表 | server | 配置问题 + 降级/冷却端点 + 濒临耗尽的 quota gate。只放**可操作状态**，滚动统计量不进（§4） |
+| G3 | `/status` 端点行拆出 `provider` / `key_label` / `model` | server | 保留现有 `endpoint` 合成名不动，只加字段 |
+| G4 | `/status` 端点行补 `headroom` | server | 纯读侧 join，必须调 quota 包既有导出入口，不复述公式（§8.5） |
+| G5 | `/status` 端点行补 `from_fallback` | server | `core.Endpoint.FromFallback` 已有，只是没输出；没有它就画不出 Fallback 独立表 |
+| G6 | `/stats` 支持 `?range=24h\|3d\|7d` | livestats | hourly 尾窗随之放宽到 24/72/168 小时，上限 7d |
+| G7 | `/stats` 新增 `recent_errors[]` | livestats | 容量 50 的纯内存环，含 `error_class`（直接引用 `core.ErrorClass`，不重新分类） |
+| G8 | ring 与 `by_provider_model[]` 改形 | livestats | key 加 `key_label`；条目存 token 四分量；`last_10`/`last_100` 升级为含 `n` 与 `tokens` 的窗口块；撤销 `tps` 改 `toks`。**准入规则不变，仍只收成功样本** |
+
+G1 / G6 / G7 / G8 在 LiveStats 设计文档里已逐条改好，两份文档现在对得上；
+G2–G5 属于 Part 1 的 `/status` 契约，只在本文登记。
+
+### 10.3 落地顺序
+
+1. **先补 §10.2 的 G1–G8，后端先行**。页面每一格都能拿到真数据之后再接线，否则会留下
+   一批"先渲染成 `—`、以后再说"的格子，而"以后"通常不会来。`/stats` 侧（G1/G6/G7/G8）在
+   LiveStats 设计文档里已逐条改好；`/status` 侧（G2–G5）只在本文登记。
+2. 落 `internal/server/assets/console.css` + `console.js`（单一来源），页面改模板 + 注入位；
    server 启动时一次性组装（对齐 `internal/dashboard` 的 `commonJSTag` 先例）。
    数字格式化的 `dec2()`（§2-6）落在 `console.js`，前端不逐处判断。
-2. `status.html` 重构为 Overview（§8 映射），`stats.html` 与 `/stats.html` 路由下线，
+3. `status.html` 重构为 Overview（§8 映射），`stats.html` 与 `/stats.html` 路由下线，
    `log.html`/`help.html` 换骨架；`admin_log_test.go` 等页面 marker 断言同步更新。
-3. `/status` payload 增补：告警列表（config issues + 降级端点汇总 + 濒临耗尽的 quota gate）、
-   端点 headroom（§8.5 的读侧 join）、虚拟模型的协议字段、端点能力标签。
-4. `/stats` 增补：
-   - `hourly[]`/`daily[]` 按 range 查询参数输出；
-   - `by_provider_model[]` 按 `(endpoint × stream)` 出行，且**每行的计数、token 求和与分位
-     全部来自同一个 ring 窗口**（§8.4-e）。这要求把 ring 条目从
-     `(ts, dur_ms, ttft_ms, tokens.out)` 拓宽为
-     `(ts, dur_ms, ttft_ms, outcome, tokens{in,out,cache_read,cache_write})`，并让 ring
-     **接纳 error 样本**（分位仍只用 ok 样本）。**这与 LiveStats 文档现行的"ring 只收
-     `outcome=ok` 且已转发的样本"冲突，实施轮必须同时改那份文档**——只改代码会让下一个
-     读设计文档的人以为这是 bug；
-   - **新增 `recent_errors[]`**（§8.4-d）：livestats 内存环，容量 50，条目含
-     `ts / vmodel / protocol / stream / client_key_tag / provider / key_label / model /
-     attempt / error_class / status / dur_ms`。纯内存、随进程生灭、不落盘、不含正文；
-     错误类别直接引用 `core.ErrorClass`，不重新推导。
-5. 鉴权收敛：删各页自有的 Auth/promptForKey，接 `VMRAuth.guard`；回归点=各 API 的 401 路径。
-6. zh 变体：**只有 Help 保留 `.zh` 兄弟页**。Overview / Log 的内容 90% 是标识符、指标名与
+4. 鉴权收敛：删各页自有的 Auth/promptForKey，接 `VMRAuth.guard`；回归点=各 API 的 401 路径。
+5. zh 变体：**只有 Help 保留 `.zh` 兄弟页**。Overview / Log 的内容 90% 是标识符、指标名与
    数字，翻译后反而增加认知摩擦——运维对这些术语的英文形式更熟。
-7. archtest 无新边界（页面仍是 embed 资产）；行预算如触线按惯例调整。
+6. archtest 无新边界（页面仍是 embed 资产）；行预算如触线按惯例调整。
 
 ## 11. 决策记录
 
