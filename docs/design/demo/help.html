@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-14, by pi — STATIC DEMO, mock data only, no network. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Help</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+/* ===== console.css (shared tokens & components — single source in real impl) ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface-2:#1c2128;--border:#30363d;--border-soft:rgba(48,54,61,.4);--well:#090d13;
+  --text:#c9d1d9;--text-muted:#8b949e;--text-bright:#f0f6fc;
+  --accent:#58a6ff;--accent-hover:#79c0ff;
+  --green:#3fb950;--yellow:#d29922;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;
+  --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;--fs-2xl:18px;
+  --sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;
+  --r-sm:6px;--r-md:8px;--r-pill:999px;
+  --page-max:1280px;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--bg)}
+.console-header{position:sticky;top:0;z-index:50;background:rgba(22,27,34,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.hd-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:16px;padding:10px 16px}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none}
+.brand b{color:var(--text-bright);font-size:var(--fs-lg)}
+.brand .sub{font-size:var(--fs-xs);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 8px}
+.hd-nav{display:flex;gap:8px;margin-left:6px}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
+.nav-link:hover{color:var(--text-bright);text-decoration:none}
+.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
+.console-footer{border-top:1px solid var(--border);background:var(--surface);margin-top:40px}
+.ft-inner{max-width:var(--page-max);margin:0 auto;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;color:var(--text-muted);font-size:var(--fs-sm)}
+.ft-inner a{color:var(--text-muted)}
+.page{max-width:var(--page-max);margin:0 auto;padding:20px 16px 8px}
+.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--text-muted)}
+.btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.sm{font-size:var(--fs-sm);padding:3px 9px}
+.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted)}
+.b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
+.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-4)}
+.card-title{font-size:var(--fs-md);font-weight:600;color:var(--text-bright);margin-bottom:var(--sp-3)}
+.section-head{display:flex;align-items:center;gap:10px;margin:24px 0 12px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright)}
+.pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
+.p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
+.p-paused{color:var(--text-muted);border-color:var(--border);background:var(--surface-2)}
+pre.snippet{background:var(--well);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.6;overflow-x:auto;margin:10px 0 4px;white-space:pre}
+.snippet .c{color:#6e7681}
+.snippet .k{color:var(--cyan)}
+.snippet .v{color:var(--green)}
+details.disc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:var(--sp-3)}
+details.disc>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;padding:13px 16px;font-weight:600;color:var(--text-bright);font-size:var(--fs-md)}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"▸";color:var(--text-muted);transition:transform .15s}
+details.disc[open]>summary::before{transform:rotate(90deg)}
+details.disc .body{padding:0 16px 16px}
+table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.c th{text-align:left;color:var(--text-muted);font-size:var(--fs-xs);text-transform:uppercase;padding:6px 12px;border-bottom:1px solid var(--border)}
+.c td{padding:7px 12px;border-bottom:1px solid var(--border-soft);font-family:var(--font-mono)}
+.c tr:last-child td{border-bottom:none}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+.modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
+.modal-overlay.hidden{display:none}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px;width:min(440px,92vw)}
+.modal h2{font-size:16px;color:var(--text-bright);margin-bottom:8px}
+.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px}
+.modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.demo-ribbon{position:fixed;top:58px;right:12px;z-index:200;background:rgba(188,140,255,.15);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===== unified header ===== -->
+<header class="console-header">
+  <div class="hd-inner">
+    <a class="brand" href="overview.html">
+      <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>VMR</b><span class="sub">Console</span>
+    </a>
+    <nav class="hd-nav">
+      <a class="nav-link" href="overview.html">Overview</a>
+      <a class="nav-link" href="log.html">Log</a>
+      <a class="nav-link active" href="help.html">Help</a>
+    </nav>
+    <div class="hd-right">
+      <span class="badge b-dim">v4.2.1</span>
+      <button class="btn sm" id="hd-key">🔑 Set Key</button>
+    </div>
+  </div>
+</header>
+
+<span class="demo-ribbon" title="This is a static mock — no live data, no server">DEMO · mock data</span>
+
+<main class="page">
+  <div class="section-head" style="margin-top:0">Agent Configuration Guides</div>
+  <p style="color:var(--text-muted);margin-bottom:16px;max-width:820px">
+    Point any AI coding agent at this VMR instance: the <b>base URL</b> below plus a virtual model name is all
+    most clients need. The API key is provisioned by your administrator
+    (<code style="font-family:var(--font-mono)">api_keys:</code> in config.yaml) — it is never shown on this page.
+  </p>
+
+  <!-- connection check (unified VMRAuth consumer) -->
+  <div class="card">
+    <div class="card-title">🔗 Connection check</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="pill p-paused" id="chk-state">no key stored</span>
+      <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="chk-detail">No API key in this browser yet — endpoints below need one in the <code>Authorization: Bearer</code> header.</span>
+      <button class="btn sm" id="chk-btn" style="margin-left:auto">Check</button>
+      <button class="btn sm ghost" id="chk-set">Set key</button>
+    </div>
+  </div>
+
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--font-mono);font-size:var(--fs-sm)">
+      <span><span style="color:var(--text-muted)">base_url</span> http://127.0.0.1:8800/v1</span>
+      <span><span style="color:var(--text-muted)">models</span> coding · agent · cheap</span>
+    </div>
+  </div>
+
+  <!-- Claude Code -->
+  <details class="disc" open>
+    <summary>Claude Code <span class="badge b-info">anthropic-messages</span></summary>
+    <div class="body">
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0 8px">Environment variables (add to your shell profile or launch wrapper):</p>
+      <pre class="snippet" data-snippet>export ANTHROPIC_BASE_URL=http://127.0.0.1:8800
+export ANTHROPIC_AUTH_TOKEN=sk-your-vmr-key
+export ANTHROPIC_MODEL=vm:agent
+<span class="c"># per-call override:</span>
+<span class="c"># claude --model vm:cheap</span></pre>
+      <button class="btn sm" data-copy-target>Copy</button>
+      <table class="c" style="margin-top:12px">
+        <thead><tr><th>Variable</th><th>Value</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td>ANTHROPIC_BASE_URL</td><td>http://127.0.0.1:8800</td><td style="font-family:var(--font-sans);color:var(--text-muted)">vmr speaks anthropic-messages natively — no translation</td></tr>
+          <tr><td>ANTHROPIC_MODEL</td><td>vm:agent</td><td style="font-family:var(--font-sans);color:var(--text-muted)">any virtual model from the Overview page</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  <!-- Codex CLI -->
+  <details class="disc">
+    <summary>Codex CLI <span class="badge b-info">openai-responses</span></summary>
+    <div class="body">
+      <pre class="snippet" data-snippet><span class="c"># ~/.codex/config.toml</span>
+model_provider = "vmr"
+model = "vm:coding"
+
+[model_providers.vmr]
+name = "vmr"
+base_url = "http://127.0.0.1:8800/v1"
+env_key = "VMR_API_KEY"
+wire_api = "responses"</pre>
+      <button class="btn sm" data-copy-target>Copy</button>
+      <p style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:8px">Then <code style="font-family:var(--font-mono)">export VMR_API_KEY=sk-your-vmr-key</code> before launching.</p>
+    </div>
+  </details>
+
+  <!-- Generic OpenAI SDK -->
+  <details class="disc">
+    <summary>Generic OpenAI SDK <span class="badge b-info">openai-completions</span></summary>
+    <div class="body">
+      <pre class="snippet" data-snippet><span class="k">from</span> openai <span class="k">import</span> OpenAI
+
+client = OpenAI(
+    base_url=<span class="v">"http://127.0.0.1:8800/v1"</span>,
+    api_key=<span class="v">"sk-your-vmr-key"</span>,
+)
+resp = client.chat.completions.create(
+    model=<span class="v">"vm:cheap"</span>,
+    messages=[{<span class="v">"role"</span>: <span class="v">"user"</span>, <span class="v">"content"</span>: <span class="v">"hi"</span>}],
+)</pre>
+      <button class="btn sm" data-copy-target>Copy</button>
+    </div>
+  </details>
+
+  <details class="disc">
+    <summary>Troubleshooting</summary>
+    <div class="body" style="font-size:var(--fs-sm);color:var(--text-muted)">
+      <p>• 401 from every request → the key in <code style="font-family:var(--font-mono)">Authorization: Bearer</code> must match an entry of <code style="font-family:var(--font-mono)">api_keys:</code>.</p>
+      <p>• Unknown model → virtual models are per-protocol; check the Overview page's topology.</p>
+      <p>• Live 401s mid-session → vmr was reloaded with a changed <code style="font-family:var(--font-mono)">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
+      <p>• Request feels slow → check the Overview vitals (cooldowns) and Live tab (stall badges) first.</p>
+    </div>
+  </details>
+</main>
+
+<!-- ===== unified footer ===== -->
+<footer class="console-footer">
+  <div class="ft-inner">
+    <div>Virtual Model Router (VMR) · v4.2.1 · uptime 3d 4h 12m</div>
+    <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr</a></div>
+  </div>
+</footer>
+
+<script>
+/* ===== console.js shared runtime (inline demo copy) ===== */
+const VMRAuth = {
+  KEY: 'vmr_key', LEGACY: 'vmr_status_key',
+  get() { return localStorage.getItem(this.KEY) || localStorage.getItem(this.LEGACY) || ''; },
+  set(k) { const v = (k || '').trim(); localStorage.setItem(this.KEY, v); localStorage.removeItem(this.LEGACY); return v; },
+  clear() { localStorage.removeItem(this.KEY); localStorage.removeItem(this.LEGACY); },
+  has() { return !!this.get(); },
+  tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
+};
+(function injectModal() {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2>Authentication Required</h2>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
+      <div class="err" id="vmr-key-err"></div>
+      <div class="modal-actions">
+        <button class="btn" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn" id="vmr-key-cancel">Cancel</button>
+        <button class="btn primary" id="vmr-key-save">Connect</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+})();
+function openKeyModal() {
+  const m = document.querySelector('.modal-overlay'); m.classList.remove('hidden');
+  const inp = document.getElementById('vmr-key-input');
+  inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
+  setTimeout(() => inp.focus(), 30);
+}
+function closeKeyModal() { document.querySelector('.modal-overlay').classList.add('hidden'); }
+document.getElementById('vmr-key-save').onclick = () => {
+  const v = document.getElementById('vmr-key-input').value.trim();
+  if (!v) { document.getElementById('vmr-key-err').textContent = 'Enter a key (any non-empty string works in this demo).'; return; }
+  VMRAuth.set(v); syncKeyBtn(); closeKeyModal(); renderCheck(); toast('Connected — key ' + VMRAuth.tail());
+};
+document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); renderCheck(); };
+document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeKeyModal(); });
+function syncKeyBtn() {
+  const b = document.getElementById('hd-key');
+  b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
+}
+document.getElementById('hd-key').onclick = openKeyModal;
+function toast(msg) {
+  let t = document.querySelector('.toast');
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function copyText(txt, btn) {
+  const done = () => { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = o, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallback(txt, done));
+  } else fallback(txt, done);
+}
+function fallback(txt, done) {
+  const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  ta.remove();
+}
+// copy buttons for snippets
+document.querySelectorAll('[data-copy-target]').forEach(btn => {
+  btn.onclick = () => {
+    const pre = btn.parentElement.querySelector('pre[data-snippet]');
+    if (pre) copyText(pre.innerText, btn);
+  };
+});
+// connection check (demo: reads the shared key, fakes a probe)
+function renderCheck() {
+  const st = document.getElementById('chk-state');
+  const det = document.getElementById('chk-detail');
+  if (VMRAuth.has()) {
+    st.className = 'pill p-live'; st.textContent = 'key ' + VMRAuth.tail() + ' stored';
+    det.innerHTML = 'Probe (mock): <b style="color:var(--green)">reachable</b> — <code style="font-family:var(--font-mono)">GET /v1/models</code> would return 3 virtual models.';
+  } else {
+    st.className = 'pill p-paused'; st.textContent = 'no key stored';
+    det.innerHTML = 'No API key in this browser yet — endpoints below need one in the <code style="font-family:var(--font-mono)">Authorization: Bearer</code> header.';
+  }
+}
+document.getElementById('chk-btn').onclick = () => { renderCheck(); toast(VMRAuth.has() ? 'Probe ok (mock)' : 'No key stored — set one first'); };
+document.getElementById('chk-set').onclick = openKeyModal;
+// boot
+syncKeyBtn(); renderCheck();
+</script>
+</body>
+</html>

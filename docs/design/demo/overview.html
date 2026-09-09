@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-14, by pi — STATIC DEMO v2, mock data only, no network. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Overview</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+/* ===== console.css (shared tokens & components — single source in real impl) ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface-2:#1c2128;--border:#30363d;--border-soft:rgba(48,54,61,.4);--well:#090d13;
+  --text:#c9d1d9;--text-muted:#8b949e;--text-bright:#f0f6fc;
+  --accent:#58a6ff;--accent-hover:#79c0ff;
+  --green:#3fb950;--yellow:#d29922;--orange:#e8813a;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;--pink:#f778ba;
+  --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --cyan-bg:rgba(57,197,207,.15);--purple-bg:rgba(188,140,255,.15);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;--fs-2xl:18px;--fs-3xl:20px;
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
+  --r-sm:6px;--r-md:8px;--r-pill:999px;
+  --page-max:1280px;
+}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* header */
+.console-header{position:sticky;top:0;z-index:50;background:rgba(22,27,34,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.hd-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:14px;padding:10px 16px}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none}
+.brand:hover{text-decoration:none}
+.brand svg{display:block}
+.brand b{color:var(--text-bright);font-size:var(--fs-lg);letter-spacing:-.3px}
+.brand .sub{font-size:var(--fs-xs);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 8px}
+.hd-nav{display:flex;gap:8px;margin-left:6px}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:9px}
+.nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
+.nav-link:hover{color:var(--text-bright);text-decoration:none}
+.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
+.icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;border-radius:var(--r-sm)}
+.icon-btn:hover{color:var(--text-bright);background:var(--surface-2)}
+.icon-btn .cnt{position:absolute;top:-4px;right:-6px;background:var(--red);color:#fff;font-family:var(--font-mono);font-size:9px;line-height:1;padding:2px 4px;border-radius:var(--r-pill)}
+.refresh-pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
+.refresh-pill:hover{color:var(--text-bright);border-color:var(--text-muted)}
+
+/* footer */
+.console-footer{border-top:1px solid var(--border);background:var(--surface);margin-top:32px}
+.ft-inner{max-width:var(--page-max);margin:0 auto;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--text-muted);font-size:var(--fs-sm)}
+.ft-inner a{color:var(--text-muted);display:inline-flex;align-items:center;gap:5px}
+.ft-inner a:hover{color:var(--text)}
+
+/* layout & components */
+.page{max-width:var(--page-max);margin:0 auto;padding:20px 16px 8px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-4)}
+.card-title{font-size:var(--fs-md);font-weight:600;color:var(--text-bright);margin-bottom:var(--sp-3)}
+.section-head{display:flex;align-items:center;gap:10px;margin:26px 0 10px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright)}
+.section-head:first-of-type{margin-top:4px}
+.section-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
+.section-head .spacer{flex:1}
+.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:500;transition:border-color .15s,background .15s}
+.btn:hover{border-color:var(--text-muted)}
+.btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.ghost{background:transparent}
+.btn.sm{font-size:var(--fs-sm);padding:3px 9px}
+.btn.on{color:var(--text-bright);border-color:var(--accent);background:rgba(88,166,255,.14)}
+.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);white-space:nowrap}
+.b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
+.b-err{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.35)}
+.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-cyan{background:var(--cyan-bg);color:var(--cyan);border-color:rgba(57,197,207,.35)}
+.b-purple{background:var(--purple-bg);color:var(--purple);border-color:rgba(188,140,255,.35)}
+.b-dim{background:var(--surface-2);color:var(--text-muted)}
+.pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
+.p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
+.input{font-family:inherit;font-size:var(--fs-md);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;outline:none;transition:border-color .15s}
+.input:hover{border-color:var(--text-muted)}
+.input:focus{border-color:var(--accent)}
+.table-wrap{border:1px solid var(--border);border-radius:var(--r-md);overflow:auto;background:var(--surface);margin-bottom:var(--sp-4)}
+table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.c th{background:var(--surface-2);color:var(--text-muted);font-weight:600;padding:7px 12px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;position:sticky;top:0}
+.c td{padding:7px 12px;border-bottom:1px solid var(--border-soft);font-family:var(--font-mono);white-space:nowrap}
+.c tr:last-child td{border-bottom:none}
+.c tbody tr:hover{background:rgba(88,166,255,.04)}
+.c td.num,.c th.num{text-align:right;font-variant-numeric:tabular-nums}
+.c td .dim,.c .dim{color:var(--text-muted)}
+.progress{height:6px;background:var(--well);border-radius:3px;overflow:hidden;min-width:90px}
+.progress>span{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease}
+.progress>span.warn{background:var(--yellow)}
+.progress>span.danger{background:var(--red)}
+.modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
+.modal-overlay.hidden{display:none}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(480px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
+.modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2)}
+.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
+.modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-2)}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none;box-shadow:0 8px 24px rgba(1,4,9,.5)}
+.toast.show{opacity:1}
+details.disc>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px;font-weight:600;color:var(--text-bright)}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"▸";color:var(--text-muted);transition:transform .15s;font-size:var(--fs-sm)}
+details.disc[open]>summary::before{transform:rotate(90deg)}
+
+/* vitals strip */
+.vitals{display:grid;grid-template-columns:repeat(4,1fr);padding:0;overflow:hidden}
+.vseg{padding:13px 16px;border-left:1px solid var(--border-soft)}
+.vseg:first-child{border-left:none}
+.v-label{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.v-main{font-size:var(--fs-3xl);font-weight:700;color:var(--text-bright);font-family:var(--font-mono);line-height:1.2}
+.v-main small{font-size:var(--fs-md);color:var(--text-muted);font-weight:400}
+.v-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.v-sub .g{color:var(--green)}.v-sub .r{color:var(--red)}.v-sub .y{color:var(--yellow)}.v-sub .a{color:var(--accent)}
+
+/* pri tiers + stall */
+.pri{font-family:var(--font-mono);font-size:10px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid}
+.pri-1{background:rgba(88,166,255,.14);color:#58a6ff;border-color:rgba(88,166,255,.35)}
+.pri-2{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.stall{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.4);font-weight:700;animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* chart */
+.chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px}
+.chart-legend .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.chart-legend .line{display:inline-block;width:16px;height:2px;background:var(--yellow);margin-right:5px;vertical-align:3px}
+.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:var(--sp-4)}
+.chart-wrap svg{display:block;width:100%;height:auto}
+
+/* warning list rows */
+.wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
+.wrow:last-child{border-bottom:none}
+.wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
+
+/* demo-only chrome */
+.demo-ribbon{position:fixed;top:58px;right:12px;z-index:200;background:var(--purple-bg);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
+.demo-panel{position:fixed;right:12px;bottom:12px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;font-size:var(--fs-xs);color:var(--text-muted);box-shadow:0 10px 30px rgba(1,4,9,.55)}
+.demo-panel b{color:var(--purple);font-size:var(--fs-xs);letter-spacing:.5px}
+.demo-panel .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.demo-panel .btn{font-size:var(--fs-xs);padding:3px 9px}
+@media (max-width:900px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}}
+</style>
+</head>
+<body>
+
+<!-- ===== unified header (console.js injects this in the real impl) ===== -->
+<header class="console-header">
+  <div class="hd-inner">
+    <a class="brand" href="overview.html">
+      <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>VMR</b><span class="sub">Console</span>
+    </a>
+    <nav class="hd-nav">
+      <a class="nav-link active" href="overview.html">Overview</a>
+      <a class="nav-link" href="log.html">Log</a>
+      <a class="nav-link" href="help.html">Help</a>
+    </nav>
+    <div class="hd-right">
+      <!-- warning bell: count only; click opens the warning list -->
+      <button class="icon-btn" id="warn-bell" title="Warnings & errors">
+        <svg height="15" width="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16z"/><path d="M8 1.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.018.018 0 0 0-.003.01l.001.006c0 .002.002.004.004.006a.02.02 0 0 0 .005.007l.006.004.007.001h10.994l.007-.001.006-.004a.02.02 0 0 0 .005-.007l.001-.007a.018.018 0 0 0-.003-.01l-1.704-2.555a1.745 1.745 0 0 1-.293-.97V5A3.5 3.5 0 0 0 8 1.5z"/></svg>
+        <span class="cnt" id="warn-count">3</span>
+      </button>
+      <!-- 5-minute auto-refresh countdown; click = refresh now -->
+      <button class="refresh-pill" id="hd-refresh" title="Auto-refresh countdown — click to refresh now">
+        <svg height="11" width="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+        <span id="cd">5:00</span>
+      </button>
+      <span class="badge b-dim" title="vmr v4.2.1 · go1.24 · darwin/arm64">v4.2.1</span>
+      <span class="pill p-live" id="hd-conn" title="page data every 5m · live table every 1s · paused while hidden">live</span>
+      <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
+    </div>
+  </div>
+</header>
+
+<span class="demo-ribbon" title="This is a static mock — no live data, no server">DEMO · mock data</span>
+
+<main class="page">
+
+  <!-- ============ vitals strip (compressed from 4 cards + storage) ============ -->
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="vitals">
+      <div class="vseg">
+        <div class="v-label">Concurrency</div>
+        <div class="v-main" id="v-conc">0<small> / 8</small></div>
+        <div class="v-sub"><span><span class="a" id="v-queued">0</span> queued</span><span>max_concurrency 8</span></div>
+      </div>
+      <div class="vseg">
+        <div class="v-label">Requests</div>
+        <div class="v-main" id="v-req">12,847</div>
+        <div class="v-sub"><span class="g" id="v-ok">12,702 ok</span><span><span class="y" id="v-cancel">61</span> cancel</span><span class="r">84 err</span></div>
+      </div>
+      <div class="vseg">
+        <div class="v-label">Tokens</div>
+        <div class="v-main" id="v-tok">48.2M</div>
+        <div class="v-sub"><span>in 31.4M</span><span>out 16.8M</span><span class="g">cache hit 62%</span></div>
+      </div>
+      <div class="vseg">
+        <div class="v-label">System</div>
+        <div class="v-main" style="font-size:var(--fs-xl);padding-top:4px">412 MB · 233 gor</div>
+        <div class="v-sub"><span>disk 489G free</span></div>
+      </div>
+    </div>
+    <details class="disc" style="padding:10px 16px;border-top:1px solid var(--border-soft)">
+      <summary style="font-size:var(--fs-sm)"><span style="font-weight:400;color:var(--text-muted)">System details &amp; storage</span></summary>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 24px;padding:10px 2px 2px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted)">
+        <span>heap <span style="color:var(--text)">412 MB</span> / sys 586 MB</span>
+        <span>goroutines <span style="color:var(--text)">233</span></span>
+        <span>disk free <span style="color:var(--text)">489 GB</span> (volume /)</span>
+        <span>audit <span style="color:var(--green)">on</span> · 1.2 GB · 38 files</span>
+        <span>image cache <span style="color:var(--green)">on</span> · 256 MB · ttl 7d</span>
+        <span>pid <span style="color:var(--text)">48211</span> · 127.0.0.1:8800 · darwin/arm64 (go1.24)</span>
+      </div>
+    </details>
+  </div>
+
+  <!-- ============ quota budgets ============ -->
+  <div class="section-head" id="quota">Quota Budgets <span class="badge b-dim">3</span></div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>Provider : Key</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
+        <th style="width:180px">Progress</th><th class="num">Headroom</th><th>Resets</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td>packycode : <span class="b-purple badge" style="padding:1px 7px">main</span></td>
+          <td><span class="badge b-info" title="bucket — longest-period limit; unused allowance is real waste, so spare headroom raises routing priority">tokens / 1mo</span></td>
+          <td style="color:var(--text-muted)">all models</td>
+          <td class="num">100M</td><td class="num">68.2M</td>
+          <td><div class="progress"><span class="warn" style="width:68%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 2.1%</span></td>
+          <td class="num" style="color:var(--yellow)">31.8M (32%)</td>
+          <td style="color:var(--text-muted)">in 16d</td>
+        </tr>
+        <tr>
+          <td>deepseek : <span class="badge b-dim" style="padding:1px 7px">a1b2c3</span></td>
+          <td><span class="badge b-err" title="gate — shorter-period rate cap; near-saturation lowers routing priority, never boosts it">requests / 1d</span></td>
+          <td style="color:var(--text-muted)">cheap</td>
+          <td class="num">25,000</td><td class="num">3,211</td>
+          <td><div class="progress"><span style="width:13%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.0%</span></td>
+          <td class="num" style="color:var(--green)">21,789 (87%)</td>
+          <td style="color:var(--text-muted)">04:00 (9h)</td>
+        </tr>
+        <tr>
+          <td>openrouter : <span class="badge b-purple" style="padding:1px 7px">backup</span></td>
+          <td><span class="badge b-err" title="gate — shorter-period rate cap">requests / 1d</span></td>
+          <td style="color:var(--text-muted)">all models</td>
+          <td class="num">10,000</td><td class="num">9,800</td>
+          <td><div class="progress"><span class="danger" style="width:98%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.0%</span></td>
+          <td class="num" style="color:var(--red)">200 (2%)</td>
+          <td style="color:var(--text-muted)">in 47m</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============ virtual models & endpoint topology ============ -->
+  <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology <span class="badge b-dim">3 models · 5 endpoints</span></div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>Virtual Model</th><th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th class="num">Ctx</th><th class="num">Headroom</th>
+      </tr></thead>
+      <tbody>
+        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">coding</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
+        <tr><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
+        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">agent</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-opus-4.6</td><td><span class="badge b-ok">healthy</span></td><td class="num">200k</td><td class="num" style="color:var(--yellow)">31.8M tok (32%)</td></tr>
+        <tr><td class="num"><span class="pri pri-2">P2</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-r2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128k</td><td class="num" style="color:var(--green)">21,789 req (87%)</td></tr>
+        <tr><td style="color:var(--text-bright);font-weight:600">cheap</td><td class="num"><span class="pri pri-1">P1</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-chat</td><td><span class="badge b-warn">half-open</span></td><td class="num">128k</td><td class="num" style="color:var(--green)">21,789 req (87%)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section-head" style="font-size:var(--fs-lg);margin-top:14px">Fallback Endpoints <span class="badge b-dim">2</span></div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr><th>Virtual Model</th><th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>coding</td><td class="num"><span class="pri pri-2">P9</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td><span class="badge b-ok">healthy</span></td><td style="color:var(--text-muted)">trailing fallback</td></tr>
+        <tr><td>agent</td><td class="num"><span class="pri pri-2">P9</span></td><td>openrouter : <span style="color:var(--purple)">backup</span> : anthropic/claude-opus-4.6</td><td><span class="badge b-err">cooldown 2m 13s</span></td><td style="color:var(--text-muted)">trailing fallback</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ============ live requests ============ -->
+  <div class="section-head" id="live">Live Requests
+    <span class="badge b-cyan" id="live-running">0 running</span>
+    <span class="badge b-warn" id="live-queued">0 queued</span>
+    <span class="count">every 1s · paused while hidden</span>
+  </div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>State</th><th class="num">Seq</th><th>Model</th><th>Caller</th><th>Provider : Key : Model</th>
+        <th class="num">Att</th><th class="num">Elapsed</th><th class="num">First / Last Tok</th><th class="num">Tok in</th><th class="num">Tok out</th>
+      </tr></thead>
+      <tbody id="live-body"><tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests — the simulator will start new ones shortly</td></tr></tbody>
+    </table>
+  </div>
+
+  <!-- ============ requests & tokens chart ============ -->
+  <div class="section-head" id="charts">Requests &amp; Tokens
+    <span class="spacer"></span>
+    <span style="display:flex;gap:6px">
+      <button class="btn sm on" data-range="24h">24h</button>
+      <button class="btn sm" data-range="3d">3d</button>
+      <button class="btn sm" data-range="7d">7d</button>
+    </span>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-legend">
+      <span><span class="line"></span>requests (right axis)</span>
+      <span><span class="dot" style="background:var(--accent)"></span>tok in · fresh</span>
+      <span><span class="dot" style="background:var(--purple)"></span>tok in · cache write</span>
+      <span><span class="dot" style="background:var(--cyan)"></span>tok in · cache read</span>
+      <span><span class="dot" style="background:var(--green)"></span>tok out</span>
+    </div>
+    <div id="chart"></div>
+  </div>
+
+  <!-- ============ performance ============ -->
+  <div class="section-head" id="perf">Performance by Provider &amp; Model <span class="count">p50/p90 over last 100 ok samples</span></div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>Provider : Key : Model</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th>
+        <th class="num">TTFT p50 / p90</th><th class="num">TPS p50 / p90</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td class="num">4,120 / 31</td><td class="num">8.1M / 2.4M</td><td class="num">4.2M</td><td class="num">812ms / 2.41s</td><td class="num">68.2 / 41.0</td></tr>
+        <tr><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td class="num">1,904 / 12</td><td class="num">3.9M / 1.1M</td><td class="num">2.0M</td><td class="num">934ms / 2.88s</td><td class="num">61.5 / 38.2</td></tr>
+        <tr><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td class="num">2,381 / 88</td><td class="num">5.6M / 2.0M</td><td class="num">3.1M</td><td class="num">1.62s / 4.10s</td><td class="num">44.8 / 27.9</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Upstream Key Label</div>
+      <div class="table-wrap">
+        <table class="c">
+          <thead><tr><th>Key Label</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge b-purple">main</span></td><td class="num">6,024 / 43</td><td class="num">12.0M / 3.5M</td><td class="num">6.2M</td></tr>
+            <tr><td><span class="badge b-dim">a1b2c3</span></td><td class="num">2,381 / 88</td><td class="num">5.6M / 2.0M</td><td class="num">3.1M</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Caller</div>
+      <div class="table-wrap">
+        <table class="c">
+          <thead><tr><th>Client Key Tag</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge b-info">jason</span></td><td class="num">3,855 / 40</td><td class="num">7.7M / 2.3M</td><td class="num">4.0M</td></tr>
+            <tr><td><span class="badge b-info">openclaw</span></td><td class="num">4,006 / 71</td><td class="num">8.8M / 2.6M</td><td class="num">4.5M</td></tr>
+            <tr><td><span class="badge b-info">cron</span></td><td class="num">544 / 20</td><td class="num">1.1M / 0.6M</td><td class="num">0.8M</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ===== unified footer ===== -->
+<footer class="console-footer">
+  <div class="ft-inner">
+    <div>Virtual Model Router (VMR) · v4.2.1 · uptime <span id="ft-uptime">3d 4h 12m</span></div>
+    <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
+      <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
+  </div>
+</footer>
+
+<!-- demo-only control panel (not part of the real design) -->
+<div class="demo-panel" id="demo-panel">
+  <b>DEMO CONTROLS</b>
+  <div class="row">
+    <button class="btn" id="dp-pause">⏸ Pause sim</button>
+    <button class="btn" id="dp-stall">⚡ Inject stall</button>
+  </div>
+  <div class="row">
+    <button class="btn" id="dp-401">🚫 Simulate 401 once</button>
+    <button class="btn" id="dp-reset">♻ Reset</button>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   console.js — shared runtime (auth, header, formatting). In the real
+   implementation this is one embedded asset injected into every page;
+   the demo carries an equivalent inline copy.
+   ===================================================================== */
+const VMRAuth = {
+  KEY: 'vmr_key', LEGACY: 'vmr_status_key',
+  get() { return localStorage.getItem(this.KEY) || localStorage.getItem(this.LEGACY) || ''; },
+  set(k) { const v = (k || '').trim(); localStorage.setItem(this.KEY, v); localStorage.removeItem(this.LEGACY); return v; },
+  clear() { localStorage.removeItem(this.KEY); localStorage.removeItem(this.LEGACY); },
+  has() { return !!this.get(); },
+  tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
+};
+
+// --- auth modal (single 401 flow, injected once) ---
+(function injectModal() {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2>Authentication Required</h2>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
+      <div class="err" id="vmr-key-err"></div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn" id="vmr-key-cancel">Cancel</button>
+        <button class="btn primary" id="vmr-key-save">Connect</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+})();
+const modalEl = () => document.querySelector('.modal-overlay');
+function openKeyModal() {
+  const m = modalEl(); m.classList.remove('hidden');
+  const inp = document.getElementById('vmr-key-input');
+  inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
+  setTimeout(() => inp.focus(), 30);
+}
+function closeKeyModal() { modalEl().classList.add('hidden'); }
+document.getElementById('vmr-key-save').onclick = () => {
+  const v = document.getElementById('vmr-key-input').value.trim();
+  if (DEMO.consume401()) { document.getElementById('vmr-key-err').textContent = '401 — invalid or missing API key (demo-simulated)'; return; }
+  if (!v) { document.getElementById('vmr-key-err').textContent = 'Enter a key (any non-empty string works in this demo).'; return; }
+  VMRAuth.set(v); syncKeyBtn(); closeKeyModal(); toast('Connected — key ' + VMRAuth.tail());
+};
+document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); closeKeyModal(); toast('Stored key cleared'); };
+document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeKeyModal(); closeWarnModal(); } });
+function syncKeyBtn() {
+  const b = document.getElementById('hd-key');
+  b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
+  b.title = VMRAuth.has() ? 'Key stored in this browser — click to change or clear' : 'Set the API key for this VMR instance';
+}
+document.getElementById('hd-key').onclick = openKeyModal;
+
+// --- shared helpers ---
+function toast(msg) {
+  let t = document.querySelector('.toast');
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+function copyText(txt, btn) {
+  const done = () => { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = o, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
+  } else fallbackCopy(txt, done);
+}
+function fallbackCopy(txt, done) {
+  const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  ta.remove();
+}
+function fmtAge(rfc3339) {
+  if (!rfc3339) return '—';
+  const s = Math.max(0, Math.floor((Date.now() - new Date(rfc3339).getTime()) / 1000));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+  return Math.floor(s / 3600) + 'h' + Math.floor((s % 3600) / 60) + 'm';
+}
+function fmtMMSS(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+
+/* ===== warning bell (count in header, details on click) ===== */
+const WARNINGS = [
+  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
+  { sev: 'warn', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s (transient upstream 500).', when: '2m ago' },
+  { sev: 'err', text: '84 requests errored in the last 24h — rate_limit 61, transient 23 (see Performance → usage tables).', when: 'rolling 24h' },
+];
+(function injectWarnModal() {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2>Warnings &amp; Errors <span class="badge b-err" id="warn-modal-count"></span></h2>
+      <div id="warn-list"></div>
+      <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
+    </div>`;
+  document.body.appendChild(div);
+  document.getElementById('warn-list').innerHTML = WARNINGS.map(w => `
+    <div class="wrow">
+      <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
+      <span style="color:var(--text)">${w.text}</span>
+      <span class="when">${w.when}</span>
+    </div>`).join('');
+  document.getElementById('warn-modal-count').textContent = WARNINGS.length;
+  document.getElementById('warn-close').onclick = closeWarnModal;
+  div.addEventListener('click', e => { if (e.target === div) closeWarnModal(); });
+})();
+const warnOverlay = () => document.querySelectorAll('.modal-overlay')[1];
+function openWarnModal() { const m = warnOverlay(); if (m) m.classList.remove('hidden'); }
+function closeWarnModal() { const m = warnOverlay(); if (m) m.classList.add('hidden'); }
+document.getElementById('warn-bell').onclick = openWarnModal;
+
+/* ===== 5-minute auto-refresh countdown (click = refresh now) ===== */
+let countdown = 300;
+function refreshNow() {
+  countdown = 300;
+  // vitals micro-bump to make the refresh visible (mock)
+  const req = 12847 + Math.floor(Math.random() * 3 + 1);
+  document.getElementById('v-req').textContent = req.toLocaleString();
+  document.getElementById('v-ok').textContent = (12702 + Math.floor(Math.random() * 2)).toLocaleString() + ' ok';
+  toast('Data refreshed (mock)');
+}
+document.getElementById('hd-refresh').onclick = refreshNow;
+setInterval(() => {
+  if (SIM.paused || document.hidden) return;
+  countdown--;
+  if (countdown <= 0) { refreshNow(); }
+  document.getElementById('cd').textContent = fmtMMSS(Math.max(0, countdown));
+}, 1000);
+
+/* ===== live request simulator (mock of per-chunk milestone stamping) ===== */
+const PROTOS = ['openai-completions', 'anthropic-messages', 'openai-responses'];
+const PROVIDERS = [
+  { p: 'packycode', k: 'main', m: 'claude-sonnet-4' },
+  { p: 'packycode', k: 'main', m: 'claude-opus-4.6' },
+  { p: 'packycode', k: 'backup', m: 'claude-sonnet-4' },
+  { p: 'deepseek', k: 'a1b2c3', m: 'deepseek-v3.2' },
+];
+const CALLERS = ['jason', 'openclaw', 'cron'];
+const VMODELS = ['coding', 'agent', 'cheap'];
+const SIM = { entries: [], seq: 4182, paused: false, injectStall: false, _401once: false };
+const DEMO = {
+  consume401() { const v = SIM._401once; SIM._401once = false; return v; },
+  reset() { localStorage.clear(); location.reload(); }
+};
+const nowISO = () => new Date().toISOString();
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function spawn() {
+  SIM.entries.push({
+    seq: ++SIM.seq, proto: pick(PROTOS), vmodel: pick(VMODELS), caller: pick(CALLERS),
+    stream: Math.random() < 0.8, state: 'queued', ts: nowISO(), sentAt: '', firstAt: '', lastAt: '',
+    provider: '', key: '', model: '', attempt: 0,
+    estIn: 800 + Math.floor(Math.random() * 24000), estOut: 0,
+    promoteAt: Date.now() + 300 + Math.random() * 2200, firstAtDeadline: 0, doneAt: 0
+  });
+}
+function promote(e) {
+  e.attempt = 1;
+  let pr = pick(PROVIDERS);
+  if (Math.random() < 0.08) { e.attempt = 2; pr = pick(PROVIDERS.filter(x => x.p !== pr.p || x.k !== pr.k)); }
+  e.provider = pr.p; e.key = pr.k; e.model = pr.m;
+  e.state = 'running'; e.sentAt = nowISO();
+  e.firstAtDeadline = Date.now() + 400 + Math.random() * 2600;
+  if (Math.random() < 0.04) e.doneAt = Date.now() + 900;
+}
+function simTick() {
+  if (SIM.paused || document.hidden) return;
+  if (SIM.entries.length < 9 && Math.random() < 0.5) spawn();
+  const now = Date.now();
+  SIM.entries = SIM.entries.filter(e => !(e.doneAt && now >= e.doneAt));
+  for (const e of SIM.entries) {
+    if (e.state === 'queued' && now >= e.promoteAt) promote(e);
+    if (e.state === 'running') {
+      if (!e.firstAt && now >= e.firstAtDeadline) { e.firstAt = nowISO(); e.lastAt = e.firstAt; }
+      else if (e.firstAt) {
+        if (e.stallUntil && now < e.stallUntil) { /* frozen: no lastAt update */ }
+        else {
+          e.lastAt = nowISO();
+          e.estOut += 6 + Math.floor(Math.random() * 70);
+          if (SIM.injectStall && e.stream) { e.stallUntil = now + 14000; SIM.injectStall = false; toast('Stall injected on #' + e.seq); }
+          else if (Math.random() < 0.015) e.stallUntil = now + 9000 + Math.random() * 9000;
+        }
+        const totalMs = (e.stream ? 9000 : 4000) + Math.random() * 18000;
+        if (now - new Date(e.sentAt).getTime() > totalMs) e.doneAt = now + 60;
+      }
+    }
+  }
+  renderLive();
+  updateVitals();
+}
+function firstLastCell(e) {
+  if (!e.firstAt) return '—';
+  const ft = ((new Date(e.firstAt) - new Date(e.sentAt)) / 1000).toFixed(2) + 's';
+  const age = Math.floor((Date.now() - new Date(e.lastAt).getTime()) / 1000);
+  const last = (e.stream && age >= 10) ? `<span class="badge stall">${age}s</span>` : age + 's';
+  return ft + ' · ' + last;
+}
+function renderLive() {
+  const body = document.getElementById('live-body');
+  const es = SIM.entries;
+  document.getElementById('live-running').textContent = es.filter(e => e.state === 'running').length + ' running';
+  document.getElementById('live-queued').textContent = es.filter(e => e.state === 'queued').length + ' queued';
+  if (!es.length) {
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests — the simulator will start new ones shortly</td></tr>';
+    return;
+  }
+  const rows = es.slice(-10).map(e => `<tr>
+    <td>${e.state === 'queued' ? '<span class="badge b-warn">queued</span>' : '<span class="badge b-cyan">running</span>'}</td>
+    <td class="num">#${e.seq}</td>
+    <td><span class="dim">${e.proto}:</span><b>${e.vmodel}</b></td>
+    <td>${e.caller}</td>
+    <td>${e.provider ? `${e.provider} : <span style="color:var(--purple)">${e.key}</span> : ${e.model}` : '<span class="dim">—</span>'}</td>
+    <td class="num">${e.attempt || '—'}</td>
+    <td class="num">${fmtAge(e.ts)}</td>
+    <td class="num">${firstLastCell(e)}</td>
+    <td class="num">${e.estIn.toLocaleString()}</td>
+    <td class="num">${e.estOut.toLocaleString()}</td>
+  </tr>`).join('');
+  const more = es.length > 10 ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted)">… ${es.length - 10} more in flight</td></tr>` : '';
+  body.innerHTML = rows + more;
+}
+function updateVitals() {
+  const running = SIM.entries.filter(e => e.state === 'running').length;
+  const queued = SIM.entries.filter(e => e.state === 'queued').length;
+  document.getElementById('v-conc').innerHTML = running + '<small> / 8</small>';
+  document.getElementById('v-queued').textContent = queued;
+}
+
+/* ===== Requests & Tokens chart (pure SVG, no chart lib) ===== */
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const RANGES = {
+  '24h': { n: 24, bh: 1, seed: 11 },
+  '3d': { n: 24, bh: 3, seed: 22 },
+  '7d': { n: 28, bh: 6, seed: 33 },
+};
+function genSeries(key) {
+  const cfg = RANGES[key], rnd = mulberry32(cfg.seed), arr = [];
+  for (let i = 0; i < cfg.n; i++) {
+    const hourOfDay = (new Date().getHours() - (cfg.n - 1 - i) * cfg.bh % 24 + 24 * 4) % 24;
+    const work = 0.4 + 0.6 * Math.exp(-Math.pow(((hourOfDay - 14 + 24) % 24 - 4) / 7, 2));
+    const base = (0.55 + rnd() * 0.7) * (0.6 + 0.4 * work);
+    arr.push({
+      fresh: base * 0.9e6 * (0.7 + rnd() * 0.6),
+      cw: base * 0.25e6 * (0.6 + rnd() * 0.8),
+      cr: base * 1.6e6 * (0.7 + rnd() * 0.6),
+      out: base * 0.75e6 * (0.7 + rnd() * 0.6),
+      req: Math.round(280 * base * (0.7 + rnd() * 0.6)) + 40,
+    });
+  }
+  return arr;
+}
+function fmtM(v) { return (v / 1e6).toFixed(1) + 'M'; }
+function bucketLabel(i, cfg) {
+  const d = new Date(Date.now() - (cfg.n - 1 - i) * cfg.bh * 3600 * 1000);
+  if (cfg.bh === 1) return String(d.getHours()).padStart(2, '0') + ':00';
+  return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0');
+}
+function renderChart(key) {
+  const cfg = RANGES[key], data = genSeries(key);
+  const W = 1200, H = 260, padL = 52, padR = 52, padT = 12, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxTok = Math.max(...data.map(d => d.fresh + d.cw + d.cr + d.out)) * 1.12;
+  const maxReq = Math.max(...data.map(d => d.req)) * 1.15;
+  const groupW = plotW / cfg.n, barW = Math.min(16, groupW * 0.26);
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="font-family:var(--font-mono)">`;
+  // gridlines + y labels
+  for (let g = 0; g <= 4; g++) {
+    const y = padT + plotH - (plotH * g / 4);
+    s += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(48,54,61,.5)" stroke-dasharray="3 4"/>`;
+    s += `<text x="${padL - 7}" y="${y + 3.5}" fill="#8b949e" font-size="10" text-anchor="end">${fmtM(maxTok * g / 4)}</text>`;
+    s += `<text x="${W - padR + 7}" y="${y + 3.5}" fill="#8b949e" font-size="10">${Math.round(maxReq * g / 4)}</text>`;
+  }
+  const x = i => padL + groupW * i + groupW / 2;
+  // bars per bucket
+  data.forEach((d, i) => {
+    const gx = x(i) - barW - 2;
+    const hFresh = plotH * d.fresh / maxTok, hCw = plotH * d.cw / maxTok, hCr = plotH * d.cr / maxTok, hOut = plotH * d.out / maxTok;
+    const tip = `${bucketLabel(i, cfg)} · ${d.req} requests\ntok in ${fmtM(d.fresh + d.cw + d.cr)} (fresh ${fmtM(d.fresh)} · cw ${fmtM(d.cw)} · cr ${fmtM(d.cr)})\ntok out ${fmtM(d.out)}`;
+    s += `<g><title>${tip}</title>`;
+    s += `<rect x="${gx}" y="${padT + plotH - hFresh}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1.5"/>`;
+    s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1.5"/>`;
+    s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw - hCr}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1.5"/>`;
+    s += `<rect x="${x(i) + 2}" y="${padT + plotH - hOut}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1.5"/>`;
+    s += `</g>`;
+  });
+  // requests polyline
+  const pts = data.map((d, i) => `${x(i)},${padT + plotH - plotH * d.req / maxReq}`).join(' ');
+  s += `<polyline points="${pts}" fill="none" stroke="#d29922" stroke-width="2" stroke-linejoin="round"/>`;
+  data.forEach((d, i) => { s += `<circle cx="${x(i)}" cy="${padT + plotH - plotH * d.req / maxReq}" r="2.6" fill="#d29922"><title>${bucketLabel(i, cfg)} · ${d.req} requests</title></circle>`; });
+  // x labels
+  data.forEach((d, i) => {
+    if (i % Math.ceil(cfg.n / 8) === 0 || i === cfg.n - 1)
+      s += `<text x="${x(i)}" y="${H - 8}" fill="#8b949e" font-size="10" text-anchor="middle">${bucketLabel(i, cfg)}</text>`;
+  });
+  s += '</svg>';
+  document.getElementById('chart').innerHTML = s;
+}
+document.querySelectorAll('[data-range]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-range]').forEach(x => x.classList.toggle('on', x === b));
+  renderChart(b.dataset.range);
+});
+
+/* ===== demo panel ===== */
+document.getElementById('dp-pause').onclick = function () {
+  SIM.paused = !SIM.paused;
+  this.textContent = SIM.paused ? '▶ Resume sim' : '⏸ Pause sim';
+  document.getElementById('hd-conn').className = 'pill ' + (SIM.paused ? 'p-paused' : 'p-live');
+  document.getElementById('hd-conn').textContent = SIM.paused ? 'paused' : 'live';
+  toast(SIM.paused ? 'Live simulation paused' : 'Live simulation resumed');
+};
+document.getElementById('dp-stall').onclick = () => { SIM.injectStall = true; toast('Will stall the next streaming request…'); document.getElementById('live').scrollIntoView({ behavior: 'smooth' }); };
+document.getElementById('dp-401').onclick = () => { SIM._401once = true; openKeyModal(); toast('Next Connect will fail with 401 (demo)'); };
+document.getElementById('dp-reset').onclick = () => DEMO.reset();
+
+/* ===== boot ===== */
+syncKeyBtn();
+setInterval(simTick, 1000);
+simTick();
+renderChart('24h');
+</script>
+</body>
+</html>

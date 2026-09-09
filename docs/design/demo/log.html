@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-14, by pi — STATIC DEMO, mock data only, no network. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Log</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+/* ===== console.css (shared tokens & components — single source in real impl) ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d1117;--surface:#161b22;--surface-2:#1c2128;--border:#30363d;--border-soft:rgba(48,54,61,.4);--well:#090d13;
+  --text:#c9d1d9;--text-muted:#8b949e;--text-bright:#f0f6fc;
+  --accent:#58a6ff;--accent-hover:#79c0ff;
+  --green:#3fb950;--yellow:#d29922;--orange:#e8813a;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;
+  --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;
+  --sp-2:8px;--sp-3:12px;--sp-4:16px;
+  --r-sm:6px;--r-md:8px;--r-pill:999px;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+a{color:var(--accent);text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+
+/* header (full-width variant — Log page, 100vw content) */
+.console-header{background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.hd-inner.full{max-width:none;display:flex;align-items:center;gap:12px;padding:8px 16px}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none}
+.brand b{color:var(--text-bright);font-size:var(--fs-lg)}
+.brand .sub{font-size:var(--fs-xs);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 8px}
+.hd-nav{display:flex;gap:8px}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
+.nav-link:hover{color:var(--text-bright)}
+.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
+.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{border-color:var(--text-muted)}
+.btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.sm{font-size:var(--fs-sm);padding:3px 9px}
+.input{font-family:var(--font-mono);font-size:var(--fs-sm);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 10px;outline:none}
+.input:focus{border-color:var(--accent)}
+.pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
+.p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
+.p-connecting{color:var(--yellow);border-color:rgba(210,153,34,.3);background:var(--yellow-bg)}
+.p-down{color:var(--red);border-color:rgba(248,81,73,.3);background:var(--red-bg)}
+.p-paused{color:var(--text-muted);border-color:var(--border);background:var(--surface-2)}
+.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted)}
+.b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
+.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+
+/* terminal: full-bleed, full-height, internal scroll */
+main.term{position:relative;flex:1;min-height:0;display:flex}
+pre#log{
+  flex:1;overflow-y:auto;margin:0;padding:12px 16px 20px;
+  font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.55;
+  white-space:pre-wrap;word-break:break-all;
+}
+.ln{display:block}
+.ln .t{color:#6e7681}
+.ln.inf .lv{color:var(--accent)}
+.ln.ok  .lv{color:var(--green)}
+.ln.wrn .lv{color:var(--yellow)}
+.ln.err .lv{color:var(--red)}
+.ln.err{background:rgba(248,81,73,.06)}
+.ln .m{color:var(--text)}
+.ln .dim{color:var(--text-muted)}
+
+/* jump-to-bottom chip */
+#jump{
+  position:absolute;right:22px;bottom:18px;display:none;align-items:center;gap:6px;
+  background:var(--accent);color:#0d1117;border:none;border-radius:var(--r-pill);
+  padding:5px 13px;font:600 var(--fs-sm) var(--font-sans);cursor:pointer;box-shadow:0 6px 20px rgba(1,4,9,.5)
+}
+#jump.show{display:inline-flex}
+
+/* unified footer as a status bar (Log-page variant: full width, terminal stats) */
+.console-footer{border-top:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.ft-inner.full{max-width:none;padding:7px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--text-muted);font-size:var(--fs-xs);font-family:var(--font-mono)}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
+.modal-overlay.hidden{display:none}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px;width:min(440px,92vw)}
+.modal h2{font-size:16px;color:var(--text-bright);margin-bottom:8px}
+.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px}
+.modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none}
+.toast.show{opacity:1}
+.demo-ribbon{position:fixed;top:50px;right:12px;z-index:200;background:rgba(188,140,255,.15);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===== unified header (full variant) ===== -->
+<header class="console-header">
+  <div class="hd-inner full">
+    <a class="brand" href="overview.html">
+      <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <b>VMR</b><span class="sub">Console</span>
+    </a>
+    <nav class="hd-nav">
+      <a class="nav-link" href="overview.html">Overview</a>
+      <a class="nav-link active" href="log.html">Log</a>
+      <a class="nav-link" href="help.html">Help</a>
+    </nav>
+    <div class="hd-right">
+      <input class="input" id="filter" placeholder="filter substring…" style="width:190px" autocomplete="off">
+      <span class="pill p-connecting" id="hd-conn">connecting</span>
+      <button class="btn sm" id="hd-key">🔑 Set Key</button>
+    </div>
+  </div>
+</header>
+
+<span class="demo-ribbon" title="This is a static mock — no live data, no server">DEMO · mock data</span>
+
+<main class="term">
+  <pre id="log"></pre>
+  <button id="jump">↓ <span id="jump-n">0</span> new</button>
+</main>
+
+<!-- ===== unified footer as status bar ===== -->
+<footer class="console-footer">
+  <div class="ft-inner full">
+    <div><span id="ft-count">0 lines</span> · buffer ~512 · filter: <span id="ft-filter">off</span></div>
+    <div>Virtual Model Router (VMR) · <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener" style="color:var(--text-muted)">bigfatsea/vmr</a></div>
+  </div>
+</footer>
+
+<script>
+/* ===== console.js shared runtime (inline demo copy) ===== */
+const VMRAuth = {
+  KEY: 'vmr_key', LEGACY: 'vmr_status_key',
+  get() { return localStorage.getItem(this.KEY) || localStorage.getItem(this.LEGACY) || ''; },
+  set(k) { const v = (k || '').trim(); localStorage.setItem(this.KEY, v); localStorage.removeItem(this.LEGACY); return v; },
+  clear() { localStorage.removeItem(this.KEY); localStorage.removeItem(this.LEGACY); },
+  has() { return !!this.get(); },
+  tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
+};
+(function injectModal() {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true">
+      <h2>Authentication Required</h2>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
+      <div class="err" id="vmr-key-err"></div>
+      <div class="modal-actions">
+        <button class="btn" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn" id="vmr-key-cancel">Cancel</button>
+        <button class="btn primary" id="vmr-key-save">Connect</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+})();
+function openKeyModal() {
+  const m = document.querySelector('.modal-overlay'); m.classList.remove('hidden');
+  const inp = document.getElementById('vmr-key-input');
+  inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
+  setTimeout(() => inp.focus(), 30);
+}
+function closeKeyModal() { document.querySelector('.modal-overlay').classList.add('hidden'); }
+document.getElementById('vmr-key-save').onclick = () => {
+  const v = document.getElementById('vmr-key-input').value.trim();
+  if (!v) { document.getElementById('vmr-key-err').textContent = 'Enter a key (any non-empty string works in this demo).'; return; }
+  VMRAuth.set(v); syncKeyBtn(); closeKeyModal(); toast('Connected — key ' + VMRAuth.tail());
+};
+document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); };
+document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeKeyModal(); });
+function syncKeyBtn() {
+  const b = document.getElementById('hd-key');
+  b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
+}
+document.getElementById('hd-key').onclick = openKeyModal;
+function toast(msg) {
+  let t = document.querySelector('.toast');
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* ===== log page logic (mock stream) ===== */
+const logEl = document.getElementById('log');
+const connEl = document.getElementById('hd-conn');
+const jumpEl = document.getElementById('jump');
+const filterEl = document.getElementById('filter');
+let autoscroll = true, newSinceScroll = 0, paused = false, allLines = [], downTimer = null, reconnectTimer = null;
+
+const MODELS = ['coding', 'agent', 'cheap'];
+const UPS = ['claude-sonnet-4', 'claude-opus-4.6', 'deepseek-v3.2'];
+const PROVS = ['packycode-main', 'packycode-backup', 'deepseek'];
+const CALLERS = ['jason', 'openclaw', 'cron'];
+const rnd = a => a[Math.floor(Math.random() * a.length)];
+const ts = () => new Date().toTimeString().slice(0, 8);
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+function line(level, msg) {
+  const o = { t: ts(), lv: level.toUpperCase().padEnd(4, ' '), m: msg };
+  allLines.push(o);
+  if (allLines.length > 512) allLines.shift();
+  if (passes(o)) appendLine(o);
+}
+function passes(o) {
+  const f = filterEl.value.trim().toLowerCase();
+  return !f || (o.t + ' ' + o.lv + ' ' + o.m).toLowerCase().includes(f);
+}
+function appendLine(o) {
+  const cls = { INF: 'inf', OK: 'ok', WRN: 'wrn', ERR: 'err' }[o.lv.trim()] || 'inf';
+  const html = `<span class="ln ${cls}"><span class="t">${o.t}</span> <span class="lv">${esc(o.lv)}</span> <span class="m">${esc(o.m)}</span></span>\n`;
+  const stick = autoscroll && (logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8);
+  logEl.insertAdjacentHTML('beforeend', html);
+  while (logEl.children.length > 520) logEl.firstChild.remove();
+  if (stick) { logEl.scrollTop = logEl.scrollHeight; }
+  else { newSinceScroll++; jumpEl.querySelector('#jump-n').textContent = newSinceScroll; jumpEl.classList.add('show'); }
+  document.getElementById('ft-count').textContent = allLines.length + ' lines';
+}
+function genLine() {
+  const r = Math.random();
+  const caller = rnd(CALLERS), vm = rnd(MODELS), prov = rnd(PROVS), up = rnd(UPS);
+  if (r < 0.42) {
+    const tok = 300 + Math.floor(Math.random() * 9000);
+    line('inf', `chat ${vm} <- ${caller} → ${prov}(${up}) 200 OK ${tok} tok · ${rnd(['stream', 'json'])} · ${(Math.random() * 30 + 2).toFixed(1)}s`);
+  } else if (r < 0.62) {
+    line('ok', `${rnd(['cache hit 71% (prompt 12.4k, cached 8.8k)', 'sticky pinned → packycode-main (ttl 9m)', 'image downscaled 4.2MB → 310KB (jpeg)'])}`);
+  } else if (r < 0.72) {
+    line('wrn', `${prov} transient 429 · backoff 5s (consecutive 1)`);
+  } else if (r < 0.78) {
+    line('err', `${prov} upstream 500 · failing over to next candidate`);
+  } else if (r < 0.86) {
+    line('inf', `client_key=${caller} · ${vm} · est in ${(Math.random() * 40 + 2).toFixed(1)}k tok · tools=${Math.floor(Math.random() * 8)}`);
+  } else if (r < 0.93) {
+    line('inf', `reload: config unchanged (mtime check) · quota flush ok`);
+  } else {
+    line('ok', `health probe ${prov} ok (rtt ${(Math.random() * 400 + 60).toFixed(0)}ms) · half-open → healthy`);
+  }
+}
+
+// scroll behavior: pause autoscroll when user scrolls up
+logEl.addEventListener('scroll', () => {
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
+  if (atBottom) { autoscroll = true; newSinceScroll = 0; jumpEl.classList.remove('show'); }
+  else autoscroll = false;
+});
+jumpEl.onclick = () => { logEl.scrollTop = logEl.scrollHeight; autoscroll = true; };
+filterEl.addEventListener('input', () => {
+  const f = filterEl.value.trim();
+  document.getElementById('ft-filter').textContent = f ? `"${f}"` : 'off';
+  logEl.innerHTML = '';
+  allLines.filter(passes).forEach(appendLine);
+  logEl.scrollTop = logEl.scrollHeight;
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'p' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); togglePause(); }
+});
+function togglePause() {
+  paused = !paused;
+  connEl.className = 'pill ' + (paused ? 'p-paused' : (downTimer ? 'p-down' : 'p-live'));
+  connEl.textContent = paused ? 'paused' : (downTimer ? 'down' : 'streaming');
+  toast(paused ? 'Stream paused (demo)' : 'Stream resumed');
+}
+
+// simulate disconnect at ~45s, then Retry → reconnect
+function simulateDown() {
+  downTimer = true;
+  connEl.className = 'pill p-down'; connEl.textContent = 'down';
+  line('err', '— stream disconnected (demo-simulated) —');
+  jumpEl.innerHTML = '⟳ Retry'; jumpEl.classList.add('show');
+  jumpEl.onclick = () => {
+    downTimer = false;
+    connEl.className = 'pill p-live'; connEl.textContent = 'streaming';
+    jumpEl.innerHTML = '↓ <span id="jump-n">0</span> new'; jumpEl.onclick = jumpToBottom; jumpEl.classList.remove('show');
+    line('ok', '— stream reconnected (replayed recent lines) —');
+  };
+}
+function jumpToBottom() { logEl.scrollTop = logEl.scrollHeight; autoscroll = true; }
+
+// boot
+syncKeyBtn();
+for (let i = 0; i < 14; i++) genLine();   // seed history
+logEl.scrollTop = logEl.scrollHeight;
+connEl.className = 'pill p-live'; connEl.textContent = 'streaming';
+const genTimer = setInterval(() => { if (!paused && !downTimer && !document.hidden) genLine(); }, 900);
+setTimeout(simulateDown, 45000);
+</script>
+</body>
+</html>
