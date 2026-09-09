@@ -20,6 +20,7 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 	"vmr/internal/imgprep"
+	"vmr/internal/livestats"
 	"vmr/internal/logtee"
 	"vmr/internal/router"
 )
@@ -47,6 +48,9 @@ type Server struct {
 	// reports is non-nil only when analytics.serve is on at Handler() mount
 	// time — see mountReports in reports.go.
 	reports *reportsState
+	// liveStats holds the completed-request aggregator (nil = live stats
+	// persistence disabled, e.g. lightweight tests).
+	liveStats *livestats.Aggregator
 	// started is when this Server began serving — /health's uptime basis.
 	// Separate from inst.startedAt, which only `vmr start` fills in and
 	// which /status therefore reports conditionally: /health has no
@@ -68,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
 	mux.HandleFunc("GET /status.html", s.statusPage)
+	mux.HandleFunc("GET /stats", s.auth(s.adminStats))
+	mux.HandleFunc("GET /stats.html", s.statsPage)
 	mux.HandleFunc("GET /help", s.helpPageEN)
 	mux.HandleFunc("GET /help.html", s.helpPageEN)
 	mux.HandleFunc("GET /help.zh", s.helpPageZH)
@@ -260,6 +266,26 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 			rec.Model, rec.Stream = probeModel, probeStream
 		}
 
+		// Register in-flight request entry BEFORE entering the concurrency
+		// gate (LiveStats design §5.2): state starts as "queued" until the
+		// first upstream attempt actually fires in tryOne.
+		if s.rt != nil && s.rt.Inflight != nil {
+			reqTS := time.Now()
+			if rec != nil {
+				reqTS = rec.TS
+			}
+			h, remove := s.rt.Inflight.Register(router.InflightInitials{
+				Protocol:     protocol,
+				VModel:       probeModel,
+				Stream:       probeStream,
+				ClientKeyTag: tag,
+				Addr:         r.RemoteAddr,
+				TS:           reqTS,
+			})
+			defer remove()
+			r = r.WithContext(router.WithInflightHandle(r.Context(), h))
+		}
+
 		// Global concurrency gate: excess requests park here until a slot
 		// frees, or the client goes away. Acquired AFTER the body is
 		// buffered so a slow upload never occupies a slot — the gate
@@ -301,6 +327,9 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		if rec != nil {
 			rec.Facts = &facts
 		}
+		if h := router.InflightHandleFrom(r.Context()); h != nil {
+			h.SetEstIn(facts.EstimatedTokens)
+		}
 
 		s.rt.ServeWithSnap(w, r, &core.CanonicalRequest{
 			Model: probeModel, Stream: probeStream, Raw: body, Header: hdr,
@@ -320,9 +349,6 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 // The returned http.ResponseWriter wraps the original with a recorder that
 // captures the response status and body for the audit trail.
 func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request) (rec *audit.Record, ww http.ResponseWriter, done func()) {
-	if s.audit == nil {
-		return nil, w, nil
-	}
 	rec = &audit.Record{
 		TS:       time.Now(),
 		Protocol: protocol,
@@ -338,8 +364,13 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 		rec.Client.Response = rw.message()
 		canceled := r.Context().Err() != nil
 		rec.Outcome = audit.OutcomeFor(rw.status, canceled)
-		if err := s.audit.Write(rec); err != nil {
-			s.rt.Logf("audit: %v", err)
+		if s.audit != nil {
+			if err := s.audit.Write(rec); err != nil {
+				s.rt.Logf("audit: %v", err)
+			}
+		}
+		if s.liveStats != nil {
+			s.liveStats.Record(sampleFromRecord(rec))
 		}
 	}
 }

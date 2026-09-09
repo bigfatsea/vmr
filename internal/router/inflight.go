@@ -195,9 +195,14 @@ func WithInflightHandle(ctx context.Context, h *InflightHandle) context.Context 
 	return context.WithValue(ctx, inflightCtxKey{}, h)
 }
 
-func inflightHandleFrom(ctx context.Context) *InflightHandle {
+// InflightHandleFrom extracts the handle stored by WithInflightHandle.
+func InflightHandleFrom(ctx context.Context) *InflightHandle {
 	h, _ := ctx.Value(inflightCtxKey{}).(*InflightHandle)
 	return h
+}
+
+func inflightHandleFrom(ctx context.Context) *InflightHandle {
+	return InflightHandleFrom(ctx)
 }
 
 // stampSent marks one attempt as sent upstream: sent_at, the attempt number,

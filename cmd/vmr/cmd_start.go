@@ -19,6 +19,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/fmtutil"
+	"vmr/internal/livestats"
 	"vmr/internal/logtee"
 	"vmr/internal/quota"
 	"vmr/internal/router"
@@ -181,6 +182,14 @@ func cmdStart(args []string) error {
 	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
 	defer func() { stopQuotaFlush(); qreg.Flush() }()
 
+	// Live stats aggregator: owns slim WAL and rollup persistence in log_dir.
+	liveAgg, err := livestats.New(cfg.LogDir)
+	if err != nil {
+		logger.Printf("WARN live stats: %v (degrading to in-memory only)", err)
+	} else {
+		defer liveAgg.Close()
+	}
+
 	snap, err := router.BuildSnapshot(cfg)
 	if err != nil {
 		return fmt.Errorf("build routes: %w", err)
@@ -241,7 +250,7 @@ func cmdStart(args []string) error {
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
-		Handler: server.New(rt, auditLog).WithLogTee(tee).
+		Handler: server.New(rt, auditLog).WithLogTee(tee).WithLiveStats(liveAgg).
 			WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 	}
