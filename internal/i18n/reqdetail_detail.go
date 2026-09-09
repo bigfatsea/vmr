@@ -133,6 +133,9 @@ func Detail(lang Lang) DetailText {
 				"overflow_raw_passthrough":          "响应体超过 8MB 缓冲上限，归一化器放弃处理并原样透传剩余字节——后续的 model 改写/think 剥离等步骤不再执行，等同直连行为",
 				"crlf_framing_suspected":            "疑似 CRLF（`\\r\\n\\r\\n`）分帧的 SSE 响应——归一化器只识别 `\\n\\n` 事件边界，未找到时整段响应会被当作一次性缓冲处理（内容仍正确，仅逐 token 流式效果退化）",
 				"thinking_process_pattern_detected": "响应内容含类似 MiniMax thinking=medium 泄漏的编号推理小节，但未命中现有 \"Thinking Process:\" 剥离触发条件——字节未改动，仅作观测标记，用于判断该剥离规则是否已经失效",
+				"think_pattern_detected":            "响应内容出现了字面的 `<think>` / `</think>` 标记但未触发 `<think>` 块剥离——`thinking_process_pattern_detected` 的标签形态对应项。无阈值，正文里引用或演示这两个标记也会命中；字节未改动，仅作观测，用于判断 `<think>` 剥离规则是否已经失效",
+				"truncated_flush":                   "上游在响应中途断流；此前收到、可安全交付的字节（非 SSE 的部分 JSON，或 `modePassthrough` 的 SSE 尾部）已原样 flush 给客户端，随后连接被中止——客户端看到的是断掉的传输而非格式良好的空 200",
+				"truncated_withheld":                "上游在响应中途断流，且 SSE 此时处于 buffered/undecided 模式——被扣留的尾部是待剥离的 MiniMax thinking 形态，原样 flush 会泄漏未闭合的 `<think>` 块，因此整段丢弃并中止连接（思考阶段客户端本就拿不到内容）",
 			},
 			UnknownNormStep: "（未知步骤）",
 
@@ -288,6 +291,9 @@ func Detail(lang Lang) DetailText {
 			"overflow_raw_passthrough":          "Response body exceeded the 8MB buffering cap; the normalizer gave up and passed the remaining bytes through as-is — subsequent steps like model rewrite/think stripping no longer run, equivalent to a direct connection",
 			"crlf_framing_suspected":            "Suspected CRLF (`\\r\\n\\r\\n`) framed SSE response — the normalizer only recognizes `\\n\\n` event boundaries; when not found, the whole response is treated as one buffered unit (content is still correct, only the token-by-token streaming effect degrades)",
 			"thinking_process_pattern_detected": "Response content contains a numbered reasoning section resembling a MiniMax thinking=medium leak, but didn't trip the existing \"Thinking Process:\" strip trigger — bytes unchanged, recorded only as an observation, used to judge whether that strip rule has gone stale",
+			"think_pattern_detected":            "Response content contained a literal `<think>` / `</think>` marker but the `<think>`-block strip did not fire — the tag-form counterpart to `thinking_process_pattern_detected`. No threshold: benign content merely quoting or demonstrating the markers also trips it. Bytes unchanged, recorded only as an observation, used to judge whether the `<think>` strip rule has gone stale",
+			"truncated_flush":                   "Upstream cut the stream mid-response; the bytes already received and safe to deliver (a non-SSE partial JSON body, or a `modePassthrough` SSE tail) were flushed to the client as-is, then the connection was aborted — the client sees a broken transfer, not a well-formed empty 200",
+			"truncated_withheld":                "Upstream cut the stream mid-response while the SSE was in buffered/undecided mode — the withheld tail is a MiniMax thinking shape awaiting stripping, and flushing it raw would leak an unclosed `<think>` block, so it was discarded entirely and the connection aborted (the client gets nothing for the thinking phase anyway)",
 		},
 		UnknownNormStep: "(unknown step)",
 

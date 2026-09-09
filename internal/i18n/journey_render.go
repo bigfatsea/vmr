@@ -46,7 +46,8 @@ type JourneyText struct {
 	// SysPromptEraCoord is the coordinate form of the same line, used by the
 	// default batch suite where the evidence blob is not materialized
 	// (P13.1) — names the blob and points at `vmr analyze -journey <id>`
-	// rather than emitting a link that would 404 (B10 / review §12.5).
+	// rather than emitting a link that would 404 (guarded by B10, the
+	// dead-link check in cmd/vmr/cmd_analyze_test.go).
 	SysPromptEraCoord func(fromSeq, toSeq, chars int, blobName string) string
 	// SysPromptEraNoSys is the line for an era with no leading system
 	// block at all (HasSys == false) — rendered as-is, not silently

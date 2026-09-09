@@ -689,7 +689,7 @@ func journeyBaseName(j *journey.Journey) string {
 // exists: the default suite (materializeDetails=false) can have written
 // this exact file with inline coordinates and no materialized details, and
 // -compare naming that same journey is a user-named target that must get
-// the linked form (P13.1 → review §12.5's 12-B). EnsureJourneyDetails and
+// the linked form (P13.1). EnsureJourneyDetails and
 // the re-render are both cheap here — EnsureRendered's fingerprint check
 // (P12) makes an already-materialized Step a fast skip, and RenderMarkdown
 // is a pure string build.

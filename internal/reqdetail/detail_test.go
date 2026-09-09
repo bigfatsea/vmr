@@ -19,12 +19,17 @@ import (
 // name being added to the router-side trail (internal/respnorm)
 // without a matching entry in i18n.Detail — writeNorms falls back to
 // "（未知步骤）" for anything missing, which is silent and easy to forget.
+// The list is hand-maintained: reqdetail is the analytics half and cannot
+// import internal/respnorm (two halves, one contract), so it mirrors that
+// package's noteApplied call sites by copy. Keep it in sync when a marker
+// is added there.
 func TestNormDescriptions_AllKnownStepsHaveText(t *testing.T) {
 	for _, step := range []string{
 		"model_rewrite", "done_appended", "think_strip", "thinking_process_strip",
 		"buffered", "resumed_stream", "soft_block_detected", "opaque",
 		"overflow_raw_passthrough", "crlf_framing_suspected",
-		"thinking_process_pattern_detected",
+		"thinking_process_pattern_detected", "think_pattern_detected",
+		"truncated_flush", "truncated_withheld",
 	} {
 		var b strings.Builder
 		writeNorms(&b, []string{step}, i18n.Detail(i18n.EN))
