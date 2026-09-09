@@ -33,6 +33,9 @@ file only orients; it does not restate them.
   tradeoff argued only in a source comment is not tracked. The next reviewer reads the
   accused line, never finds the comment that answers it three files away, and re-proposes
   the thing you already settled.
+- `ROADMAP` — not-yet-built analytics-half features (new views / exports / signals). Kept
+  separate from `KNOWN_ISSUES` on purpose: product roadmap, not tech debt. Router-half
+  roadmap stays in the Strategy and Core docs.
 
 ## Build / test / run
 

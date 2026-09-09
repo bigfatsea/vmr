@@ -61,7 +61,8 @@ func docHasInternalPaths(docRel string) bool {
 	return strings.HasSuffix(docRel, ".go") ||
 		docRel == "CLAUDE.md" ||
 		strings.HasPrefix(docRel, "docs/VirtualModelRouter_Design_v4_") ||
-		docRel == "docs/KNOWN_ISSUES.md"
+		docRel == "docs/KNOWN_ISSUES.md" ||
+		docRel == "docs/ROADMAP.md"
 }
 
 // docHasSymbols marks the docs that describe current state and therefore
@@ -77,6 +78,7 @@ func docHasSymbols(docRel string) bool {
 	return docRel == "CLAUDE.md" ||
 		strings.HasPrefix(docRel, "docs/VirtualModelRouter_Design_v4_") ||
 		docRel == "docs/KNOWN_ISSUES.md" ||
+		docRel == "docs/ROADMAP.md" ||
 		strings.HasPrefix(docRel, "README") ||
 		strings.HasPrefix(docRel, "docs/UserGuide")
 }
