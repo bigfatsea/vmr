@@ -40,6 +40,12 @@ type Router struct {
 	// into and no use for it.
 	Quota *quota.Registry
 
+	// Inflight is the per-request live registry behind /stats (LiveStats
+	// design §5). New() wires it; a Router built by struct literal leaves
+	// it nil, and every registry method is nil-safe for that case — same
+	// convention as Quota above.
+	Inflight *InflightRegistry
+
 	snap atomic.Pointer[Snapshot]
 
 	ctx context.Context
@@ -55,7 +61,7 @@ type Router struct {
 }
 
 func New(logger *log.Logger) *Router {
-	return &Router{Health: health.New(), Sticky: sticky.New(), Logger: logger, ctx: context.Background()}
+	return &Router{Health: health.New(), Sticky: sticky.New(), Inflight: NewInflightRegistry(), Logger: logger, ctx: context.Background()}
 }
 
 // WithContext returns the router with the given root context set for graceful shutdown.
@@ -126,6 +132,10 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 
 	if rt.rejectIfAllKeyless(w, creq, route.Endpoints) {
 		return
+	}
+
+	if ifh := inflightHandleFrom(r.Context()); ifh != nil {
+		ifh.SetEstIn(creq.Facts.EstimatedTokens)
 	}
 
 	now := time.Now()
@@ -360,6 +370,11 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	// the audit trail references it directly — no GetBody+ReadAll round trip
 	// duplicating the whole body per attempt.
 	att.SetRequest(req.URL.String(), req.Header, outBody)
+	// In-flight sent stamp (LiveStats §5.2), same point as the audit request
+	// stamp: every attempt overwrites the previous one, so a request stuck
+	// in failover shows the endpoint it is currently waiting on.
+	ifh := inflightHandleFrom(r.Context())
+	ifh.stampSent(attempt, ep.Provider, ep.Model, ep.KeyLabel)
 
 	resp, err := snap.clientFor(ep).Do(req)
 	if err != nil {
@@ -535,7 +550,9 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// mid-transfer must abort instead of parking the request forever. The
 	// per-chunk Flush is a no-op concern for JSON bodies — Content-Length is
 	// stripped anyway.
-	copyErr := copyFlush(r.Context(), w, rbody, snap.Cfg.Timeouts.StreamIdle.D())
+	// Per-chunk in-flight stamping (§5.3) rides on the same reads; no-op
+	// when the request carries no registered handle.
+	copyErr := copyFlush(r.Context(), w, inflightStamped(rbody, inflightHandleFrom(r.Context())), snap.Cfg.Timeouts.StreamIdle.D())
 	status := "OK"
 	if r.Context().Err() != nil {
 		status = "CANCELED"
