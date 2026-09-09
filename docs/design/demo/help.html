@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by pi — STATIC DEMO, mock data only, no network. -->
+<!-- Ver 2026-09-14, by pi — STATIC DEMO v4 (2026-09-09 design-review pass), mock data only, no network. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -15,6 +15,7 @@
   --accent:#58a6ff;--accent-hover:#79c0ff;
   --green:#3fb950;--yellow:#d29922;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;
   --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --purple-bg:rgba(188,140,255,.15);--accent-bg:rgba(88,166,255,.14);
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;--fs-2xl:18px;
@@ -37,7 +38,20 @@ a:hover{text-decoration:underline}
 .hd-right{margin-left:auto;display:flex;align-items:center;gap:10px}
 .nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
 .nav-link:hover{color:var(--text-bright);text-decoration:none}
-.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
+.nav-link.active{color:var(--text-bright);background:var(--accent-bg);border-color:var(--accent)}
+/* alert pill, far right — same slot and same glyphs on every page */
+.warn-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;line-height:1.4}
+.warn-btn .ico{font-size:12px;line-height:1}
+.warn-btn.has-warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+.warn-btn.has-err{color:var(--red);border-color:rgba(248,81,73,.4);background:var(--red-bg)}
+.warn-btn.quiet{opacity:.6}
+/* page rail — same slot the Overview page uses for its section navigation */
+.hd-rail{border-top:1px solid var(--border-soft)}
+.rail-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:3px;padding:5px 16px;overflow-x:auto;scrollbar-width:none}
+.rail-inner::-webkit-scrollbar{display:none}
+.rail-link{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);padding:3px 10px;border-radius:var(--r-sm);white-space:nowrap;text-decoration:none;border:1px solid transparent}
+.rail-link:hover{color:var(--text-bright);background:var(--surface-2);text-decoration:none}
+.rail-link.active{color:var(--accent);background:var(--accent-bg);border-color:rgba(88,166,255,.3)}
 .console-footer{border-top:1px solid var(--border);background:var(--surface);margin-top:40px}
 .ft-inner{max-width:var(--page-max);margin:0 auto;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;color:var(--text-muted);font-size:var(--fs-sm)}
 .ft-inner a{color:var(--text-muted)}
@@ -45,11 +59,22 @@ a:hover{text-decoration:underline}
 .btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .btn:hover{border-color:var(--text-muted)}
 .btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.ghost{background:transparent}
 .btn.sm{font-size:var(--fs-sm);padding:3px 9px}
-.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted)}
+.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);white-space:nowrap}
 .b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
 .b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
-.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-err{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.35)}
+.b-info{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-dim{background:var(--surface-2);color:var(--text-muted)}
+.t-dim{color:var(--text-muted)}.t-ok{color:var(--green)}
+.hint{font-size:var(--fs-xs);color:var(--text-muted)}
+.wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
+.wrow:last-child{border-bottom:none}
+.wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
+.modal-actions .left{margin-right:auto}
+.section-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
+.section-head .spacer{flex:1}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-4)}
 .card-title{font-size:var(--fs-md);font-weight:600;color:var(--text-bright);margin-bottom:var(--sp-3)}
 .section-head{display:flex;align-items:center;gap:10px;margin:24px 0 12px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright)}
@@ -98,8 +123,22 @@ table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
       <a class="nav-link active" href="help.html">Help</a>
     </nav>
     <div class="hd-right">
-      <span class="badge b-dim">v4.2.1</span>
-      <button class="btn sm" id="hd-key">🔑 Set Key</button>
+      <!-- freshness slot: Help is static, so the slot states that plainly -->
+      <span class="pill p-paused" id="hd-conn" title="Help is a static page — there is nothing here to refresh">static</span>
+      <span class="badge b-dim" title="time since process start">up 3d 4h 12m</span>
+      <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
+      <button class="warn-btn" id="warn-bell" aria-label="Warnings and errors" title="Actionable warnings &amp; errors">
+        <span class="ico" id="warn-ico">⚠️</span><span id="warn-count">0</span>
+      </button>
+    </div>
+  </div>
+  <div class="hd-rail">
+    <div class="rail-inner">
+      <a class="rail-link" href="#connect" data-rail>Connect</a>
+      <a class="rail-link" href="#claude-code" data-rail>Claude Code</a>
+      <a class="rail-link" href="#codex" data-rail>Codex CLI</a>
+      <a class="rail-link" href="#openai-sdk" data-rail>OpenAI SDK</a>
+      <a class="rail-link" href="#troubleshooting" data-rail>Troubleshooting</a>
     </div>
   </div>
 </header>
@@ -109,31 +148,41 @@ table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
 <main class="page">
   <div class="section-head" style="margin-top:0">Agent Configuration Guides</div>
   <p style="color:var(--text-muted);margin-bottom:16px;max-width:820px">
-    Point any AI coding agent at this VMR instance: the <b>base URL</b> below plus a virtual model name is all
-    most clients need. The API key is provisioned by your administrator
-    (<code style="font-family:var(--font-mono)">api_keys:</code> in config.yaml) — it is never shown on this page.
+    Point any AI coding agent at this VMR instance: the base URL below plus a virtual model name is all most clients need.
   </p>
 
-  <!-- connection check (unified VMRAuth consumer) -->
-  <div class="card">
-    <div class="card-title">🔗 Connection check</div>
+  <!-- connection: identity of this instance + whether this browser can talk to it -->
+  <div class="card" id="connect" style="scroll-margin-top:96px">
+    <div class="card-title">Connection</div>
+    <table class="c" style="margin-bottom:12px">
+      <tbody>
+        <tr>
+          <td class="t-dim" style="width:110px">base_url</td>
+          <td id="v-base">http://127.0.0.1:8800/v1</td>
+          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="http://127.0.0.1:8800/v1">Copy</button></td>
+        </tr>
+        <tr>
+          <td class="t-dim">models</td>
+          <td><b>coding</b> <span class="badge b-dim">anthropic-messages</span> · <b>agent</b> <span class="badge b-dim">anthropic-messages</span> · <b>cheap</b> <span class="badge b-dim">openai-completions</span></td>
+          <td style="text-align:right" class="hint">a virtual model only answers on its own protocol</td>
+        </tr>
+        <tr>
+          <td class="t-dim">auth</td>
+          <td><code>Authorization: Bearer &lt;key&gt;</code> — provisioned by your administrator (<code>api_keys:</code> in config.yaml), never shown on this page</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <span class="pill p-paused" id="chk-state">no key stored</span>
       <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="chk-detail">No API key in this browser yet — endpoints below need one in the <code>Authorization: Bearer</code> header.</span>
-      <button class="btn sm" id="chk-btn" style="margin-left:auto">Check</button>
+      <button class="btn sm" id="chk-btn" style="margin-left:auto">Check connection</button>
       <button class="btn sm ghost" id="chk-set">Set key</button>
     </div>
   </div>
 
-  <div class="card" style="padding:12px 16px">
-    <div style="display:flex;gap:12px;flex-wrap:wrap;font-family:var(--font-mono);font-size:var(--fs-sm)">
-      <span><span style="color:var(--text-muted)">base_url</span> http://127.0.0.1:8800/v1</span>
-      <span><span style="color:var(--text-muted)">models</span> coding · agent · cheap</span>
-    </div>
-  </div>
-
   <!-- Claude Code -->
-  <details class="disc" open>
+  <details class="disc" id="claude-code" style="scroll-margin-top:96px" open>
     <summary>Claude Code <span class="badge b-info">anthropic-messages</span></summary>
     <div class="body">
       <p style="font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0 8px">Environment variables (add to your shell profile or launch wrapper):</p>
@@ -154,7 +203,7 @@ export ANTHROPIC_MODEL=vm:agent
   </details>
 
   <!-- Codex CLI -->
-  <details class="disc">
+  <details class="disc" id="codex" style="scroll-margin-top:96px">
     <summary>Codex CLI <span class="badge b-info">openai-responses</span></summary>
     <div class="body">
       <pre class="snippet" data-snippet><span class="c"># ~/.codex/config.toml</span>
@@ -172,7 +221,7 @@ wire_api = "responses"</pre>
   </details>
 
   <!-- Generic OpenAI SDK -->
-  <details class="disc">
+  <details class="disc" id="openai-sdk" style="scroll-margin-top:96px">
     <summary>Generic OpenAI SDK <span class="badge b-info">openai-completions</span></summary>
     <div class="body">
       <pre class="snippet" data-snippet><span class="k">from</span> openai <span class="k">import</span> OpenAI
@@ -189,13 +238,15 @@ resp = client.chat.completions.create(
     </div>
   </details>
 
-  <details class="disc">
+  <details class="disc" id="troubleshooting" style="scroll-margin-top:96px">
     <summary>Troubleshooting</summary>
     <div class="body" style="font-size:var(--fs-sm);color:var(--text-muted)">
-      <p>• 401 from every request → the key in <code style="font-family:var(--font-mono)">Authorization: Bearer</code> must match an entry of <code style="font-family:var(--font-mono)">api_keys:</code>.</p>
-      <p>• Unknown model → virtual models are per-protocol; check the Overview page's topology.</p>
-      <p>• Live 401s mid-session → vmr was reloaded with a changed <code style="font-family:var(--font-mono)">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
-      <p>• Request feels slow → check the Overview vitals (cooldowns) and Live tab (stall badges) first.</p>
+      <p>• <b>401 from every request</b> → the key in <code style="font-family:var(--font-mono)">Authorization: Bearer</code> must match an entry of <code style="font-family:var(--font-mono)">api_keys:</code>.</p>
+      <p>• <b>Unknown model</b> → virtual models are per-protocol; check <a href="overview.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> for the protocol each name answers on.</p>
+      <p>• <b>401s appearing mid-session</b> → vmr was reloaded with a changed <code style="font-family:var(--font-mono)">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
+      <p>• <b>A request feels slow or hangs</b> → open <a href="overview.html#live">Overview → Live Requests</a>: a red <i>stalled</i> badge means no upstream byte for over 10s; a long <i>queued</i> elapsed means the concurrency gate is full.</p>
+      <p>• <b>All requests suddenly fail over</b> → check <a href="overview.html#models">endpoint health</a> for cooldowns, and <a href="overview.html#quota">Quota Budgets</a> for a saturated gate.</p>
+      <p>• <b>A request just failed and you want to know why</b> → <a href="overview.html#failures">Overview → Recent Failures</a> lists the last failures with the router's own error class; the class chips double as a filter when one class floods the buffer.</p>
     </div>
   </details>
 </main>
@@ -203,7 +254,7 @@ resp = client.chat.completions.create(
 <!-- ===== unified footer ===== -->
 <footer class="console-footer">
   <div class="ft-inner">
-    <div>Virtual Model Router (VMR) · v4.2.1 · uptime 3d 4h 12m</div>
+    <div>Virtual Model Router (VMR) · v4.2.1 · pid 48211 · go1.24 · darwin/arm64 · listen 127.0.0.1:8800</div>
     <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr</a></div>
   </div>
 </footer>
@@ -218,42 +269,96 @@ const VMRAuth = {
   has() { return !!this.get(); },
   tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
 };
-(function injectModal() {
+let lastFocus = null;
+function openOverlay(el) {
+  lastFocus = document.activeElement;
+  el.classList.remove('hidden');
+  const f = el.querySelector('input,button');
+  if (f) setTimeout(() => f.focus(), 30);
+}
+function closeOverlay(el) { el.classList.add('hidden'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+function wireOverlay(el) { el.addEventListener('click', e => { if (e.target === el) closeOverlay(el); }); }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(closeOverlay);
+});
+const keyOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Authentication">
       <h2>Authentication Required</h2>
-      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage — it is never sent anywhere but this instance.</p>
       <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
       <div class="err" id="vmr-key-err"></div>
       <div class="modal-actions">
-        <button class="btn" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn ghost left" id="vmr-key-clear">Clear stored key</button>
         <button class="btn" id="vmr-key-cancel">Cancel</button>
         <button class="btn primary" id="vmr-key-save">Connect</button>
       </div>
     </div>`;
-  document.body.appendChild(div);
+  document.body.appendChild(div); wireOverlay(div); return div;
 })();
 function openKeyModal() {
-  const m = document.querySelector('.modal-overlay'); m.classList.remove('hidden');
   const inp = document.getElementById('vmr-key-input');
   inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
-  setTimeout(() => inp.focus(), 30);
+  openOverlay(keyOverlay);
 }
-function closeKeyModal() { document.querySelector('.modal-overlay').classList.add('hidden'); }
 document.getElementById('vmr-key-save').onclick = () => {
   const v = document.getElementById('vmr-key-input').value.trim();
   if (!v) { document.getElementById('vmr-key-err').textContent = 'Enter a key (any non-empty string works in this demo).'; return; }
-  VMRAuth.set(v); syncKeyBtn(); closeKeyModal(); renderCheck(); toast('Connected — key ' + VMRAuth.tail());
+  VMRAuth.set(v); syncKeyBtn(); closeOverlay(keyOverlay); renderCheck(); toast('Connected — key ' + VMRAuth.tail());
 };
-document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); renderCheck(); };
-document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeKeyModal(); });
+document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); closeOverlay(keyOverlay); renderCheck(); toast('Stored key cleared'); };
+document.getElementById('vmr-key-cancel').onclick = () => closeOverlay(keyOverlay);
 function syncKeyBtn() {
   const b = document.getElementById('hd-key');
   b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
+  b.title = VMRAuth.has() ? 'Key stored in this browser — click to change or clear' : 'Set the API key for this VMR instance';
 }
+/* warning bell — same content contract as Overview (actionable state only) */
+const WARNINGS = [
+  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
+  { sev: 'err', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.', when: '2m ago' },
+  { sev: 'warn', text: 'openrouter : backup — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.', when: 'now' },
+];
+const warnOverlay = (() => {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
+      <div id="warn-list"></div>
+      <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
+    </div>`;
+  document.body.appendChild(div); wireOverlay(div); return div;
+})();
+(function renderWarnings() {
+  const bell = document.getElementById('warn-bell');
+  document.getElementById('warn-list').innerHTML = WARNINGS.map(w => `
+    <div class="wrow">
+      <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
+      <span>${w.text}</span><span class="when">${w.when}</span>
+    </div>`).join('');
+  const hasErr = WARNINGS.some(w => w.sev === 'err');
+  bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
+  document.getElementById('warn-ico').textContent = hasErr ? '\u{1F6A8}' : '\u26A0\uFE0F';
+  document.getElementById('warn-count').textContent = WARNINGS.length;
+  document.getElementById('warn-modal-count').textContent = WARNINGS.length + ' open';
+  document.getElementById('warn-close').onclick = () => closeOverlay(warnOverlay);
+})();
+document.getElementById('warn-bell').onclick = () => openOverlay(warnOverlay);
+/* rail scroll-spy */
+(function railSpy() {
+  const links = [...document.querySelectorAll('[data-rail]')];
+  const targets = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const spy = () => {
+    let cur = 0;
+    targets.forEach((t, i) => { if (t.getBoundingClientRect().top <= 110) cur = i; });
+    links.forEach((a, i) => a.classList.toggle('active', i === cur));
+  };
+  window.addEventListener('scroll', spy, { passive: true });
+  spy();
+})();
 document.getElementById('hd-key').onclick = openKeyModal;
 function toast(msg) {
   let t = document.querySelector('.toast');
@@ -279,6 +384,10 @@ document.querySelectorAll('[data-copy-target]').forEach(btn => {
     const pre = btn.parentElement.querySelector('pre[data-snippet]');
     if (pre) copyText(pre.innerText, btn);
   };
+});
+// copy buttons for single values (base_url etc.)
+document.querySelectorAll('[data-copy-value]').forEach(btn => {
+  btn.onclick = () => copyText(btn.dataset.copyValue, btn);
 });
 // connection check (demo: reads the shared key, fakes a probe)
 function renderCheck() {

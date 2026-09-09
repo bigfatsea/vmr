@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by pi — STATIC DEMO v3, mock data only, no network. -->
+<!-- Ver 2026-09-14, by pi — STATIC DEMO v5 (2026-09-09 review + owner sign-off), mock data only, no network. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -15,15 +15,16 @@
   --accent:#58a6ff;--accent-hover:#79c0ff;
   --green:#3fb950;--yellow:#d29922;--orange:#e8813a;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;--pink:#f778ba;
   --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
-  --cyan-bg:rgba(57,197,207,.15);--purple-bg:rgba(188,140,255,.15);
+  --cyan-bg:rgba(57,197,207,.15);--purple-bg:rgba(188,140,255,.15);--accent-bg:rgba(88,166,255,.14);
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;--fs-2xl:18px;--fs-3xl:20px;
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
   --r-sm:6px;--r-md:8px;--r-pill:999px;
   --page-max:1280px;
+  --hd-h:88px;              /* header (identity row + section rail) — anchors offset by this */
 }
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);line-height:1.55}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -32,8 +33,15 @@ a:hover{text-decoration:underline}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--bg)}
 ::-webkit-scrollbar-track{background:transparent}
 
-/* header */
-.console-header{position:sticky;top:0;z-index:50;background:rgba(22,27,34,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+/* text utilities — pages use classes, never raw colours (design token discipline) */
+.t-ok{color:var(--green)}.t-warn{color:var(--yellow)}.t-err{color:var(--red)}
+.t-dim{color:var(--text-muted)}.t-key{color:var(--purple)}.t-accent{color:var(--accent)}
+.t-strong{color:var(--text-bright);font-weight:600}
+.hint{font-size:var(--fs-xs);color:var(--text-muted)}
+.help{border-bottom:1px dotted var(--text-muted);cursor:help}
+
+/* header: identity row + section rail, one sticky block */
+.console-header{position:sticky;top:0;z-index:50;background:rgba(22,27,34,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
 .hd-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:14px;padding:10px 16px}
 .brand{display:flex;align-items:center;gap:9px;text-decoration:none}
 .brand:hover{text-decoration:none}
@@ -44,12 +52,27 @@ a:hover{text-decoration:underline}
 .hd-right{margin-left:auto;display:flex;align-items:center;gap:9px}
 .nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
 .nav-link:hover{color:var(--text-bright);text-decoration:none}
-.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
-.icon-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;border-radius:var(--r-sm)}
-.icon-btn:hover{color:var(--text-bright);background:var(--surface-2)}
-.icon-btn .cnt{position:absolute;top:-4px;right:-6px;background:var(--red);color:#fff;font-family:var(--font-mono);font-size:9px;line-height:1;padding:2px 4px;border-radius:var(--r-pill)}
+.nav-link.active{color:var(--text-bright);background:var(--accent-bg);border-color:var(--accent)}
+/* refresh pill doubles as the freshness indicator: it also carries the paused state */
 .refresh-pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
 .refresh-pill:hover{color:var(--text-bright);border-color:var(--text-muted)}
+.refresh-pill.paused{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+/* alert pill, far right: glyph carries severity, count carries volume */
+.warn-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;line-height:1.4}
+.warn-btn .ico{font-size:12px;line-height:1}
+.warn-btn.has-warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+.warn-btn.has-err{color:var(--red);border-color:rgba(248,81,73,.4);background:var(--red-bg)}
+.warn-btn.quiet{opacity:.6}
+
+/* section rail (anchor navigation for the single flat page) */
+.hd-rail{border-top:1px solid var(--border-soft)}
+.rail-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:3px;padding:5px 16px;overflow-x:auto;scrollbar-width:none}
+.rail-inner::-webkit-scrollbar{display:none}
+.rail-link{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);padding:3px 10px;border-radius:var(--r-sm);white-space:nowrap;text-decoration:none;border:1px solid transparent}
+.rail-link:hover{color:var(--text-bright);background:var(--surface-2);text-decoration:none}
+.rail-link.active{color:var(--accent);background:var(--accent-bg);border-color:rgba(88,166,255,.3)}
+.rail-link .n{color:var(--text-muted);margin-left:5px}
+.rail-link.active .n{color:var(--accent)}
 
 /* footer */
 .console-footer{border-top:1px solid var(--border);background:var(--surface);margin-top:32px}
@@ -58,86 +81,114 @@ a:hover{text-decoration:underline}
 .ft-inner a:hover{color:var(--text)}
 
 /* layout & components */
-.page{max-width:var(--page-max);margin:0 auto;padding:20px 16px 8px}
+.page{max-width:var(--page-max);margin:0 auto;padding:18px 16px 8px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-4)}
 .card-title{font-size:var(--fs-md);font-weight:600;color:var(--text-bright);margin-bottom:var(--sp-3)}
-.section-head{display:flex;align-items:center;gap:10px;margin:26px 0 10px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright)}
+.section-head{display:flex;align-items:center;gap:10px;margin:24px 0 9px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright);scroll-margin-top:var(--hd-h)}
 .section-head:first-of-type{margin-top:4px}
 .section-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
 .section-head .spacer{flex:1}
+/* one visual rank below section-head — reserved for genuine sub-tables */
+.sub-head{display:flex;align-items:center;gap:9px;margin:14px 0 7px;font-size:var(--fs-lg);font-weight:600;color:var(--text)}
+.sub-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
+.sub-head .spacer{flex:1}
 .btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:500;transition:border-color .15s,background .15s}
 .btn:hover{border-color:var(--text-muted)}
 .btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
 .btn.primary:hover{background:var(--accent-hover)}
 .btn.ghost{background:transparent}
 .btn.sm{font-size:var(--fs-sm);padding:3px 9px}
-.btn.on{color:var(--text-bright);border-color:var(--accent);background:rgba(88,166,255,.14)}
+.btn.on{color:var(--text-bright);border-color:var(--accent);background:var(--accent-bg)}
+.seg{display:inline-flex;gap:4px;align-items:center}
+.seg-label{font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-right:2px}
 .badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);white-space:nowrap}
 .b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
 .b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
 .b-err{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.35)}
-.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-info{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
 .b-cyan{background:var(--cyan-bg);color:var(--cyan);border-color:rgba(57,197,207,.35)}
 .b-purple{background:var(--purple-bg);color:var(--purple);border-color:rgba(188,140,255,.35)}
 .b-dim{background:var(--surface-2);color:var(--text-muted)}
+.badge.tight{padding:1px 7px}
+/* status pill: unused on Overview (the refresh countdown carries freshness here) but part
+   of the shared block — Log uses all four states, and a missing state means bare text */
 .pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
 .p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
+.p-connecting{color:var(--yellow);border-color:rgba(210,153,34,.3);background:var(--yellow-bg)}
+.p-down{color:var(--red);border-color:rgba(248,81,73,.3);background:var(--red-bg)}
+.p-paused{color:var(--text-muted);border-color:var(--border);background:var(--surface-2)}
 .input{font-family:inherit;font-size:var(--fs-md);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;outline:none;transition:border-color .15s}
 .input:hover{border-color:var(--text-muted)}
 .input:focus{border-color:var(--accent)}
 .table-wrap{border:1px solid var(--border);border-radius:var(--r-md);overflow:auto;background:var(--surface);margin-bottom:var(--sp-4)}
-table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
-.c th{background:var(--surface-2);color:var(--text-muted);font-weight:600;padding:7px 12px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;position:sticky;top:0}
+/* bounded height so the sticky header row actually sticks while a long table scrolls */
+.table-wrap.bounded{max-height:56vh}
+table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+.c th{background:var(--surface-2);color:var(--text-muted);font-weight:600;padding:7px 12px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;position:sticky;top:0;z-index:2}
 .c td{padding:7px 12px;border-bottom:1px solid var(--border-soft);font-family:var(--font-mono);white-space:nowrap}
-.c tr:last-child td{border-bottom:none}
-.c tbody tr:hover{background:rgba(88,166,255,.04)}
-.c td.num,.c th.num{text-align:right;font-variant-numeric:tabular-nums}
+.c tbody tr:last-child td{border-bottom:none}
+.c tbody tr:hover{background:rgba(88,166,255,.045)}
+.c tfoot td{padding:7px 12px;border-top:1px solid var(--border);background:var(--surface-2);font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
+.c td.num,.c th.num,.c tfoot td.num{text-align:right;font-variant-numeric:tabular-nums}
 .c td .dim,.c .dim{color:var(--text-muted)}
+/* group boundary inside a rowspan-grouped table */
+.c tr.grp td{border-top:1px solid var(--border)}
+.c tbody tr:first-child.grp td{border-top:none}
+/* long identifiers must truncate, never push the diagnostic columns off-screen */
+.ep{display:inline-block;max-width:290px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.zero td{color:var(--text-muted)}
+/* transport mode: streaming vs single-JSON samples never share a percentile.
+   Spelled out, never an icon — a glyph makes the reader learn a legend first. */
+.mode{font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:var(--r-pill);border:1px solid;margin-left:6px}
+.m-stream{color:var(--cyan);background:var(--cyan-bg);border-color:rgba(57,197,207,.35)}
+.m-json{color:var(--text-muted);background:var(--surface-2);border-color:var(--border)}
+.c td > .mode:first-child{margin-left:0}   /* in its own Mode column, not trailing a name */
 .progress{height:6px;background:var(--well);border-radius:3px;overflow:hidden;min-width:90px}
 .progress>span{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease}
 .progress>span.warn{background:var(--yellow)}
 .progress>span.danger{background:var(--red)}
+.sharebar{height:4px;background:var(--well);border-radius:2px;overflow:hidden;width:64px;display:inline-block;vertical-align:middle;margin-right:7px}
+.sharebar>span{display:block;height:100%;background:var(--accent);opacity:.75}
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(480px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
-.modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2)}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
+.modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
 .modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
-.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-2)}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-3)}
+.modal-actions .left{margin-right:auto}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none;box-shadow:0 8px 24px rgba(1,4,9,.5)}
 .toast.show{opacity:1}
-details.disc>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px;font-weight:600;color:var(--text-bright)}
-details.disc>summary::-webkit-details-marker{display:none}
-details.disc>summary::before{content:"▸";color:var(--text-muted);transition:transform .15s;font-size:var(--fs-sm)}
-details.disc[open]>summary::before{transform:rotate(90deg)}
 
 /* vitals strip */
-.vitals{display:grid;grid-template-columns:repeat(4,1fr);padding:0;overflow:hidden}
-.vseg{padding:13px 16px;border-left:1px solid var(--border-soft)}
+.vitals{display:grid;grid-template-columns:repeat(5,1fr);padding:0;overflow:hidden}
+.vseg{padding:12px 15px;border-left:1px solid var(--border-soft);min-width:0}
 .vseg:first-child{border-left:none}
-.v-label{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
-.v-main{font-size:var(--fs-3xl);font-weight:700;color:var(--text-bright);font-family:var(--font-mono);line-height:1.2}
+.v-label{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v-label .win{text-transform:none;letter-spacing:0;color:#6e7681}
+.v-main{font-size:var(--fs-3xl);font-weight:700;color:var(--text-bright);font-family:var(--font-mono);line-height:1.2;font-variant-numeric:tabular-nums}
 .v-main small{font-size:var(--fs-md);color:var(--text-muted);font-weight:400}
-.v-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px 10px}
-.v-sub .g{color:var(--green)}.v-sub .r{color:var(--red)}.v-sub .y{color:var(--yellow)}.v-sub .a{color:var(--accent)}
-.sysline{border-top:1px solid var(--border-soft);padding:9px 16px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);display:flex;flex-wrap:wrap;gap:4px 22px}
+.v-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:2px 10px;font-family:var(--font-mono)}
+.sysline{border-top:1px solid var(--border-soft);padding:9px 15px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);display:flex;flex-wrap:wrap;gap:4px 22px}
 .sysline b{color:var(--text);font-weight:400}
 
-/* pri tiers + stall */
+/* priority tiers + live-table states */
 .pri{font-family:var(--font-mono);font-size:10px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid}
-.pri-1{background:rgba(88,166,255,.14);color:#58a6ff;border-color:rgba(88,166,255,.35)}
+.pri-1{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
 .pri-2{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.pri-n{background:var(--surface-2);color:var(--text-muted);border-color:var(--border)}
 .stall{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.4);font-weight:700;animation:pulse 1.4s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* chart */
-.chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px}
+.chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;align-items:center}
 .chart-legend .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .chart-legend .line{display:inline-block;width:16px;height:2px;background:var(--yellow);margin-right:5px;vertical-align:3px}
+.chart-legend .xdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:5px;vertical-align:0}
 .chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:var(--sp-4);position:relative}
 .chart-wrap svg{display:block;width:100%;height:auto}
-.chart-tip{position:absolute;z-index:60;display:none;pointer-events:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 11px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);box-shadow:0 8px 24px rgba(1,4,9,.55);white-space:nowrap}
+.chart-tip{position:absolute;z-index:60;display:none;pointer-events:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 11px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);box-shadow:0 8px 24px rgba(1,4,9,.55);white-space:nowrap;line-height:1.7}
 .chart-tip b{color:var(--text-bright)}
 .chart-tip .tr{color:var(--text-muted)}
 
@@ -146,18 +197,34 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 .wrow:last-child{border-bottom:none}
 .wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
 
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+
 /* demo-only chrome */
-.demo-ribbon{position:fixed;top:58px;right:12px;z-index:200;background:var(--purple-bg);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
-.demo-panel{position:fixed;right:12px;bottom:12px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;font-size:var(--fs-xs);color:var(--text-muted);box-shadow:0 10px 30px rgba(1,4,9,.55)}
+.demo-ribbon{position:fixed;top:96px;right:12px;z-index:200;background:var(--purple-bg);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
+.demo-panel{position:fixed;right:12px;bottom:12px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;font-size:var(--fs-xs);color:var(--text-muted);box-shadow:0 10px 30px rgba(1,4,9,.55);max-width:260px}
+.demo-panel .hd{display:flex;align-items:center;gap:10px}
 .demo-panel b{color:var(--purple);font-size:var(--fs-xs);letter-spacing:.5px}
-.demo-panel .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.demo-panel .fold{margin-left:auto;background:none;border:none;color:var(--text-muted);cursor:pointer;font-family:var(--font-mono);padding:0 3px}
+.demo-panel .row{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
 .demo-panel .btn{font-size:var(--fs-xs);padding:3px 9px}
-@media (max-width:900px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}}
+.demo-panel.folded .body{display:none}
+
+/* class filter chips (Recent Failures) */
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}
+.chip{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;font-weight:400}
+.chip:hover{color:var(--text-bright)}
+.chip.on{color:var(--red);background:var(--red-bg);border-color:rgba(248,81,73,.4)}
+.chip.on[data-cls=canceled]{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.4)}
+.chip .n{opacity:.75;margin-left:4px}
+
+@media (max-width:1160px){.vitals{grid-template-columns:repeat(3,1fr)}.vseg:nth-child(4){border-left:none}}
+@media (max-width:1080px){.hd-uptime{display:none}}
+@media (max-width:820px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}.grid-2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 
-<!-- ===== unified header (console.js injects this in the real impl) ===== -->
+<!-- ===== unified header: identity row + section rail (console.js injects both in the real impl) ===== -->
 <header class="console-header">
   <div class="hd-inner">
     <a class="brand" href="overview.html">
@@ -170,20 +237,29 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
       <a class="nav-link" href="help.html">Help</a>
     </nav>
     <div class="hd-right">
-      <!-- warning bell: count only; click opens the warning list -->
-      <button class="icon-btn" id="warn-bell" title="Warnings & errors">
-        <svg height="15" width="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16z"/><path d="M8 1.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.018.018 0 0 0-.003.01l.001.006c0 .002.002.004.004.006a.02.02 0 0 0 .005.007l.006.004.007.001h10.994l.007-.001.006-.004a.02.02 0 0 0 .005-.007l.001-.007a.018.018 0 0 0-.003-.01l-1.704-2.555a1.745 1.745 0 0 1-.293-.97V5A3.5 3.5 0 0 0 8 1.5z"/></svg>
-        <span class="cnt" id="warn-count">3</span>
-      </button>
-      <!-- 5-minute auto-refresh countdown; click = refresh now -->
-      <button class="refresh-pill" id="hd-refresh" title="Auto-refresh countdown — click to refresh now">
-        <svg height="11" width="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
+      <!-- countdown to the next whole-page refresh; also carries the paused state -->
+      <button class="refresh-pill" id="hd-refresh" title="Time to the next automatic refresh — click to refresh now">
+        <svg height="11" width="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
         <span id="cd">5:00</span>
       </button>
-      <span class="badge b-dim" title="vmr v4.2.1 · go1.24 · darwin/arm64">v4.2.1 · pid 48211</span>
-      <span class="badge b-dim" title="time since process start">up 3d 4h</span>
-      <span class="pill p-live" id="hd-conn" title="whole page refreshes on the countdown — click the countdown to refresh now">live</span>
+      <span class="badge b-dim hd-uptime" title="time since process start">up 3d 4h 12m</span>
       <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
+      <!-- alerts sit at the far right: the last thing the eye lands on before leaving the header -->
+      <button class="warn-btn" id="warn-bell" aria-label="Warnings and errors" title="Actionable warnings &amp; errors">
+        <span class="ico" id="warn-ico">⚠️</span><span id="warn-count">0</span>
+      </button>
+    </div>
+  </div>
+  <!-- section rail: the flat page is long; this is its table of contents -->
+  <div class="hd-rail">
+    <div class="rail-inner">
+      <a class="rail-link" href="#vitals" data-rail>Overview</a>
+      <a class="rail-link" href="#quota" data-rail>Quota<span class="n" id="rail-quota">3</span></a>
+      <a class="rail-link" href="#models" data-rail>Models<span class="n" id="rail-models">3</span></a>
+      <a class="rail-link" href="#live" data-rail>Live<span class="n" id="rail-live">0</span></a>
+      <a class="rail-link" href="#failures" data-rail>Failures<span class="n" id="rail-fail">6</span></a>
+      <a class="rail-link" href="#perf" data-rail>Performance</a>
+      <a class="rail-link" href="#traffic" data-rail>Traffic &amp; Usage</a>
     </div>
   </div>
 </header>
@@ -192,131 +268,243 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 
 <main class="page">
 
-  <!-- ============ vitals strip (compressed from 4 cards + storage) ============ -->
-  <div class="card" style="padding:0;overflow:hidden">
+  <!-- ============ vitals strip: the five questions asked on arrival ============ -->
+  <div class="card" style="padding:0;overflow:hidden;scroll-margin-top:var(--hd-h)" id="vitals">
     <div class="vitals">
       <div class="vseg">
-        <div class="v-label">Concurrency</div>
+        <div class="v-label">Concurrency <span class="win">· now</span></div>
         <div class="v-main" id="v-conc">0<small> / 8</small></div>
-        <div class="v-sub"><span><span class="a" id="v-queued">0</span> queued</span><span>max_concurrency 8</span></div>
+        <div class="v-sub"><span id="v-queued-wrap"><span class="t-accent" id="v-queued">0</span> queued</span><span id="v-peak">peak 7</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">Requests</div>
+        <div class="v-label">Requests <span class="win">· since start</span></div>
         <div class="v-main" id="v-req">12,847</div>
-        <div class="v-sub"><span class="g" id="v-ok">12,702 ok</span><span><span class="y" id="v-cancel">61</span> cancel</span><span class="r">84 err</span></div>
+        <div class="v-sub"><span class="t-ok" id="v-ok">12,702 ok</span><span class="t-warn" id="v-cancel">61 cancel</span><span class="t-err" id="v-err" title="errored requests / all requests since process start">84 err · 0.65%</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">Tokens</div>
+        <div class="v-label">Tokens <span class="win">· since start</span></div>
         <div class="v-main" id="v-tok">48.20M</div>
-        <div class="v-sub"><span>in 31.40M</span><span>out 16.80M</span><span class="g">cache hit 62%</span></div>
+        <div class="v-sub"><span>in 31.40M</span><span>out 16.80M</span><span class="t-ok help" title="cache_read / (fresh + cache_write + cache_read) — share of prompt tokens served from the upstream prompt cache">cache 62%</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">System</div>
-        <div class="v-main" style="font-size:var(--fs-xl);padding-top:4px">412 MB · 233 gor</div>
-        <div class="v-sub"><span>disk 489.00G free</span></div>
+        <div class="v-label">TTFT p50 <span class="win">· last 100</span></div>
+        <div class="v-main" id="v-ttft">0.93<small>s</small></div>
+        <div class="v-sub"><span>p90 2.88s</span><span class="help" title="per-request throughput: all four token components / total duration, p50 over the same window">tok/s 22.30</span></div>
+      </div>
+      <div class="vseg">
+        <div class="v-label">Endpoints <span class="win">· now</span></div>
+        <div class="v-main" id="v-eps">5<small> / 7 healthy</small></div>
+        <div class="v-sub"><span class="t-warn">1 half-open</span><span class="t-err">1 cooldown</span></div>
       </div>
     </div>
-    <!-- system detail: single line, no folding, no heading (v2 review) -->
+    <!-- process & storage detail: one line, no folding, no heading -->
     <div class="sysline">
-      <span>heap <b>412 MB</b> / sys 586 MB</span>
-      <span>goroutines <b>233</b></span>
-      <span>disk free <b>489.00G</b></span>
-      <span>audit <b>on</b> · 1.20G · 38 files</span>
-      <span>image cache <b>on</b> · 256.00M · ttl 7d</span>
+      <span>vmr <b>v4.2.1</b> · pid 48211</span>
+      <span>heap <b>412 MB</b> / sys 586 MB · 233 goroutines</span>
+      <span>disk free <b>489 GB</b></span>
+      <span>audit <b>on</b> · 1.20 GB · 38 files</span>
+      <span>image cache <b>on</b> · 256 MB · ttl 7d</span>
     </div>
   </div>
 
   <!-- ============ quota budgets ============ -->
-  <div class="section-head" id="quota">Quota Budgets <span class="badge b-dim">3</span></div>
+  <div class="section-head" id="quota">Quota Budgets
+    <span class="badge b-dim">3 accounts</span>
+    <span class="count">headroom = pace of spend vs pace of time; 1.00 is exactly on pace</span>
+  </div>
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
         <th>Provider : Key</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
-        <th style="width:180px">Progress</th><th class="num">Headroom</th><th>Resets</th>
+        <th style="width:190px">Progress</th><th class="num">Headroom</th><th>Resets</th>
       </tr></thead>
       <tbody>
         <tr>
-          <td>packycode : <span class="b-purple badge" style="padding:1px 7px">main</span></td>
-          <td><span class="badge b-info" title="bucket — longest-period limit; unused allowance is real waste, so spare headroom raises routing priority">tokens / 1mo</span></td>
-          <td style="color:var(--text-muted)">all models</td>
-          <td class="num">100.00M</td><td class="num">68.20M</td>
-          <td><div class="progress"><span class="warn" style="width:68%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 2.10%</span></td>
-          <td class="num" style="color:var(--yellow)" title="(1 - used_frac) / time_left_frac — on pace = 1.00, >1 underused, <1 overspent, 0 exhausted">0.60</td>
-          <td style="color:var(--text-muted)">in 16d</td>
+          <td>packycode : <span class="badge b-purple tight">main</span></td>
+          <td><span class="badge b-cyan" title="bucket — the longest-period limit on this account. Unused allowance is real waste, so spare headroom raises routing priority.">bucket · tokens / 1mo</span></td>
+          <td class="t-dim">all models</td>
+          <td class="num">100M</td><td class="num">68.20M</td>
+          <td>
+            <div class="progress"><span class="warn" style="width:68%"></span></div>
+            <span class="hint">68.20% used</span>
+          </td>
+          <td class="num t-warn help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Below 1 = spending ahead of the clock.">0.60</td>
+          <td class="t-dim">10-01 00:00 <span class="dim">· in 16d</span></td>
         </tr>
         <tr>
-          <td>deepseek : <span class="badge b-dim" style="padding:1px 7px">a1b2c3</span></td>
-          <td><span class="badge b-err" title="gate — shorter-period rate cap; near-saturation lowers routing priority, never boosts it">requests / 1d</span></td>
-          <td style="color:var(--text-muted)">cheap</td>
+          <td>deepseek : <span class="badge b-dim tight">a1b2c3</span></td>
+          <td><span class="badge b-purple" title="gate — a shorter-period rate cap. Near-saturation lowers routing priority; it never raises it.">gate · requests / 1d</span></td>
+          <td class="t-dim">cheap</td>
           <td class="num">25,000</td><td class="num">3,211</td>
-          <td><div class="progress"><span style="width:13%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.00%</span></td>
-          <td class="num" style="color:var(--green)">2.33</td>
-          <td style="color:var(--text-muted)">04:00 (9h)</td>
+          <td>
+            <div class="progress"><span style="width:13%"></span></div>
+            <span class="hint">12.84% used</span>
+          </td>
+          <td class="num t-ok help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Above 1 = under-using the budget.">2.33</td>
+          <td class="t-dim">04:00 <span class="dim">· in 9h</span></td>
         </tr>
         <tr>
-          <td>openrouter : <span class="badge b-purple" style="padding:1px 7px">backup</span></td>
-          <td><span class="badge b-err" title="gate — shorter-period rate cap">requests / 1d</span></td>
-          <td style="color:var(--text-muted)">all models</td>
+          <td>openrouter : <span class="badge b-purple tight">backup</span></td>
+          <td><span class="badge b-purple" title="gate — a shorter-period rate cap. Near-saturation lowers routing priority; it never raises it.">gate · requests / 1d</span></td>
+          <td class="t-dim">all models</td>
           <td class="num">10,000</td><td class="num">9,800</td>
-          <td><div class="progress"><span class="danger" style="width:98%"></span></div><span style="font-size:var(--fs-xs);color:var(--text-muted)">est 0.00%</span></td>
-          <td class="num" style="color:var(--red)">0.61</td>
-          <td style="color:var(--text-muted)">in 47m</td>
+          <td>
+            <div class="progress"><span class="danger" style="width:98%"></span></div>
+            <span class="hint t-err">98% used · 200 left</span>
+          </td>
+          <td class="num t-warn help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Below 1 = spending ahead of the clock.">0.61</td>
+          <td class="t-dim">04:00 <span class="dim">· in 47m</span></td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <!-- ============ virtual models & endpoint topology ============ -->
-  <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology <span class="badge b-dim">3 models · 5 endpoints</span></div>
+  <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology
+    <span class="badge b-dim">3 models · 5 endpoints</span>
+    <span class="count">share = this endpoint's share of all forwarded requests in the last 24h</span>
+  </div>
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Virtual Model</th><th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th class="num">Ctx</th><th class="num">Headroom</th>
+        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order">PRI</th>
+        <th>Provider : Key : Model</th><th>Health</th>
+        <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
+        <th class="num" title="Share of forwarded requests over the last 24h">Share 24h</th>
+        <th>Context / Capabilities</th>
       </tr></thead>
       <tbody>
-        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">coding</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
-        <tr><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">backup</span> : claude-sonnet-4</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
-        <tr><td rowspan="2" style="color:var(--text-bright);font-weight:600">agent</td><td class="num"><span class="pri pri-1">P1</span></td><td>packycode : <span style="color:var(--purple)">main</span> : claude-opus-4.6</td><td><span class="badge b-ok">healthy</span></td><td class="num">200.00K</td><td class="num" style="color:var(--yellow)">0.60</td></tr>
-        <tr><td class="num"><span class="pri pri-2">P2</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-r2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128.00K</td><td class="num" style="color:var(--green)">2.33</td></tr>
-        <tr><td style="color:var(--text-bright);font-weight:600">cheap</td><td class="num"><span class="pri pri-1">P1</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-chat</td><td><span class="badge b-warn">half-open</span></td><td class="num">128.00K</td><td class="num" style="color:var(--green)">2.33</td></tr>
+        <tr class="grp">
+          <td rowspan="2"><span class="dim">anthropic-messages:</span><br><span class="t-strong">coding</span></td>
+          <td class="num"><span class="pri pri-1">P1</span></td>
+          <td><span class="ep" title="packycode : main : claude-sonnet-4">packycode : <span class="t-key">main</span> : claude-sonnet-4</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-warn">0.60</td>
+          <td class="num"><span class="sharebar"><span style="width:38%"></span></span>38.2%</td>
+          <td>200K <span class="dim">· tools · image</span></td>
+        </tr>
+        <tr>
+          <td class="num"><span class="pri pri-1">P1</span></td>
+          <td><span class="ep" title="packycode : backup : claude-sonnet-4">packycode : <span class="t-key">backup</span> : claude-sonnet-4</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-warn">0.60</td>
+          <td class="num"><span class="sharebar"><span style="width:11%"></span></span>11.4%</td>
+          <td>200K <span class="dim">· tools · image</span></td>
+        </tr>
+        <tr class="grp">
+          <td rowspan="2"><span class="dim">anthropic-messages:</span><br><span class="t-strong">agent</span></td>
+          <td class="num"><span class="pri pri-1">P1</span></td>
+          <td><span class="ep" title="packycode : main : claude-opus-4.6">packycode : <span class="t-key">main</span> : claude-opus-4.6</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-warn">0.60</td>
+          <td class="num"><span class="sharebar"><span style="width:25%"></span></span>24.7%</td>
+          <td>200K <span class="dim">· tools · image · thinking</span></td>
+        </tr>
+        <tr>
+          <td class="num"><span class="pri pri-2">P2</span></td>
+          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-r2">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-r2</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num"><span class="sharebar"><span style="width:6%"></span></span>6.1%</td>
+          <td>128K <span class="dim">· tools · thinking</span></td>
+        </tr>
+        <tr class="grp">
+          <td><span class="dim">openai-completions:</span><br><span class="t-strong">cheap</span></td>
+          <td class="num"><span class="pri pri-1">P1</span></td>
+          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-chat">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-chat</span></td>
+          <td><span class="badge b-warn" title="Cooldown elapsed — the next request is the single half-open trial. Last error: transient 429 (4m ago).">half-open</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num"><span class="sharebar"><span style="width:18%"></span></span>17.9%</td>
+          <td>128K <span class="dim">· tools</span></td>
+        </tr>
       </tbody>
     </table>
   </div>
 
-  <div class="section-head" style="font-size:var(--fs-lg);margin-top:14px">Fallback Endpoints <span class="badge b-dim">2</span></div>
+  <div class="sub-head">Fallback Endpoints
+    <span class="badge b-dim">2</span>
+    <span class="count">tried after every priority tier of the matched virtual model is exhausted</span>
+  </div>
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th class="num">PRI</th><th>Provider : Key : Model</th><th>Health</th><th class="num">Ctx</th><th>Capabilities</th>
+        <th class="num" title="Fallback ordering — a separate space from the per-model priority tiers">ORD</th>
+        <th>Provider : Key : Model</th><th>Health</th>
+        <th class="num">Headroom</th><th class="num">Share 24h</th><th>Context / Capabilities</th>
       </tr></thead>
       <tbody>
-        <tr><td class="num"><span class="pri pri-2">P9</span></td><td>deepseek : <span style="color:var(--text-muted)">a1b2c3</span> : deepseek-v3.2</td><td><span class="badge b-ok">healthy</span></td><td class="num">128.00K</td><td style="color:var(--text-muted)">tools</td></tr>
-        <tr><td class="num"><span class="pri pri-2">P9</span></td><td>openrouter : <span style="color:var(--purple)">backup</span> : anthropic/claude-opus-4.6</td><td><span class="badge b-err">cooldown 2m 13s</span></td><td class="num">200.00K</td><td style="color:var(--text-muted)">tools · image · thinking</td></tr>
+        <tr>
+          <td class="num"><span class="pri pri-n">1</span></td>
+          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-v3.2">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-v3.2</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num"><span class="sharebar"><span style="width:1%"></span></span>1.4%</td>
+          <td>128K <span class="dim">· tools</span></td>
+        </tr>
+        <tr>
+          <td class="num"><span class="pri pri-n">2</span></td>
+          <td><span class="ep" title="openrouter : backup : anthropic/claude-opus-4.6">openrouter : <span class="t-key">backup</span> : anthropic/claude-opus-4.6</span></td>
+          <td><span class="badge b-err" title="Excluded from routing until the cooldown expires. Cause: upstream 500 (transient), 3 consecutive failures.">cooldown 2m 13s</span></td>
+          <td class="num t-warn">0.61</td>
+          <td class="num"><span class="sharebar"><span style="width:1%"></span></span>0.3%</td>
+          <td>200K <span class="dim">· tools · image · thinking</span></td>
+        </tr>
       </tbody>
     </table>
   </div>
 
-  <!-- ============ live requests (refreshes with the page) ============ -->
+  <!-- ============ live requests ============ -->
   <div class="section-head" id="live">Live Requests
     <span class="badge b-cyan" id="live-running">0 running</span>
     <span class="badge b-warn" id="live-queued">0 queued</span>
-    <span class="count">refreshes with the page</span>
+    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap bounded">
     <table class="c">
       <thead><tr>
-        <th>State</th><th class="num">Seq</th><th>Model</th><th>Caller</th><th>Provider : Key : Model</th>
-        <th class="num">Att</th><th class="num">Elapsed</th><th class="num">First / Last Tok</th><th class="num">Tok in</th><th class="num">Tok out</th>
+        <th>State</th>
+        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
+        <th>Model</th><th>Caller</th>
+        <th>Provider : Key : Model</th>
+        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
+        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
+        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
+        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
       </tr></thead>
       <tbody id="live-body"></tbody>
     </table>
   </div>
 
+  <!-- ============ recent failures: the gap between "now" and the hourly aggregates ============ -->
+  <div class="section-head" id="failures">Recent Failures
+    <span class="badge b-err" id="fail-count">0</span>
+    <span class="count">in memory only — cleared on restart, never contains request bodies</span>
+    <span class="spacer"></span>
+    <!-- one class can flood the buffer; the chips are both a breakdown and a filter -->
+    <span class="chips" id="fail-chips"></span>
+  </div>
+  <div class="table-wrap bounded">
+    <table class="c">
+      <thead><tr>
+        <th class="num" title="Arrival time of the request; hover a row's time for its process-local request number">When</th>
+        <th>Model</th><th>Caller</th>
+        <th>Provider : Key : Model</th>
+        <th class="num" title="Attempts made before the request was given up on">Att</th>
+        <th>Outcome</th>
+        <th class="num" title="Client-view total duration">Dur</th>
+      </tr></thead>
+      <tbody id="fail-body"></tbody>
+    </table>
+  </div>
+
   <!-- ============ performance ============ -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">nearest-rank percentiles · tok/s = all four token components / dur</span>
+    <span class="count">one row per endpoint × mode; every column covers the selected window, so Req also shows how full it is</span>
     <span class="spacer"></span>
-    <span style="display:flex;gap:6px">
+    <span class="seg">
+      <span class="seg-label">window</span>
       <button class="btn sm" data-basis="10">last 10</button>
       <button class="btn sm on" data-basis="100">last 100</button>
     </span>
@@ -324,50 +512,59 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Key : Model</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th>
-        <th class="num">TTFT p50 / p90</th><th class="num">TPS p50 / p90</th><th class="num">Tok/s p50 / p90</th>
+        <th>Provider : Key : Model</th>
+        <th title="Transport mode — streaming and non-streaming samples are separate rows and never share a percentile">Mode</th>
+        <th class="num" title="Requests in the selected window. Fewer than the window size simply means the endpoint has not served that many yet.">Req <span class="dim">ok / err</span></th>
+        <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
+        <th class="num" title="Output tokens over the window">Tok out</th>
+        <th class="num" title="Time to first token — nearest-rank percentiles over the successful requests in the window">TTFT p50 / p90</th>
+        <th class="num" title="Per-request throughput: all four token components / total duration, then nearest-rank percentiles over the window">Tok/s p50 / p90</th>
       </tr></thead>
       <tbody id="perf-body"></tbody>
     </table>
   </div>
 
-  <!-- ============ requests & tokens chart ============ -->
-  <div class="section-head" id="charts">Requests &amp; Tokens
+  <!-- ============ traffic & usage: one time window governs the chart and both tables ============ -->
+  <div class="section-head" id="traffic">Traffic &amp; Usage
+    <span class="count">the window below applies to the chart and both usage tables</span>
     <span class="spacer"></span>
-    <span data-rangescope></span>
+    <span class="seg"><span class="seg-label">window</span><span data-rangescope></span></span>
   </div>
   <div class="chart-wrap">
     <div class="chart-legend">
-      <span><span class="line"></span>requests (right axis)</span>
+      <span><span class="line"></span>requests <span class="dim">(right axis)</span></span>
+      <span><span class="xdot"></span>bucket with errors</span>
+      <span class="spacer" style="flex:1"></span>
       <span><span class="dot" style="background:var(--accent)"></span>tok in · fresh</span>
       <span><span class="dot" style="background:var(--purple)"></span>tok in · cache write</span>
       <span><span class="dot" style="background:var(--cyan)"></span>tok in · cache read</span>
-      <span><span class="dot" style="background:var(--green)"></span>tok out</span>
+      <span><span class="dot" style="background:var(--green)"></span>tok out <span class="dim">(left axis)</span></span>
     </div>
     <div id="chart"></div>
   </div>
 
-  <!-- ============ usage by key / caller (range-synced) ============ -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="grid-2">
     <div>
-      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Upstream Key Label
-        <span class="spacer"></span><span data-rangescope></span>
+      <div class="sub-head">Usage by Upstream Key Label
+        <span class="count">which account paid for it</span>
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Key Label</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
+          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
           <tbody id="usage-key"></tbody>
+          <tfoot id="usage-key-foot"></tfoot>
         </table>
       </div>
     </div>
     <div>
-      <div class="section-head" style="font-size:var(--fs-lg);margin-top:8px">Usage by Caller
-        <span class="spacer"></span><span data-rangescope></span>
+      <div class="sub-head">Usage by Caller
+        <span class="count">which client asked for it</span>
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Client Key Tag</th><th class="num">Req (ok/err)</th><th class="num">Tok (in+cw) / cr</th><th class="num">Tok out</th></tr></thead>
+          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
           <tbody id="usage-caller"></tbody>
+          <tfoot id="usage-caller-foot"></tfoot>
         </table>
       </div>
     </div>
@@ -377,22 +574,27 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 <!-- ===== unified footer ===== -->
 <footer class="console-footer">
   <div class="ft-inner">
-    <div>Virtual Model Router (VMR) · v4.2.1</div>
+    <div>Virtual Model Router (VMR) · v4.2.1 · pid 48211 · go1.24 · darwin/arm64 · listen 127.0.0.1:8800</div>
     <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
-      <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
+      <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
   </div>
 </footer>
 
 <!-- demo-only control panel (not part of the real design) -->
 <div class="demo-panel" id="demo-panel">
-  <b>DEMO CONTROLS</b>
-  <div class="row">
-    <button class="btn" id="dp-pause">⏸ Pause auto-refresh</button>
-    <button class="btn" id="dp-stall">⚡ Inject stall</button>
-  </div>
-  <div class="row">
-    <button class="btn" id="dp-401">🚫 Simulate 401 once</button>
-    <button class="btn" id="dp-reset">♻ Reset</button>
+  <div class="hd"><b>DEMO CONTROLS</b><button class="fold" id="dp-fold" title="Collapse">−</button></div>
+  <div class="body">
+    <div class="row">
+      <button class="btn" id="dp-pause">⏸ Pause auto-refresh</button>
+      <button class="btn" id="dp-stall">⚡ Inject stall</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="dp-queue">⛔ Inject queue backlog</button>
+      <button class="btn" id="dp-401">🚫 Simulate 401 once</button>
+    </div>
+    <div class="row">
+      <button class="btn" id="dp-reset">♻ Reset</button>
+    </div>
   </div>
 </div>
 
@@ -411,32 +613,53 @@ const VMRAuth = {
   tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
 };
 
+/* --- modal plumbing: one behaviour for every overlay (Esc, backdrop click,
+       focus in on open, focus restored on close) --- */
+let lastFocus = null;
+function openOverlay(el) {
+  lastFocus = document.activeElement;
+  el.classList.remove('hidden');
+  const f = el.querySelector('input,button');
+  if (f) setTimeout(() => f.focus(), 30);
+}
+function closeOverlay(el) {
+  el.classList.add('hidden');
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+function wireOverlay(el) {
+  el.addEventListener('click', e => { if (e.target === el) closeOverlay(el); });
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(closeOverlay);
+});
+
 // --- auth modal (single 401 flow, injected once) ---
-(function injectModal() {
+const keyOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Authentication">
       <h2>Authentication Required</h2>
-      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage — it is never sent anywhere but this instance.</p>
       <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
       <div class="err" id="vmr-key-err"></div>
       <div class="modal-actions">
-        <button class="btn ghost" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn ghost left" id="vmr-key-clear">Clear stored key</button>
         <button class="btn" id="vmr-key-cancel">Cancel</button>
         <button class="btn primary" id="vmr-key-save">Connect</button>
       </div>
     </div>`;
   document.body.appendChild(div);
+  wireOverlay(div);
+  return div;
 })();
-const modalEl = () => document.querySelector('.modal-overlay');
 function openKeyModal() {
-  const m = modalEl(); m.classList.remove('hidden');
   const inp = document.getElementById('vmr-key-input');
   inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
-  setTimeout(() => inp.focus(), 30);
+  openOverlay(keyOverlay);
 }
-function closeKeyModal() { modalEl().classList.add('hidden'); }
+function closeKeyModal() { closeOverlay(keyOverlay); }
 document.getElementById('vmr-key-save').onclick = () => {
   const v = document.getElementById('vmr-key-input').value.trim();
   if (DEMO.consume401()) { document.getElementById('vmr-key-err').textContent = '401 — invalid or missing API key (demo-simulated)'; return; }
@@ -445,7 +668,6 @@ document.getElementById('vmr-key-save').onclick = () => {
 };
 document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); closeKeyModal(); toast('Stored key cleared'); };
 document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeKeyModal(); closeWarnModal(); } });
 function syncKeyBtn() {
   const b = document.getElementById('hd-key');
   b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
@@ -454,14 +676,17 @@ function syncKeyBtn() {
 document.getElementById('hd-key').onclick = openKeyModal;
 
 // --- shared helpers ---
-// Formatting discipline: every K/M/G humanized value keeps exactly two decimals.
+// Number discipline: humanized values carry two decimals, but a trailing ".00"
+// is noise on structural constants (200K context, 100M budget) — strip it.
+function dec2(v) { return v.toFixed(2).replace(/\.00$/, ''); }
 function fmtKMG(v) {
   if (!isFinite(v)) return '—';
-  if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
-  if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
-  if (v >= 1e3) return (v / 1e3).toFixed(2) + 'K';
+  if (v >= 1e9) return dec2(v / 1e9) + 'B';
+  if (v >= 1e6) return dec2(v / 1e6) + 'M';
+  if (v >= 1e3) return dec2(v / 1e3) + 'K';
   return String(Math.round(v));
 }
+function fmtPct(v) { return dec2(v) + '%'; }
 function fmtInt(v) { return Math.round(v).toLocaleString('en-US'); }
 function toast(msg) {
   let t = document.querySelector('.toast');
@@ -472,64 +697,105 @@ function toast(msg) {
 function fmtAge(rfc3339) {
   if (!rfc3339) return '—';
   const s = Math.max(0, Math.floor((Date.now() - new Date(rfc3339).getTime()) / 1000));
+  return fmtDur(s);
+}
+function fmtDur(s) {
   if (s < 60) return s + 's';
-  if (s < 3600) return Math.floor(s / 60) + 'm' + (s % 60) + 's';
-  return Math.floor(s / 3600) + 'h' + Math.floor((s % 3600) / 60) + 'm';
+  if (s < 3600) return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
+  return Math.floor(s / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm';
 }
 function fmtMMSS(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
-function copyText(txt, btn) {
-  const done = () => { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = o, 1200); };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(txt).then(done).catch(() => fallbackCopy(txt, done));
-  } else fallbackCopy(txt, done);
+function clockAt(minsAgo) {
+  const d = new Date(Date.now() - minsAgo * 60000);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') + ':' +
+         String(d.getSeconds()).padStart(2, '0');
 }
-function fallbackCopy(txt, done) {
-  const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); done(); } catch (e) {}
-  ta.remove();
-}
+// transport mode, spelled out — same vocabulary everywhere it appears
+const MODE_TAG = {
+  stream: '<span class="mode m-stream" title="streaming response (SSE)">stream</span>',
+  json: '<span class="mode m-json" title="non-streaming response (single JSON body)">json</span>',
+};
+const modeTag = isStream => MODE_TAG[isStream ? 'stream' : 'json'];
 
-/* ===== warning bell (count in header, details on click) ===== */
+/* ===== alerts: only actionable state lives here.
+   A rolling metric (e.g. "84 errors in 24h") would pin the badge permanently
+   and train the operator to ignore it — error rate belongs in the vitals. ===== */
 const WARNINGS = [
   { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
-  { sev: 'warn', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s (transient upstream 500).', when: '2m ago' },
-  { sev: 'err', text: '84 requests errored in the last 24h — rate_limit 61, transient 23 (see Performance → usage tables).', when: 'rolling 24h' },
+  { sev: 'err', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.', when: '2m ago' },
+  { sev: 'warn', text: 'openrouter : backup — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.', when: 'now' },
 ];
-(function injectWarnModal() {
+const warnOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
-      <h2>Warnings &amp; Errors <span class="badge b-err" id="warn-modal-count"></span></h2>
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
       <div id="warn-list"></div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
   document.body.appendChild(div);
-  document.getElementById('warn-list').innerHTML = WARNINGS.map(w => `
-    <div class="wrow">
-      <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
-      <span style="color:var(--text)">${w.text}</span>
-      <span class="when">${w.when}</span>
-    </div>`).join('');
-  document.getElementById('warn-modal-count').textContent = WARNINGS.length;
-  document.getElementById('warn-close').onclick = closeWarnModal;
-  div.addEventListener('click', e => { if (e.target === div) closeWarnModal(); });
+  wireOverlay(div);
+  return div;
 })();
-const warnOverlay = () => document.querySelectorAll('.modal-overlay')[1];
-function openWarnModal() { const m = warnOverlay(); if (m) m.classList.remove('hidden'); }
-function closeWarnModal() { const m = warnOverlay(); if (m) m.classList.add('hidden'); }
-document.getElementById('warn-bell').onclick = openWarnModal;
+(function renderWarnings() {
+  const list = document.getElementById('warn-list');
+  const bell = document.getElementById('warn-bell');
+  const ico = document.getElementById('warn-ico');
+  const cnt = document.getElementById('warn-count');
+  if (!WARNINGS.length) {
+    list.innerHTML = '<div class="wrow"><span class="badge b-ok">clear</span><span class="t-dim">No config issues and no degraded endpoints.</span></div>';
+    bell.className = 'warn-btn quiet'; bell.title = 'No warnings'; ico.textContent = '⚠️'; cnt.textContent = '0';
+  } else {
+    list.innerHTML = WARNINGS.map(w => `
+      <div class="wrow">
+        <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
+        <span>${w.text}</span>
+        <span class="when">${w.when}</span>
+      </div>`).join('');
+    const hasErr = WARNINGS.some(w => w.sev === 'err');
+    bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
+    ico.textContent = hasErr ? '🚨' : '⚠️';
+    cnt.textContent = WARNINGS.length;
+    bell.title = WARNINGS.length + ' actionable item(s) — click for detail';
+  }
+  document.getElementById('warn-modal-count').textContent = WARNINGS.length + ' open';
+  document.getElementById('warn-close').onclick = () => closeOverlay(warnOverlay);
+})();
+document.getElementById('warn-bell').onclick = () => openOverlay(warnOverlay);
+
+/* ===== section rail: scroll-spy over the flat page ===== */
+(function railSpy() {
+  const links = [...document.querySelectorAll('[data-rail]')];
+  const targets = links.map(a => document.querySelector(a.getAttribute('href'))).filter(Boolean);
+  const spy = () => {
+    const line = 110;
+    let cur = 0;
+    targets.forEach((t, i) => { if (t.getBoundingClientRect().top <= line) cur = i; });
+    links.forEach((a, i) => a.classList.toggle('active', i === cur));
+  };
+  window.addEventListener('scroll', spy, { passive: true });
+  window.addEventListener('resize', spy);
+  spy();
+})();
 
 /* ===== 5-minute auto-refresh countdown (click = refresh now).
-   The WHOLE page refreshes together — live table included (v2 review). ===== */
+   The WHOLE page refreshes together — live table included. A finer-grained
+   live view is a later, SSE-based addition, not a second polling clock. ===== */
 let countdown = 300;
+let reqTotal = 12847, okTotal = 12702, cancelTotal = 61, errTotal = 84;
 function refreshNow() {
   countdown = 300;
   simTick();                       // live table advances with the page
-  const req = 12847 + Math.floor(Math.random() * 3 + 1);
-  document.getElementById('v-req').textContent = fmtInt(req);
-  document.getElementById('v-ok').textContent = (12702 + Math.floor(Math.random() * 2)) + ' ok';
+  const d = Math.floor(Math.random() * 40 + 12);
+  reqTotal += d; okTotal += d - (Math.random() < .3 ? 1 : 0);
+  if (Math.random() < .3) errTotal += 1;
+  document.getElementById('v-req').textContent = fmtInt(reqTotal);
+  document.getElementById('v-ok').textContent = fmtInt(okTotal) + ' ok';
+  document.getElementById('v-cancel').textContent = fmtInt(cancelTotal) + ' cancel';
+  document.getElementById('v-err').textContent = fmtInt(errTotal) + ' err · ' + fmtPct(errTotal / reqTotal * 100);
+  // a manual refresh while paused must not leave the pill reading "paused" over fresh data
+  document.getElementById('cd').textContent = SIM.paused ? 'paused' : fmtMMSS(countdown);
   toast('Data refreshed (mock)');
 }
 document.getElementById('hd-refresh').onclick = refreshNow;
@@ -540,8 +806,14 @@ setInterval(() => {
   document.getElementById('cd').textContent = fmtMMSS(Math.max(0, countdown));
 }, 1000);
 
-/* ===== live request simulator — one tick per page refresh (v2 review) ===== */
-const PROTOS = ['openai-completions', 'anthropic-messages', 'openai-responses'];
+/* ===== live request simulator — one tick per page refresh ===== */
+// A virtual model belongs to exactly one ingress protocol; the mock respects that
+// so the Live table and the topology table can never disagree.
+const VMODELS = [
+  { name: 'coding', proto: 'anthropic-messages' },
+  { name: 'agent', proto: 'anthropic-messages' },
+  { name: 'cheap', proto: 'openai-completions' },
+];
 const PROVIDERS = [
   { p: 'packycode', k: 'main', m: 'claude-sonnet-4' },
   { p: 'packycode', k: 'main', m: 'claude-opus-4.6' },
@@ -549,22 +821,26 @@ const PROVIDERS = [
   { p: 'deepseek', k: 'a1b2c3', m: 'deepseek-v3.2' },
 ];
 const CALLERS = ['jason', 'openclaw', 'cron'];
-const VMODELS = ['coding', 'agent', 'cheap'];
-const SIM = { entries: [], seq: 4182, paused: false, injectStall: false, _401once: false };
+const SIM = { entries: [], seq: 4182, paused: false, injectStall: false, injectQueue: false, expanded: false, _401once: false };
 const DEMO = {
   consume401() { const v = SIM._401once; SIM._401once = false; return v; },
   reset() { localStorage.clear(); location.reload(); }
 };
+const LIVE_CAP = 10;              // rows shown before the "Show all" affordance
+const STALL_S = 10;               // streaming last-chunk age that counts as stalled
+const QUEUE_WARN_S = 3;           // queued longer than this is an incident, not a blip
 const nowISO = () => new Date().toISOString();
 const pick = a => a[Math.floor(Math.random() * a.length)];
-function spawn() {
-  SIM.entries.push({
-    seq: ++SIM.seq, proto: pick(PROTOS), vmodel: pick(VMODELS), caller: pick(CALLERS),
+function spawn(opts) {
+  const vm = pick(VMODELS);
+  SIM.entries.push(Object.assign({
+    seq: ++SIM.seq, proto: vm.proto, vmodel: vm.name, caller: pick(CALLERS),
     stream: Math.random() < 0.8, state: 'queued', ts: nowISO(), sentAt: '', firstAt: '', lastAt: '',
     provider: '', key: '', model: '', attempt: 0,
     estIn: 800 + Math.floor(Math.random() * 24000), estOut: 0,
+    outUnknown: Math.random() < 0.12,   // compressed response body — cannot be counted
     promoteAt: Date.now() + 300 + Math.random() * 2200, firstAtDeadline: 0, doneAt: 0
-  });
+  }, opts || {}));
 }
 function promote(e) {
   e.attempt = 1;
@@ -577,6 +853,10 @@ function promote(e) {
 }
 function simTick() {
   const now = Date.now();
+  if (SIM.injectQueue) {           // demo: a saturated concurrency gate
+    for (let i = 0; i < 5; i++) spawn({ ts: new Date(now - 4000 - i * 3000).toISOString(), promoteAt: now + 600000 });
+    SIM.injectQueue = false;
+  }
   if (SIM.entries.length < 9 && Math.random() < 0.85) spawn();
   SIM.entries = SIM.entries.filter(e => !(e.doneAt && now >= e.doneAt));
   for (const e of SIM.entries) {
@@ -600,66 +880,174 @@ function simTick() {
   updateVitals();
 }
 function firstLastCell(e) {
-  if (!e.firstAt) return '—';
-  const ft = ((new Date(e.firstAt) - new Date(e.sentAt)) / 1000).toFixed(2) + 's';
+  if (!e.firstAt) return '<span class="dim">—</span>';
+  const ft = dec2((new Date(e.firstAt) - new Date(e.sentAt)) / 1000) + 's';
   const age = Math.floor((Date.now() - new Date(e.lastAt).getTime()) / 1000);
-  const last = (e.stream && age >= 10) ? `<span class="badge stall">${age}s</span>` : age + 's';
-  return ft + ' · ' + last;
+  const last = (e.stream && age >= STALL_S)
+    ? `<span class="badge stall" title="No upstream chunk for ${age}s — this stream looks stalled">stalled ${fmtDur(age)}</span>`
+    : fmtDur(age);
+  return ft + ' <span class="dim">·</span> ' + last;
+}
+function elapsedCell(e) {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(e.ts).getTime()) / 1000));
+  if (e.state === 'queued' && s >= QUEUE_WARN_S)
+    return `<span class="t-warn" title="Waiting on the concurrency gate for ${fmtDur(s)}">${fmtDur(s)}</span>`;
+  return fmtDur(s);
+}
+function attemptCell(n) {
+  if (!n) return '<span class="dim">—</span>';
+  if (n > 1) return `<span class="badge b-warn tight" title="Failover: attempt ${n}">#${n}</span>`;
+  return '<span class="dim">1</span>';   // the common case must not compete for attention
+}
+function endpointCell(provider, key, model) {
+  if (!provider) return '<span class="dim">— never forwarded</span>';
+  return `<span class="ep" title="${provider} : ${key} : ${model}">${provider} : <span class="t-key">${key}</span> : ${model}</span>`;
 }
 function renderLive() {
   const body = document.getElementById('live-body');
   const es = SIM.entries;
-  document.getElementById('live-running').textContent = es.filter(e => e.state === 'running').length + ' running';
-  document.getElementById('live-queued').textContent = es.filter(e => e.state === 'queued').length + ' queued';
+  const running = es.filter(e => e.state === 'running').length;
+  const queued = es.filter(e => e.state === 'queued').length;
+  document.getElementById('live-running').textContent = running + ' running';
+  document.getElementById('live-queued').textContent = queued + ' queued';
+  document.getElementById('live-queued').className = 'badge ' + (queued ? 'b-warn' : 'b-dim');
+  document.getElementById('rail-live').textContent = es.length;
+  const expandBtn = document.getElementById('live-expand');
+  expandBtn.hidden = es.length <= LIVE_CAP;
+  expandBtn.textContent = SIM.expanded ? 'Show top ' + LIVE_CAP : 'Show all ' + es.length;
   if (!es.length) {
-    body.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:22px">No active requests at last refresh</td></tr>';
+    body.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:26px">
+      <div class="t-dim">No requests in flight at the last refresh.</div>
+      <div class="hint">Completed requests are not listed here — see Recent Failures, Performance and Traffic below.</div></td></tr>`;
     return;
   }
-  const rows = es.slice(-10).map(e => `<tr>
+  const shown = SIM.expanded ? es : es.slice(-LIVE_CAP);
+  const rows = shown.map(e => `<tr>
     <td>${e.state === 'queued' ? '<span class="badge b-warn">queued</span>' : '<span class="badge b-cyan">running</span>'}</td>
-    <td class="num">#${e.seq}</td>
-    <td><span class="dim">${e.proto}:</span><b>${e.vmodel}</b></td>
+    <td class="num">${elapsedCell(e)}</td>
+    <td><span class="dim">${e.proto}:</span><b>${e.vmodel}</b>${modeTag(e.stream)}</td>
     <td>${e.caller}</td>
-    <td>${e.provider ? `${e.provider} : <span style="color:var(--purple)">${e.key}</span> : ${e.model}` : '<span class="dim">—</span>'}</td>
-    <td class="num">${e.attempt || '—'}</td>
-    <td class="num">${fmtAge(e.ts)}</td>
+    <td>${e.provider ? endpointCell(e.provider, e.key, e.model) : '<span class="dim">— routing</span>'}</td>
+    <td class="num">${attemptCell(e.attempt)}</td>
     <td class="num">${firstLastCell(e)}</td>
     <td class="num">${fmtInt(e.estIn)}</td>
-    <td class="num">${fmtInt(e.estOut)}</td>
+    <td class="num">${e.outUnknown ? '<span class="dim" title="compressed response body — output tokens cannot be counted">—</span>' : fmtInt(e.estOut)}</td>
   </tr>`).join('');
-  const more = es.length > 10 ? `<tr><td colspan="10" style="text-align:center;color:var(--text-muted)">… ${es.length - 10} more in flight</td></tr>` : '';
+  const more = (!SIM.expanded && es.length > LIVE_CAP)
+    ? `<tr><td colspan="9" class="hint" style="text-align:center">… ${es.length - LIVE_CAP} more in flight — use “Show all”</td></tr>` : '';
   body.innerHTML = rows + more;
 }
+document.getElementById('live-expand').onclick = () => { SIM.expanded = !SIM.expanded; renderLive(); };
 function updateVitals() {
   const running = SIM.entries.filter(e => e.state === 'running').length;
   const queued = SIM.entries.filter(e => e.state === 'queued').length;
   document.getElementById('v-conc').innerHTML = running + '<small> / 8</small>';
   document.getElementById('v-queued').textContent = queued;
+  document.getElementById('v-queued-wrap').className = queued ? 't-warn' : '';
 }
 
-/* ===== performance: last 10/100 basis toggle + tok/s column ===== */
+/* ===== recent failures: an in-memory ring, the bridge between the live view
+   and the hourly aggregates. Error class comes from the router's own
+   classification — the console never re-derives it. ===== */
+const FAILURES = [
+  { seq: 4181, min: 2, proto: 'anthropic-messages', vmodel: 'agent', caller: 'openclaw', stream: true,
+    provider: 'packycode', key: 'main', model: 'claude-opus-4.6', att: 2, cls: 'upstream_5xx', code: '502', dur: 4.1 },
+  { seq: 4176, min: 4, proto: 'anthropic-messages', vmodel: 'coding', caller: 'jason', stream: true,
+    provider: 'openrouter', key: 'backup', model: 'anthropic/claude-opus-4.6', att: 2, cls: 'rate_limit', code: '429', dur: 0.6 },
+  { seq: 4170, min: 6, proto: 'anthropic-messages', vmodel: 'coding', caller: 'jason', stream: true,
+    provider: 'packycode', key: 'main', model: 'claude-sonnet-4', att: 1, cls: 'rate_limit', code: '429', dur: 0.8 },
+  { seq: 4166, min: 8, proto: 'openai-completions', vmodel: 'cheap', caller: 'cron', stream: true,
+    provider: 'openrouter', key: 'backup', model: 'anthropic/claude-opus-4.6', att: 1, cls: 'rate_limit', code: '429', dur: 0.7 },
+  { seq: 4159, min: 11, proto: 'openai-completions', vmodel: 'cheap', caller: 'cron', stream: false,
+    provider: 'deepseek', key: 'a1b2c3', model: 'deepseek-chat', att: 3, cls: 'transient', code: '500', dur: 12.4 },
+  { seq: 4148, min: 15, proto: 'anthropic-messages', vmodel: 'coding', caller: 'openclaw', stream: true,
+    provider: 'openrouter', key: 'backup', model: 'anthropic/claude-opus-4.6', att: 2, cls: 'rate_limit', code: '429', dur: 0.9 },
+  { seq: 4137, min: 18, proto: 'anthropic-messages', vmodel: 'agent', caller: 'openclaw', stream: true,
+    provider: 'openrouter', key: 'backup', model: 'anthropic/claude-opus-4.6', att: 2, cls: 'timeout', code: '', dur: 60.0 },
+  { seq: 4120, min: 24, proto: 'anthropic-messages', vmodel: 'coding', caller: 'jason', stream: true,
+    provider: '', key: '', model: '', att: 3, cls: 'no_candidate', code: '', dur: 0.1 },
+  { seq: 4103, min: 31, proto: 'openai-completions', vmodel: 'cheap', caller: 'cron', stream: true,
+    provider: 'deepseek', key: 'a1b2c3', model: 'deepseek-chat', att: 1, cls: 'canceled', code: '', dur: 8.2 },
+];
+let failFilter = null;            // null = show every class
+function renderFailures() {
+  const body = document.getElementById('fail-body');
+  const counts = FAILURES.reduce((a, f) => (a[f.cls] = (a[f.cls] || 0) + 1, a), {});
+  const classes = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+  document.getElementById('fail-count').textContent = FAILURES.length;
+  document.getElementById('rail-fail').textContent = FAILURES.length;
+  // the chips are the breakdown AND the filter: one flooding class must not hide the rest
+  document.getElementById('fail-chips').innerHTML = classes.map(c =>
+    `<button class="chip ${failFilter === c ? 'on' : ''}" data-cls="${c}" title="${failFilter === c ? 'Click to clear the filter' : 'Show only ' + c}">${c}<span class="n">${counts[c]}</span></button>`).join('');
+  document.querySelectorAll('#fail-chips .chip').forEach(b => b.onclick = () => {
+    failFilter = failFilter === b.dataset.cls ? null : b.dataset.cls;
+    renderFailures();
+  });
+  const rows = failFilter ? FAILURES.filter(f => f.cls === failFilter) : FAILURES;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:26px">
+      <div class="t-dim">No failed request in the current buffer.</div>
+      <div class="hint">The buffer holds the last 50 failures and is cleared on restart.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(f => {
+    const cancelled = f.cls === 'canceled';
+    return `<tr>
+      <td class="num" title="request #${f.seq} — the same number the Log page prints on its lines">${clockAt(f.min)} <span class="dim">· ${f.min}m</span></td>
+      <td><span class="dim">${f.proto}:</span><b>${f.vmodel}</b>${modeTag(f.stream)}</td>
+      <td>${f.caller}</td>
+      <td>${endpointCell(f.provider, f.key, f.model)}</td>
+      <td class="num">${attemptCell(f.att)}</td>
+      <td><span class="badge ${cancelled ? 'b-warn' : 'b-err'}">${f.cls}</span>${f.code ? ` <span class="dim">${f.code}</span>` : ''}</td>
+      <td class="num">${dec2(f.dur)}s</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ===== performance: one window governs the whole row =====
+   One row per (endpoint × transport mode) — the ring is keyed on `stream` and
+   the design forbids mixing the two into one percentile.
+   Every column is scoped to the selected window (last 10 / last 100 requests of
+   that row): counts, token sums and percentiles all move together, so the row
+   never mixes two time bases. Req doubles as the window's fill level — a row
+   showing 43 under "last 100" simply has not served 100 requests yet. */
 const PERF = {
   '10': [
-    { pk: 'packycode : main : claude-sonnet-4', ok: 9, err: 1, incw: '0.19M', cr: '0.05M', out: '0.10M', ttft: '742ms / 1.88s', tps: '71.4 / 44.0', toks: '26.10 / 19.20' },
-    { pk: 'packycode : backup : claude-sonnet-4', ok: 1, err: 0, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.02s / 1.02s', tps: '58.0 / 58.0', toks: '21.40 / 21.40' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', ok: 0, err: 0, incw: '0.00M', cr: '0.00M', out: '0.00M', ttft: '— / —', tps: '— / —', toks: '— / —' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', ok: 9, err: 1, incw: '0.19M', cr: '0.06M', out: '0.10M', ttft: '742ms / 1.88s', toks: '26.10 / 19.20' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', ok: 2, err: 0, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.18s / 1.31s', toks: '20.80 / 18.40' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', ok: 6, err: 0, incw: '0.11M', cr: '0.03M', out: '0.06M', ttft: '1.02s / 1.44s', toks: '23.50 / 17.10' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', ok: 0, err: 0 },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', ok: 3, err: 1, incw: '0.05M', cr: '0.02M', out: '0.03M', ttft: '1.51s / 2.02s', toks: '17.60 / 11.90' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', ok: 0, err: 0 },
   ],
   '100': [
-    { pk: 'packycode : main : claude-sonnet-4', ok: 96, err: 3, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', tps: '68.2 / 41.0', toks: '24.80 / 17.60' },
-    { pk: 'packycode : backup : claude-sonnet-4', ok: 46, err: 1, incw: '0.93M', cr: '0.27M', out: '0.48M', ttft: '934ms / 2.88s', tps: '61.5 / 38.2', toks: '22.30 / 15.90' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', ok: 57, err: 9, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', tps: '44.8 / 27.9', toks: '18.90 / 12.40' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', ok: 97, err: 3, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', toks: '24.80 / 17.60' },
+    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', ok: 41, err: 2, incw: '0.31M', cr: '0.09M', out: '0.14M', ttft: '1.24s / 3.02s', toks: '19.40 / 13.10' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', ok: 96, err: 4, incw: '1.86M', cr: '0.55M', out: '0.97M', ttft: '934ms / 2.88s', toks: '22.30 / 15.90' },
+    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', ok: 18, err: 0, incw: '0.12M', cr: '0.04M', out: '0.06M', ttft: '1.41s / 2.10s', toks: '18.70 / 14.20' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', ok: 89, err: 11, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', toks: '18.90 / 12.40' },
+    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', ok: 21, err: 2, incw: '0.14M', cr: '0.05M', out: '0.07M', ttft: '2.05s / 5.40s', toks: '15.20 / 10.30' },
   ],
 };
 function renderPerf(basis) {
-  document.getElementById('perf-body').innerHTML = PERF[basis].map(r => `<tr>
-    <td>${r.pk}</td>
-    <td class="num">${fmtInt(r.ok)} / ${fmtInt(r.err)}</td>
-    <td class="num">${r.incw} / ${r.cr}</td>
-    <td class="num">${r.out}</td>
-    <td class="num">${r.ttft}</td>
-    <td class="num">${r.tps}</td>
-    <td class="num">${r.toks}</td>
-  </tr>`).join('');
+  const rows = PERF[basis];
+  document.getElementById('perf-body').innerHTML = rows.map((r, i) => {
+    const n = r.ok + r.err;
+    const none = !n;
+    const first = i === 0 || rows[i - 1].pk !== r.pk;
+    const cell = v => none ? '<span class="dim">—</span>' : v;
+    return `<tr class="${none ? 'zero ' : ''}${first ? 'grp' : ''}">
+      <td><span class="ep" title="${r.pk}">${r.pk.replace(/ : ([\w-]+) : /, ' : <span class="t-key">$1</span> : ')}</span>
+        ${none ? '<span class="badge b-dim tight" title="This endpoint has not served a request in this mode within the window">no samples</span>' : ''}</td>
+      <td><span class="mode m-${r.mode}" title="${r.mode === 'stream' ? 'streaming response (SSE)' : 'non-streaming response (single JSON body)'}">${r.mode}</span></td>
+      <td class="num">${none ? '<span class="dim">0</span>'
+        : `<span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}" title="${fmtPct(r.err / n * 100)} error rate over ${n} request(s)">${fmtInt(r.err)}</span>`}</td>
+      <td class="num">${none ? '<span class="dim">—</span>' : `${r.incw} <span class="dim">/</span> ${r.cr}`}</td>
+      <td class="num">${cell(r.out)}</td>
+      <td class="num">${cell(r.ttft)}</td>
+      <td class="num">${cell(r.toks)}</td>
+    </tr>`;
+  }).join('');
 }
 document.querySelectorAll('[data-basis]').forEach(b => b.onclick = () => {
   document.querySelectorAll('[data-basis]').forEach(x => x.classList.toggle('on', x === b));
@@ -679,12 +1067,14 @@ function genSeries(key) {
     const hourOfDay = (new Date().getHours() - (cfg.n - 1 - i) * cfg.bh % 24 + 96) % 24;
     const work = 0.4 + 0.6 * Math.exp(-Math.pow(((hourOfDay - 14 + 24) % 24 - 4) / 7, 2));
     const base = (0.55 + rnd() * 0.7) * (0.6 + 0.4 * work);
+    const req = Math.round(280 * base * (0.7 + rnd() * 0.6)) + 40;
     arr.push({
       fresh: base * 0.9e6 * (0.7 + rnd() * 0.6),
       cw: base * 0.25e6 * (0.6 + rnd() * 0.8),
       cr: base * 1.6e6 * (0.7 + rnd() * 0.6),
       out: base * 0.75e6 * (0.7 + rnd() * 0.6),
-      req: Math.round(280 * base * (0.7 + rnd() * 0.6)) + 40,
+      req,
+      err: rnd() < 0.22 ? Math.max(1, Math.round(req * (0.01 + rnd() * 0.09))) : 0,
     });
   }
   return arr;
@@ -702,18 +1092,24 @@ function bucketLabel(i, cfg) {
   if (cfg.bh === 1) return String(d.getHours()).padStart(2, '0') + ':00';
   return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0');
 }
-function fmtM(v) { return (v / 1e6).toFixed(2) + 'M'; }
+function fmtM(v) { return dec2(v / 1e6) + 'M'; }
 
-const chartState = { range: '24h', data: null, cfg: null, W: 1200, padL: 52, padR: 52 };
+const chartState = { range: '24h', data: null, cfg: null, W: 1200, H: 268, padL: 56, padR: 56, padT: 22, padB: 26 };
+function plotGroupW(cfg) { return (chartState.W - chartState.padL - chartState.padR) / cfg.n; }
 function renderChart(key) {
   chartState.range = key; chartState.cfg = RANGES[key]; chartState.data = genSeries(key);
   const cfg = chartState.cfg, data = chartState.data;
-  const W = chartState.W, H = 260, padL = chartState.padL, padR = chartState.padR, padT = 12, padB = 26;
+  const { W, H, padL, padR, padT, padB } = chartState;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxTok = Math.max(...data.map(d => d.fresh + d.cw + d.cr + d.out)) * 1.12;
   const maxReq = Math.max(...data.map(d => d.req)) * 1.15;
   const groupW = plotW / cfg.n, barW = Math.min(16, groupW * 0.26);
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="font-family:var(--font-mono)">`;
+  // axis captions — the legend alone does not say what the left axis counts
+  s += `<text x="${padL}" y="11" fill="#6e7681" font-size="10">tokens</text>`;
+  s += `<text x="${W - padR}" y="11" fill="#6e7681" font-size="10" text-anchor="end">requests</text>`;
+  // hover guide band, moved by the tooltip handler
+  s += `<rect id="chart-guide" x="0" y="${padT}" width="${groupW}" height="${plotH}" fill="rgba(88,166,255,.07)" style="display:none"/>`;
   for (let g = 0; g <= 4; g++) {
     const y = padT + plotH - (plotH * g / 4);
     s += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(48,54,61,.5)" stroke-dasharray="3 4"/>`;
@@ -731,7 +1127,14 @@ function renderChart(key) {
   });
   const pts = data.map((d, i) => `${x(i)},${padT + plotH - plotH * d.req / maxReq}`).join(' ');
   s += `<polyline points="${pts}" fill="none" stroke="#d29922" stroke-width="2" stroke-linejoin="round"/>`;
-  data.forEach((d, i) => { s += `<circle cx="${x(i)}" cy="${padT + plotH - plotH * d.req / maxReq}" r="2.6" fill="#d29922"/>`; });
+  data.forEach((d, i) => {
+    const cy = padT + plotH - plotH * d.req / maxReq;
+    // buckets carrying errors are marked on the requests line — an error spike
+    // is otherwise invisible on the only time series the page has
+    s += d.err
+      ? `<circle cx="${x(i)}" cy="${cy}" r="4" fill="#f85149" stroke="#0d1117" stroke-width="1"/>`
+      : `<circle cx="${x(i)}" cy="${cy}" r="2.6" fill="#d29922"/>`;
+  });
   data.forEach((d, i) => {
     if (i % Math.ceil(cfg.n / 8) === 0 || i === cfg.n - 1)
       s += `<text x="${x(i)}" y="${H - 8}" fill="#8b949e" font-size="10" text-anchor="middle">${bucketLabel(i, cfg)}</text>`;
@@ -739,7 +1142,7 @@ function renderChart(key) {
   s += '</svg>';
   document.getElementById('chart').innerHTML = s;
 }
-// hover tooltip: one entry lists requests + every token component + in total
+// hover tooltip: one entry lists requests, errors and every token component
 (function chartTooltip() {
   const wrap = document.querySelector('.chart-wrap');
   const tip = document.createElement('div');
@@ -747,33 +1150,44 @@ function renderChart(key) {
   wrap.addEventListener('mousemove', ev => {
     const cfg = chartState.cfg, data = chartState.data; if (!data) return;
     const svg = wrap.querySelector('svg'); if (!svg) return;
+    const guide = svg.querySelector('#chart-guide');
     const r = svg.getBoundingClientRect();
     const px = (ev.clientX - r.left) * (chartState.W / r.width);
-    if (px < chartState.padL || px > chartState.W - chartState.padR) { tip.style.display = 'none'; return; }
-    const i = Math.min(cfg.n - 1, Math.max(0, Math.floor((px - chartState.padL) / (plotGroupW(cfg)))));
+    if (px < chartState.padL || px > chartState.W - chartState.padR) {
+      tip.style.display = 'none'; if (guide) guide.style.display = 'none'; return;
+    }
+    const gw = plotGroupW(cfg);
+    const i = Math.min(cfg.n - 1, Math.max(0, Math.floor((px - chartState.padL) / gw)));
     const d = data[i];
     const tin = d.fresh + d.cw + d.cr;
+    if (guide) { guide.setAttribute('x', chartState.padL + gw * i); guide.setAttribute('width', gw); guide.style.display = ''; }
     tip.innerHTML =
       `<b>${bucketRange(i, cfg)}</b><br>` +
-      `requests: ${fmtInt(d.req)}<br>` +
+      `requests: <b>${fmtInt(d.req)}</b>` +
+      (d.err ? ` <span class="t-err">· ${fmtInt(d.err)} err (${fmtPct(d.err / d.req * 100)})</span>` : ' <span class="tr">· 0 err</span>') + '<br>' +
       `tok in: <b>${fmtM(tin)}</b> <span class="tr">(fresh ${fmtM(d.fresh)} · cw ${fmtM(d.cw)} · cr ${fmtM(d.cr)})</span><br>` +
       `tok out: <b>${fmtM(d.out)}</b>`;
-    const wrapR = wrap.getBoundingClientRect();
-    let left = ev.clientX - wrapR.left + 14;
-    if (left + 300 > wrapR.width) left = ev.clientX - wrapR.left - 300 - 6;
-    tip.style.left = left + 'px';
-    tip.style.top = (ev.clientY - wrapR.top + 14) + 'px';
     tip.style.display = 'block';
+    // measure, then place — a hardcoded width guess overflows on the right edge
+    const wrapR = wrap.getBoundingClientRect();
+    const tw = tip.offsetWidth;
+    let left = ev.clientX - wrapR.left + 14;
+    if (left + tw > wrapR.width - 4) left = ev.clientX - wrapR.left - tw - 10;
+    tip.style.left = Math.max(4, left) + 'px';
+    tip.style.top = (ev.clientY - wrapR.top + 14) + 'px';
   });
-  wrap.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
-  function plotGroupW(cfg) { return (chartState.W - chartState.padL - chartState.padR) / cfg.n; }
+  wrap.addEventListener('mouseleave', () => {
+    tip.style.display = 'none';
+    const g = wrap.querySelector('#chart-guide'); if (g) g.style.display = 'none';
+  });
 })();
 
-/* ===== usage tables (range-synced with the chart) ===== */
+/* ===== usage tables (share of the selected window, plus a totals row) ===== */
 function genUsage(key) {
   const mult = { '24h': 1, '3d': 2.7, '7d': 6.1 }[key];
   const rnd = mulberry32({ '24h': 7, '3d': 8, '7d': 9 }[key]);
-  const row = (okBase, errBase, inBase, crBase, outBase) => ({
+  const row = (name, okBase, errBase, inBase, crBase, outBase) => ({
+    name,
     ok: Math.round(okBase * mult * (0.9 + rnd() * 0.2)),
     err: Math.round(errBase * mult * (0.9 + rnd() * 0.2)),
     incw: inBase * mult * (0.9 + rnd() * 0.2),
@@ -782,31 +1196,54 @@ function genUsage(key) {
   });
   return {
     keys: [
-      { name: 'main', ...row(6024, 43, 9.6e6, 2.8e6, 4.9e6) },
-      { name: 'a1b2c3', ...row(2381, 88, 4.5e6, 1.6e6, 2.5e6) },
+      row('main', 6024, 43, 9.6e6, 2.8e6, 4.9e6),
+      row('a1b2c3', 2381, 88, 4.5e6, 1.6e6, 2.5e6),
     ],
     callers: [
-      { name: 'jason', ...row(3855, 40, 6.2e6, 1.8e6, 3.2e6) },
-      { name: 'openclaw', ...row(4006, 71, 7.0e6, 2.1e6, 3.6e6) },
-      { name: 'cron', ...row(544, 20, 0.9e6, 0.5e6, 0.6e6) },
+      row('openclaw', 4006, 71, 7.0e6, 2.1e6, 3.6e6),
+      row('jason', 3855, 40, 6.2e6, 1.8e6, 3.2e6),
+      row('cron', 544, 20, 0.9e6, 0.5e6, 0.6e6),
     ],
   };
 }
+const total = r => r.incw + r.cr + r.out;
 function usageRows(rows) {
-  return rows.map(r => `<tr>
-    <td>${r.name}</td>
-    <td class="num">${fmtInt(r.ok)} / ${fmtInt(r.err)}</td>
-    <td class="num">${fmtKMG(r.incw)} / ${fmtKMG(r.cr)}</td>
-    <td class="num">${fmtKMG(r.out)}</td>
-  </tr>`).join('');
+  const sum = rows.reduce((a, r) => a + total(r), 0) || 1;
+  return rows
+    .slice()
+    .sort((a, b) => total(b) - total(a))     // the top consumer must be the top row
+    .map(r => {
+      const share = total(r) / sum * 100;
+      return `<tr>
+        <td>${r.name}</td>
+        <td class="num"><span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}">${fmtInt(r.err)}</span></td>
+        <td class="num">${fmtKMG(r.incw)} <span class="dim">/</span> ${fmtKMG(r.cr)}</td>
+        <td class="num">${fmtKMG(r.out)}</td>
+        <td class="num"><span class="sharebar"><span style="width:${share.toFixed(0)}%"></span></span>${fmtPct(share)}</td>
+      </tr>`;
+    }).join('');
+}
+function usageFoot(rows) {
+  const s = rows.reduce((a, r) => ({
+    ok: a.ok + r.ok, err: a.err + r.err, incw: a.incw + r.incw, cr: a.cr + r.cr, out: a.out + r.out
+  }), { ok: 0, err: 0, incw: 0, cr: 0, out: 0 });
+  return `<tr>
+    <td>total</td>
+    <td class="num">${fmtInt(s.ok)} <span class="dim">/</span> ${fmtInt(s.err)}</td>
+    <td class="num">${fmtKMG(s.incw)} <span class="dim">/</span> ${fmtKMG(s.cr)}</td>
+    <td class="num">${fmtKMG(s.out)}</td>
+    <td class="num">100%</td>
+  </tr>`;
 }
 function renderUsage(key) {
   const u = genUsage(key);
   document.getElementById('usage-key').innerHTML = usageRows(u.keys);
+  document.getElementById('usage-key-foot').innerHTML = usageFoot(u.keys);
   document.getElementById('usage-caller').innerHTML = usageRows(u.callers);
+  document.getElementById('usage-caller-foot').innerHTML = usageFoot(u.callers);
 }
 
-/* ===== range selector: three section heads, one shared state ===== */
+/* ===== one range control governs the whole Traffic & Usage band ===== */
 const RANGE_BTNS = ['24h', '3d', '7d'];
 function setRange(key) {
   document.querySelectorAll('[data-rangescope]').forEach(scope => {
@@ -819,20 +1256,30 @@ function setRange(key) {
 }
 
 /* ===== demo panel ===== */
+document.getElementById('dp-fold').onclick = function () {
+  const p = document.getElementById('demo-panel');
+  p.classList.toggle('folded');
+  this.textContent = p.classList.contains('folded') ? '+' : '−';
+};
 document.getElementById('dp-pause').onclick = function () {
   SIM.paused = !SIM.paused;
   this.textContent = SIM.paused ? '▶ Resume auto-refresh' : '⏸ Pause auto-refresh';
-  document.getElementById('hd-conn').className = 'pill ' + (SIM.paused ? 'p-paused' : 'p-live');
-  document.getElementById('hd-conn').textContent = SIM.paused ? 'paused' : 'live';
+  const r = document.getElementById('hd-refresh');
+  r.classList.toggle('paused', SIM.paused);
+  document.getElementById('cd').textContent = SIM.paused ? 'paused' : fmtMMSS(Math.max(0, countdown));
+  r.title = SIM.paused ? 'Auto-refresh paused — the data on screen is frozen. Click to refresh now.'
+                       : 'Time to the next automatic refresh — click to refresh now';
   toast(SIM.paused ? 'Auto-refresh paused' : 'Auto-refresh resumed');
 };
-document.getElementById('dp-stall').onclick = () => { SIM.injectStall = true; toast('Stall injected — it becomes visible on the next page refresh (click the countdown)'); };
+document.getElementById('dp-stall').onclick = () => { SIM.injectStall = true; toast('Stall injected — visible on the next page refresh (click the countdown)'); };
+document.getElementById('dp-queue').onclick = () => { SIM.injectQueue = true; toast('Queue backlog injected — visible on the next page refresh'); };
 document.getElementById('dp-401').onclick = () => { SIM._401once = true; openKeyModal(); toast('Next Connect will fail with 401 (demo)'); };
 document.getElementById('dp-reset').onclick = () => DEMO.reset();
 
 /* ===== boot ===== */
 syncKeyBtn();
 simTick();
+renderFailures();
 renderPerf('100');
 setRange('24h');
 </script>

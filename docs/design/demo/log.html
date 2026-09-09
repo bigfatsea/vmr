@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by pi — STATIC DEMO, mock data only, no network. -->
+<!-- Ver 2026-09-14, by pi — STATIC DEMO v4 (2026-09-09 design-review pass), mock data only, no network. -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -15,31 +15,56 @@
   --accent:#58a6ff;--accent-hover:#79c0ff;
   --green:#3fb950;--yellow:#d29922;--orange:#e8813a;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;
   --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --purple-bg:rgba(188,140,255,.15);--accent-bg:rgba(88,166,255,.14);
   --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
   --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;
-  --sp-2:8px;--sp-3:12px;--sp-4:16px;
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;
   --r-sm:6px;--r-md:8px;--r-pill:999px;
 }
 body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);height:100vh;display:flex;flex-direction:column;overflow:hidden}
 a{color:var(--accent);text-decoration:none}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--bg)}
+.t-dim{color:var(--text-muted)}.t-err{color:var(--red)}.t-ok{color:var(--green)}
 
-/* header (full-width variant — Log page, 100vw content) */
+/* header: identity row (identical on every page) + page toolbar row */
 .console-header{background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
-.hd-inner.full{max-width:none;display:flex;align-items:center;gap:12px;padding:8px 16px}
+.hd-inner.full{max-width:none;display:flex;align-items:center;gap:12px;padding:9px 16px}
 .brand{display:flex;align-items:center;gap:9px;text-decoration:none}
-.brand b{color:var(--text-bright);font-size:var(--fs-lg)}
+.brand b{color:var(--text-bright);font-size:var(--fs-lg);letter-spacing:-.3px}
 .brand .sub{font-size:var(--fs-xs);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 8px}
-.hd-nav{display:flex;gap:8px}
-.hd-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.hd-nav{display:flex;gap:8px;margin-left:6px}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:9px}
 .nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
 .nav-link:hover{color:var(--text-bright)}
-.nav-link.active{color:var(--text-bright);background:rgba(88,166,255,.14);border-color:var(--accent)}
-.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.nav-link.active{color:var(--text-bright);background:var(--accent-bg);border-color:var(--accent)}
+/* alert pill, far right — same slot and same glyphs on every page */
+.warn-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;line-height:1.4}
+.warn-btn .ico{font-size:12px;line-height:1}
+.warn-btn.has-warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+.warn-btn.has-err{color:var(--red);border-color:rgba(248,81,73,.4);background:var(--red-bg)}
+.warn-btn.quiet{opacity:.6}
+/* page toolbar — the Log page's equivalent of the Overview section rail */
+.hd-rail{border-top:1px solid var(--border-soft)}
+.rail-inner{max-width:none;display:flex;align-items:center;gap:8px;padding:6px 16px;flex-wrap:wrap}
+.rail-inner .spacer{flex:1}
+.lvl-group{display:inline-flex;gap:4px;align-items:center}
+.lvl-label{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);margin-right:2px}
+.lvl{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
+.lvl.on{color:var(--text-bright)}
+.lvl[data-lvl=ERR].on{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.4)}
+.lvl[data-lvl=WRN].on{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.4)}
+.lvl[data-lvl=OK].on{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.4)}
+.lvl[data-lvl=INF].on{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.4)}
+
+.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:500}
 .btn:hover{border-color:var(--text-muted)}
 .btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.ghost{background:transparent}
 .btn.sm{font-size:var(--fs-sm);padding:3px 9px}
+.btn.on{color:var(--text-bright);border-color:var(--accent);background:var(--accent-bg)}
 .input{font-family:var(--font-mono);font-size:var(--fs-sm);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 10px;outline:none}
 .input:focus{border-color:var(--accent)}
 .pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
@@ -48,27 +73,39 @@ a{color:var(--accent);text-decoration:none}
 .p-down{color:var(--red);border-color:rgba(248,81,73,.3);background:var(--red-bg)}
 .p-paused{color:var(--text-muted);border-color:var(--border);background:var(--surface-2)}
 .badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted)}
+.b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
 .b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
-.b-info{background:rgba(88,166,255,.14);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-err{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.35)}
+.b-info{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-dim{background:var(--surface-2);color:var(--text-muted)}
 
 /* terminal: full-bleed, full-height, internal scroll */
-main.term{position:relative;flex:1;min-height:0;display:flex}
+main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+/* connection banner — reconnect must not hijack the jump-to-bottom chip */
+#conn-banner{display:none;align-items:center;gap:10px;padding:8px 16px;background:var(--red-bg);border-bottom:1px solid rgba(248,81,73,.35);color:var(--red);font-size:var(--fs-sm);flex-shrink:0}
+#conn-banner.show{display:flex}
+#conn-banner .spacer{flex:1}
 pre#log{
   flex:1;overflow-y:auto;margin:0;padding:12px 16px 20px;
   font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.55;
   white-space:pre-wrap;word-break:break-all;
 }
+pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
 .ln{display:block}
 .ln .t{color:#6e7681}
+.ln .sq{color:#6e7681}
 .ln.inf .lv{color:var(--accent)}
 .ln.ok  .lv{color:var(--green)}
 .ln.wrn .lv{color:var(--yellow)}
 .ln.err .lv{color:var(--red)}
 .ln.err{background:rgba(248,81,73,.06)}
+.ln.wrn{background:rgba(210,153,34,.05)}
 .ln .m{color:var(--text)}
 .ln .dim{color:var(--text-muted)}
+.ln mark{background:rgba(210,153,34,.35);color:var(--text-bright);border-radius:2px}
+.empty{color:var(--text-muted);padding:18px 0;font-family:var(--font-sans)}
 
-/* jump-to-bottom chip */
+/* jump-to-bottom chip — one meaning, always */
 #jump{
   position:absolute;right:22px;bottom:18px;display:none;align-items:center;gap:6px;
   background:var(--accent);color:#0d1117;border:none;border-radius:var(--r-pill);
@@ -82,20 +119,24 @@ pre#log{
 
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
-.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px;width:min(440px,92vw)}
-.modal h2{font-size:16px;color:var(--text-bright);margin-bottom:8px}
-.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);max-height:80vh;overflow:auto;box-shadow:0 16px 48px rgba(1,4,9,.6)}
+.modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
+.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
-.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-3)}
+.modal-actions .left{margin-right:auto}
+.wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
+.wrow:last-child{border-bottom:none}
+.wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none}
 .toast.show{opacity:1}
-.demo-ribbon{position:fixed;top:50px;right:12px;z-index:200;background:rgba(188,140,255,.15);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
+.demo-ribbon{position:fixed;top:92px;right:12px;z-index:200;background:var(--purple-bg);color:var(--purple);border:1px solid rgba(188,140,255,.4);font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill)}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 
-<!-- ===== unified header (full variant) ===== -->
+<!-- ===== unified header: identity row is byte-identical across pages; row 2 is page-specific ===== -->
 <header class="console-header">
   <div class="hd-inner full">
     <a class="brand" href="overview.html">
@@ -108,9 +149,30 @@ pre#log{
       <a class="nav-link" href="help.html">Help</a>
     </nav>
     <div class="hd-right">
-      <input class="input" id="filter" placeholder="filter substring…" style="width:190px" autocomplete="off">
-      <span class="pill p-connecting" id="hd-conn">connecting</span>
-      <button class="btn sm" id="hd-key">🔑 Set Key</button>
+      <!-- freshness slot: Overview puts its refresh countdown here, Log puts the stream state -->
+      <span class="pill p-connecting" id="hd-conn" title="Live log stream state">connecting</span>
+      <span class="badge b-dim" title="time since process start">up 3d 4h 12m</span>
+      <button class="btn sm" id="hd-key" title="Manage API key">🔑 Set Key</button>
+      <button class="warn-btn" id="warn-bell" aria-label="Warnings and errors" title="Actionable warnings &amp; errors">
+        <span class="ico" id="warn-ico">⚠️</span><span id="warn-count">0</span>
+      </button>
+    </div>
+  </div>
+  <div class="hd-rail">
+    <div class="rail-inner">
+      <span class="lvl-group">
+        <span class="lvl-label">level</span>
+        <button class="lvl on" data-lvl="ERR">ERR</button>
+        <button class="lvl on" data-lvl="WRN">WRN</button>
+        <button class="lvl on" data-lvl="OK">OK</button>
+        <button class="lvl on" data-lvl="INF">INF</button>
+      </span>
+      <input class="input" id="filter" placeholder="filter substring…" style="width:230px" autocomplete="off">
+      <button class="btn sm ghost" id="btn-clear-filter" title="Clear the substring filter and re-enable every level">Reset filters</button>
+      <span class="spacer"></span>
+      <button class="btn sm" id="btn-pause" title="Pause the stream (⌘P / Ctrl+P) — the buffer keeps filling">⏸ Pause</button>
+      <button class="btn sm ghost" id="btn-wrap" title="Toggle soft wrapping of long lines">Wrap: on</button>
+      <button class="btn sm ghost" id="btn-copy" title="Copy every line currently visible to the clipboard">Copy view</button>
     </div>
   </div>
 </header>
@@ -118,6 +180,11 @@ pre#log{
 <span class="demo-ribbon" title="This is a static mock — no live data, no server">DEMO · mock data</span>
 
 <main class="term">
+  <div id="conn-banner">
+    <span>Log stream disconnected.</span>
+    <span class="spacer"></span>
+    <button class="btn sm" id="btn-retry">⟳ Reconnect</button>
+  </div>
   <pre id="log"></pre>
   <button id="jump">↓ <span id="jump-n">0</span> new</button>
 </main>
@@ -125,8 +192,8 @@ pre#log{
 <!-- ===== unified footer as status bar ===== -->
 <footer class="console-footer">
   <div class="ft-inner full">
-    <div><span id="ft-count">0 lines</span> · buffer ~512 · filter: <span id="ft-filter">off</span></div>
-    <div>Virtual Model Router (VMR) · <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener" style="color:var(--text-muted)">bigfatsea/vmr</a></div>
+    <div><span id="ft-count">0 lines</span> · buffer 512 · level <span id="ft-level">all</span> · filter <span id="ft-filter">off</span></div>
+    <div>Virtual Model Router (VMR) · v4.2.1 · <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener" style="color:var(--text-muted)">bigfatsea/vmr</a></div>
   </div>
 </footer>
 
@@ -140,41 +207,51 @@ const VMRAuth = {
   has() { return !!this.get(); },
   tail() { const k = this.get(); return k ? '····' + k.slice(-4) : ''; }
 };
-(function injectModal() {
+let lastFocus = null;
+function openOverlay(el) {
+  lastFocus = document.activeElement;
+  el.classList.remove('hidden');
+  const f = el.querySelector('input,button');
+  if (f) setTimeout(() => f.focus(), 30);
+}
+function closeOverlay(el) { el.classList.add('hidden'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
+function wireOverlay(el) { el.addEventListener('click', e => { if (e.target === el) closeOverlay(el); }); }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(closeOverlay);
+});
+const keyOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Authentication">
       <h2>Authentication Required</h2>
-      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage.</p>
+      <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage — it is never sent anywhere but this instance.</p>
       <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
       <div class="err" id="vmr-key-err"></div>
       <div class="modal-actions">
-        <button class="btn" id="vmr-key-clear">Clear stored key</button>
+        <button class="btn ghost left" id="vmr-key-clear">Clear stored key</button>
         <button class="btn" id="vmr-key-cancel">Cancel</button>
         <button class="btn primary" id="vmr-key-save">Connect</button>
       </div>
     </div>`;
-  document.body.appendChild(div);
+  document.body.appendChild(div); wireOverlay(div); return div;
 })();
 function openKeyModal() {
-  const m = document.querySelector('.modal-overlay'); m.classList.remove('hidden');
   const inp = document.getElementById('vmr-key-input');
   inp.value = VMRAuth.get(); document.getElementById('vmr-key-err').textContent = '';
-  setTimeout(() => inp.focus(), 30);
+  openOverlay(keyOverlay);
 }
-function closeKeyModal() { document.querySelector('.modal-overlay').classList.add('hidden'); }
 document.getElementById('vmr-key-save').onclick = () => {
   const v = document.getElementById('vmr-key-input').value.trim();
   if (!v) { document.getElementById('vmr-key-err').textContent = 'Enter a key (any non-empty string works in this demo).'; return; }
-  VMRAuth.set(v); syncKeyBtn(); closeKeyModal(); toast('Connected — key ' + VMRAuth.tail());
+  VMRAuth.set(v); syncKeyBtn(); closeOverlay(keyOverlay); toast('Connected — key ' + VMRAuth.tail());
 };
-document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); };
-document.getElementById('vmr-key-cancel').onclick = closeKeyModal;
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeKeyModal(); });
+document.getElementById('vmr-key-clear').onclick = () => { VMRAuth.clear(); syncKeyBtn(); closeOverlay(keyOverlay); toast('Stored key cleared'); };
+document.getElementById('vmr-key-cancel').onclick = () => closeOverlay(keyOverlay);
 function syncKeyBtn() {
   const b = document.getElementById('hd-key');
   b.textContent = VMRAuth.has() ? '🔑 ' + VMRAuth.tail() : '🔑 Set Key';
+  b.title = VMRAuth.has() ? 'Key stored in this browser — click to change or clear' : 'Set the API key for this VMR instance';
 }
 document.getElementById('hd-key').onclick = openKeyModal;
 function toast(msg) {
@@ -183,109 +260,198 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200);
 }
+/* warning bell — same content contract as Overview (actionable state only) */
+const WARNINGS = [
+  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
+  { sev: 'err', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.', when: '2m ago' },
+  { sev: 'warn', text: 'openrouter : backup — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.', when: 'now' },
+];
+const warnOverlay = (() => {
+  const div = document.createElement('div');
+  div.className = 'modal-overlay hidden';
+  div.innerHTML = `
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
+      <div id="warn-list"></div>
+      <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
+    </div>`;
+  document.body.appendChild(div); wireOverlay(div); return div;
+})();
+(function renderWarnings() {
+  const bell = document.getElementById('warn-bell');
+  document.getElementById('warn-list').innerHTML = WARNINGS.map(w => `
+    <div class="wrow">
+      <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
+      <span>${w.text}</span><span class="when">${w.when}</span>
+    </div>`).join('');
+  const hasErr = WARNINGS.some(w => w.sev === 'err');
+  bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
+  document.getElementById('warn-ico').textContent = hasErr ? '🚨' : '⚠️';
+  document.getElementById('warn-count').textContent = WARNINGS.length;
+  document.getElementById('warn-modal-count').textContent = WARNINGS.length + ' open';
+  document.getElementById('warn-close').onclick = () => closeOverlay(warnOverlay);
+})();
+document.getElementById('warn-bell').onclick = () => openOverlay(warnOverlay);
 
 /* ===== log page logic (mock stream) ===== */
+const BUFFER = 512;
 const logEl = document.getElementById('log');
 const connEl = document.getElementById('hd-conn');
 const jumpEl = document.getElementById('jump');
 const filterEl = document.getElementById('filter');
-let autoscroll = true, newSinceScroll = 0, paused = false, allLines = [], downTimer = null, reconnectTimer = null;
+const bannerEl = document.getElementById('conn-banner');
+let autoscroll = true, newSinceScroll = 0, paused = false, down = false, allLines = [];
+const levels = { ERR: true, WRN: true, OK: true, INF: true };
 
-const MODELS = ['coding', 'agent', 'cheap'];
+const VMODELS = [
+  { name: 'coding', proto: 'anthropic-messages' },
+  { name: 'agent', proto: 'anthropic-messages' },
+  { name: 'cheap', proto: 'openai-completions' },
+];
 const UPS = ['claude-sonnet-4', 'claude-opus-4.6', 'deepseek-v3.2'];
 const PROVS = ['packycode-main', 'packycode-backup', 'deepseek'];
 const CALLERS = ['jason', 'openclaw', 'cron'];
 const rnd = a => a[Math.floor(Math.random() * a.length)];
 const ts = () => new Date().toTimeString().slice(0, 8);
+let seq = 4182;
 
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
-function line(level, msg) {
-  const o = { t: ts(), lv: level.toUpperCase().padEnd(4, ' '), m: msg };
+function line(level, msg, sq) {
+  const o = { t: ts(), lv: level.toUpperCase().padEnd(3, ' '), m: msg, sq: sq || null };
   allLines.push(o);
-  if (allLines.length > 512) allLines.shift();
+  if (allLines.length > BUFFER) allLines.shift();
   if (passes(o)) appendLine(o);
+  updateStatus();
 }
 function passes(o) {
+  if (!levels[o.lv.trim()]) return false;
   const f = filterEl.value.trim().toLowerCase();
   return !f || (o.t + ' ' + o.lv + ' ' + o.m).toLowerCase().includes(f);
 }
+// substring hits are highlighted — finding the match should not require re-reading the line
+function markup(text) {
+  const f = filterEl.value.trim();
+  const safe = esc(text);
+  if (!f) return safe;
+  const needle = esc(f).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(needle, 'gi'), m => '<mark>' + m + '</mark>');
+}
 function appendLine(o) {
   const cls = { INF: 'inf', OK: 'ok', WRN: 'wrn', ERR: 'err' }[o.lv.trim()] || 'inf';
-  const html = `<span class="ln ${cls}"><span class="t">${o.t}</span> <span class="lv">${esc(o.lv)}</span> <span class="m">${esc(o.m)}</span></span>\n`;
+  const sq = o.sq ? `<span class="sq">#${o.sq}</span> ` : '';
+  const html = `<span class="ln ${cls}"><span class="t">${o.t}</span> <span class="lv">${esc(o.lv)}</span> ${sq}<span class="m">${markup(o.m)}</span></span>\n`;
   const stick = autoscroll && (logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8);
   logEl.insertAdjacentHTML('beforeend', html);
-  while (logEl.children.length > 520) logEl.firstChild.remove();
+  while (logEl.children.length > BUFFER + 8) logEl.firstChild.remove();
   if (stick) { logEl.scrollTop = logEl.scrollHeight; }
   else { newSinceScroll++; jumpEl.querySelector('#jump-n').textContent = newSinceScroll; jumpEl.classList.add('show'); }
-  document.getElementById('ft-count').textContent = allLines.length + ' lines';
+}
+function repaint() {
+  const kept = allLines.filter(passes);
+  logEl.innerHTML = '';
+  if (!kept.length) {
+    logEl.innerHTML = '<div class="empty">No line in the ' + allLines.length + '-line buffer matches the current level and substring filters.</div>';
+  } else kept.forEach(appendLine);
+  logEl.scrollTop = logEl.scrollHeight;
+  updateStatus();
+}
+// the count must say what is on screen, not just what is buffered
+function updateStatus() {
+  const shown = allLines.filter(passes).length;
+  document.getElementById('ft-count').textContent =
+    shown === allLines.length ? allLines.length + ' lines' : shown + ' shown / ' + allLines.length + ' lines';
+  const off = Object.keys(levels).filter(k => !levels[k]);
+  document.getElementById('ft-level').textContent = off.length ? Object.keys(levels).filter(k => levels[k]).join('+') || 'none' : 'all';
+  const f = filterEl.value.trim();
+  document.getElementById('ft-filter').textContent = f ? `"${f}"` : 'off';
 }
 function genLine() {
   const r = Math.random();
-  const caller = rnd(CALLERS), vm = rnd(MODELS), prov = rnd(PROVS), up = rnd(UPS);
+  const caller = rnd(CALLERS), vm = rnd(VMODELS), prov = rnd(PROVS), up = rnd(UPS);
   if (r < 0.42) {
     const tok = 300 + Math.floor(Math.random() * 9000);
-    line('inf', `chat ${vm} <- ${caller} → ${prov}(${up}) 200 OK ${tok} tok · ${rnd(['stream', 'json'])} · ${(Math.random() * 30 + 2).toFixed(1)}s`);
+    line('inf', `chat ${vm.proto}:${vm.name} <- ${caller} → ${prov}(${up}) 200 OK ${tok} tok · ${rnd(['stream', 'json'])} · ${(Math.random() * 30 + 2).toFixed(1)}s`, ++seq);
   } else if (r < 0.62) {
-    line('ok', `${rnd(['cache hit 71% (prompt 12.4k, cached 8.8k)', 'sticky pinned → packycode-main (ttl 9m)', 'image downscaled 4.2MB → 310KB (jpeg)'])}`);
+    line('ok', rnd(['cache hit 71% (prompt 12.4k, cached 8.8k)', 'sticky pinned → packycode-main (ttl 9m)', 'image downscaled 4.20 MB → 310 KB (jpeg)']), seq);
   } else if (r < 0.72) {
-    line('wrn', `${prov} transient 429 · backoff 5s (consecutive 1)`);
+    line('wrn', `${prov} transient 429 · backoff 5s (consecutive 1)`, seq);
   } else if (r < 0.78) {
-    line('err', `${prov} upstream 500 · failing over to next candidate`);
+    line('err', `${prov} upstream 500 · failing over to next candidate`, seq);
   } else if (r < 0.86) {
-    line('inf', `client_key=${caller} · ${vm} · est in ${(Math.random() * 40 + 2).toFixed(1)}k tok · tools=${Math.floor(Math.random() * 8)}`);
+    line('inf', `client_key=${caller} · ${vm.proto}:${vm.name} · est in ${(Math.random() * 40 + 2).toFixed(1)}k tok · tools=${Math.floor(Math.random() * 8)}`, ++seq);
   } else if (r < 0.93) {
-    line('inf', `reload: config unchanged (mtime check) · quota flush ok`);
+    line('inf', 'reload: config unchanged (mtime check) · quota flush ok');
   } else {
     line('ok', `health probe ${prov} ok (rtt ${(Math.random() * 400 + 60).toFixed(0)}ms) · half-open → healthy`);
   }
 }
 
-// scroll behavior: pause autoscroll when user scrolls up
+// scroll behavior: pause autoscroll when the user scrolls up
 logEl.addEventListener('scroll', () => {
   const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
   if (atBottom) { autoscroll = true; newSinceScroll = 0; jumpEl.classList.remove('show'); }
   else autoscroll = false;
 });
 jumpEl.onclick = () => { logEl.scrollTop = logEl.scrollHeight; autoscroll = true; };
-filterEl.addEventListener('input', () => {
-  const f = filterEl.value.trim();
-  document.getElementById('ft-filter').textContent = f ? `"${f}"` : 'off';
-  logEl.innerHTML = '';
-  allLines.filter(passes).forEach(appendLine);
-  logEl.scrollTop = logEl.scrollHeight;
+filterEl.addEventListener('input', repaint);
+document.querySelectorAll('.lvl').forEach(b => b.onclick = () => {
+  levels[b.dataset.lvl] = !levels[b.dataset.lvl];
+  b.classList.toggle('on', levels[b.dataset.lvl]);
+  repaint();
 });
+document.getElementById('btn-clear-filter').onclick = () => {
+  filterEl.value = '';
+  Object.keys(levels).forEach(k => levels[k] = true);
+  document.querySelectorAll('.lvl').forEach(b => b.classList.add('on'));
+  repaint();
+};
+document.getElementById('btn-wrap').onclick = function () {
+  logEl.classList.toggle('nowrap');
+  this.textContent = 'Wrap: ' + (logEl.classList.contains('nowrap') ? 'off' : 'on');
+};
+document.getElementById('btn-copy').onclick = function () {
+  const txt = allLines.filter(passes).map(o => `${o.t} ${o.lv} ${o.sq ? '#' + o.sq + ' ' : ''}${o.m}`).join('\n');
+  const done = () => toast('Copied ' + allLines.filter(passes).length + ' lines');
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done).catch(done);
+  else done();
+};
 document.addEventListener('keydown', e => {
-  if (e.key === 'p' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); togglePause(); }
+  if (e.key.toLowerCase() === 'p' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); togglePause(); }
 });
+document.getElementById('btn-pause').onclick = togglePause;
+function setConn() {
+  if (down) { connEl.className = 'pill p-down'; connEl.textContent = 'down'; connEl.title = 'The log stream is disconnected'; return; }
+  if (paused) { connEl.className = 'pill p-paused'; connEl.textContent = 'paused'; connEl.title = 'Rendering paused — the server keeps streaming'; return; }
+  connEl.className = 'pill p-live'; connEl.textContent = 'streaming'; connEl.title = 'Receiving the live log stream';
+}
 function togglePause() {
   paused = !paused;
-  connEl.className = 'pill ' + (paused ? 'p-paused' : (downTimer ? 'p-down' : 'p-live'));
-  connEl.textContent = paused ? 'paused' : (downTimer ? 'down' : 'streaming');
+  document.getElementById('btn-pause').textContent = paused ? '▶ Resume' : '⏸ Pause';
+  document.getElementById('btn-pause').classList.toggle('on', paused);
+  setConn();
   toast(paused ? 'Stream paused (demo)' : 'Stream resumed');
 }
 
-// simulate disconnect at ~45s, then Retry → reconnect
+// simulate disconnect at ~45s, then Reconnect
 function simulateDown() {
-  downTimer = true;
-  connEl.className = 'pill p-down'; connEl.textContent = 'down';
+  down = true; setConn();
+  bannerEl.classList.add('show');
   line('err', '— stream disconnected (demo-simulated) —');
-  jumpEl.innerHTML = '⟳ Retry'; jumpEl.classList.add('show');
-  jumpEl.onclick = () => {
-    downTimer = false;
-    connEl.className = 'pill p-live'; connEl.textContent = 'streaming';
-    jumpEl.innerHTML = '↓ <span id="jump-n">0</span> new'; jumpEl.onclick = jumpToBottom; jumpEl.classList.remove('show');
-    line('ok', '— stream reconnected (replayed recent lines) —');
-  };
 }
-function jumpToBottom() { logEl.scrollTop = logEl.scrollHeight; autoscroll = true; }
+document.getElementById('btn-retry').onclick = () => {
+  down = false; setConn();
+  bannerEl.classList.remove('show');
+  line('ok', '— stream reconnected (replayed recent lines) —');
+};
 
 // boot
 syncKeyBtn();
 for (let i = 0; i < 14; i++) genLine();   // seed history
 logEl.scrollTop = logEl.scrollHeight;
-connEl.className = 'pill p-live'; connEl.textContent = 'streaming';
-const genTimer = setInterval(() => { if (!paused && !downTimer && !document.hidden) genLine(); }, 900);
+setConn();
+updateStatus();
+setInterval(() => { if (!paused && !down && !document.hidden) genLine(); }, 900);
 setTimeout(simulateDown, 45000);
 </script>
 </body>

@@ -43,12 +43,12 @@ code{font-family:var(--font-mono);font-size:11px;color:var(--text)}
   <div class="grid">
     <a class="tile" href="overview.html">
       <h2>Overview</h2>
-      <p>Status + Stats merged. Tabs for Overview / Live / Performance. Watch requests flow through the queue → dispatch → streaming milestones; inject a stall; open the unified auth modal.</p>
+      <p>Status + Stats merged into one flat page — vitals, quota, topology, live requests, recent failures, performance, traffic. No tabs; the header section rail is the table of contents.</p>
       <span class="tag">main deliverable</span>
     </a>
     <a class="tile" href="log.html">
       <h2>Log</h2>
-      <p>Full-bleed terminal. Mock streaming with pause/resume, substring filter, auto-scroll handoff, and a simulated disconnect after ~45s.</p>
+      <p>Full-bleed terminal. Mock streaming with level + substring filters, pause/resume, auto-scroll handoff, and a simulated disconnect after ~45s.</p>
       <span class="tag">full-width variant</span>
     </a>
     <a class="tile" href="help.html">
@@ -61,9 +61,9 @@ code{font-family:var(--font-mono);font-size:11px;color:var(--text)}
   <div class="note">
     <b>Demo interactions worth trying</b>
     <ul>
-      <li>Overview: switch tabs (URL hash remembers), watch the Live table fill up, press <code>⚡ Inject stall</code> for the red stall badge, <code>🚫 Simulate 401</code> then Connect to see the unified 401 flow, copy a Connect URL.</li>
-      <li>Log: scroll up to pause autoscroll ("↓ N new" chip), type a substring to filter, wait ~45s for the disconnect, then Retry.</li>
-      <li>Help: copy a snippet, store a key — then check the Overview header badge: the key is shared via localStorage across all pages.</li>
+      <li>Overview: use the header section rail to jump between blocks; click the countdown to refresh the whole page at once (pausing turns the countdown itself amber); hover the chart for the per-bucket breakdown (red dots mark buckets with errors); switch the Performance window — the whole row moves together, and rows with no traffic in that window fall back to <code>no samples</code>; read Recent Failures for the "why did that one fail" gap between Live and the hourly aggregates; <code>⚡ Inject stall</code> and <code>⛔ Inject queue backlog</code> for the two incident shapes; <code>🚫 Simulate 401</code> then Connect for the unified 401 flow.</li>
+      <li>Log: toggle the level chips, type a substring (hits are highlighted), scroll up to pause autoscroll ("↓ N new" chip), <code>⌘P</code> to pause the stream, wait ~45s for the disconnect banner, then Reconnect.</li>
+      <li>Help: copy a snippet or the base URL, store a key — then check any other page's header: the key is shared via localStorage across all pages.</li>
       <li>Right-bottom demo panel (Overview) and the <code>DEMO · mock data</code> ribbon exist only in the demo, not in the real design.</li>
     </ul>
   </div>
