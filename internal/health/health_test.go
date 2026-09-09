@@ -24,7 +24,7 @@ func wantJitter(t *testing.T, what string, d, want time.Duration) {
 func TestTransientBackoffCurve(t *testing.T) {
 	t.Parallel()
 	r := New()
-	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
+	want := []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second}
 	for i, w := range want {
 		got := r.ReportFailure("e", core.ErrTransient, 0, t0)
 		wantJitter(t, fmt.Sprintf("failure #%d", i+1), got, w)
@@ -61,7 +61,7 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0)
-	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+	after := t0.Add(6 * time.Second) // cooldown (5s) expired → half-open
 
 	if !r.Acquire("e", after) {
 		t.Fatal("first caller should win the probe slot")
@@ -74,13 +74,13 @@ func TestHalfOpenSingleFlightProbe(t *testing.T) {
 	}
 
 	// Probe fails → deeper cooldown, probe slot released.
-	wantJitter(t, "probe failure deepens backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
+	wantJitter(t, "probe failure deepens backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 10*time.Second)
 	if r.Acquire("e", after.Add(1*time.Second)) {
 		t.Error("must be cooling down again after failed probe")
 	}
 
 	// Cooldown expires again, probe succeeds → fully healthy, no probe gate.
-	again := after.Add(5 * time.Second)
+	again := after.Add(11 * time.Second)
 	if !r.Acquire("e", again) {
 		t.Fatal("probe after second cooldown")
 	}
@@ -106,7 +106,7 @@ func TestClassify(t *testing.T) {
 		t.Errorf("still cooling down: available=%v needsProbe=%v, want false,false", available, needsProbe)
 	}
 
-	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+	after := t0.Add(6 * time.Second) // cooldown (5s) expired → half-open
 	available, needsProbe := r.Classify("e", after)
 	if available || !needsProbe {
 		t.Errorf("first caller after cooldown: available=%v needsProbe=%v, want false,true", available, needsProbe)
@@ -134,8 +134,8 @@ func TestTransientHonorsRetryAfter(t *testing.T) {
 func TestReportNeutralReleasesProbeOnly(t *testing.T) {
 	t.Parallel()
 	r := New()
-	r.ReportFailure("e", core.ErrTransient, 0, t0) // cooldown 2s, fails=1
-	after := t0.Add(3 * time.Second)               // half-open
+	r.ReportFailure("e", core.ErrTransient, 0, t0) // cooldown 5s, fails=1
+	after := t0.Add(6 * time.Second)               // half-open
 
 	if !r.Acquire("e", after) {
 		t.Fatal("should win probe slot")
@@ -148,7 +148,7 @@ func TestReportNeutralReleasesProbeOnly(t *testing.T) {
 	}
 	// …and failure count was not deepened: a subsequent failure backs off to
 	// 4s (fails=2), not 8s (which fails=3 would give).
-	wantJitter(t, "neutral must not deepen backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
+	wantJitter(t, "neutral must not deepen backoff", r.ReportFailure("e", core.ErrTransient, 0, after), 10*time.Second)
 }
 
 func TestSuccessResets(t *testing.T) {
@@ -158,7 +158,7 @@ func TestSuccessResets(t *testing.T) {
 		r.ReportFailure("e", core.ErrTransient, 0, t0)
 	}
 	r.ReportSuccess("e")
-	wantJitter(t, "backoff should reset after success", r.ReportFailure("e", core.ErrTransient, 0, t0), 2*time.Second)
+	wantJitter(t, "backoff should reset after success", r.ReportFailure("e", core.ErrTransient, 0, t0), 5*time.Second)
 }
 
 func TestStatus(t *testing.T) {
@@ -205,7 +205,7 @@ func TestStatusReportsProbing(t *testing.T) {
 	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0)
-	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+	after := t0.Add(6 * time.Second) // cooldown (5s) expired → half-open
 
 	if st := r.Status("e", after); st.Probing {
 		t.Errorf("half-open with no probe in flight should report Probing=false: %+v", st)
@@ -234,7 +234,7 @@ func TestStatusServingDistinctFromAvailableWhenHalfOpen(t *testing.T) {
 	t.Parallel()
 	r := New()
 	r.ReportFailure("e", core.ErrTransient, 0, t0)
-	after := t0.Add(3 * time.Second) // cooldown (2s) expired → half-open
+	after := t0.Add(6 * time.Second) // cooldown (5s) expired → half-open
 
 	st := r.Status("e", after)
 	if !st.Available {
@@ -270,7 +270,7 @@ func TestRetryAfterCappedAtOneHour(t *testing.T) {
 
 // TestCurveSwitchResetsFailureDepth pins R04: fails counts consecutive
 // failures under the *current* backoff curve. Five transient failures leave
-// the transient curve at depth 5 (32s), but the first auth failure must
+// the transient curve at depth 5 (80s), but the first auth failure must
 // start the long curve at its base — the old shared counter took that 401
 // at depth 6, straight to the 1h cap. Same in the other direction.
 func TestCurveSwitchResetsFailureDepth(t *testing.T) {
@@ -283,7 +283,7 @@ func TestCurveSwitchResetsFailureDepth(t *testing.T) {
 	if got := r.ReportFailure("e", core.ErrAuth, 0, t0); got >= time.Hour {
 		t.Errorf("auth run should deepen from 10min, not start near the cap: %v", got)
 	}
-	wantJitter(t, "first transient after auth run", r.ReportFailure("e", core.ErrTransient, 0, t0), 2*time.Second)
+	wantJitter(t, "first transient after auth run", r.ReportFailure("e", core.ErrTransient, 0, t0), 5*time.Second)
 }
 
 // TestSameCurveStillDeepens is the regression half of R04: within one curve
@@ -324,7 +324,7 @@ func TestProbeSuccessDecaysNotClears(t *testing.T) {
 // probe successes and real failures alternating, the depth never returns to
 // zero (no real success ever lands), so the cooldown never falls back to
 // the shallowest step. The old clear-on-probe behavior reset a flapping
-// endpoint to 2s forever.
+// endpoint to 5s forever.
 func TestFlappingEndpointKeepsBackoff(t *testing.T) {
 	t.Parallel()
 	r := New()
@@ -337,7 +337,7 @@ func TestFlappingEndpointKeepsBackoff(t *testing.T) {
 			t.Fatalf("iter %d: probe success cleared the failure depth", i)
 		}
 		got := r.ReportFailure("e", core.ErrTransient, 0, t0)
-		if got < 4*time.Second {
+		if got < 10*time.Second {
 			t.Fatalf("iter %d: cooldown %v fell back to the shallowest step", i, got)
 		}
 	}
@@ -349,8 +349,8 @@ func TestFlappingEndpointKeepsBackoff(t *testing.T) {
 func TestReleaseProbeReturnsSlotWithoutVerdict(t *testing.T) {
 	t.Parallel()
 	r := New()
-	r.ReportFailure("e", core.ErrTransient, 0, t0) // fails=1, 2s cooldown
-	after := t0.Add(3 * time.Second)               // half-open
+	r.ReportFailure("e", core.ErrTransient, 0, t0) // fails=1, 5s cooldown
+	after := t0.Add(6 * time.Second)               // half-open
 	if !r.Acquire("e", after) {
 		t.Fatal("should win probe slot")
 	}
@@ -367,7 +367,7 @@ func TestReleaseProbeReturnsSlotWithoutVerdict(t *testing.T) {
 	// A later verdict still lands on the untouched state: this failure
 	// deepens to 4s (fails=2), not 8s (which a phantom extra failure would
 	// give) — and it's not a curve switch, since nothing re-classified.
-	wantJitter(t, "failure after released probe", r.ReportFailure("e", core.ErrTransient, 0, after), 4*time.Second)
+	wantJitter(t, "failure after released probe", r.ReportFailure("e", core.ErrTransient, 0, after), 10*time.Second)
 }
 
 // TestAllDeclaredErrorClassesHaveExplicitCurve pins S4's enumeration: every

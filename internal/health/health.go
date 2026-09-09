@@ -20,7 +20,20 @@ import (
 )
 
 const (
-	transientBase = 2 * time.Second
+	// transientBase is deliberately ≥5s, not 2s: the recovery probe is a
+	// max_tokens-300 echo while real traffic is often a 200k-token request,
+	// so on a degraded-but-not-dead upstream the probe passes systematically
+	// more often than real traffic. A 2s first step let that gray zone flap:
+	// fail → 2s → probe OK → back in the pool at its configured priority →
+	// the next session without a sticky pointer hits it first → fail again,
+	// each cycle paying a full response_header timeout. (Failover success
+	// moves the sticky pointer to whichever candidate succeeded, so the same
+	// conversation does NOT come back — the re-hits come from new traffic.)
+	// 5s slows the flap 2.5× without making a single transient failure
+	// expensive; the structural fix is registered in docs/KNOWN_ISSUES.md
+	// §2.99 (probe decays only to fails==1, real traffic confirms the last
+	// step) pending observation.
+	transientBase = 5 * time.Second
 	transientCap  = 5 * time.Minute
 	longBase      = 10 * time.Minute
 	longCap       = time.Hour

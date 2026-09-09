@@ -207,7 +207,7 @@ ErrAuth         401 / 403（非内容类）；或 4xx body 命中 OAuth 标准�
 ErrRateLimit    429 → 尊重 Retry-After（秒/HTTP-date），切换
 ErrEndpoint     端点持续不可用（额度耗尽/402、模型不存在/404 或 400+嗅探【模型未知、upstreamHint】；402/404 先过内容词表，命中归 ErrContent；
                 或 4xx body 里出现"网关/中转层自报转发失败"措辞——upstreamHint，见下）→ 长冷却，切换
-ErrTransient    5xx/408/529/超时/网络 → 短冷却（2s 指数退避；带 Retry-After 则从其值），切换
+ErrTransient    5xx/408/529/超时/网络 → 短冷却（5s 指数退避；带 Retry-After 则从其值），切换
 ErrContent      内容合规拦截 → 切换，但不惩罚端点健康（零冷却）
 ErrContextLimit 会话历史超出该端点模型的上下文窗口 → 切换，但不惩罚端点健康（零冷却，窗口大小是端点的静态属性）
 ErrQuirk        端点专属协议约束拒绝（DeepSeek 思考模式要求 reasoning_content 回传、Google
@@ -312,7 +312,7 @@ Priority、Weight、RoundRobin、Latency、Cost 都只是排序维度，任意�
 
 ### 6.2 健康：冷却 + 半开恢复探测（后台探测）
 
-* 失败按类别计冷却：Transient 2s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 与 Transient 优先 `Retry-After`（429/503 都可能携带），**但同样封顶 1h**——Retry-After 是上游可控输入，一个畸形的超大值不该把端点锁死到进程重启。请求侧误配三类零冷却：内容合规/上下文超限/vendor 约束拒绝（ErrContent/ErrContextLimit/ErrQuirk）。
+* 失败按类别计冷却：Transient 5s 起指数退避（×2 封顶 5min）；Auth/Endpoint 10min 起（封顶 1h）；RateLimit 与 Transient 优先 `Retry-After`（429/503 都可能携带），**但同样封顶 1h**——Retry-After 是上游可控输入，一个畸形的超大值不该把端点锁死到进程重启。请求侧误配三类零冷却：内容合规/上下文超限/vendor 约束拒绝（ErrContent/ErrContextLimit/ErrQuirk）。
 * 冷却中被健康过滤剔除；到期进入半开，此时半开端点永远不放行真实请求：发现某个端点半开且当前没有探测在跑，就用 `Health.Acquire` 抢下单飞名额，起一个后台 goroutine（`internal/router/probe.go` 的 `runProbe`）发一个 `internal/probe` 构造的最小请求（要求模型原样回显一个一次性 nonce，`internal/probe.Echoed` 做子串校验），真实请求本身仍旧把这个端点当不可用处理，直接路由到下一候选。探测结果走跟真实请求完全相同的 `ad.ClassifyError` 判定，落到 `ReportSuccess`/`ReportFailure`/`ReportNeutral` 三者之一——2xx 视为恢复（回显没对上只记日志、不惩罚，避免模型偶尔不遵循指令误伤一个其实健康的端点）；4xx 且分类为 `ErrClient`/`ErrContent`/`ErrContextLimit`/`ErrQuirk` 视为"探测请求本身的问题，与端点健康无关"（`ReportNeutral`）；其余（含探测超时，受 `timeouts.probe` 约束，默认 15s）视为真失败（`ReportFailure`，按原分类计相应冷却）。这条路径要解决的问题：如果放任"谁先撞上半开端点谁就当探针"，探针请求本身很大很慢时（比如一段几十万 token 的长对话），恢复检测的时长就跟这个具体请求的体量强绑定，期间同一进程里所有其他并发调用方也会被连带拖累；探测跟真实流量解耦之后，这个连带效应被消除，真实请求永远不必等探测、也不会因为探测变慢。
 * **探针槽必须在每种结局下都归还**——中性结局共四类：内容拦截（ErrContent）、上下文超限（ErrContextLimit）、厂商协议约束拒绝（ErrQuirk）、ErrClient（坏请求原样返回）；漏掉任何一类的释放，探针一旦撞上对应类型的请求，`probing` 就会永久为 true，端点锁死到进程重启（这个不变式由回归测试锁定：`internal/server/active_probe_test.go`）。`upstreamHint` 命中的 `ErrEndpoint` 必须真的走到 `ReportFailure`、不能被误并进上面的中性分支——这条路径的同步 `tryOne` 侧由 `TestUpstreamGatewayFailureContinuesFailover`（`server_test.go`）锁定，异步 `runProbe` 侧由镜像的 `TestActiveProbe_UpstreamFailureGoesToReportFailure`（`active_probe_test.go`）锁定，两条路径各一份，互不替代。
 * 客户端主动断连不计入端点失败（与上游健康无关，防状态污染）——真实请求从不持有探针槽，所以断连也不需要额外释放探针的逻辑。
