@@ -152,6 +152,10 @@
 - **`buildinfo` 只输出 VCS commit 哈希，不人工编造语义化版本**：如实反映构建来源。
 - **官方用量 API 不预先抽象 `Source` 接口**：YAGNI，等真正接入第一个厂商私有用量接口时再设计。
 - **不维护外部贡献者 `CONTRIBUTING.md`**：与小团队运作方式不匹配。
+- **`client_key_tag` 与 `key_label` 命名与推导刻意不统一**：前者代表调用方（`audit.KeyTag` 尾 8 位窗口 + 连字符截断，有 16 字符下限与 `-alice` 命名约定的历史包袱，文件名与既有报表已定型）；后者代表实际分发到的上游账号（沿用 config 的 `api_keys` label 叫法，未配置 label 时取 key 尾 6 位）。两者是相互独立的两个维度，在所有统计报表（slim、rollup、`/stats`、`/stats.html`）中并列记录，刻意不统一推导或合为一个字段。
+- **in-flight 请求注册表（`router/inflight.go`）归属路由运行态，永不落盘、不结算进完成时账本**：排队、逐 attempt 发出、流式逐块盖章等事件发生在 router 内部，早于任何 audit record 产生；完成时钩子（`server.done`）对每个请求恰好记账一次，in-flight 仅补充"请求进行中"的内存观测空窗，条目在请求结束时整条删除，两条路径互不写对方的数据。
+- **`last_byte_at` 与 `est_out` 逐块盖章、刻意不节流**：`last_byte_at` 的语义是"上游最后一块数据真实到达的时刻"，用于卡死检测；若按时间或字节数攒批，节流后的盖章时间反而滞后于真实末块到达时间，让已卡死的流显得"更新鲜"，方向恰好做反；成本上每块只有一次 `OutTokens()`（per-stream 互斥锁内读计数器，本来每块就进过一次）+ 几次 per-entry 原子写，零内存分配，千块/秒极端流下也远低于 JSON/SSE 协议开销，无需攒批。
+- **body 上传与 probe 阶段对 in-flight 注册表不可见**：注册点设在 `TopLevelProbe` + `authenticate` 之后、`AcquireSlot` 之前，因为未获得协议与虚拟模型名前的请求无法归属维度，且慢速客户端 body 上传并不占用并发槽，不属于并发门排队观测的对象。
 
 ---
 

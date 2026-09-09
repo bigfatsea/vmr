@@ -46,12 +46,12 @@ type statsResponse struct {
 		InFlight int64 `json:"in_flight"`
 		Waiting  int64 `json:"waiting"`
 	} `json:"concurrency"`
-	Inflight        []router.InflightEntry       `json:"inflight"`
-	Hourly          []livestats.HourlyRow        `json:"hourly"`
-	Daily           []livestats.HourlyRow        `json:"daily"`
-	ByProviderModel []livestats.ProviderRow      `json:"by_provider_model"`
-	ByClientKeyTag  []livestats.DimensionRow     `json:"by_client_key_tag"`
-	ByKeyLabel      []livestats.DimensionRow     `json:"by_key_label"`
+	Inflight        []router.InflightEntry   `json:"inflight"`
+	Hourly          []livestats.HourlyRow    `json:"hourly"`
+	Daily           []livestats.HourlyRow    `json:"daily"`
+	ByProviderModel []livestats.ProviderRow  `json:"by_provider_model"`
+	ByClientKeyTag  []livestats.DimensionRow `json:"by_client_key_tag"`
+	ByKeyLabel      []livestats.DimensionRow `json:"by_key_label"`
 }
 
 // adminStats serves GET /stats: merges router in-flight + concurrency with
