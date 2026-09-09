@@ -66,7 +66,17 @@ func (r *hourRow) add(h time.Time, c Counters) {
 	if r.byHr == nil {
 		r.byHr = make(map[int64]Counters)
 	}
-	r.byHr[h.Unix()] = c
+	// Accumulate, never assign: the same (dims, hour) pair can arrive from
+	// two independent folds (the rollup map and the live current-hour map
+	// both feed snapshotLocked), and the rollup iteration order is map-
+	// random — an assign here would make the winner of that race decide the
+	// number, which is exactly the h9/h10 swap TestAggregator_RestartRecovery
+	// caught. The two sources are disjoint by construction (rolling moves a
+	// group out of cur and into rollup once), so summing is the correct
+	// merge, not double-counting.
+	acc := r.byHr[h.Unix()]
+	acc.add(c)
+	r.byHr[h.Unix()] = acc
 }
 
 // snapshotLocked aggregates the whole ledger for /stats. Caller holds the
@@ -175,6 +185,18 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 	snap.ByProviderModel = buildProviderRows(prov, rings)
 	snap.ByClientKeyTag = buildAxisRows(byTag)
 	snap.ByKeyLabel = buildAxisRows(byLabel)
+	// Sort hourly rows by time ascending (older first, newest at the end) so
+	// consumers (and tests) see a deterministic time-ordered progression,
+	// not map-iteration randomness over byHr. Ties break on Dims id.
+	slices.SortFunc(snap.Hourly, func(a, b HourlyRow) int {
+		if !a.Hour.Equal(b.Hour) {
+			if a.Hour.Before(b.Hour) {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a.Dims.key().id(), b.Dims.key().id())
+	})
 	return snap
 }
 
