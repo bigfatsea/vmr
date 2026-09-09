@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/quota"
@@ -135,6 +136,25 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	// rbody.OutTokens() (respnorm.go), which returns 0 for opaque responses.
 	raw, estimated = TokenCountersSides(u, inSniffed, outSniffed, creq.Facts.EstimatedTokens, rbody.OutTokens())
 	return
+}
+
+// tokenStamp converts one response's raw counters into the audit stamp
+// value — the exact audit.TokenCount shape Attempt.Tokens stores (the
+// LiveStats-side key space). Every Forwarded attempt gets one (audit
+// evidence must not depend on quota configuration, which is why this is
+// separate from needsTokenCharge-gated tokenCharge): quota billing and
+// audit stamping read the SAME counters, same instant — the parity
+// differential test (cmd/vmr/quota_parity_test.go pattern) pins the two
+// against each other. The mapping lives here rather than in audit so the
+// audit package stays free of quota's vocabulary.
+func tokenStamp(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) *audit.TokenCount {
+	raw, _, _, _ := tokenCharge(rbody, creq)
+	return &audit.TokenCount{
+		In:         int64(raw.Fresh),
+		Out:        int64(raw.Out),
+		CacheRead:  int64(raw.CacheRead),
+		CacheWrite: int64(raw.CacheWrite),
+	}
 }
 
 // TokenCountersSides is the router half's one translation layer from

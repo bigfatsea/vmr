@@ -210,6 +210,7 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 				BaseURL:          baseURL,
 				FullURL:          ad.ResolveURL(baseURL),
 				APIKey:           p.APIKey,
+				KeyLabel:         p.KeyLabel,
 				Model:            upstreamModel,
 				Priority:         eg.Priority,
 				RoleMap:          p.RoleMap,

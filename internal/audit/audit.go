@@ -211,6 +211,25 @@ type Attempt struct {
 	// must use the IsForwarded predicate (see audit.IsForwarded) which
 	// handles the compatibility case.
 	Forwarded bool `json:"forwarded,omitempty"`
+
+	// Tokens holds the four raw token components taken at the same instant
+	// (and from the same source) as the quota charge this attempt was billed
+	// with — the stream-side exact/degraded fold in router.TokenCountersSides,
+	// BEFORE model_multipliers billing conversion (the converted float64 is
+	// the billing lens, not the traffic lens; the two must never be stored
+	// interchangeably). Stamped only on Forwarded attempts (same point as
+	// SetForwarded); nil for failed/canceled ones.
+	Tokens *TokenCount `json:"tokens,omitempty"`
+
+	// KeyLabel identifies which upstream credential served this request —
+	// the label for a provider expanded from a labeled api_keys map
+	// (p1 + main/backup → p1-main), else the key's last-6 tail for a plain
+	// api_key. Resolved at config-load time (expandProviderAPIKeys), carried
+	// on core.Endpoint, and stamped here at the same forwardSuccess point
+	// as Tokens/Forwarded. It is a DIFFERENT concept from Record's
+	// client_key_tag (the caller's credential): name asymmetry is deliberate
+	// — see the LiveStats design doc's decision table; do not unify them.
+	KeyLabel string `json:"key_label,omitempty"`
 }
 
 type Message struct {

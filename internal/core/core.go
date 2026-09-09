@@ -196,6 +196,12 @@ type Endpoint struct {
 	// provider has no quota configured (unmetered account).
 	Quota *QuotaSpec
 
+	// KeyLabel is the upstream credential's display label (config.Provider
+	// → core.Endpoint, verbatim — see Provider.KeyLabel's doc comment),
+	// stamped onto audit Attempt.key_label at forwardSuccess and consumed
+	// by the LiveStats slim/rollup files. Display label, never a secret.
+	KeyLabel string
+
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
 	// immutable once constructed, so BuildSnapshot computes them exactly

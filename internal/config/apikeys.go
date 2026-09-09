@@ -38,6 +38,7 @@ func (c *Config) expandProviderAPIKeys() error {
 	expanded := make([]Provider, 0, len(c.Providers))
 	for _, p := range c.Providers {
 		if len(p.APIKeys) == 0 {
+			p.KeyLabel = keyTailLabel(p.APIKey)
 			expanded = append(expanded, p)
 			continue
 		}
@@ -56,6 +57,7 @@ func (c *Config) expandProviderAPIKeys() error {
 			child.Name = p.Name + "-" + label
 			child.APIKey = key
 			child.APIKeys = nil
+			child.KeyLabel = label
 			expanded = append(expanded, child)
 			names = append(names, child.Name)
 		}
@@ -127,4 +129,16 @@ func rewriteProviderRefs(refs []string, rename map[string][]string) ([]string, b
 		}
 	}
 	return out, true
+}
+
+// keyTailLabel derives a Provider.KeyLabel for a provider written the plain
+// api_key way (no api_keys labels): the key's last 6 characters, or the
+// whole key when it's shorter. 6 (vs the client-side audit.KeyTag's 8-char
+// window) is deliberate — a different concept with a different derivation;
+// see the LiveStats design doc's decision table, do not unify them.
+func keyTailLabel(key string) string {
+	if len(key) <= 6 {
+		return key
+	}
+	return key[len(key)-6:]
 }

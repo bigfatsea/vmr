@@ -54,6 +54,16 @@ type Provider struct {
 	Name    string            `yaml:"name"`
 	BaseURL map[string]string `yaml:"base_url"`
 	APIKey  string            `yaml:"api_key"`
+	// KeyLabel is the audit/stats-facing name of the credential this
+	// provider carries — the label it was written under in api_keys, or
+	// the key's last-6 tail for a plain api_key (audit files are 0600 and
+	// config validation keeps client-side tags non-secret the same way).
+	// Set by expandProviderAPIKeys at Parse time; every consumer (snapshot
+	// → core.Endpoint → Attempt.key_label stamping) reads it verbatim and
+	// never re-derives it from the expanded provider name — parsing
+	// "<base>-<label>" back out is fragile (base names may contain hyphens
+	// themselves). A stats/audit display label, never a secret.
+	KeyLabel string `yaml:"-"`
 	// APIKeys is sugar for several independent accounts on the same vendor,
 	// expanded at Parse time — see apikeys.go. A plain Go map: iteration
 	// order (and so which expanded key ends up "first" when no priority/

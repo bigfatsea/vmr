@@ -562,6 +562,14 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// chargeQuota's doc comment); nil-safe when no quota.Registry is wired
 	// up or this endpoint carries no quota: config.
 	rt.chargeQuota(ep, rbody, creq, time.Now())
+	// Stamp the audit evidence (raw four-component counters + upstream
+	// credential label) at the same point: every Forwarded attempt carries
+	// it, independent of whether any quota billing happened (audit evidence
+	// must not depend on quota configuration). tokenStamp re-derives the
+	// same counters tokenCharge would — same source, same instant — and the
+	// parity differential test pins stamp vs charge against each other.
+	att.SetTokens(tokenStamp(rbody, creq))
+	att.SetKeyLabel(ep.KeyLabel)
 	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
 	// rbody.Usage() is safe to read here even on copyFlush's early-return
