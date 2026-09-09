@@ -63,6 +63,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `digest` | The system's one cache-digest construction (D8): length-prefixed ordered sha256 chain plus fixed-width scalar encoders. stdlib-only leaf; report and journey are both callers |
 | `jsonscan` | JSON byte-range scan/splice engine: low-level structural byte scanning (`TopLevelValues`, `WalkArrayElements`, `Skip*` primitives) and zero-allocation byte-splice rewrites (`RewriteModel`, `RewriteStream`, `RewriteRoles`, `RewriteInputRoles`). Fuzz-tested. Zero internal dependencies |
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/viewmodel_*.go` (the ViewModel builders; `archtest` enforces the pairing), `i18n/journey_*.go` next to `internal/journey`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
+| `livestats` | Completed-request live telemetry ledger: zero-internal-dependency leaf owning slim WAL append, hourly lazy rollups, restart recovery with duplicate row last-wins assimilation, in-memory ring buffers with nearest-rank percentiles, and read-time `/stats` snapshot aggregation |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
 
 Routing half:
@@ -78,7 +79,7 @@ Routing half:
 | `quota` | Quota accounting: `Counters`/`Registry` keyed by provider *name* (rotating a key must not reset the period), calendar-aware periods, headroom scoring, atomic `vmr-quota.json` persistence |
 | `pricing` | Two-layer rate resolution (account override → standard table → unpriced), no external file layer. A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
 | `respnorm` | Response stream normalization: `Wrap` + the buffered/passthrough state machine, model rewrite, SSE splitting, `[DONE]` policy, and the evidence-based vendor quirk repairs. Quota usage sniffing lives here too — a documented tradeoff, see the package doc |
-| `router` | Failover loop (`Serve`/`tryOne`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
+| `router` | Failover loop (`Serve`/`tryOne`), in-flight requests registry (`InflightRegistry`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
 | `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, `/status` (auth-gated), unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/status`) |
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |
@@ -139,7 +140,10 @@ root allowed to see both halves at once.
 - **Timezone: one display authority.** Everything human-facing — Markdown/CLI output,
   aggregation bucketing, filenames — renders through `fmtutil.DisplayZone`; persisted records
   keep their write-time offset. A timestamp inside an LLM/tool payload is passthrough content,
-  never parsed or converted. `journey`'s `deriveID` is the one documented exception.
+  never parsed or converted. Two documented exceptions: `journey`'s `deriveID`, and
+  `internal/livestats` — a zero-dep leaf that cannot import `fmtutil`, so its hour and
+  local-calendar-day bucketing (`hour.go`, `snapshot.go`) reads `time.Local` directly, which
+  is `DisplayZone`'s production value anyway.
 - **`internal/report` is coupled to `audit.Record`'s shape at compile time** — changing the
   record structure means updating `report` and its tests in the same change.
 - **Run `go test ./internal/archtest/...`** after any package-boundary change, any `router`

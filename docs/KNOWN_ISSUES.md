@@ -41,7 +41,7 @@
 - **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→5s 冷却→探针成功→满额流量→429 的循环成因。由 `TestFlappingEndpointKeepsBackoff` 钉死的保证是「探针成功与真实失败交替时，深度永不回落到最浅档」；`fails>0` 期间对真实流量恒 `available=false`（last-resort 释放是唯一例外，见 §2.85）。**已知残留**：连续探针成功可把 `fails` 衰减到 0 并把端点放回常规池原优先级，对「慢而未死」的灰区上游构成池级振荡循环（transient 首档 5s 只降频）；根除方案登记在 §2.99，待触发。
 - **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
 - **后台探针按 requests 口径计 1，对 token 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
-- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。
+- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/livestats` 自带一把**独立**的同机制 flock（`.vmr-stats.lock`），因为它不寄生 audit：`-audit=false` 时 audit 锁根本不存在，而"不留正文仍要监控"是一等场景——第二个实例的 livestats 拿不到锁就降级为纯内存（不写 slim/rollup），不污染首个实例的归档。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
 - **`copyFlush` 的 goroutine + channel 流水线**：避免在底层连接层设全局 Deadline 破坏 TLS/Header 超时语义。
@@ -221,6 +221,26 @@
 - **触发条件**：真实 profile 显示某个离线聚合路径的时间/内存确由 `map[string]any` 分配主导（当前证据相反）。
 
 ### B. 分析半区 · 指标与口径正确性
+
+#### 2.100 [中，登记待做] `internal/report` 未消费 `Attempt.tokens` 盖章值，与 `/stats` 的 token 双路径
+
+- **现状**：LiveStats 前置改动把每个 forwarded attempt 的 raw 四分量 token 盖到
+  `audit.Attempt.tokens`（`internal/router/quota.go:tokenStamp`，与 quota 扣费同源），目的是
+  "routing half 能盖戳就不让下游反推"。`internal/livestats` 的 `/stats` 已消费它；但
+  `internal/report`（`session.go` 的 `chatmsg.ExtractUsageSides(resp.Body, …)`）**仍从响应体
+  反解析** token。字段是加性的，report 不改也编译。
+- **双路径分叉风险**：同一条 audit record，`/stats` 的 `by_provider_model` token 走
+  `Attempt.tokens`（quota 的 exact/degraded fold），`vmr analyze` 的按端点 token 走 body
+  反解析——两条路径对同一请求可能不一致：① degraded 场景（流在 usage 块前截断）两侧的估算
+  口径不同；② `Attempt.tokens.in` 是 fresh（净 cache），`chatmsg.Usage.In` 是 gross。运维
+  对不上账。
+- **可能方案**：`report` 改为优先读 `Attempt.tokens`（缺失时 fallback 到
+  `ExtractUsageSides`，仿 `Attempt.IsForwarded` 的 stamped-优先-heuristic-兜底），并补
+  livestats-token vs report-token 的差分测试。
+- **为什么还没做**：跨 viewmodel 层、golden fixture 会变，有独立的测试成本；不阻塞现状
+  （两条路径各自有测试、各自能跑）。
+- **触发条件**：有分析半区改动窗口时一起做；或运维实际报出 `/stats` 与 `vmr analyze` 的
+  token 对不上。
 
 #### 2.57 [低] `computeTimeSplit` 单间隙时间归因无上限，污染 benchmark 均值
 

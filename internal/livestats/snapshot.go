@@ -140,7 +140,9 @@ func bookAxis(m map[string]*Counters, v string, c Counters) {
 // assembleSnapshot folds the hour rows into hourly/daily slices, builds the
 // provider rows with ring percentiles, and orders everything.
 func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring) Snapshot {
-	// hourly[] keeps the most recent hourlyTail hours with data.
+	// hourly[] keeps the most recent hourlyTail hours with data; daily[] the
+	// most recent dailyTail local-calendar-days. Both windows are derived from
+	// the full observed-hour set before either is truncated.
 	hours := make([]int64, 0, 2*len(hourRows))
 	for _, r := range hourRows {
 		for u := range r.byHr {
@@ -149,6 +151,25 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 	}
 	slices.Sort(hours)
 	hours = slices.Compact(hours)
+
+	dayKeys := make([]string, 0, len(hours))
+	seenDay := make(map[string]bool, len(hours))
+	for _, u := range hours {
+		dk := formatDay(foldDay(u))
+		if !seenDay[dk] {
+			seenDay[dk] = true
+			dayKeys = append(dayKeys, dk)
+		}
+	}
+	slices.Sort(dayKeys)
+	if len(dayKeys) > dailyTail {
+		dayKeys = dayKeys[len(dayKeys)-dailyTail:]
+	}
+	daySet := make(map[string]bool, len(dayKeys))
+	for _, dk := range dayKeys {
+		daySet[dk] = true
+	}
+
 	if len(hours) > hourlyTail {
 		hours = hours[len(hours)-hourlyTail:]
 	}
@@ -172,7 +193,11 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 				snap.Hourly = append(snap.Hourly, HourlyRow{Hour: time.Unix(u, 0), Dims: r.dims, Counters: c})
 			}
 			day := foldDay(u)
-			dk := formatDay(day) + "\x1f" + id
+			dayStr := formatDay(day)
+			if !daySet[dayStr] {
+				continue
+			}
+			dk := dayStr + "\x1f" + id
 			d := daily[dk]
 			if d == nil {
 				d = &HourlyRow{Hour: day, Dims: r.dims}
@@ -200,10 +225,16 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 	return snap
 }
 
-// foldDay returns the UTC day bucket a unix hour belongs to. Day buckets
-// are display groupings over hour-aligned data, so UTC is the stable choice.
+// foldDay returns the local-calendar-day bucket a unix hour belongs to.
+// "By day" is a human-facing grouping, so it follows the operator's wall
+// clock (time.Local) — the same authority hour.go uses for slim-file naming,
+// and what the project's one-display-zone rule requires (livestats is a leaf
+// and cannot import fmtutil.DisplayZone, whose value is time.Local anyway).
+// A fixed-offset %86400 truncation would put a UTC+8 operator's 00:00-07:59
+// requests on the previous day.
 func foldDay(unix int64) time.Time {
-	return time.Unix(unix-unix%86400, 0).UTC()
+	t := time.Unix(unix, 0).In(time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
 }
 
 func formatDay(t time.Time) string {

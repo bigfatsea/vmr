@@ -230,7 +230,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		_ = rc.SetReadDeadline(time.Now().Add(getBodyReadTimeout()))
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxRequestBodyBytes()))
 		_ = rc.SetReadDeadline(time.Time{})
-		if rec != nil {
+		if rec != nil && s.audit != nil {
 			rec.Client.Request.Body = audit.EncodeBody(body)
 		}
 		if err != nil {
@@ -339,15 +339,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 }
 
 // beginAudit creates the audit record and recorder for one chat request.
-// Returns (nil, w, nil) when auditing is disabled, so the caller does:
-//
-//	rec, w, done := s.beginAudit(w, protocol, r)
-//	if done != nil {
-//		defer done()
-//	}
-//
-// The returned http.ResponseWriter wraps the original with a recorder that
-// captures the response status and body for the audit trail.
+// rec and done are always non-nil: the completion hook runs even with
+// -audit=false, where it feeds the live-stats ledger instead of writing the
+// audit log. The returned http.ResponseWriter wraps the original with a
+// recorder that captures response status and TTFT always, and the response
+// body only when auditing is on (recorder.captureBody).
 func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request) (rec *audit.Record, ww http.ResponseWriter, done func()) {
 	rec = &audit.Record{
 		TS:       time.Now(),
@@ -357,7 +353,10 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 			Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
 		},
 	}
-	rw := newRecorder(w, rec.TS)
+	// captureBody only when auditing: with -audit=false the completion hook
+	// feeds live stats, which needs status + ttftMS but not the response body
+	// or a header redact.
+	rw := newRecorder(w, rec.TS, s.audit != nil)
 	return rec, rw, func() {
 		rec.DurMS = time.Since(rec.TS).Milliseconds()
 		rec.TTFTMS = rw.ttftMS
@@ -369,7 +368,13 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 				s.rt.Logf("audit: %v", err)
 			}
 		}
-		if s.liveStats != nil {
+		// Only book requests that got past the probe (rec.Model set). A
+		// pre-probe failure (401, unreadable body, invalid JSON, missing
+		// model) has no virtual model to attribute — booking it sprays
+		// empty-dims rows into slim/rollup (port scanners' 401s especially).
+		// Same shape as "probe traffic isn't audited, so it isn't counted";
+		// post-probe failures (404, all-failover, upstream error) still count.
+		if s.liveStats != nil && rec.Model != "" {
 			s.liveStats.Record(sampleFromRecord(rec))
 		}
 	}

@@ -113,8 +113,17 @@ GET /stats（auth-gated）+ 内嵌 stats.html 轮询页（§8）
 
 - 只在 `forwardSuccess` 处盖章（与 `Forwarded=true` 同点），数据源与喂给 quota 扣费的
   raw 侧**同一来源、同一时刻取值**；
+- 盖章**不受 `needsTokenCharge` 门控**——quota 扣费在 provider 没有 `metric: tokens`
+  的 Limit 时会跳过 usage 提取（热路径优化），但审计证据不能依赖 quota 配置，所以每个
+  forwarded 请求都盖。代价：完全不配 quota 的纯路由部署，每个 forwarded 请求多一次
+  post-stream 的 usage fold——此刻 respnorm 的 usage/meter 已是缓存字段读，成本是缓存读
+  加算术，微秒级；
 - 值是 int64 原始计数，**不做** model_multipliers 折算（折算后的 float64 是 quota 的
   计费口径，不是流量口径；两者不得混存）；
+- `tokens.in` 是 **fresh input**（`usage.In − cache_read − cache_write`，与 quota 计量的
+  `Fresh` 分量同义），**不是** gross prompt——`in + cache_read + cache_write` 才等于上游
+  报告的总 prompt tokens。JSON key 仍叫 `in`（对齐 `Attempt.tokens` 与 slim/rollup 的
+  落盘格式），语义按此理解；
 - 差分测试钉住：盖章值 vs quota 扣费入账的 raw 计数必须一致（复用
   `cmd/vmr/quota_parity_test.go` 的模式——router 侧调 router 自己的导出入口，不复述公式）。
 
@@ -140,8 +149,12 @@ GET /stats（auth-gated）+ 内嵌 stats.html 轮询页（§8）
 
 ### 3.2 slim 小时文件（瞬态 WAL）
 
-路径：`<log_dir>/vmr-stats-YYYYMMDD-HH.jsonl`（与 audit 同目录，受同一把 `log_dir`
-flock 保护——双进程写坏归档的问题已由 audit 的目录锁一并覆盖）。0600。每行一个请求：
+路径：`<log_dir>/vmr-stats-YYYYMMDD-HH.jsonl`（与 audit 同目录）。0600。双进程写坏 slim/rollup
+的问题由 livestats **自己的** advisory flock（`<log_dir>/.vmr-stats.lock`，与 audit 的
+`.vmr-audit.lock` 独立、同机制）挡住——不能寄生 audit 的目录锁，因为 `-audit=false` 时那把锁
+根本不存在，而"不留正文仍要监控"（§1.2）恰恰是要支持的场景。第二个指向同 `log_dir` 的实例
+拿不到锁 → `livestats.New` 返回 error → 该实例降级为纯内存统计（不写文件，不污染首个实例的
+归档）。每行一个请求：
 
 ```json
 {"ts":"2026-09-07T14:32:01+08:00","vmodel":"coding","protocol":"anthropic-messages",
@@ -163,7 +176,7 @@ flock 保护——双进程写坏归档的问题已由 audit 的目录锁一并�
 | `provider` / `model` | **实际服务的** provider 与真实上游模型名（来自 winning attempt 的 `Attempt.Provider`/`Attempt.Model`）；从未转发成功时为空串 |
 | `key_label` | 上游凭据的 label，取 winning attempt 盖章的 `Attempt.key_label`（§3.1）；未转发为空串 |
 | `dur_ms` / `ttft_ms` | client-view 总耗时 / 首字节延迟（`Record.TTFTMS`，0 = 未测量） |
-| `tokens` | 四项 token 对象，**原样拷贝** winning attempt 盖章的 `Attempt.tokens`（§3.1）——键空间与 audit 完全一致；未转发为全 0 |
+| `tokens` | 四项 token 对象，**原样拷贝** winning attempt 盖章的 `Attempt.tokens`（§3.1）——键空间与 audit 完全一致；`in` 是 fresh（净 cache，见 §3.1）；未转发为全 0 |
 
 一行 ~200B。**没有任何请求/响应正文、URL、header**——这就是它与 audit 的隐私分界。
 
@@ -222,7 +235,11 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 挂在 `server.beginAudit` 返回的 `done()` 里、`audit.Write` 之后。此刻响应已提交（客户端
 侧计时已闭环），处于脱离主线的收尾段。铁律：
 
-- 钩子内只做：构造一行 slim JSON、append 文件、更新内存计数与 ring——全部 O(1)；
+- 钩子内只做：构造一行 slim JSON、append 文件、更新内存计数与 ring——全部 O(1)。
+  **唯一的例外是滚动边界那一次**：跨小时的第一个请求触发 `rollHourLocked`，它在持锁期间
+  流式读完该小时的整个 slim 文件、逐行 parse、append rollup、删 slim（§6），成本是
+  O(该小时 slim 行数)。每小时一次、脱离主线、本地量级——用这一次 O(n) 换掉 ticker 与
+  "从内存搬家只搬一次"的额外状态，是刻意取舍（§9 决策表）；
 - 一次请求至多一把锁（聚合器自身 mutex），且**不与 audit 写锁嵌套**（先释放 audit 的再进
   聚合器的）；
 - slim 写失败只降级统计精度（该请求缺样本），绝不影响请求结果，也绝不回写错误到客户端；
@@ -244,9 +261,14 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 
 ### 4.3 并发模型
 
-聚合器一个 mutex 覆盖全部内存态。读路径（`/stats`）持锁做读时聚合——读低频、数据小，
-可接受；这与"init 注册表用原子读 + COW 写"的惯例不冲突（那条针对的是注册表，这里是一
-个整体状态的账本，粗锁简单且正确性一目了然）。
+聚合器一个 mutex 覆盖全部内存态。读路径（`/stats`）持锁做读时聚合——数据小、结构简单，
+粗锁正确性一目了然；这与"init 注册表用原子读 + COW 写"的惯例不冲突（那条针对的是注册表，
+这里是一个整体状态的账本）。
+
+读时聚合是 O(rollup + 当前小时)，而 `stats.html` 每 1 秒轮询、可能多个标签页并存——"读低频"
+的假设不再成立。`CachedSnapshot()` 兜住这一点：它缓存上一次 `Snapshot()` 结果 1 秒，窗口内
+所有轮询者直接拿缓存，`Record` 写入**不**使缓存失效（监控容忍 ≤1s 滞后）。`/stats` 走
+`CachedSnapshot()`；`Snapshot()` 保持纯聚合，供测试和需要精确即时读的调用方。
 
 ---
 
@@ -307,7 +329,9 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
   扫描，增量可忽略。千块/秒量级的极端流下也远够快。
 
 排队聚合（"8 个请求、6 槽、2 排队"中的聚合计数）直接复用 limiter 已有的
-`Concurrency()`（limit/running/queued），in-flight 注册表只负责 per-request 明细。
+`Concurrency()`——它返回 `(limit, in_flight, waiting)`，`/stats` 的 `concurrency`
+对象逐字沿用这三个键（`in_flight` = 已获槽正在跑，`waiting` = 卡在门外排队）。
+in-flight 注册表只负责 per-request 明细。
 
 ### 5.4 刻意不做
 
@@ -328,6 +352,13 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 2. 逐文件流式读取 → 按 (dims) 聚合出该小时的 rollup 行 → append 进 rollup 文件；
 3. 删除已滚的 slim 文件；打不开新小时文件则本小时统计降级为纯内存（见 §9）。
 
+这一整段在**持聚合器 mutex** 期间同步完成（`rollHourLocked`）——触发它的那个 `Record`
+因此是 O(该小时 slim 行数)，不是 O(1)（§4.1 铁律的唯一例外）。每小时至多一次、发生在
+脱离主线的收尾段、本地量级（繁忙的一小时几千行、~1MB），期间并发的 `done()` 钩子
+goroutine 短暂阻塞在锁上但客户端无感（响应早已提交）。把这段 IO 移出锁需要一条独立的
+roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互处理，对一个每小时
+一次的操作复杂度不成比例——刻意不做（§9 决策表）。
+
 两个细节：
 
 - **为何从文件聚合而不是从内存**：内存里当前小时的计数在滚动瞬间就是完整的小时数据，似
@@ -342,6 +373,8 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 
 启动顺序（全在聚合器构造函数里，同步完成；本地量级，毫秒到十毫秒级）：
 
+0. 建 `<log_dir>`、取 `.vmr-stats.lock` advisory flock（§3.2）；拿不到锁直接返回 error
+   （调用方降级为纯内存），不继续往下；
 1. 扫 `<log_dir>`，加载 rollup 文件为内存键表（last-wins）；
 2. 对 hour < 当前小时的 slim 文件执行 §6 的补滚；
 3. 读当前小时的 slim 文件：喂当前小时计数 + ring（ring 取末尾 ≤100 条，不足即缺，不追）；
@@ -355,7 +388,8 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
   启后 ring 只反映当前小时内已发生的请求。这符合它的定位——反映"最近一段时间各模型的性
   能表现"，不追求精确；
 - 若 rollup 或 slim 损坏（半行 JSON）：跳过该行继续；rollup 不可读则从空表开始（历史统计
-  清零是可接受的降级，绝不阻塞启动）。
+  清零是可接受的降级，绝不阻塞启动）。**锁是唯一的硬失败**——rollup/slim 的问题都降级，
+  但拿不到目录锁意味着另一个进程正在写同一批文件，此时继续写就是数据损坏。
 
 ---
 
@@ -364,10 +398,15 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 - **`GET /stats`**：与 `/status` 同一 auth 门槛（`s.auth`），同一契约家族——统计按
   `client_key_tag`（调用方）与 `key_label`（上游凭据）两个独立维度分组，等于暴露用量
   画像，绝不能无认证暴露。JSON 结构（读时聚合生成）：
-  - `inflight[]` + `concurrency{limit,running,queued}`：进行中请求明细与并发门状态
-    （§5 注册表快照 + limiter 聚合）；
-  - `hourly[]`：近期逐小时 × dims 的计数（来自 rollup 尾部 + 当前小时）；
-  - `daily[]`：按天折叠的同一套计数；
+  - `inflight[]` + `concurrency{limit,in_flight,waiting}`：进行中请求明细与并发门状态
+    （§5 注册表快照 + limiter 聚合；键名逐字取自 `router.Concurrency()` 的返回，
+    不是 in-flight 条目的 `state`（那是 per-request 的 `queued`/`running`））；
+  - `hourly[]`：近期逐小时 × dims 的计数（来自 rollup 尾部 + 当前小时），只保留最近
+    有数据的 `hourlyTail`（48）个小时；
+  - `daily[]`：按天折叠的同一套计数，只保留最近 `dailyTail`（90）个有数据的日历日——
+    rollup 永不自动删，无窗口会让 `daily[]` 随部署年限线性变大、每次 `/stats` 全量构造；
+    折叠按 **server-local 日历日**（`time.Local`，与 slim 文件名同一时区权威；livestats 是
+    leaf 不能 import `fmtutil.DisplayZone`，但生产态两者同值）；
   - `by_provider_model[]`：累计与均值（token 四项、dur/ttft 均值），含 `last_10` /
     `last_100` 的 TTFT、TPS p50/p90（来自 ring，nearest-rank，读时排序副本）；
   - `by_client_key_tag[]`：按调用方 key 的用量画像；
@@ -387,7 +426,7 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 
 | 决策 | 理由 | 代价 / 保留意见 |
 | --- | --- | --- |
-| token 四项盖章到 `Attempt.tokens`（新） | 下游反推 body 是既有纪律的反面；一次计算多方受益 | report 同改；差分测试钉住与 quota 扣费同源 |
+| token 四项盖章到 `Attempt.tokens`（新） | 下游反推 body 是既有纪律的反面；一次计算多方受益 | `report` 的按端点 token 应改用盖章值（当前仍 `chatmsg.ExtractUsageSides` 从 body 反解析——已登记 `KNOWN_ISSUES`）；差分测试钉住与 quota 扣费同源；`tokens.in` 存 fresh（净 cache）不存 gross；盖章不受 `needsTokenCharge` 门控（证据独立于 quota 配置），无 quota 部署每请求多一次 post-stream usage fold（缓存读 + 算术，微秒级） |
 | 上游凭据标识盖 `Attempt.key_label`（label 或尾 6 位） | 不让下游反推（展开名内含 label，但靠解析名字反推脆弱）；analyze 的按 key 分账同步受益 | config 展开期需携带 label；report 同改 |
 | `client_key_tag` 与 `key_label` 命名不同、推导不同，两个独立概念并存 | 前者=调用方凭据（`audit.KeyTag` 尾 8 位+连字符，有 16 字符下限与"-alice"约定的历史包袱，报表/文件名已定型），后者=上游凭据（config 的 label 叫法，或尾 6 位） | 刻意不统一，勿顺手合并 |
 | slim/rollup 键空间逐字对齐 audit（`tokens`/`client_key_tag`/`key_label` 原样引用，仅 `vmodel` 因扁平化改名） | 同一数据两套键名 = 每个消费方都要翻译一遍；audit 是唯一格式权威 | —— |
@@ -395,15 +434,17 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 | `last_byte_at`/`est_out` 逐块盖章，不节流 | `last_byte_at` 的语义是"最后一块真实到达时刻"，节流会让卡死的流显得更新鲜（盖章滞后于真实末块），方向恰好错；成本为 per-stream 锁内一次读 + per-entry 原子写，零分配 | —— |
 | queued/running 由 `sent_at` 推导，不存第三状态 | "获槽未发出"的毫秒级窗口不值得一个 preparing 态 | —— |
 | in-flight 不落盘、不结算进完成时账本 | done() 恰好记一次，in-flight 只补"进行中"空窗，两本账互不交叉计数 | 重启后自然清空（本来就是瞬态） |
-| 独立 slim 流，不寄生于 audit | 隐私分级（无正文）；audit off 时监控可用；恢复读取 200B/行 vs 数 KB/行 | 多一个 append 写点（O(1)，已预算）；有 audit 时数字上有轻微重复 |
+| 独立 slim 流，不寄生于 audit | 隐私分级（无正文）；audit off 时监控可用；恢复读取 200B/行 vs 数 KB/行 | 多一个 append 写点（O(1)，已预算）；有 audit 时数字上有轻微重复；"独立"必须包含锁——livestats 自带 `.vmr-stats.lock`（§3.2），不能寄生 audit 的目录锁 |
 | slim rollup 后即删 | 磁盘有界；rollup 后即冗余 | 历史分位数不可恢复（只有和与均值）——接受，ring 定位本就是运行态指示 |
 | rollup append + last-wins，不 upsert | append 近乎原子，崩溃窗口最小 | 同 key 可能留重复行，读取侧消化 |
-| lazy 关账，不 ticker | 与 quota 同构；零流量零开销 | 停机跨小时由启动补滚兜住（§7） |
+| lazy 关账，不 ticker | 与 quota 同构；零流量零开销 | 停机跨小时由启动补滚兜住（§7）；触发滚动的那一个 `Record` 是 O(该小时 slim 行数)、持聚合器 mutex（§6）——每小时一次、脱离主线、本地量级，比 ticker + 内存搬家状态机简单，接受 |
 | rollup 存和不存直方图 | 历史分位数的需求从未成立，ring 覆盖"最近"语义 | 历史只能给均值；将来真要，加直方图块是向后兼容的 |
+| `/stats` 的 `hourly[]`/`daily[]` 只给尾窗（48 小时 / 90 天），不给全量 | rollup 永不删，全量会随年限线性膨胀读成本与 JSON 体积 | 要看更久的历史读 rollup 文件本身或跑 `vmr analyze`；`by_provider_model` 的累计仍是全 rollup fold（由读缓存兜） |
+| `daily[]` 按 server-local 日历日折叠（`time.Local`） | 时区一处权威——人类可见的"按天"跟运维本地墙钟；与 slim 文件名同一权威 | livestats 是 leaf 不能 import `fmtutil.DisplayZone`，直接用 `time.Local`（生产态同值）——CLAUDE.md 时区不变量的 documented exception |
 | ring 存原始四元组，读时算 TPS/分位 | 公式可修，数据不迁 | 读时排序 100 条，微不足道 |
 | 钩子放 audit done() 内 | 响应已提交、计时已闭环、单点 | 与 audit 写共享收尾段；不嵌锁已写明（§4.1） |
 | 小时归属按到达时刻 | 与 audit 的请求语义一致 | 跨边界长请求把全部 token 记入到达小时——接受 |
-| 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用 |
+| 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用；`/stats` 读路径持锁做 O(rollup) fold，dashboard 1s 轮询 × 多标签页会放大——由 `CachedSnapshot()` 的 1s 读缓存兜住（N 个轮询者每秒最多算一次；`Record` 不使缓存失效，监控容忍 ≤1s 滞后），`Snapshot()` 仍是纯聚合供测试与需精确读的调用方 |
 | probe 流量不进统计 | 不写 audit 的既有决定自然延伸 | —— |
 | provider 维度在全失败请求上缺席 | 无服务发生就没有服务面事实 | outcome 计数（请求面）覆盖其存在性 |
 
@@ -411,14 +452,20 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 
 ## 10. 落地范围
 
-- 新包 `internal/livestats`：聚合器、slim/rollup 文件 IO、恢复、读时聚合。**零内部依赖**
+- 新包 `internal/livestats`：聚合器、slim/rollup 文件 IO、恢复、读时聚合、自己的
+  `.vmr-stats.lock` advisory flock（`lock_unix.go`/`lock_windows.go`，仿 audit）。**零内部依赖**
   （自有输入样本结构，server 从 `audit.Record` 构造后喂入；不 import audit，保持与取证
   格式解耦——record 形状再变，统计输入契约不动）。
 - `internal/router`：`inflight.go`——in-flight 注册表（§5）；`tryOne`（发出盖章、failover
   覆盖）与 `copyFlush`（逐块盖章）接盖章点。
-- `internal/server`：done() 钩子一行接线；chatHandler 注册/移除 in-flight 条目（probe
-  之后、`AcquireSlot` 之前注册，defer 链移除）；`/stats`、`stats.html`（含 live 区块）。
-- `internal/audit`：`Attempt.tokens` 与 `Attempt.key_label` 盖章字段（§3.1），`internal/report` 同改。
+- `internal/server`：done() 钩子接线（对 livestats 加 `rec.Model != ""` 门槛，pre-probe
+  失败不入统计——与"probe 不写 audit"同构）；chatHandler 注册/移除 in-flight 条目（probe
+  之后、`AcquireSlot` 之前注册，defer 链移除）；`/stats`（走 `CachedSnapshot()`）、
+  `stats.html`（含 live 区块）；`recorder` 的 `captureBody` 开关——`-audit=false` 时不缓冲
+  响应体，只留 status/ttft 供 livestats。
+- `internal/audit`：`Attempt.tokens` 与 `Attempt.key_label` 盖章字段（§3.1）。`internal/report`
+  的 token 来源切到盖章值是连带义务，但工作量大（跨 viewmodel 层、golden fixture 变动），
+  单列为后续任务——已登记 `KNOWN_ISSUES`，当前 report 仍从 body 反解析。
 - `internal/config`：`expandProviderAPIKeys` 在展开期携带 label（单一 `api_key` 推导尾 6 位），随快照进入 `core.Endpoint` 供盖章。
 - `archtest`：`livestats` 加入 leaf 包清单；行预算按增量常规调整。
 - 测试重点：滚动幂等（同文件滚两次 rollup 数值一致）；重启恢复（rollup + slim 补滚 + ring

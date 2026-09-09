@@ -107,7 +107,7 @@
     <div class="card">
       <div class="card-label">Concurrency</div>
       <div id="cardConcurrency" class="card-value">—</div>
-      <div id="cardConcurrencySub" class="card-sub">running / limit (queued)</div>
+      <div id="cardConcurrencySub" class="card-sub">active / limit (waiting)</div>
     </div>
     <div class="card">
       <div class="card-label">Active In-flight</div>
@@ -164,7 +164,7 @@
           <th>Provider / Model</th>
           <th>Stream</th>
           <th>Requests (OK/Err)</th>
-          <th>Tokens (In / Out)</th>
+          <th>Tokens (Fresh / Out)</th>
           <th>TTFT p50 / p90 (L100)</th>
           <th>TPS p50 / p90 (L100)</th>
         </tr>
@@ -180,7 +180,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Key Label</th><th>OK</th><th>Error</th><th>Tokens In</th><th>Tokens Out</th></tr>
+        <tr><th>Key Label</th><th>OK</th><th>Error</th><th>Tokens Fresh</th><th>Tokens Out</th></tr>
       </thead>
       <tbody id="keyLabelBody">
         <tr><td colspan="5" class="empty-hint">No data</td></tr>
@@ -274,7 +274,7 @@
         <td>${r.client_key_tag || '<span class="dim">—</span>'}</td>
         <td>${pm}</td>
         <td>${r.key_label || '<span class="dim">—</span>'}</td>
-        <td>${r.attempt || 1}</td>
+        <td>${r.attempt || '<span class="dim">—</span>'}</td>
         <td>${totalElapsed}</td>
         <td>${queueRouteGap}</td>
         <td>${firstTokStr}</td>
@@ -291,8 +291,9 @@
       return;
     }
     tbody.innerHTML = rows.map(r => {
-      const ttft = r.last_100 && r.last_100.ttft_p50 ? `${r.last_100.ttft_p50}ms / ${r.last_100.ttft_p90}ms` : '—';
-      const tps = r.last_100 && r.last_100.tps_p50 ? `${r.last_100.tps_p50.toFixed(1)} / ${r.last_100.tps_p90.toFixed(1)}` : '—';
+      const q = r.last_100;
+      const ttft = q && q.ttft_p50_ms ? `${q.ttft_p50_ms}ms / ${q.ttft_p90_ms}ms` : '—';
+      const tps = q && q.tps_p50 ? `${q.tps_p50.toFixed(1)} / ${q.tps_p90.toFixed(1)}` : '—';
       return `<tr>
         <td><strong>${r.provider}</strong> : ${r.model}</td>
         <td>${r.stream ? '<span class="badge badge-running">stream</span>' : '<span class="dim">sync</span>'}</td>
@@ -311,7 +312,7 @@
       return;
     }
     tbody.innerHTML = rows.map(r => `<tr>
-      <td><strong>${r.name || '<span class="dim">(unlabeled)</span>'}</strong></td>
+      <td><strong>${r.value || '<span class="dim">(unlabeled)</span>'}</strong></td>
       <td><span class="badge badge-ok">${fmtNum(r.ok)}</span></td>
       <td>${fmtNum(r.error)}</td>
       <td>${fmtNum(r.tokens ? r.tokens.in : 0)}</td>
@@ -319,30 +320,37 @@
     </tr>`).join('');
   }
 
+  // sumLatestPeriod folds every hourly/daily row sharing the newest .hour into
+  // one {ok, tokens} total. hourly[]/daily[] rows are (period x dims) groups,
+  // not period totals — the newest bucket's real total is the sum of every row
+  // carrying it. Counts live under .counters (livestats.HourlyRow shape).
+  function sumLatestPeriod(rows) {
+    const out = { ok: 0, tokens: 0 };
+    if (!rows || rows.length === 0) return out;
+    let newest = '';
+    for (const r of rows) { if (r.hour > newest) newest = r.hour; }
+    for (const r of rows) {
+      if (r.hour !== newest) continue;
+      const c = r.counters || {};
+      out.ok += c.ok || 0;
+      if (c.tokens) out.tokens += (c.tokens.in || 0) + (c.tokens.out || 0);
+    }
+    return out;
+  }
+
   function renderSummary(data) {
     const c = data.concurrency || {};
     const lim = c.limit > 0 ? c.limit : '∞';
     document.getElementById('cardConcurrency').textContent = `${c.in_flight || 0} / ${lim}`;
-    document.getElementById('cardConcurrencySub').textContent = `running / limit (${c.waiting || 0} queued)`;
+    document.getElementById('cardConcurrencySub').textContent = `active / limit (${c.waiting || 0} waiting)`;
     document.getElementById('cardInflight').textContent = data.inflight ? data.inflight.length : 0;
 
-    // Daily totals
-    let dailyOK = 0, dailyTokens = 0;
-    if (data.daily && data.daily.length > 0) {
-      const today = data.daily[data.daily.length - 1];
-      dailyOK = today.ok || 0;
-      if (today.tokens) dailyTokens = (today.tokens.in || 0) + (today.tokens.out || 0);
-    }
-    document.getElementById('cardDailyOK').textContent = fmtNum(dailyOK);
-    document.getElementById('cardDailyTokens').textContent = fmtNum(dailyTokens) + ' tokens total';
+    const day = sumLatestPeriod(data.daily);
+    document.getElementById('cardDailyOK').textContent = fmtNum(day.ok);
+    document.getElementById('cardDailyTokens').textContent = fmtNum(day.tokens) + ' tokens total';
 
-    // Last hour rate
-    let hourOK = 0;
-    if (data.hourly && data.hourly.length > 0) {
-      const lastHr = data.hourly[data.hourly.length - 1];
-      hourOK = lastHr.ok || 0;
-    }
-    document.getElementById('cardHourRate').textContent = fmtNum(hourOK);
+    const hr = sumLatestPeriod(data.hourly);
+    document.getElementById('cardHourRate').textContent = fmtNum(hr.ok);
   }
 
   function fetchData() {

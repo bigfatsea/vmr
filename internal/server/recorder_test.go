@@ -11,7 +11,7 @@ import (
 // TestRecorderTTFT: the first non-empty body write stamps the first-token
 // latency relative to the start time; later writes don't move it.
 func TestRecorderTTFT(t *testing.T) {
-	rw := newRecorder(httptest.NewRecorder(), time.Now().Add(-100*time.Millisecond))
+	rw := newRecorder(httptest.NewRecorder(), time.Now().Add(-100*time.Millisecond), true)
 	if rw.ttftMS != 0 {
 		t.Fatalf("ttft before any write = %d", rw.ttftMS)
 	}
@@ -34,7 +34,7 @@ func TestRecorderTTFT(t *testing.T) {
 // knows the body was cut, not that it was really that short.
 func TestRecorderCapsAuditBodyButNotClientBody(t *testing.T) {
 	under := httptest.NewRecorder()
-	rw := newRecorder(under, time.Now())
+	rw := newRecorder(under, time.Now(), true)
 
 	const chunk = 1 << 20 // 1MB chunks so the test doesn't allocate 16MB+ in one shot
 	p := make([]byte, chunk)
@@ -70,8 +70,38 @@ func TestRecorderCapsAuditBodyButNotClientBody(t *testing.T) {
 
 func TestRecorderUnwrap(t *testing.T) {
 	under := httptest.NewRecorder()
-	rw := newRecorder(under, time.Now())
+	rw := newRecorder(under, time.Now(), true)
 	if got := rw.Unwrap(); got != under {
 		t.Errorf("Unwrap() = %v, want %v", got, under)
+	}
+}
+
+// TestRecorderStatusOnlyMode: with captureBody=false (-audit=false + live
+// stats) the client still gets every byte and status/ttft are still tracked,
+// but nothing accumulates in buf and message() is nil — the completion hook
+// only needs status + ttftMS.
+func TestRecorderStatusOnlyMode(t *testing.T) {
+	under := httptest.NewRecorder()
+	rw := newRecorder(under, time.Now().Add(-50*time.Millisecond), false)
+
+	rw.WriteHeader(201)
+	big := make([]byte, 4<<20)
+	rw.Write(big)
+	rw.Write([]byte("more"))
+
+	if under.Body.Len() != len(big)+4 {
+		t.Errorf("client body = %d, want %d (client must see every byte)", under.Body.Len(), len(big)+4)
+	}
+	if rw.buf.Len() != 0 {
+		t.Errorf("status-only recorder buffered %d bytes, want 0", rw.buf.Len())
+	}
+	if rw.status != 201 {
+		t.Errorf("status = %d, want 201", rw.status)
+	}
+	if rw.ttftMS < 50 || rw.ttftMS > 5000 {
+		t.Errorf("ttft = %dms, want ~50ms", rw.ttftMS)
+	}
+	if rw.message() != nil {
+		t.Errorf("message() = non-nil in status-only mode, want nil")
 	}
 }

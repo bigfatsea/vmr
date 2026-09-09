@@ -17,9 +17,20 @@ const (
 // last_100 with no room to spare (design §3.4).
 const ringCap = 100
 
-// hourlyTail bounds Snapshot's hourly[] to the most recent N distinct hours
-// with data.
-const hourlyTail = 48
+// hourlyTail / dailyTail bound Snapshot's hourly[]/daily[] to the most recent
+// N distinct hours / local-calendar-days with data. The rollup file is never
+// auto-deleted, so without dailyTail the daily slice would grow linearly with
+// deployment age and be rebuilt in full on every /stats poll.
+const (
+	hourlyTail = 48
+	dailyTail  = 90
+)
+
+// snapCacheTTL bounds how stale CachedSnapshot may be. /stats polls at ~1s
+// from possibly several dashboards; without a cache each poll would hold the
+// aggregator mutex through a full O(rollup) fold, contending with the
+// completion hook. Bounded staleness is harmless for a monitor.
+const snapCacheTTL = time.Second
 
 // TokenCounts is the raw four-way per-request token tally. Same field names
 // as the audit record's token stamp, re-declared here: the slim/rollup key

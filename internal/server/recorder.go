@@ -28,17 +28,23 @@ const recorderBodyCap = 16 << 20
 // first-body-byte time (the client-view TTFT). Flush passes through so
 // streaming latency is unaffected. The client always receives every byte
 // unchanged — only the audit copy is capped.
+//
+// captureBody is false when auditing is off but live stats is on: the
+// completion hook only needs status + ttftMS, so the 16MB body buffer (and
+// the header redact in message()) are pure waste there — a -audit=false
+// deployment that just wants /stats should not pay for a full audit copy.
 type recorder struct {
 	http.ResponseWriter
-	start     time.Time
-	ttftMS    int64 // arrival → first body byte; 0 until the first Write
-	status    int
-	buf       bytes.Buffer
-	truncated bool
+	start       time.Time
+	ttftMS      int64 // arrival → first body byte; 0 until the first Write
+	status      int
+	buf         bytes.Buffer
+	truncated   bool
+	captureBody bool
 }
 
-func newRecorder(w http.ResponseWriter, start time.Time) *recorder {
-	return &recorder{ResponseWriter: w, start: start}
+func newRecorder(w http.ResponseWriter, start time.Time, captureBody bool) *recorder {
+	return &recorder{ResponseWriter: w, start: start, captureBody: captureBody}
 }
 
 func (r *recorder) WriteHeader(status int) {
@@ -54,6 +60,9 @@ func (r *recorder) Write(p []byte) (int, error) {
 	}
 	if r.ttftMS == 0 && len(p) > 0 {
 		r.ttftMS = time.Since(r.start).Milliseconds()
+	}
+	if !r.captureBody {
+		return r.ResponseWriter.Write(p)
 	}
 	if remain := recorderBodyCap - r.buf.Len(); remain > 0 {
 		if remain < len(p) {
@@ -78,9 +87,11 @@ func (r *recorder) Unwrap() http.ResponseWriter {
 	return r.ResponseWriter
 }
 
-// message renders what was sent to the client; nil if nothing was written.
+// message renders what was sent to the client; nil if nothing was written,
+// or if this recorder is in status-only mode (captureBody false — auditing
+// off, so nobody serializes this).
 func (r *recorder) message() *audit.Message {
-	if r.status == 0 {
+	if r.status == 0 || !r.captureBody {
 		return nil
 	}
 	body := r.buf.Bytes()

@@ -20,9 +20,17 @@ type Aggregator struct {
 	now    func() time.Time
 	hour   time.Time // start of the hour the slim file is open for
 	slim   *os.File  // current hour's slim WAL; nil when the write side degraded
+	lock   *os.File  // advisory dir lock (.vmr-stats.lock); held for the aggregator's lifetime
 	rollup map[time.Time]map[dimsKey]Counters
 	cur    map[dimsKey]Counters
 	rings  map[ringKey]*ring
+
+	// snapCache serves the /stats read path (CachedSnapshot): a full fold is
+	// O(rollup), and the dashboard polls ~1s from possibly several tabs at
+	// once, so without this each poll would hold mu through the fold.
+	snapCache Snapshot
+	snapAt    time.Time
+	snapValid bool
 }
 
 // New builds the aggregator and performs synchronous restart recovery (§7):
@@ -55,6 +63,17 @@ func (a *Aggregator) recover(now time.Time) error {
 	if err := os.MkdirAll(a.dir, dirMode); err != nil {
 		return err
 	}
+
+	// Take the advisory dir lock before touching any slim/rollup file. A
+	// second vmr process on the same log_dir fails here — cmd_start then
+	// degrades this instance to memory-only stats rather than corrupting the
+	// first instance's files. When -audit is on, audit.New already failed
+	// first; this lock is what covers -audit=false (design §3.2).
+	lock, err := acquireDirLock(a.dir)
+	if err != nil {
+		return err
+	}
+	a.lock = lock
 
 	// Step 1: scan log_dir, load rollup into memory (last-wins).
 	rm, err := loadRollup(a.rollupPath())
@@ -245,23 +264,48 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 	}
 }
 
-// Snapshot aggregates the whole ledger for /stats (§8). Read path, holds
-// the same coarse mutex (§4.3).
+// Snapshot aggregates the whole ledger, fresh every call. Read path, holds
+// the same coarse mutex (§4.3). Tests and callers needing an exact read use
+// this; the /stats HTTP path uses CachedSnapshot.
 func (a *Aggregator) Snapshot() Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.snapshotLocked()
 }
 
-// Close releases the slim file handle; the aggregator stops accepting
-// meaningful work afterwards.
+// CachedSnapshot is Snapshot for the /stats read path: it reuses the last
+// fold for up to snapCacheTTL so N concurrent dashboard pollers cost one
+// aggregation, not N. Record never invalidates it — a monitor tolerates a
+// second of lag (§4.3). Uses the injectable clock so the window is testable.
+func (a *Aggregator) CachedSnapshot() Snapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.snapValid {
+		if d := a.now().Sub(a.snapAt); d >= 0 && d < snapCacheTTL {
+			return a.snapCache
+		}
+	}
+	a.snapCache = a.snapshotLocked()
+	a.snapAt = a.now()
+	a.snapValid = true
+	return a.snapCache
+}
+
+// Close releases the slim file handle and the advisory dir lock; the
+// aggregator stops accepting meaningful work afterwards.
 func (a *Aggregator) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.slim == nil {
-		return nil
+	var err error
+	if a.slim != nil {
+		err = a.slim.Close()
+		a.slim = nil
 	}
-	err := a.slim.Close()
-	a.slim = nil
+	if a.lock != nil {
+		if cerr := a.lock.Close(); err == nil {
+			err = cerr
+		}
+		a.lock = nil
+	}
 	return err
 }

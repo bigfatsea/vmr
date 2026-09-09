@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -251,6 +252,89 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 	}
 }
 
+// TestAggregator_DirLockRejectsSecondInstance: two aggregators on one dir
+// cannot coexist — the second fails to take the advisory flock, so slim/rollup
+// stay single-writer even with -audit=false (design §3.2). Skipped on Windows,
+// where the lock is a deliberate no-op.
+func TestAggregator_DirLockRejectsSecondInstance(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no flock on windows; acquireDirLock is a deliberate no-op there")
+	}
+	dir := t.TempDir()
+	now := func() time.Time { return time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local) }
+
+	a1, err := NewAt(dir, now)
+	if err != nil {
+		t.Fatalf("first NewAt: %v", err)
+	}
+
+	if a2, err := NewAt(dir, now); err == nil {
+		a2.Close()
+		t.Fatal("second NewAt on the same dir succeeded, want lock error")
+	}
+
+	// After the first releases, a fresh instance can take the dir.
+	a1.Close()
+	a3, err := NewAt(dir, now)
+	if err != nil {
+		t.Fatalf("NewAt after first Close: %v", err)
+	}
+	a3.Close()
+}
+
+// TestAggregator_CachedSnapshotStaleWindow: CachedSnapshot reuses the last
+// fold for up to snapCacheTTL (Record does not invalidate it); past the TTL it
+// recomputes. Snapshot itself stays always-fresh.
+func TestAggregator_CachedSnapshotStaleWindow(t *testing.T) {
+	dir := t.TempDir()
+	clock := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local)
+	now := func() time.Time { return clock }
+
+	agg, err := NewAt(dir, now)
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	mk := func() Sample {
+		return Sample{
+			TS: clock, VModel: "coding", Outcome: OutcomeOK,
+			Provider: "p1", Model: "m1", DurMS: 100, TTFTMS: 10,
+			Tokens: TokenCounts{In: 1, Out: 1},
+		}
+	}
+
+	agg.Record(mk())
+	first := agg.CachedSnapshot()
+	if got := providerOK(first); got != 1 {
+		t.Fatalf("cached OK after 1 record = %d, want 1", got)
+	}
+
+	// Within the TTL: a new record is not reflected by CachedSnapshot, but
+	// Snapshot sees it immediately.
+	agg.Record(mk())
+	if got := providerOK(agg.CachedSnapshot()); got != 1 {
+		t.Errorf("cached OK within TTL = %d, want stale 1", got)
+	}
+	if got := providerOK(agg.Snapshot()); got != 2 {
+		t.Errorf("fresh Snapshot OK = %d, want 2", got)
+	}
+
+	// Past the TTL: CachedSnapshot recomputes.
+	clock = clock.Add(snapCacheTTL + time.Millisecond)
+	if got := providerOK(agg.CachedSnapshot()); got != 2 {
+		t.Errorf("cached OK past TTL = %d, want refreshed 2", got)
+	}
+}
+
+func providerOK(s Snapshot) int64 {
+	var n int64
+	for _, r := range s.ByProviderModel {
+		n += r.OK
+	}
+	return n
+}
+
 func TestAggregator_Concurrency(t *testing.T) {
 	dir := t.TempDir()
 	clock := time.Date(2026, 9, 7, 16, 0, 0, 0, time.Local)
@@ -288,6 +372,7 @@ func TestAggregator_Concurrency(t *testing.T) {
 				agg.Record(s)
 				if i%10 == 0 {
 					_ = agg.Snapshot()
+					_ = agg.CachedSnapshot()
 				}
 			}
 		}(w)

@@ -71,9 +71,10 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		resp.Inflight = []router.InflightEntry{}
 	}
 
-	// 2. Livestats completed ledger snapshot
+	// 2. Livestats completed ledger snapshot (read-cached ~1s: several
+	// dashboards polling at once cost one fold, not one each).
 	if s.liveStats != nil {
-		snap := s.liveStats.Snapshot()
+		snap := s.liveStats.CachedSnapshot()
 		resp.Hourly = snap.Hourly
 		resp.Daily = snap.Daily
 		resp.ByProviderModel = snap.ByProviderModel

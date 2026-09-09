@@ -179,3 +179,76 @@ func TestSnapshot_StreamVsNonStreamProviderRows(t *testing.T) {
 		t.Errorf("expected non-stream TPS p50=20.0, got %f", rowNonStream.Last10.TPSP50)
 	}
 }
+
+// TestSnapshot_DailyTailBoundsHistory: daily[] keeps only the most recent
+// dailyTail distinct local-calendar-days, so a long-lived deployment's rollup
+// (never auto-deleted) does not make /stats grow without bound.
+func TestSnapshot_DailyTailBoundsHistory(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
+	nDays := dailyTail + 15
+	clock := base.AddDate(0, 0, nDays).Add(12 * time.Hour)
+	agg, err := NewAt(dir, func() time.Time { return clock })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	for d := 0; d < nDays; d++ {
+		agg.Record(Sample{
+			TS:     base.AddDate(0, 0, d).Add(time.Hour),
+			VModel: "coding", Outcome: OutcomeOK,
+			Provider: "p1", Model: "m1", Tokens: TokenCounts{In: 1, Out: 1},
+		})
+	}
+
+	snap := agg.Snapshot()
+	if len(snap.Daily) != dailyTail {
+		t.Fatalf("daily rows = %d, want dailyTail=%d", len(snap.Daily), dailyTail)
+	}
+	// Rows are day-sorted ascending; the oldest kept day is nDays-dailyTail.
+	wantOldest := base.AddDate(0, 0, nDays-dailyTail)
+	if got := snap.Daily[0].Hour; !sameLocalDay(got, wantOldest) {
+		t.Errorf("oldest daily row = %s, want %s", got.Format("2006-01-02"), wantOldest.Format("2006-01-02"))
+	}
+}
+
+func sameLocalDay(a, b time.Time) bool {
+	ay, am, ad := a.In(time.Local).Date()
+	by, bm, bd := b.In(time.Local).Date()
+	return ay == by && am == bm && ad == bd
+}
+
+// TestSnapshot_DailyBucketsUseLocalCalendarDay pins foldDay to the operator's
+// wall clock: a request in the early hours of a local day sits on the previous
+// UTC day for any operator east of UTC, but must still fold into that local
+// day's bucket, stamped at local midnight — not UTC midnight. A fixed-offset
+// %86400 truncation (the earlier implementation) failed both checks in every
+// non-UTC zone.
+func TestSnapshot_DailyBucketsUseLocalCalendarDay(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 3, 15, 1, 0, 0, 0, time.Local) // 01:00 local
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	agg.Record(Sample{
+		TS: now.Add(5 * time.Minute), VModel: "coding", Outcome: OutcomeOK,
+		Provider: "p1", Model: "m1", Tokens: TokenCounts{In: 1, Out: 1},
+	})
+
+	snap := agg.Snapshot()
+	if len(snap.Daily) != 1 {
+		t.Fatalf("expected 1 daily row, got %d", len(snap.Daily))
+	}
+	got := snap.Daily[0].Hour.In(time.Local)
+	wy, wm, wd := now.Date()
+	if gy, gm, gd := got.Date(); gy != wy || gm != wm || gd != wd {
+		t.Errorf("daily bucket day = %04d-%02d-%02d, want local day %04d-%02d-%02d", gy, gm, gd, wy, wm, wd)
+	}
+	if h, m, s := got.Clock(); h != 0 || m != 0 || s != 0 {
+		t.Errorf("daily bucket local clock = %02d:%02d:%02d, want 00:00:00 (local midnight, not UTC)", h, m, s)
+	}
+}
