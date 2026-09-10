@@ -374,3 +374,79 @@ func TestHelpPage_MissingHostFallsBackToLoopback(t *testing.T) {
 		t.Errorf("body missing loopback Anthropic base URL fallback")
 	}
 }
+
+func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+	srv := New(rt, nil)
+
+	req := httptest.NewRequest("GET", "/status.html", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+
+	// Adaptive poller fast and idle cadences
+	for _, want := range []string{
+		"const LIVE_POLL_FAST_MS = 2000;",
+		"const LIVE_POLL_IDLE_MS = 15000;",
+		"function armLivePoll(ms)",
+		"async function livePollTick()",
+		"renderConcurrencyVitals(",
+		"renderLive(",
+		"lastConcLimit",
+		"fetch('/stats', { headers })",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status.html missing poller element %q", want)
+		}
+	}
+
+	// Poller must NOT call VMRAuth.guard or wrap with authFetch (owns no auth modal)
+	if strings.Contains(body, "authFetch('/stats')") {
+		t.Errorf("status.html poller must not call authFetch('/stats')")
+	}
+
+	// Tab visibility pausing: armLivePoll must drop timer when hidden
+	if !strings.Contains(body, "if (document.hidden) return;   // parked — visibilitychange wakes us up") {
+		t.Errorf("status.html armLivePoll missing document.hidden check")
+	}
+}
+
+func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+	srv := New(rt, nil)
+
+	req := httptest.NewRequest("GET", "/log.html", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+
+	// refreshStatus in log.html must send Authorization header when VMRAuth.has()
+	wantHeader := "headers: VMRAuth.has() ? { 'Authorization': 'Bearer ' + VMRAuth.get() } : {}"
+	if !strings.Contains(body, wantHeader) {
+		t.Errorf("log.html refreshStatus missing auth headers: %q", wantHeader)
+	}
+}

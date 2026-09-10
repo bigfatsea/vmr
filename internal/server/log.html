@@ -376,7 +376,11 @@ document.getElementById('btn-retry').addEventListener('click', () => connect());
 // 页面 load 时异步拉一次 /status 更新 header
 async function refreshStatus() {
   try {
-    const resp = await VMRAuth.guard(() => fetch('/status'));
+    const resp = await VMRAuth.guard(() =>
+      fetch('/status', {
+        headers: VMRAuth.has() ? { 'Authorization': 'Bearer ' + VMRAuth.get() } : {},
+      })
+    );
     if (!resp.ok) return;
     const d = await resp.json();
     ConsoleAlerts.set((d.alerts || []));

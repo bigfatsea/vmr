@@ -43,9 +43,8 @@ type statsResponse struct {
 
 // parseRangeTail resolves ?range= to the hourly tail it selects
 // (contracts §1.5): 24h|3d|7d → 24/72/168 hours; absent or unrecognized
-// values fall back to the 48h default. The 7d cap is deliberate — the
-// rollup file is never auto-deleted, so an unbounded range would turn one
-// /stats poll into a full-history rebuild.
+// values fall back to the 48h default. 7d is the cap because the in-memory
+// rollup only holds ~7 days — it is also the widest window the console offers.
 func parseRangeTail(q string) int {
 	switch q {
 	case "24h":
@@ -64,7 +63,9 @@ func parseRangeTail(q string) int {
 func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 	var resp statsResponse
 
-	// 1. Router live concurrency + in-flight entries snapshot
+	// 1. Router live concurrency + in-flight entries snapshot. Computed fresh
+	// on every read — never cached — so the Overview poller sees in-flight
+	// activity at its own cadence, independent of the ledger cache below.
 	if s.rt != nil {
 		lim, inf, wait := s.rt.Concurrency()
 		resp.Concurrency.Limit = lim
@@ -76,10 +77,11 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		resp.Inflight = []router.InflightEntry{}
 	}
 
-	// 2. Livestats completed ledger snapshot (read-cached ~1s: several
-	// dashboards polling at once cost one fold, not one each). The cache is
-	// keyed by the resolved range tail so ?range= variants don't thrash
-	// each other's entries.
+	// 2. Livestats completed ledger snapshot (read-cached, snapCacheTTL: a
+	// burst of polls costs one fold, not one each — the TTL sits above the
+	// Overview poller's cadence on purpose). The cache is keyed by the
+	// resolved range tail so ?range= variants don't thrash each other's
+	// entries.
 	if s.liveStats != nil {
 		snap := s.liveStats.CachedSnapshot(parseRangeTail(r.URL.Query().Get("range")))
 		resp.Hourly = snap.Hourly

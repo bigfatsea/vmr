@@ -202,21 +202,20 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 | Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**直接补在对应虚拟模型底部**（PRI 标 FB） | Virtual Models 区 |
 | Connect Your Agent 卡 | **删除**（导航已有 Help；连接信息归 Help 页的 Connection 卡） | — |
 | stats 并发卡 | 删除（与 vitals 并发段重复，去重） | — |
-| stats in-flight 表 | 并入，列序与列义重构（§8.4-c），**随整页刷新** | Live Requests 区 |
+| stats in-flight 表 | 并入，列序与列义重构（§8.4-c），自适应短轮询驱动 | Live Requests 区 |
 | —（新增） | **Recent Failures**（§8.4-d）：填补 Live 与小时聚合之间的诊断盲区 | Recent Failures 区 |
 | stats by_provider_model | 并入，列重构（§8.4-e） | Performance 区 |
 | stats Requests-per-Hour | 升级为 **Requests & Tokens** 组合图（§8.4-f） | Traffic & Usage 带 |
 | stats by_key×2 | 并入，列重构（§8.4-g），与图表同属 Traffic & Usage 带 | Traffic & Usage 带 |
 
-### 8.2 单页平铺、区块导轨与整页刷新
+### 8.2 单页平铺、区块导轨与刷新模型
 
-**定案：单页平铺 + 整页统一刷新，只有一个刷新时钟。**
+**定案：单页平铺 + 区块导轨。刷新分两层——整页一个 5 分钟倒计时时钟，Live 区与并发 vitals
+一个自适应短轮询。**
 
-- Header 的倒计时（5:00）是唯一的刷新节奏，**点击立即刷新**；`document.hidden` 时暂停；
+- Header 的倒计时（5:00）是**整页**的刷新节奏，**点击立即刷新**；`document.hidden` 时暂停；
   暂停状态由倒计时 pill 自身表达（转黄 + `paused`），不另设连接徽。
-- Live 表**不做**独立轮询。**将来要提升实时精度时走 SSE，而不是第二个轮询时钟**——
-  秒级轮询会在页面上引入两套节奏与两个"数据有多旧"的答案，而 SSE 是单向推送，
-  Live 区可以在整页节奏之外自然更新，不需要第二个时钟。本轮不做，先跑最简形态。
+- Live 表与并发 vitals 由**前端自适应短轮询**单独驱动（有进行中或排队请求时 ~2s，空闲退避至 15s，标签页隐藏停拍，恢复时立即探测）——elapsed / stalled / tok-out 是这张表存在的意义，5 分钟一刷等于让它假死。服务端 `/stats` 的 in-flight 与并发计数每次读实时算，其余聚合段读缓存时长大于该轮询节奏，一批轮询只算一次 fold。不做事件级 SSE 推送（in-flight 是易变状态集而非追加流，快照轮询天然幂等自愈，详见 LiveStats 设计文档 §5.4）。页面其余绝大部分区域只随整页 5 分钟时钟刷新。
 - 长页的可导航性由 Header 第二行的**区块导轨**承担：`Overview / Live / Quota / Models /
   Failures / Performance / Traffic & Usage`（Live 在 Quota 之前——polish 轮据反馈前移，
   §8.4-c），条目带计数（Live 显示当前 running 数、Failures 显示缓冲条数），滚动时高亮
@@ -465,7 +464,7 @@ Log 页另有两条：断线用**独立横幅 + Reconnect 按钮**（不许把"�
 
 | 文件 | 内容 | 模拟交互 |
 | --- | --- | --- |
-| `overview.html` | 平铺单页：vitals(5段)+sysline / Quota / Models+Fallback / Live / Recent Failures / Performance / Traffic & Usage（图 + 两张 Usage 表，单一时间窗） | ① 区块导轨跳转 + 滚动高亮 ② 告警 pill 弹窗（3 条可操作 mock，⚠️/🚨 随严重度切换）③ 刷新倒计时点击即刷（Live 表随整页推进：请求生命周期、failover、stall 跨刷新演化）④ 图表 hover 导引带 + DOM tooltip（requests、错误数与错误率、tok in 总计及三分项、tok out）⑤ 单一 24h/3d/7d 控件联动图表与两表 ⑥ Performance 窗口切换（整行同窗口：计数、token、分位一起变；json 行在 last-10 下呈现 `no samples` 态）⑦ 鉴权 modal（存键/清除/演示 401）⑧ Demo 控制面板（暂停/注卡死/注排队积压/演示 401/重置，可折叠） |
+| `overview.html` | 平铺单页：vitals(5段)+sysline / Quota / Models+Fallback / Live / Recent Failures / Performance / Traffic & Usage（图 + 两张 Usage 表，单一时间窗） | ① 区块导轨跳转 + 滚动高亮 ② 告警 pill 弹窗（3 条可操作 mock，⚠️/🚨 随严重度切换）③ 刷新倒计时点击即刷（demo 里 Live 表也随整页推进，用来演示请求生命周期 / failover / stall 的跨刷新演化；生产页 Live 区与并发 vitals 改由自适应短轮询单独驱动，见 §8.2）④ 图表 hover 导引带 + DOM tooltip（requests、错误数与错误率、tok in 总计及三分项、tok out）⑤ 单一 24h/3d/7d 控件联动图表与两表 ⑥ Performance 窗口切换（整行同窗口：计数、token、分位一起变；json 行在 last-10 下呈现 `no samples` 态）⑦ 鉴权 modal（存键/清除/演示 401）⑧ Demo 控制面板（暂停/注卡死/注排队积压/演示 401/重置，可折叠） |
 | `log.html` | 满宽终端 | level 芯片过滤、子串过滤（命中高亮）、Copy view、Pause（⌘P，含可见按钮）、自动滚动 + 上滚暂停 + "↓ N new" chip、~45s 模拟断线 → **独立横幅 + Reconnect**、统一 footer 状态条（`N shown / M lines`） |
 | `help.html` | Agent 指南 | Connection 卡（base_url 复制、模型 × 协议对照、auth 说明）、指南锚点导轨、手风琴、片段复制（✓ 反馈）、连接检查（读共享 Key）、Troubleshooting 直链 Overview 锚点 |
 | `index.html` | Demo 入口 | — |
@@ -559,7 +558,7 @@ G2–G5 属于 Part 1 的 `/status` 契约，只在本文登记。
 
 | # | 议题 | 决定 |
 | --- | --- | --- |
-| 1 | Live 区刷新节奏 | **维持整页 5 分钟**，先跑最简形态。将来提升实时精度走 **SSE**，不引入第二个轮询时钟（§8.2） |
+| 1 | Live 区刷新节奏 | **自适应短轮询**（活跃 ~2s / 空闲 15s，后台标签页暂停），与整页 5 分钟时钟分层；in-flight/并发每次读实时算，其余聚合段读缓存时长大于轮询节奏；不做事件级 SSE（§8.2、LiveStats 设计 §5.4） |
 | 2 | Performance 是否按 `stream` 拆行 | **拆行**，传输方式用**独立 `Mode` 列的文字标签**——图标要先学图例才能读表（§8.4-e） |
 | 3 | 拓扑是否补流量份额 | **补 `Share 24h` 列**，按请求数，客户端 join `/status` 与 `/stats`（§8.4-b） |
 | 4 | Headroom 是否加第三档色阶 | **维持两档**，紧迫感交给 Progress 列（§8.5） |

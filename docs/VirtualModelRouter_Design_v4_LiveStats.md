@@ -210,14 +210,23 @@ GET /stats（auth-gated）+ 内嵌控制台 Overview 页（§8）
   `Attempt.tokens` 相同的扁平形状（分量各自求和），不为对称而加 n。
 - **append + 读取时 last-wins，不做 read-modify-write upsert**。小行 append 在 POSIX 下
   近乎原子，崩溃最多留一行残缺（读取时丢弃/被覆盖）；upsert 的读-改-写窗口大得多。启动
-  全量加载时按 (hour, dims) 取最后一条即可。
-- 0600，永不自动删除（体量可忽略；真要清理由人工动手）。
+  加载时按 (hour, dims) 取最后一条即可。
+- 0600，**文件永不自动删除**——它是全量归档。**内存只是它的近 7 天滑动窗口**（`rollupRetentionDays`
+  个整天 + 当天，§3.4）：启动只加载窗口内的行，之后每次日切逐出掉出窗口的那一天。
+  文件按年万行级增长，体量可忽略；若启动解析真的变慢（启动日志会显示恢复行数与耗时），
+  届时再按天分文件，现在不做。
 
 ### 3.4 内存态
 
 聚合器进程内持有三块，全部小而有界：
 
-1. **rollup 键表**：`(hour, dims) → counters`，即 §3.3 的内存映像；
+1. **rollup 键表**：`(hour, dims) → counters`，是 §3.3 rollup 文件**近 7 天**（`rollupRetentionDays`
+   个整天 + 当天）的内存映像（不是全量）。窗口边界是**日历日**：`now` 是周三中午 12:00 时，
+   窗口 = 上周三 00:00 起（7 个整天 + 周三半天）；`now` 是 0:00 时正好 7 整天。启动按此窗口
+   过滤加载；运行中每次日切逐出掉出窗口的那一天。所以键表大小是常数 `≈ 8 × 24 × dims 基数`，
+   读时 fold 成本不随部署年限增长——这正是 `/stats` 读缓存能真正兜住高频轮询的前提。窗口取 7 天：
+   `?range=` 最宽就是 7d，内存里正好是控制台能显示的量；要看更久跑 `vmr analyze`（它读 audit log，
+   不读这个文件），`by_*` 累计也因此是"滚动近一周"的口径；
 2. **当前小时计数**：`(dims) → counters`（hour 固定为当前），由钩子实时累加；
 3. **性能 ring**：per `(provider, key_label, model, stream)` 各一个容量 100 的环形缓冲。
    ring 条目存**原始元组** `(ts, dur_ms, ttft_ms, tokens{in,out,cache_read,cache_write})`，
@@ -276,9 +285,13 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 粗锁正确性一目了然；这与"init 注册表用原子读 + COW 写"的惯例不冲突（那条针对的是注册表，
 这里是一个整体状态的账本）。
 
-读时聚合是 O(rollup + 当前小时)，而展示页会定期轮询、可能多个标签页并存——"读低频"
-的假设不再成立。`CachedSnapshot()` 兜住这一点：它缓存上一次 `Snapshot()` 结果 1 秒，窗口内
-所有轮询者直接拿缓存，`Record` 写入**不**使缓存失效（监控容忍 ≤1s 滞后）。`/stats` 走
+读时聚合是 O(内存 rollup + 当前小时)。内存 rollup 是近 7 天滑动窗口（§3.4），所以这是个
+**不随部署年限增长的常数**——但控制台 Overview 页有活动时按 ~2s 轮询 `/stats`、还可能多个
+标签页并存，"读低频"的假设仍不成立，一个常数成本乘以高频也值得省。`CachedSnapshot()` 兜住
+这一点：它缓存上一次 `Snapshot()` 结果 `snapCacheTTL`（3 秒，**刻意大于轮询节奏**——一次
+轮询通常直接复用上一次 fold，活跃期稳态成本是每几秒一次 fold 而非每拍一次），窗口内所有
+轮询者直接拿缓存，`Record` 写入**不**使缓存失效（监控容忍数秒滞后）。这层缓存只作用于历史
+聚合段——`/stats` 的 in-flight 快照与并发计数每次读都实时计算，不经此缓存。`/stats` 走
 `CachedSnapshot()`；`Snapshot()` 保持纯聚合，供测试和需要精确即时读的调用方。
 
 ---
@@ -348,8 +361,12 @@ in-flight 注册表只负责 per-request 明细。
 
 - **响应头到达时刻**：与 `first_byte_at`（体首块）只差毫秒级，单独一列是噪声；
 - **队列位次**：信号量队列不内省，`queued` 聚合计数已覆盖"压了几个"的问题；
-- **SSE 推送**：本轮 /stats 保持轮询，in-flight 快照随轮询返回；将来若要提升 in-flight 的
-  观测精度，走 SSE，而不是把轮询间隔压到秒级——单向推送不需要第二个刷新时钟；
+- **自适应短轮询（不做事件级 SSE 推送）**：in-flight 是易变的状态集（mutable
+  state machine），不是无边界追加的事件日志（append-only stream）。逐块或逐事件推送
+  （`req_queued`/`req_sent`/`req_chunk`/`req_done`）会引发长文本流下的重绘风暴与网络抖动
+  导致的状态机乱序；而全量 snapshot SSE 本质上只是服务端驱动的时钟。控制台 Overview
+  页采用自适应短轮询（有活动时 ~2s，空闲 15s，后台标签页自动暂停），配合服务端把
+  历史聚合段读缓存 `snapCacheTTL`（大于轮询节奏），零新增服务端状态，全量快照天然自愈；
 - **落盘/结算**：in-flight 永不写文件；条目结束即消失，完成时事实由 done() 钩子记账，
   两条路径不互写。重启后 in-flight 自然清空（本来就是瞬态）。
 
@@ -387,7 +404,8 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 
 0. 建 `<log_dir>`、取 `.vmr-stats.lock` advisory flock（§3.2）；拿不到锁直接返回 error
    （调用方降级为纯内存），不继续往下；
-1. 扫 `<log_dir>`，加载 rollup 文件为内存键表（last-wins）；
+1. 扫 `<log_dir>`，加载 rollup 文件**近 7 天窗口**（§3.4）为内存键表（last-wins）；
+   更早的行读过即弃，留在盘上不入内存；
 2. 对 hour < 当前小时的 slim 文件执行 §6 的补滚；
 3. 读当前小时的 slim 文件：喂当前小时计数 + ring（ring 取末尾 ≤100 条，不足即缺，不追）；
 4. 打开当前小时的 slim 文件进入写状态。
@@ -399,6 +417,9 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 - ring 是 best-effort 的运行态指示器：跨小时的历史不回填（rollup 只有和，没有样本），重
   启后 ring 只反映当前小时内已发生的请求。这符合它的定位——反映"最近一段时间各模型的性
   能表现"，不追求精确；
+- 恢复完成后打一行启动日志（恢复的 rollup 行数 + 耗时），作为"文件是否大到该按天分"的
+  唯一判据；近 7 天窗口在这一步（加载过滤）和运行中（每次日切逐出掉队的一天）两处强制，
+  恢复后内存里不会有早于窗口的小时；
 - 若 rollup 或 slim 损坏（半行 JSON）：跳过该行继续；rollup 不可读则从空表开始（历史统计
   清零是可接受的降级，绝不阻塞启动）。**锁是唯一的硬失败**——rollup/slim 的问题都降级，
   但拿不到目录锁意味着另一个进程正在写同一批文件，此时继续写就是数据损坏。
@@ -416,16 +437,17 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   - `hourly[]`：近期逐小时 × dims 的计数（来自 rollup 尾部 + 当前小时）。默认只保留最近
     有数据的 `hourlyTail`（48）个小时；**`?range=24h|3d|7d` 把这个尾窗改为 24 / 72 / 168 小时**，
     供控制台的时间序列图与按 key/caller 的区间用量表使用（三者共用同一份 `hourly[]`，
-    在客户端按 dims 折叠，服务端不为每个消费者各做一次聚合）。上限 7d 是刻意的：
-    rollup 永不自动删，无上限的 range 会让一次 `/stats` 变成全量构造。dims 基数在单机
-    路由上是个位数到几十（端点 × 调用方 × 协议），168 小时 × 几十行仍是几百 KB 量级；
-  - `daily[]`：按天折叠的同一套计数，只保留最近 `dailyTail`（90）个有数据的日历日——
-    rollup 永不自动删，无窗口会让 `daily[]` 随部署年限线性变大、每次 `/stats` 全量构造；
-    折叠按 **server-local 日历日**（`time.Local`，与 slim 文件名同一时区权威；livestats 是
-    leaf 不能 import `fmtutil.DisplayZone`，但生产态两者同值）；
+    在客户端按 dims 折叠，服务端不为每个消费者各做一次聚合）。7d 是上限：内存 rollup 窗口
+    就是近 7 天，`?range=` 不可能超出它，控制台也只提供 24h/3d/7d 三档。dims 基数在单机路由上是
+    个位数到几十（端点 × 调用方 × 协议），168 小时 × 几十行仍是几百 KB 量级；
+  - `daily[]`：按天折叠的同一套计数，`dailyTail` 略大于内存窗口（`rollupRetentionDays + 1`），
+    窗口能装几天就给几天。折叠按 **server-local 日历日**（`time.Local`，与 slim 文件名同一
+    时区权威；livestats 是 leaf 不能 import `fmtutil.DisplayZone`，但生产态两者同值）。目前
+    控制台不渲染 `daily[]`，同 `overall` 作为 JSON 契约保留；
   - `by_provider_model[]`：per `(provider, key_label, model, stream)` 一行——**`key_label`
-    是独立字段，不让消费者去拆展开后的 provider 名**（§3.4）。每行含累计计数与均值
-    （token 四项、dur/ttft 均值），以及 `last_10` / `last_100` 两个**窗口块**；
+    是独立字段，不让消费者去拆展开后的 provider 名**（§3.4）。每行含近 7 天窗口内的累计计数
+    与均值（token 四项、dur/ttft 均值），以及 `last_10` / `last_100` 两个 **窗口块**；
+    `by_client_key_tag[]` / `by_key_label[]` 同理是近 7 天的累计画像；
   - **窗口块**（`last_10` / `last_100`）不只是分位数，它是"这一段最近样本"的完整画像：
     `n`（**窗口内实际样本数**）、`tokens` 四项在该窗口内的和、`ttft_p50/p90`、
     `toks_p50/p90`。`n` 必须出现在输出里——ring 常常不满 100，消费者不知道 `n` 就会把
@@ -437,14 +459,17 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
     作为 `/stats` JSON 契约的一部分保留（无害、已测、可外部消费；若首屏日后要补延迟
     信号会重新用上）；无 ring 样本时为 `null`；
   - `recent_errors[]`：最近 50 条失败/取消请求的明细环（§8.1）；
-  - `by_client_key_tag[]`：按调用方 key 的**累计**用量画像；
-  - `by_key_label[]`：按上游凭据的**累计**用量画像（多账号/多 key 的 provider 由此分账）。
-    这两项是全量累计画像；控制台的"按区间"用量表走 `hourly[]` 折叠，不走这里；
+  - `by_client_key_tag[]`：按调用方 key 的用量画像（近 7 天累计）；
+  - `by_key_label[]`：按上游凭据的用量画像（多账号/多 key 的 provider 由此分账，同为近 7 天
+    累计）。控制台的"按区间"用量表走 `hourly[]` 折叠，不走这里；
 - **展示页**：`/stats` 的消费者是内置控制台的 Overview 页（`go:embed`，与 `log.html` /
   `help.html` 同模式）。独立的 `stats.html` 与 `/stats.html` 路由**已并入 Overview 并下线**
   ——见 console-unification 设计文档；`/stats` 这个 **JSON 契约本身不变**，本节继续有效。
-  整页按固定节奏刷新，不做秒级轮询；要提升 in-flight 的观测精度时走 SSE，不加第二个轮询
-  时钟。live 区块把 `last_byte_at` 渲染成"距今秒数"——它是流卡死的直接信号。
+  整页绝大部分区域按 5 分钟固定节奏刷新（点击头部倒计时立即刷，标签页隐藏自动暂停）；
+  Live Requests 区块与并发 vitals 由前端自适应轮询单独驱动（有进行中请求时 ~2s 一拍，
+  空闲退避至 15s 一拍，标签页隐藏停拍，恢复时立即探测）。in-flight 与并发计数每次读实时
+  算，其余聚合段读缓存 `snapCacheTTL`（大于轮询节奏，活跃期稳态每几秒一次 fold）。live
+  区块把 `last_byte_at` 渲染成"距今秒数"——它是流卡死的直接信号。
 - **速率只有一个口径：`toks`**（读时应用，写在 §9 的决策表里防漂移）：
   `toks = (tokens.in + tokens.out + tokens.cache_read + tokens.cache_write) / (dur_ms / 1000)`
   ——单请求的四分量 token 总和 ÷ 整请求耗时，流式与非流式**同一个分母**。
@@ -497,12 +522,13 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 | rollup append + last-wins，不 upsert | append 近乎原子，崩溃窗口最小 | 同 key 可能留重复行，读取侧消化 |
 | lazy 关账，不 ticker | 与 quota 同构；零流量零开销 | 停机跨小时由启动补滚兜住（§7）；触发滚动的那一个 `Record` 是 O(该小时 slim 行数)、持聚合器 mutex（§6）——每小时一次、脱离主线、本地量级，比 ticker + 内存搬家状态机简单，接受 |
 | rollup 存和不存直方图 | 历史分位数的需求从未成立，ring 覆盖"最近"语义 | 历史只能给均值；将来真要，加直方图块是向后兼容的 |
-| `/stats` 的 `hourly[]`/`daily[]` 只给尾窗（默认 48 小时 / 90 天，`?range=` 可把 hourly 放宽到 7d），不给全量 | rollup 永不删，全量会随年限线性膨胀读成本与 JSON 体积；7d 上限让最坏情况仍是可算的常数 | 要看更久的历史读 rollup 文件本身或跑 `vmr analyze`；`by_provider_model` 的累计仍是全 rollup fold（由读缓存兜） |
+| rollup 文件永不删（全量归档），但内存只加载近 7 天（`rollupRetentionDays` 个整天 + 当天），每次日切逐出掉队的一天 | 只截断输出尾窗不够——`by_*` 累计是全 rollup fold，读成本会随部署年限线性涨，读缓存也兜不住一个越来越贵的 fold；把内存做成滑动窗口后 fold 是常数 | `by_*` 累计口径从"自启动以来"变成"滚动近 7 天"；要看更久跑 `vmr analyze`（读 audit log）；文件随年限增长，启动解析成本 O(全历史)——有启动日志盯着，真变慢再按天分文件 |
+| 内存窗口取 7 天、按日历日对齐、不做 lazy 从文件加载 | 7d = `?range=` 最宽档 = 内存里正好是控制台能显示的量，一个干净不变量；实测每 `(hour,dims)` 行 ~450B，小团队规模近 7 天约 1–3 MB，病态高基数也就几十 MB——不值得为省几 MB 把读路径搞成带文件 I/O 的（那比刚优化掉的 fold 还慢） | `by_*` 是"近一周"口径而非月度；将来真要 30 天趋势视图，改一个常量 |
 | `daily[]` 按 server-local 日历日折叠（`time.Local`） | 时区一处权威——人类可见的"按天"跟运维本地墙钟；与 slim 文件名同一权威 | livestats 是 leaf 不能 import `fmtutil.DisplayZone`，直接用 `time.Local`（生产态同值）——CLAUDE.md 时区不变量的 documented exception |
 | ring 存原始元组（`ts/dur/ttft/tokens` 四分量），读时算速率与分位 | 公式可修，数据不迁；四分量让「窗口内用量」与「单请求吞吐」都能在读时算出来，不必让消费者去凑 | 每键 100 条 × 4 个 int64，量级可忽略；读时排序 100 条，微不足道 |
 | 钩子放 audit done() 内 | 响应已提交、计时已闭环、单点 | 与 audit 写共享收尾段；不嵌锁已写明（§4.1） |
 | 小时归属按到达时刻 | 与 audit 的请求语义一致 | 跨边界长请求把全部 token 记入到达小时——接受 |
-| 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用；`/stats` 读路径持锁做 O(rollup) fold，dashboard 1s 轮询 × 多标签页会放大——由 `CachedSnapshot()` 的 1s 读缓存兜住（N 个轮询者每秒最多算一次；`Record` 不使缓存失效，监控容忍 ≤1s 滞后），`Snapshot()` 仍是纯聚合供测试与需精确读的调用方 |
+| 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用；`/stats` 读路径持锁做 O(rollup) fold，控制台 Overview 页活跃期 ~2s 轮询 × 多标签页会放大——由 `CachedSnapshot()` 的 `snapCacheTTL`（3s，大于轮询节奏）读缓存兜住（一拍通常复用上一次 fold，活跃期稳态每几秒一次；`Record` 不使缓存失效，监控容忍数秒滞后），`Snapshot()` 仍是纯聚合供测试与需精确读的调用方 |
 | probe 流量不进统计 | 不写 audit 的既有决定自然延伸 | —— |
 | provider 维度在全失败请求上缺席 | 无服务发生就没有服务面事实 | outcome 计数（请求面）覆盖其存在性 |
 | ring key 带 `key_label`，输出行也带 | §3.1 已判定「靠解析展开后的 provider 名反推 label 是脆弱的」——这条纪律不能只用在写侧而让读侧去拆名字 | key 多一个字段；行数不变（展开名本就一账号一个） |
@@ -510,6 +536,7 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 | 撤销 `tps`，只留 `toks` | 两个速率口径并列，消费者要先分辨口径才能读数；「首 token 慢不慢」由 `ttft_p50/p90` 单独回答 | 失去「纯生成段速率」这个细分；真要时可由四分量与 ttft 在读时重算，数据都还在 |
 | 新增 `overall` 合并窗口块 | 分位数不可合并，消费者拿到分行数据算不出全局 p50；控制台首屏要的就是这一个数 | 读时多一次对样本并集的排序（键数 × 100 条） |
 | 新增 `recent_errors[]`（容量 50，纯内存） | 完成时账本与 in-flight 之间的空窗——「刚刚那条为什么失败」无处可查（§8.1） | 多一个环形缓冲；仍不含正文，隐私分级不变 |
+| in-flight 采用自适应短轮询而非 SSE 长连接 | in-flight 为易变状态集，事件推送易乱序重绘；全量快照天然幂等自愈。in-flight/并发每次读实时算，其余聚合段读缓存 `snapCacheTTL`（大于轮询节奏），活跃期稳态每几秒一次 fold | 繁忙期比绝对实时有 ≤2s 观测滞后；接受，肉眼无感 |
 
 ---
 

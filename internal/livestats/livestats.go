@@ -17,24 +17,39 @@ const (
 // capacity: last_100 with no room to spare (design §3.4).
 const ringCap = 100
 
-// hourlyTailDefault is the /stats hourly[] tail when no ?range= narrows it
-// (design §8): the last 48 distinct hours with data. dailyTail is fixed —
-// ?range= never touches daily[]. The rollup file is never auto-deleted, so
-// without these tails both slices would grow linearly with deployment age
-// and be rebuilt in full on every /stats poll.
+// rollupRetentionDays is the in-memory rollup window (design §8): the last
+// this-many whole calendar days plus the current partial one. Startup only
+// loads rollup rows inside it; each day roll evicts anything older. The
+// rollup FILE still keeps every row — only the memory image, and therefore
+// the read-time fold behind every /stats call, is bounded to a constant
+// instead of growing with deployment age. 7 days == the widest /stats view
+// (?range=7d), so memory holds exactly what the console can show; deeper
+// history is `vmr analyze`'s job (it reads the audit log, not this file).
+const rollupRetentionDays = 7
+
+// HourlyTailDefault is the /stats hourly[] tail when no ?range= narrows it
+// (design §8): the last 48 distinct hours with data. dailyTail bounds
+// daily[] — the window spans rollupRetentionDays whole days plus today, and
+// nothing older is held anyway, so +1 keeps every day that is in memory.
 const (
 	HourlyTailDefault = 48
-	dailyTail         = 90
+	dailyTail         = rollupRetentionDays + 1
 )
 
 // recentErrCap bounds the in-memory recent_errors ring (design §8.1).
 const recentErrCap = 50
 
-// snapCacheTTL bounds how stale CachedSnapshot may be. /stats polls at ~1s
-// from possibly several dashboards; without a cache each poll would hold the
-// aggregator mutex through a full O(rollup) fold, contending with the
-// completion hook. Bounded staleness is harmless for a monitor.
-const snapCacheTTL = time.Second
+// snapCacheTTL bounds how stale CachedSnapshot may be. The console Overview
+// poller drives /stats every ~2s while requests are in flight (plus the
+// whole-page 5-minute refresh, plus any external monitor); without a cache
+// each poll would hold the aggregator mutex through a full O(rollup) fold,
+// contending with the completion hook. The TTL sits above the poller's
+// cadence on purpose — a poll then usually reuses the last fold, so the
+// steady-state cost during active traffic is one fold every few seconds,
+// not one per poll. Bounded staleness is harmless for a monitor, and it
+// only touches the historical aggregate: /stats computes in-flight and
+// concurrency fresh on every read, outside this cache.
+const snapCacheTTL = 3 * time.Second
 
 // TokenCounts is the raw four-way per-request token tally. Same field names
 // as the audit record's token stamp, re-declared here: the slim/rollup key

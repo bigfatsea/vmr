@@ -122,8 +122,10 @@ func (*skipLine) Error() string { return "skip line" }
 // loadRollup reads the rollup file into an in-memory map, last row per
 // (hour, dims) key winning (§3.3). A missing file starts from an empty map
 // — history loss is an accepted degradation, never a startup blocker (§7).
-// Keys carry the stamp's own location.
-func loadRollup(path string) (map[time.Time]map[dimsKey]Counters, error) {
+// Keys carry the stamp's own location. Rows older than minHour are read past
+// but not kept: the file is the full archive, the map is the retention
+// window (§8). A zero minHour keeps everything.
+func loadRollup(path string, minHour time.Time) (map[time.Time]map[dimsKey]Counters, error) {
 	m := make(map[time.Time]map[dimsKey]Counters)
 	f, err := os.Open(path)
 	if err != nil {
@@ -141,6 +143,9 @@ func loadRollup(path string) (map[time.Time]map[dimsKey]Counters, error) {
 		hk, err := time.Parse(hourFormat, row.Hour)
 		if err != nil {
 			return errSkipLine
+		}
+		if hk.Before(minHour) {
+			return nil // outside the retention window: archived on disk, not held in memory
 		}
 		if m[hk] == nil {
 			m[hk] = make(map[dimsKey]Counters)

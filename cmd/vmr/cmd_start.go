@@ -188,6 +188,9 @@ func cmdStart(args []string) error {
 		logger.Printf("WARN live stats: %v (degrading to in-memory only)", err)
 	} else {
 		defer liveAgg.Close()
+		if rows, dur := liveAgg.RecoveryInfo(); rows > 0 || dur > 50*time.Millisecond {
+			logger.Printf("live stats: rollup recovery loaded %d rows in %s", rows, dur.Round(time.Millisecond))
+		}
 	}
 
 	snap, err := router.BuildSnapshot(cfg)

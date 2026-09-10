@@ -233,33 +233,48 @@ func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
 	}
 }
 
-// TestSnapshot_DailyTailBoundsHistory: daily[] keeps only the most recent
-// dailyTail distinct local-calendar-days, so a long-lived deployment's rollup
-// (never auto-deleted) does not make /stats grow without bound.
+// TestSnapshot_DailyTailBoundsHistory: a deployment running well past the
+// retention window keeps neither the in-memory rollup nor daily[] growing —
+// each hour roll evicts anything older than rollupRetentionDays (§8), so the
+// fold behind every /stats call stays a bounded constant.
 func TestSnapshot_DailyTailBoundsHistory(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.Local)
 	nDays := dailyTail + 15
-	clock := base.AddDate(0, 0, nDays).Add(12 * time.Hour)
+	clock := base
 	agg, err := NewAt(dir, func() time.Time { return clock })
 	if err != nil {
 		t.Fatalf("NewAt: %v", err)
 	}
 	defer agg.Close()
 
+	// One sample per day, clock advancing with it — the realistic shape, so
+	// each day's roll runs evictOldRollup.
 	for d := 0; d < nDays; d++ {
+		clock = base.AddDate(0, 0, d).Add(time.Hour)
 		agg.Record(Sample{
-			TS:     base.AddDate(0, 0, d).Add(time.Hour),
+			TS:     clock,
 			VModel: "coding", Outcome: OutcomeOK,
 			Provider: "p1", Model: "m1", Tokens: TokenCounts{In: 1, Out: 1},
 		})
+	}
+
+	// In-memory rollup stays bounded by the window, not by nDays of operation.
+	// This test writes one hour-key per day, so the exact bound here is
+	// rollupRetentionDays (+1 for the current partial day); real traffic fills
+	// up to ~24 hour-keys per retained day.
+	agg.mu.Lock()
+	rollupHours := len(agg.rollup)
+	agg.mu.Unlock()
+	if rollupHours > rollupRetentionDays+1 {
+		t.Errorf("in-memory rollup holds %d hour-keys after %d days of operation, want <= %d", rollupHours, nDays, rollupRetentionDays+1)
 	}
 
 	snap := agg.Snapshot(HourlyTailDefault)
 	if len(snap.Daily) != dailyTail {
 		t.Fatalf("daily rows = %d, want dailyTail=%d", len(snap.Daily), dailyTail)
 	}
-	// Rows are day-sorted ascending; the oldest kept day is nDays-dailyTail.
+	// The oldest kept day sits within the retention window of the last sample.
 	wantOldest := base.AddDate(0, 0, nDays-dailyTail)
 	if got := snap.Daily[0].Hour; !sameLocalDay(got, wantOldest) {
 		t.Errorf("oldest daily row = %s, want %s", got.Format("2006-01-02"), wantOldest.Format("2006-01-02"))

@@ -241,6 +241,7 @@ let liveExpanded = false;
 let failFilter = null;
 let lastStatusData = null;
 let lastStatsData = null;
+let lastConcLimit = 0;
 
 const LIVE_CAP = 10;
 const STALL_S = 10;
@@ -322,6 +323,24 @@ function headroomTitle(v) {
   return `(1 − used_frac) / time_left_frac, clamped to [0,5]. ${v < 1 ? 'Below 1 = spending ahead of the clock.' : 'Above 1 = under-using the budget.'}`;
 }
 
+function renderConcurrencyVitals(conc) {
+  // Shared by the whole-page refresh and the live poller — both render the
+  // concurrency vitals from a /stats-shaped conc object. Also records the
+  // limit for renderLive's table height (lastConcLimit, not lastStatsData:
+  // the poller must not clobber the range-scoped stats payload the chart
+  // and usage tables re-render from).
+  const inFlight = conc.in_flight || 0;
+  const limit = conc.limit || 0;
+  const waiting = conc.waiting || 0;
+  lastConcLimit = limit;
+  document.getElementById('v-conc').innerHTML = limit > 0
+    ? `${fmtInt(inFlight)}<small> / ${limit}</small>`
+    : `${fmtInt(inFlight)}<small> / ∞</small>`;
+  document.getElementById('v-queued').textContent = fmtInt(waiting);
+  document.getElementById('v-queued-wrap').className = waiting > 0 ? 't-warn' : '';
+  document.getElementById('v-limit-help').textContent = limit > 0 ? `limit ${limit}` : 'unlimited';
+}
+
 // ============ Render Vitals & Sysline ============
 function renderVitalsAndSysline(statusData, statsData) {
   const inst = statusData.instance || {};
@@ -331,16 +350,7 @@ function renderVitalsAndSysline(statusData, statsData) {
   const toks = (traf.tokens && traf.tokens.total) || {};
 
   // 1. Concurrency
-  const conc = inst.concurrency || (statsData && statsData.concurrency) || {};
-  const inFlight = conc.in_flight || 0;
-  const limit = conc.limit || 0;
-  const waiting = conc.waiting || 0;
-  document.getElementById('v-conc').innerHTML = limit > 0
-    ? `${fmtInt(inFlight)}<small> / ${limit}</small>`
-    : `${fmtInt(inFlight)}<small> / ∞</small>`;
-  document.getElementById('v-queued').textContent = fmtInt(waiting);
-  document.getElementById('v-queued-wrap').className = waiting > 0 ? 't-warn' : '';
-  document.getElementById('v-limit-help').textContent = limit > 0 ? `limit ${limit}` : 'unlimited';
+  renderConcurrencyVitals(inst.concurrency || (statsData && statsData.concurrency) || {});
 
   // 2. Requests
   const reqTotal = reqs.total || 0;
@@ -675,8 +685,7 @@ function renderLive(inflightList) {
   document.getElementById('live-running').textContent = `${running} running`;
   consoleApi.setRailCount('live', running);
 
-  const limit = (lastStatsData && lastStatsData.concurrency && lastStatsData.concurrency.limit) ||
-                (lastStatusData && lastStatusData.instance && lastStatusData.instance.concurrency && lastStatusData.instance.concurrency.limit) || 0;
+  const limit = lastConcLimit;
   const fixedRows = limit > 0 ? limit : 5;
   const fixedHeight = fixedRows * 38 + 36;
   const tableWrap = document.querySelector('#live + .table-wrap');
@@ -688,7 +697,7 @@ function renderLive(inflightList) {
 
   if (!es.length) {
     body.innerHTML = `<tr><td colspan="9" class="empty-cell">
-      <div class="t-dim">No requests in flight at the last refresh.</div>
+      <div class="t-dim">No requests in flight right now.</div>
       <div class="hint">Completed requests are not listed here — see Recent Failures, Performance and Traffic below.</div>
     </td></tr>`;
     return;
@@ -1145,6 +1154,68 @@ function updateRangeButtons() {
   });
 }
 
+// ============ Live Requests Adaptive Poller ============
+// The Live table (and the concurrency vitals) run on their own clock: ~2s
+// while requests are in flight — elapsed/stalled/tok-out are the point of
+// the table — backing off to 15s when idle, just enough to notice activity
+// start. Cost is bounded on the server side: /stats computes in-flight and
+// concurrency fresh every read, but the ledger fold behind the rest of the
+// payload is read-cached for longer than this cadence (snapCacheTTL,
+// LiveStats design §4.3), so a poll usually reuses the last fold. A full
+// SSE push was considered and rejected as overkill: in-flight is a mutable
+// state set, not an append-only stream, so a full-snapshot poll is
+// self-healing by construction while an event feed would need a client
+// state machine with packet-loss recovery. Everything else on the page
+// still refreshes on the single 5-minute whole-page clock.
+const LIVE_POLL_FAST_MS = 2000;   // requests in flight — keep the table live
+const LIVE_POLL_IDLE_MS = 15000;  // idle — only watching for activity to start
+let livePollTimer = null;
+let livePollBusy = false;
+
+function armLivePoll(ms) {
+  clearTimeout(livePollTimer);
+  if (document.hidden) return;   // parked — visibilitychange wakes us up
+  livePollTimer = setTimeout(livePollTick, ms);
+}
+
+async function livePollTick() {
+  if (livePollBusy || document.hidden) return;
+  livePollBusy = true;
+  try {
+    // Direct fetch with existing credentials if any: the whole-page refresh
+    // owns the auth modal and error toasts (guard prompts on 401). The fast
+    // poller must never invoke VMRAuth.guard, prompt a modal, or lock up
+    // unauthenticated instances (where VMRAuth.has() is false).
+    const headers = {};
+    const k = VMRAuth.get();
+    if (k) headers['Authorization'] = 'Bearer ' + k;
+    const resp = await fetch('/stats', { headers });
+    if (!resp.ok) {
+      armLivePoll(LIVE_POLL_IDLE_MS);
+      return;
+    }
+    const data = await resp.json();
+    renderConcurrencyVitals(data.concurrency || {});
+    renderLive(data.inflight || []);
+    const conc = data.concurrency || {};
+    const busy = (data.inflight || []).length > 0 ||
+                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
+    armLivePoll(busy ? LIVE_POLL_FAST_MS : LIVE_POLL_IDLE_MS);
+  } catch (_) {
+    // Transient failure (vmr restarting, laptop asleep): back off silently —
+    // the next whole-page refresh carries the error toast when it matters.
+    armLivePoll(LIVE_POLL_IDLE_MS);
+  } finally {
+    livePollBusy = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(livePollTimer);
+  if (document.hidden) return;   // parked — same pause semantics as the countdown clock
+  livePollTick();                // visible again — check in immediately, re-arms itself
+});
+
 // ============ Whole Page Refresh ============
 async function refreshAll() {
   try {
@@ -1178,9 +1249,15 @@ async function refreshAll() {
     renderChart(currentRange, statsData.hourly || []);
     renderUsage(statsData.hourly || [], currentRange);
 
+    const conc = statsData.concurrency || {};
+    const busy = (statsData.inflight || []).length > 0 ||
+                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
+    armLivePoll(busy ? LIVE_POLL_FAST_MS : LIVE_POLL_IDLE_MS);
+
   } catch (err) {
     consoleApi.setPaused(true);
     toast('Refresh failed: ' + (err.message || 'network error'));
+    armLivePoll(LIVE_POLL_IDLE_MS);
   }
 }
 

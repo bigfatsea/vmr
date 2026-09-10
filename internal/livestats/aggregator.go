@@ -31,10 +31,16 @@ type Aggregator struct {
 	recentErrs []Sample
 
 	// snapCache serves the /stats read path (CachedSnapshot): a full fold is
-	// O(rollup), and the dashboard polls ~1s from possibly several tabs at
-	// once, so without this each poll would hold mu through the fold. Keyed
+	// O(rollup), and the Overview poller hits /stats every ~2s (times several
+	// tabs), so without this each poll would hold mu through the fold. Keyed
 	// by the hourly tail so ?range= variants don't thrash each other.
 	snapCache map[int]cachedSnap
+
+	// recoveredRows / recoverDur record what startup recovery loaded, for the
+	// one-line startup log — the operator's signal for whether the rollup
+	// file has grown enough to want daily rolling (design §8).
+	recoveredRows int
+	recoverDur    time.Duration
 }
 
 // cachedSnap is one tail-window's cached fold with its fill time.
@@ -74,7 +80,10 @@ func NewAt(dir string, now func() time.Time) (*Aggregator, error) {
 // skipped); only a failure to create the log dir is fatal. recentErrs
 // deliberately starts empty — the ring is purely in-memory (§8.1).
 func (a *Aggregator) recover(now time.Time) error {
+	t0 := time.Now()
+	defer func() { a.recoveredRows, a.recoverDur = countRollupRows(a.rollup), time.Since(t0) }()
 	a.hour = hourStartOf(now)
+	minHour := dayStartOf(now).AddDate(0, 0, -rollupRetentionDays)
 	if err := os.MkdirAll(a.dir, dirMode); err != nil {
 		return err
 	}
@@ -90,8 +99,9 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 	a.lock = lock
 
-	// Step 1: scan log_dir, load rollup into memory (last-wins).
-	rm, err := loadRollup(a.rollupPath())
+	// Step 1: scan log_dir, load the rollup file's retention window into
+	// memory (last-wins). Older rows stay on disk, out of the fold.
+	rm, err := loadRollup(a.rollupPath(), minHour)
 	if err != nil {
 		rm = make(map[time.Time]map[dimsKey]Counters)
 	}
@@ -106,7 +116,7 @@ func (a *Aggregator) recover(now time.Time) error {
 		}
 	}
 	if len(old) > 0 {
-		if reloaded, err := loadRollup(a.rollupPath()); err == nil {
+		if reloaded, err := loadRollup(a.rollupPath(), minHour); err == nil {
 			a.rollup = reloaded
 		}
 	}
@@ -154,6 +164,40 @@ func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]
 
 func (a *Aggregator) rollupPath() string {
 	return filepath.Join(a.dir, rollupFileName)
+}
+
+// RecoveryInfo reports what startup recovery loaded: the number of in-memory
+// (hour, dims) rollup rows and how long recovery took. cmd/vmr logs one line
+// from this — the signal for whether the append-only rollup file has grown
+// enough to warrant daily rolling (design §8).
+func (a *Aggregator) RecoveryInfo() (rows int, dur time.Duration) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.recoveredRows, a.recoverDur
+}
+
+// countRollupRows totals the (hour, dims) entries across every retained hour.
+func countRollupRows(m map[time.Time]map[dimsKey]Counters) int {
+	n := 0
+	for _, hr := range m {
+		n += len(hr)
+	}
+	return n
+}
+
+// evictOldRollup drops in-memory rollup hours older than the retention
+// window (rollupRetentionDays whole days before today's midnight). The
+// rollup FILE keeps every row — this only bounds the memory image and the
+// read-time fold. Called once per hour roll; the boundary only actually
+// moves at the day roll, so most calls delete nothing. Cheap either way
+// (O(retained hours) ≈ O(rollupRetentionDays × 24)).
+func (a *Aggregator) evictOldRollup() {
+	cutoff := dayStartOf(a.hour).AddDate(0, 0, -rollupRetentionDays)
+	for hk := range a.rollup {
+		if hk.Before(cutoff) {
+			delete(a.rollup, hk)
+		}
+	}
 }
 
 // Record books one completed request (§4.1): O(1) memory updates plus at
@@ -220,8 +264,14 @@ func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 }
 
 // bookPastSampleLocked records a sample that arrived in an older hour: update
-// rollup memory and write the updated cumulative row to rollup file.
+// rollup memory and write the updated cumulative row to rollup file. Normally
+// the gap is minutes (a long stream crossing an hour boundary); a gap past
+// the retention window can only come from a backward clock jump, and such a
+// sample is dropped rather than resurrecting an evicted hour.
 func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
+	if hour.Before(dayStartOf(a.hour).AddDate(0, 0, -rollupRetentionDays)) {
+		return
+	}
 	key := s.key()
 	if a.rollup[hour] == nil {
 		a.rollup[hour] = make(map[dimsKey]Counters)
@@ -268,7 +318,8 @@ func addRing(rings map[ringKey]*ring, s Sample) {
 
 // rollHourLocked closes the open hour: roll slim files older than newHour
 // into rollup (from the file, not memory — §5), delete them, fold the
-// live counters into the rollup map, and open the new hour's file.
+// live counters into the rollup map, evict hours past the retention window,
+// and open the new hour's file.
 func (a *Aggregator) rollHourLocked(newHour time.Time) {
 	if a.slim != nil {
 		a.slim.Close()
@@ -290,6 +341,7 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 	}
 	a.cur = make(map[dimsKey]Counters)
 	a.hour = newHour
+	a.evictOldRollup()
 	if f, err := openSlim(a.dir, a.hour); err == nil {
 		a.slim = f
 	}
@@ -306,10 +358,11 @@ func (a *Aggregator) Snapshot(hourlyTail int) Snapshot {
 }
 
 // CachedSnapshot is Snapshot for the /stats read path: it reuses the last
-// fold per hourly tail for up to snapCacheTTL so N concurrent dashboard
-// pollers cost one aggregation, not N. Record never invalidates it — a
-// monitor tolerates a second of lag (§4.3). Uses the injectable clock so
-// the window is testable.
+// fold per hourly tail for up to snapCacheTTL so a burst of dashboard polls
+// (the Overview poller's ~2s cadence, several tabs, an external monitor)
+// costs one aggregation, not one each. Record never invalidates it — a
+// monitor tolerates a few seconds of lag (§4.3). Uses the injectable clock
+// so the window is testable.
 func (a *Aggregator) CachedSnapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()

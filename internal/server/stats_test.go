@@ -122,23 +122,29 @@ models:
 	chatWG.Wait()
 
 	// 5. In-flight entry must now be gone, and completed ledger populated.
-	// /stats snapshots are read-cached ~1s (CachedSnapshot), so the just-
-	// completed request can take up to that long to surface — poll for it.
+	// First wait (against the uncached Snapshot) for the done() hook to book
+	// the sample — chatWG.Wait() can return a hair before the deferred hook
+	// runs. Then read /stats once on a range tail step 3 did NOT warm: the
+	// completed-ledger portion is read-cached per tail (CachedSnapshot,
+	// snapCacheTTL), so a cold key folds fresh and must carry the sample,
+	// with no dependence on the TTL window.
+	for i := 0; i < 200; i++ {
+		if len(lstats.Snapshot(livestats.HourlyTailDefault).ByProviderModel) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	var doneSnapshot statsResponse
-	for i := 0; i < 40; i++ {
-		req, _ := http.NewRequest("GET", ts.URL+"/stats", nil)
+	{
+		req, _ := http.NewRequest("GET", ts.URL+"/stats?range=24h", nil)
 		req.Header.Set("Authorization", "Bearer sk-vmr-team-alice")
 		res, err := http.DefaultClient.Do(req)
 		if err != nil || res.StatusCode != 200 {
 			t.Fatalf("GET /stats after completion: %v, status=%d", err, res.StatusCode)
 		}
-		doneSnapshot = statsResponse{}
 		_ = json.NewDecoder(res.Body).Decode(&doneSnapshot)
 		res.Body.Close()
-		if len(doneSnapshot.ByProviderModel) > 0 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
 	}
 
 	if len(doneSnapshot.Inflight) != 0 {

@@ -12,6 +12,15 @@ func hourStartOf(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
 }
 
+// dayStartOf buckets t into its local-calendar day (midnight, time.Local) —
+// the retention window counts whole past days plus the current partial one,
+// so its boundary is a calendar day, not a rolling 24h multiple. Same zone
+// authority as slim-file naming and daily[] folding.
+func dayStartOf(t time.Time) time.Time {
+	lt := t.In(time.Local)
+	return time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, time.Local)
+}
+
 // hourFileName maps an hour start to its slim file name.
 func hourFileName(t time.Time) string { return t.Format(slimNameLayout) }
 

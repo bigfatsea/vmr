@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -249,6 +250,86 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 	}
 	if snap.Hourly[0].Counters.OK != 1 || snap.Hourly[1].Counters.OK != 120 {
 		t.Errorf("hourly breakdown mismatch: h9=%d, h10=%d", snap.Hourly[0].Counters.OK, snap.Hourly[1].Counters.OK)
+	}
+}
+
+// TestAggregator_RollupRetentionOnLoad: startup loads only the last
+// rollupRetentionDays of the append-only rollup file. Older rows stay on
+// disk (the file is the archive) but out of the in-memory fold (§8).
+func TestAggregator_RollupRetentionOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.Local)
+	k := dimsKey{vmodel: "coding", provider: "p1", model: "m1"}
+	rollupPath := filepath.Join(dir, rollupFileName)
+
+	writeRow := func(daysAgo int, ok int64) {
+		h := hourStartOf(now.AddDate(0, 0, -daysAgo))
+		if err := appendJSONL(rollupPath, countersRow(h, k, Counters{OK: ok})); err != nil {
+			t.Fatalf("appendJSONL: %v", err)
+		}
+	}
+	writeRow(rollupRetentionDays+20, 1000) // past the window — archived, not loaded
+	writeRow(2, 20)                        // inside the window
+	writeRow(1, 1)                         // yesterday
+
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	if rows, _ := agg.RecoveryInfo(); rows != 2 {
+		t.Errorf("RecoveryInfo rows = %d, want 2 (the oldest row is past the window)", rows)
+	}
+
+	var total int64
+	for _, pr := range agg.Snapshot(HourlyTailDefault).ByProviderModel {
+		total += pr.OK
+	}
+	if total != 21 {
+		t.Errorf("cumulative OK = %d, want 21 (20 + 1; the past-window 1000 must not load)", total)
+	}
+
+	// Retention is a memory policy — the old row is still in the file.
+	if b, _ := os.ReadFile(rollupPath); !strings.Contains(string(b), `"ok":1000`) {
+		t.Errorf("the past-window rollup row must still be on disk")
+	}
+}
+
+// TestAggregator_RetentionBoundaryIsCalendarDay: the window is
+// rollupRetentionDays *whole days* plus the current partial one — the
+// boundary is midnight of (today - N), not a rolling N*24h from now. So at
+// noon the window spans 7.5 days; the extra half-day never shifts the cut.
+func TestAggregator_RetentionBoundaryIsCalendarDay(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.Local) // noon
+	k := dimsKey{vmodel: "coding", provider: "p1", model: "m1"}
+	rollupPath := filepath.Join(dir, rollupFileName)
+
+	// Boundary = midnight of (2026-06-10 - 7d) = 2026-06-03 00:00.
+	keepHour := time.Date(2026, 6, 3, 0, 0, 0, 0, time.Local)  // exactly on the boundary — kept
+	dropHour := time.Date(2026, 6, 2, 23, 0, 0, 0, time.Local) // one hour earlier — dropped
+	for _, r := range []struct {
+		h  time.Time
+		ok int64
+	}{{keepHour, 7}, {dropHour, 500}} {
+		if err := appendJSONL(rollupPath, countersRow(r.h, k, Counters{OK: r.ok})); err != nil {
+			t.Fatalf("appendJSONL: %v", err)
+		}
+	}
+
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	var total int64
+	for _, pr := range agg.Snapshot(HourlyTailDefault).ByProviderModel {
+		total += pr.OK
+	}
+	if total != 7 {
+		t.Errorf("cumulative OK = %d, want 7 (only the on-boundary row; the 23:00-prior row is out)", total)
 	}
 }
 

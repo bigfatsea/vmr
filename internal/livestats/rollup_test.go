@@ -178,7 +178,7 @@ func TestRollupFile_LastWinsAndCorruptLineTolerance(t *testing.T) {
 		t.Fatalf("append c2: %v", err)
 	}
 
-	m, err := loadRollup(rollupPath)
+	m, err := loadRollup(rollupPath, time.Time{})
 	if err != nil {
 		t.Fatalf("loadRollup: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestRollSlimFile_Idempotent(t *testing.T) {
 	}
 
 	// Load rollup: last-wins must ensure counts are exactly from one roll, not doubled
-	m, err := loadRollup(filepath.Join(dir, rollupFileName))
+	m, err := loadRollup(filepath.Join(dir, rollupFileName), time.Time{})
 	if err != nil {
 		t.Fatalf("loadRollup: %v", err)
 	}
