@@ -281,17 +281,9 @@ function endpointHealthInfo(ep, nowMs) {
 
 function formatReset(endsAtStr) {
   if (!endsAtStr) return '<span class="dim" title="No reset time configured">—</span>';
-  const d = new Date(endsAtStr);
-  const diffSec = Math.max(0, Math.floor((d.getTime() - Date.now()) / 1000));
-  const isSameDay = d.toDateString() === new Date().toDateString();
-  let timeStr;
-  if (isSameDay) {
-    timeStr = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  } else {
-    timeStr = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + ' ' +
-              String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  }
-  return `${timeStr} <span class="dim">· in ${fmtDur(diffSec)}</span>`;
+  // Time-until-reset only — no wall-clock timestamp. fmtDur renders days as "5d8h30m".
+  const diffSec = Math.max(0, Math.floor((new Date(endsAtStr).getTime() - Date.now()) / 1000));
+  return `in ${fmtDur(diffSec)}`;
 }
 
 function formatWhen(ts) {

@@ -44,7 +44,9 @@ function fmtAge(rfc3339) {
 function fmtDur(s) {
   if (s < 60) return s + 's';
   if (s < 3600) return Math.floor(s / 60) + 'm' + String(s % 60).padStart(2, '0') + 's';
-  return Math.floor(s / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm';
+  // Days tier keeps hours+minutes so a month-out quota reset reads "5d8h30m", not "128h30m".
+  return Math.floor(s / 86400) + 'd' + Math.floor((s % 86400) / 3600) + 'h' + String(Math.floor((s % 3600) / 60)).padStart(2, '0') + 'm';
 }
 function fmtMMSS(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
 function clockAt(minsAgo) {
