@@ -73,7 +73,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
 	mux.HandleFunc("GET /status.html", s.statusPage)
 	mux.HandleFunc("GET /stats", s.auth(s.adminStats))
-	mux.HandleFunc("GET /stats.html", s.statsPage)
 	mux.HandleFunc("GET /help", s.helpPageEN)
 	mux.HandleFunc("GET /help.html", s.helpPageEN)
 	mux.HandleFunc("GET /help.zh", s.helpPageZH)

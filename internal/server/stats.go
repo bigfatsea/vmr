@@ -1,7 +1,6 @@
 // Ver 2026-09-09, by pi
 
-// The live stats HTTP and collection surface: /stats (JSON API, auth-gated)
-// and /stats.html (self-contained static dashboard).
+// The live stats HTTP and collection surface: /stats (JSON API, auth-gated).
 //
 // Ownership split (LiveStats design §5.1): livestats.Aggregator owns the
 // completed-request ledger (slim WAL, hourly rollups, ring percentiles);
@@ -10,7 +9,6 @@
 package server
 
 import (
-	_ "embed"
 	"encoding/json"
 	"net/http"
 
@@ -19,24 +17,11 @@ import (
 	"vmr/internal/router"
 )
 
-//go:embed stats.html
-var statsHTMLPage []byte
-
 // WithLiveStats wires the completed-request aggregator into the server.
 // nil-safe: absent stats leaves /stats serving only in-flight + concurrency.
 func (s *Server) WithLiveStats(l *livestats.Aggregator) *Server {
 	s.liveStats = l
 	return s
-}
-
-// statsPage serves the self-contained static HTML dashboard for live stats.
-// Unauthenticated: the HTML/JS shell contains zero business data. The
-// embedded JS calls GET /stats, which enforces s.auth().
-func (s *Server) statsPage(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.WriteHeader(http.StatusOK)
-	w.Write(statsHTMLPage)
 }
 
 // statsResponse is the JSON wire contract for GET /stats (§8).
