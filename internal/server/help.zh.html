@@ -754,9 +754,7 @@ async function fetchStatus(allowPrompt) {
 }
 function renderFooterIdentity(inst) {
   consoleAPI.setUptime(inst.uptime ? '已运行 ' + inst.uptime : '—');
-  consoleAPI.setFooterIdentity('Virtual Model Router (VMR) · v' + (inst.version || '?') +
-    ' · pid ' + (inst.pid || '?') + ' · ' + (inst.go_version || '?') + ' · ' + (inst.os_arch || '?') +
-    ' · listen ' + (inst.listen || '?'));
+  consoleAPI.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
 }
 
 // ---- Live Snippet Fill ----

@@ -174,39 +174,70 @@ function syncKeyBtn() {
 const ConsoleAlerts = {
   set(items) {
     const bell = document.getElementById('warn-bell');
-    const list = document.getElementById('warn-list');
-    if (!bell || !list) return;   // skeleton not mounted yet
+    const clearBox = document.getElementById('warn-clear');
+    const errBox = document.getElementById('warn-errors');
+    const warnBox = document.getElementById('warn-warnings');
+    const sep = document.getElementById('warn-sep');
+    if (!bell || !clearBox || !errBox || !warnBox || !sep) return;   // skeleton not mounted yet
     items = items || [];
     const n = items.length;
     const ico = document.getElementById('warn-ico');
     const cnt = document.getElementById('warn-count');
     if (!n) {
-      list.innerHTML = '<div class="wrow"><span class="badge b-ok">clear</span><span class="t-dim">No config issues and no degraded endpoints.</span></div>';
+      clearBox.hidden = false;
+      errBox.hidden = true;
+      warnBox.hidden = true;
+      sep.hidden = true;
       bell.className = 'warn-btn quiet'; bell.title = 'No warnings';
       ico.textContent = '⚠️'; cnt.textContent = '0';
     } else {
-      const hasErr = items.some(a => a.severity === 'error');
-      list.innerHTML = items.map(a => `
-        <div class="wrow">
-          <span class="badge ${a.severity === 'error' ? 'b-err' : 'b-warn'}">${a.severity === 'error' ? 'error' : 'warn'}</span>
-          <span>${esc(a.message)}</span>
-          <span class="when">${esc(a.kind || '')}${a.ref ? ' · ' + esc(a.ref) : ''}</span>
-        </div>`).join('');
+      clearBox.hidden = true;
+      const errors = items.filter(a => a.severity === 'error');
+      const warnings = items.filter(a => a.severity !== 'error');
+
+      const renderRow = a => {
+        const isErr = a.severity === 'error';
+        const badgeCls = isErr ? 'b-err' : 'b-warn';
+        const badgeText = isErr ? 'error' : 'warn';
+        const whenHtml = a.ref ? ` <span class="when">${esc(a.ref)}</span>` : '';
+        return `<div class="wrow"><span class="badge ${badgeCls}">${badgeText}</span><span>${esc(a.message)}</span>${whenHtml}</div>`;
+      };
+
+      errBox.hidden = errors.length === 0;
+      document.getElementById('warn-errors-list').innerHTML = errors.length > 0 ? errors.map(renderRow).join('') : '';
+
+      warnBox.hidden = warnings.length === 0;
+      document.getElementById('warn-warnings-list').innerHTML = warnings.length > 0 ? warnings.map(renderRow).join('') : '';
+
+      sep.hidden = !(errors.length > 0 && warnings.length > 0);
+
+      const hasErr = errors.length > 0;
       bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
       ico.textContent = hasErr ? '🚨' : '⚠️';
       cnt.textContent = String(n);
       bell.title = n + ' actionable item(s) — click for detail';
     }
-    document.getElementById('warn-modal-count').textContent = n + ' open';
   },
 };
 const warnOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
-      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
-      <div id="warn-list"></div>
+    <div class="modal warn-modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors</h2>
+      <div id="warn-clear" class="wrow" hidden>
+        <span class="badge b-ok">clear</span>
+        <span class="t-dim">No config issues and no degraded endpoints.</span>
+      </div>
+      <div id="warn-errors" class="warn-group" hidden>
+        <div class="warn-group-title">Errors</div>
+        <div id="warn-errors-list"></div>
+      </div>
+      <hr id="warn-sep" class="warn-sep" hidden>
+      <div id="warn-warnings" class="warn-group" hidden>
+        <div class="warn-group-title">Warnings</div>
+        <div id="warn-warnings-list"></div>
+      </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
   document.body.appendChild(div);
@@ -243,7 +274,7 @@ function mountConsole(opts) {
     <div class="hd-inner${full ? ' full' : ''}">
       <a class="brand" href="/status.html">
         <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <b>VMR</b><span class="sub">Console</span>
+        <b>VMR</b>
       </a>
       <nav class="hd-nav">
         <a class="nav-link${active === 'overview' ? ' active' : ''}" href="/status.html">Overview</a>
@@ -270,9 +301,6 @@ function mountConsole(opts) {
     a.innerHTML = esc(item.label) + '<span class="n" data-rail-n="' + esc(item.id) + '"></span>';
     railInner.appendChild(a);
   });
-  if (full) {
-    const sp = document.createElement('span'); sp.className = 'spacer'; railInner.appendChild(sp);
-  }
   if (rail.length) {
     // scroll-spy over the rail anchors — the flat page's table of contents
     const links = [...railInner.querySelectorAll('[data-rail]')];
@@ -289,12 +317,17 @@ function mountConsole(opts) {
 
   const footer = document.createElement('footer');
   footer.className = 'console-footer' + (full ? ' full' : '');
-  footer.innerHTML = `
-    <div class="ft-inner${full ? ' full' : ''}">
-      <div id="ft-identity"></div>
-      <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
-        <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
-    </div>`;
+  footer.innerHTML = full
+    ? `<div class="ft-inner full">
+        <div id="ft-status"></div>
+        <div><span id="ft-identity"></span> · <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
+          <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
+      </div>`
+    : `<div class="ft-inner">
+        <div id="ft-identity"></div>
+        <div><a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener">bigfatsea/vmr
+          <svg height="13" width="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg></a></div>
+      </div>`;
   document.body.appendChild(footer);
 
   syncKeyBtn();
@@ -351,6 +384,10 @@ function mountConsole(opts) {
       else if (state === 'paused') { el.className = 'pill p-paused'; el.textContent = 'paused'; el.title = 'Rendering paused — the server keeps streaming'; }
       else if (state === 'connecting') { el.className = 'pill p-connecting'; el.textContent = 'connecting'; el.title = 'Connecting to the log stream'; }
       else { el.className = 'pill p-down'; el.textContent = 'down'; el.title = 'The log stream is disconnected'; }
+    },
+    setTermStatus(text) {
+      const el = document.getElementById('ft-status');
+      if (el) el.textContent = text;
     },
     // instance identity (version · pid · go · os-arch · listen) — footer only (§8.1)
     setFooterIdentity(text) {

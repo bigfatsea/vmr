@@ -62,17 +62,35 @@
         <div class="v-sub"><span id="v-tok-in">in —</span><span id="v-tok-out">out —</span><span class="t-ok help" id="v-tok-cache" title="cache_read / (fresh + cache_write + cache_read) — share of prompt tokens served from the upstream prompt cache">cache —</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">TTFT p50 <span class="win">· last 100</span></div>
-        <div class="v-main" id="v-ttft"><span class="dim" title="No successful requests in the window">—</span></div>
-        <div class="v-sub"><span id="v-ttft-p90">p90 <span class="dim" title="No successful requests in the window">—</span></span><span class="help" id="v-toks-p50" title="per-request throughput: all four token components / total duration, p50 over the same window">tok/s <span class="dim" title="No throughput measurement">—</span></span></div>
-      </div>
-      <div class="vseg">
         <div class="v-label">Endpoints <span class="win">· now</span></div>
         <div class="v-main" id="v-eps"><span class="dim" title="Awaiting data">—</span></div>
         <div class="v-sub" id="v-eps-sub"><span class="t-ok">all endpoints healthy</span></div>
       </div>
     </div>
     <div class="sysline" id="sysline"></div>
+  </div>
+
+  <!-- ============ live requests ============ -->
+  <div class="section-head" id="live">Live Requests
+    <span class="badge b-cyan" id="live-running">0 running</span>
+    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
+  </div>
+  <div class="table-wrap bounded">
+    <table class="c">
+      <thead><tr>
+        <th>State</th>
+        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
+        <th>Model</th><th>Caller</th>
+        <th>Provider : Model</th>
+        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
+        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
+        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
+        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
+      </tr></thead>
+      <tbody id="live-body"></tbody>
+    </table>
   </div>
 
   <!-- ============ quota budgets ============ -->
@@ -83,7 +101,7 @@
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Key</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
+        <th>Provider</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
         <th class="col-progress">Progress</th><th class="num">Headroom</th><th>Resets</th>
       </tr></thead>
       <tbody id="quota-body"></tbody>
@@ -99,7 +117,7 @@
     <table class="c">
       <thead><tr>
         <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order">PRI</th>
-        <th>Provider : Key : Model</th><th>Health</th>
+        <th>Provider : Model</th><th>Health</th>
         <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
         <th class="num" title="Share of forwarded requests over the last 24h">Share 24h</th>
         <th>Context / Capabilities</th>
@@ -116,34 +134,10 @@
     <table class="c">
       <thead><tr>
         <th class="num" title="Fallback ordering — a separate space from the per-model priority tiers">ORD</th>
-        <th>Provider : Key : Model</th><th>Health</th>
+        <th>Provider : Model</th><th>Health</th>
         <th class="num">Headroom</th><th class="num">Share 24h</th><th>Context / Capabilities</th>
       </tr></thead>
       <tbody id="fallback-body"></tbody>
-    </table>
-  </div>
-
-  <!-- ============ live requests ============ -->
-  <div class="section-head" id="live">Live Requests
-    <span class="badge b-cyan" id="live-running">0 running</span>
-    <span class="badge b-dim" id="live-queued">0 queued</span>
-    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
-    <span class="spacer"></span>
-    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
-  </div>
-  <div class="table-wrap bounded">
-    <table class="c">
-      <thead><tr>
-        <th>State</th>
-        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
-        <th>Model</th><th>Caller</th>
-        <th>Provider : Key : Model</th>
-        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
-        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
-        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
-        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
-      </tr></thead>
-      <tbody id="live-body"></tbody>
     </table>
   </div>
 
@@ -159,7 +153,7 @@
       <thead><tr>
         <th class="num" title="Arrival time of the request; hover a row's time for its process-local request number">When</th>
         <th>Model</th><th>Caller</th>
-        <th>Provider : Key : Model</th>
+        <th>Provider : Model</th>
         <th class="num" title="Attempts made before the request was given up on">Att</th>
         <th>Outcome</th>
         <th class="num" title="Client-view total duration">Dur</th>
@@ -181,7 +175,7 @@
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Key : Model</th>
+        <th>Provider : Model</th>
         <th title="Transport mode — streaming and non-streaming samples are separate rows and never share a percentile">Mode</th>
         <th class="num" title="Successful requests in the window. Fewer than the window size simply means this row has not served that many yet — the ring only keeps ok samples.">Requests</th>
         <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
@@ -248,9 +242,9 @@ const consoleApi = mountConsole({
   active: 'overview',
   rail: [
     { id: 'vitals', label: 'Overview' },
+    { id: 'live', label: 'Live' },
     { id: 'quota', label: 'Quota' },
     { id: 'models', label: 'Models' },
-    { id: 'live', label: 'Live' },
     { id: 'failures', label: 'Failures' },
     { id: 'perf', label: 'Performance' },
     { id: 'traffic', label: 'Traffic & Usage' },
@@ -387,22 +381,7 @@ function renderVitalsAndSysline(statusData, statsData) {
   document.getElementById('v-tok-out').textContent = `out ${fmtKMG(toks.out || 0)}`;
   document.getElementById('v-tok-cache').textContent = promptTotal > 0 ? `cache ${dec2(cacheHitPct)}%` : 'cache —';
 
-  // 4. TTFT (from stats.overall)
-  const ov = statsData && statsData.overall;
-  if (ov && ov.n > 0) {
-    const p50s = ov.ttft_p50_ms > 0 ? dec2(ov.ttft_p50_ms / 1000) + '<small>s</small>' : '<span class="dim" title="Unmeasured TTFT">—</span>';
-    const p90s = ov.ttft_p90_ms > 0 ? `p90 ${dec2(ov.ttft_p90_ms / 1000)}s` : 'p90 <span class="dim" title="Unmeasured TTFT">—</span>';
-    const toksStr = ov.toks_p50 > 0 ? `tok/s ${dec2(ov.toks_p50)}` : 'tok/s <span class="dim" title="No toks measurement">—</span>';
-    document.getElementById('v-ttft').innerHTML = p50s;
-    document.getElementById('v-ttft-p90').innerHTML = p90s;
-    document.getElementById('v-toks-p50').innerHTML = toksStr;
-  } else {
-    document.getElementById('v-ttft').innerHTML = '<span class="dim" title="No successful requests in the window">—</span>';
-    document.getElementById('v-ttft-p90').innerHTML = 'p90 <span class="dim" title="No successful requests in the window">—</span>';
-    document.getElementById('v-toks-p50').innerHTML = 'tok/s <span class="dim" title="No throughput measurement">—</span>';
-  }
-
-  // 5. Endpoints
+  // 4. Endpoints
   const models = statusData.models || [];
   const nowMs = Date.now();
   let totalEps = 0;
@@ -435,7 +414,7 @@ function renderVitalsAndSysline(statusData, statsData) {
 
   // Sysline
   const parts = [];
-  parts.push(`<span>vmr <b>${esc(inst.version || '—')}</b> · pid ${esc(inst.pid || '—')}</span>`);
+  parts.push(`<span>Ver. <b>${esc(inst.version || '—')}</b> · pid ${esc(inst.pid || '—')}</span>`);
 
   if (sys.memory) {
     const heap = sys.memory.heap_alloc || fmtBytes(sys.memory.heap_alloc_bytes);
@@ -715,14 +694,18 @@ function renderModelsAndFallback(modelsList, statsData) {
 // ============ Render Live Requests ============
 function renderLive(inflightList) {
   const body = document.getElementById('live-body');
-  const es = inflightList || [];
-  const running = es.filter(e => e.state === 'running').length;
-  const queued = es.filter(e => e.state === 'queued').length;
+  const es = (inflightList || []).filter(e => e.state === 'running');
+  const running = es.length;
 
   document.getElementById('live-running').textContent = `${running} running`;
-  document.getElementById('live-queued').textContent = `${queued} queued`;
-  document.getElementById('live-queued').className = 'badge ' + (queued > 0 ? 'b-warn' : 'b-dim');
-  consoleApi.setRailCount('live', es.length);
+  consoleApi.setRailCount('live', running);
+
+  const limit = (lastStatsData && lastStatsData.concurrency && lastStatsData.concurrency.limit) ||
+                (lastStatusData && lastStatusData.instance && lastStatusData.instance.concurrency && lastStatusData.instance.concurrency.limit) || 0;
+  const tableWrap = document.querySelector('#live + .table-wrap');
+  if (tableWrap) {
+    tableWrap.style.maxHeight = limit > 0 ? (limit * 44 + 56) + 'px' : '';
+  }
 
   const expandBtn = document.getElementById('live-expand');
   expandBtn.hidden = es.length <= LIVE_CAP;
@@ -740,9 +723,6 @@ function renderLive(inflightList) {
 
   function elapsedCell(e) {
     const s = Math.max(0, Math.floor((Date.now() - new Date(e.ts).getTime()) / 1000));
-    if (e.state === 'queued' && s >= QUEUE_WARN_S) {
-      return `<span class="t-warn" title="Waiting on the concurrency gate for ${fmtDur(s)}">${fmtDur(s)}</span>`;
-    }
     return fmtDur(s);
   }
 
@@ -769,7 +749,7 @@ function renderLive(inflightList) {
   }
 
   const rows = shown.map(e => `<tr>
-    <td>${e.state === 'queued' ? '<span class="badge b-warn">queued</span>' : '<span class="badge b-cyan">running</span>'}</td>
+    <td><span class="badge b-cyan">running</span></td>
     <td class="num">${elapsedCell(e)}</td>
     <td><span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}</td>
     <td><span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span></td>

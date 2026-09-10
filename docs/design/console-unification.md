@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-14, by pi -->
+<!-- Ver 2026-09-15, by pi -->
 
 # VMR 控制台统一设计方案（Console Unification）
 
@@ -114,9 +114,9 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
-│ [◇] VMR·Console  Overview Log Help          (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 三页同槽
+│ [◇] VMR          Overview Log Help          (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 三页同槽
 ├──────────────────────────────────────────────────────────────────────────────────────┤
-│ Overview  Quota 3  Models 3  Live 6  Failures 6  Performance  Traffic & Usage         │ 行2 · 页面自有
+│ Overview  Live 6  Quota 3  Models 3  Failures 6  Performance  Traffic & Usage         │ 行2 · 页面自有
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │   内容区（Overview/Help: 1280px 居中；Log: 满宽终端）                                  │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
@@ -124,7 +124,7 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **行 1（sticky，毛玻璃底）**，左到右：品牌（SVG logo + `VMR` + `Console` 小徽）、页内导航、
+- **行 1（sticky，毛玻璃底）**，左到右：品牌（SVG logo + `VMR`）、页内导航、
   **刷新/连接槽**、**uptime 徽**、Key 按钮、**告警（最右）**。
   - **刷新/连接槽**是同一个位置的三种页面语义：Overview 放刷新倒计时 `⟳ 4:37`（点击即刷，
     暂停时整枚转黄并显示 `paused`）；Log 放流状态 pill（`streaming`/`paused`/`down`）；
@@ -170,6 +170,7 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
   原请求一次 → 仍 401 则错误行提示。modal 由 `console.js` 注入 DOM，页面不再手抄。
 - **浮层行为统一**：`Esc` 关闭任意打开的浮层、点击遮罩关闭、打开即聚焦首个可交互元素、
   关闭还焦到触发元素。鉴权 modal 与告警 modal 不许有两套开合手感。
+- **告警弹窗**：按 severity 分组（Errors / Warnings 各自成块并按需展示，两组均有时以 `<hr>` 分隔；无告警时显示 clear 提示行），宽度 `min(600px, 50vw)`，隐藏 `kind` 字段仅显示 `ref`。
 - **Key 按钮三态**（§4）；清除键立即生效，下次 401 重新弹窗。
 - help 页的"先探测后要键"改为直接走 `guard`（无键探测即 401，行为等价、流程统一）。
 
@@ -232,15 +233,16 @@ Overview 页（单页，自上而下）
     └─ Usage by Upstream Key Label / by Caller
 ```
 
-### 8.3 vitals 指标带：五段
+### 8.3 vitals 指标带：四段
 
 | 段 | 主数 | 副行 | 窗口标签 |
 | --- | --- | --- | --- |
 | Concurrency | `running / limit` | `N queued`（非零转黄）· `limit N` | `· now` |
 | Requests | 累计请求数 | `ok` / `cancel` / `err + 错误率%` | `· since start` |
 | Tokens | 四分量总和 | `in` / `out` / `cache N%`（口径进 title） | `· since start` |
-| TTFT p50 | 全端点 p50（来自 `/stats` 的 `overall` 窗口块——分位数不可合并，必须服务端算） | `p90` · `tok/s p50` | `· last 100` |
 | Endpoints | `healthy / total` | `N half-open` · `N cooldown` | `· now` |
+
+注：原 TTFT p50 段已移除，首屏 vitals 精简为四段。
 
 原第四段 "System"（heap · goroutines · disk）**删除**：它与紧随其后的 `.sysline` 逐字重复，
 且占据了首屏五个槽位中的一个去回答一个几乎不会先问的问题。腾出的两个槽位交给
@@ -256,7 +258,7 @@ audit 开关与占用 / image cache 开关与占用。go 版本、os-arch、list
 
 | 列 | 说明 |
 | --- | --- |
-| Provider : Key | 账号身份（key_label 对齐 §8.4-e 的键） |
+| Provider | 账号身份（key_label 对齐 §8.4-e 的键） |
 | Limit | **徽章自述角色**：`bucket · tokens / 1mo`（青）/ `gate · requests / 1d`（紫），完整语义进悬停。**不靠颜色编码角色**——用红=gate 会让一个 13% 用量、headroom 2.33 的健康账号顶着红徽，违反 §2-7 |
 | Models | `all models` 或具体模型名列表 |
 | Amount → Used | Amount 在左（先看盘子再看吃掉多少） |
@@ -270,7 +272,7 @@ audit 开关与占用 / image cache 开关与占用。go 版本、os-arch、list
 | --- | --- |
 | Virtual Model | **带协议前缀**：淡色 `anthropic-messages:` + 亮色模型名。虚拟模型是 per-protocol 的，接入方要在这张表上就能判断该往哪个协议发；跨端点用 rowspan 合并，组首行加实线上边框 |
 | PRI（Fallback 表为 ORD） | 优先级层级。Fallback 的排序是**独立空间**，用中性 `.pri-n` 徽章从 1 起编号，不套主模型的 P1/P2 色板 |
-| Provider : Key : Model | key 段紫色；超长走 `.ep` 省略号 + `title` 全量 |
+| Provider : Model | key 段紫色；超长走 `.ep` 省略号 + `title` 全量 |
 | Health | `healthy` / `half-open` / `cooldown 2m 13s`。**悬停必须给因果**：连续失败次数 + 最近错误类别；half-open 额外说明"下一个请求是唯一的试探" |
 | Headroom | 账户级 quota headroom，与 §8.4-a 同源同色阶（§8.5）；无 quota 的账户 `—` |
 | Share 24h | **迷你条 + 百分比**，该端点在过去 24h 转发请求中的份额。这一列把"配置意图"与"运行现实"放进同一行——没有它，拓扑表是纯配置视图，回答不了"我配了 5 个端点，现在谁在扛" |
@@ -282,13 +284,15 @@ Share 列的数据来自 `/status`（拓扑）与 `/stats`（`by_provider_model`
 
 **c. Live Requests**
 
+DOM 布局调整为位于 Quota Budgets 之前；表格容器 `.table-wrap.bounded` 按并发 limit 动态计算固定高度（`limit * 44 + 56px`），仅渲染 `running` 状态条目（排队中条目不在列表中展示）。
+
 | 列 | 说明 |
 | --- | --- |
-| State | queued（黄）/ running（青） |
-| Elapsed | 到达至今。**紧随 State**——"哪一条卡了"是这张表的第一问题，诊断列不能排在末尾；queued 超过阈值转黄（排队积压是事故，不是抖动） |
+| State | running（青） |
+| Elapsed | 到达至今。**紧随 State**——"哪一条卡了"是这张表的第一问题，诊断列不能排在末尾 |
 | Model | 协议前缀 + 虚拟模型名 + **传输方式标签**（`.mode`：`stream` / `json`，写字不用图标） |
 | Caller | `client_key_tag` |
-| Provider : Key : Model | 未发出显示 `— routing`；超长走 `.ep` |
+| Provider : Model | 未发出显示 `— routing`；超长走 `.ep` |
 | Att | 当前 attempt 序号。**`1` 淡显、`—` 表示未发出、`≥2` 转黄徽章**——常态值不许跟异常值抢注意力 |
 | First / Last Byte | 合并列：`0.81s · 3s ago`（首块延迟 · 末块距今）。列名跟随底层字段 `first_byte_at`/`last_byte_at` 写 **Byte**——同一张表里 `Tok in`/`Tok out` 装的是真 token 计数，两个词必须各归各的；流式末块 ≥10s 显示 `stalled Ns` 红徽，阈值写进悬停 |
 | Tok in `est` / Tok out `est` | 拆两列，右对齐 tabular-nums。**表头明写 `est`**；压缩响应体数不出 out，显示 `—` 而不是 `0` |
@@ -310,7 +314,7 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 | When | `14:32:07 · 2m`（绝对时刻 + 相对） |
 | Model | 协议前缀 + 虚拟模型 + 传输方式标签 |
 | Caller | `client_key_tag` |
-| Provider : Key : Model | 从未转发成功的请求显示 `— never forwarded` |
+| Provider : Model | 从未转发成功的请求显示 `— never forwarded` |
 | Att | 放弃前的尝试次数（`≥2` 转黄徽章） |
 | Outcome | 错误类别徽章 + 淡色 HTTP 码：`upstream_5xx 502` / `rate_limit 429` / `transient 500` / `timeout` / `no_candidate` / `canceled`（canceled 用黄，其余用红）。**类别取自路由半区自己的 `ErrorClass`，控制台绝不重新推导** |
 | Dur | client-view 总耗时 |
@@ -331,7 +335,7 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 
 | 列 | 说明 |
 | --- | --- |
-| Provider : Key : Model | key_label 内嵌；独立 Key Label 列删除 |
+| Provider : Model | key_label 内嵌；独立 Key Label 列删除 |
 | Mode | `stream` / `json`，**独立一列、写字不用图标**（见下） |
 | Requests | **窗口内的实际样本数**。ring 只收成功样本，所以它是「这一行的分位数究竟建立在多少个请求上」——不满窗口容量时转黄并在悬停里说明。失败不在这张表里，由 Recent Failures 与图上的错误标记承担 |
 | Tok in+cw / cr | 窗口内输入侧两值：fresh+cache_write 与 cache_read |

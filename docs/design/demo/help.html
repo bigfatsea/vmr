@@ -100,6 +100,10 @@ table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:20px;width:min(440px,92vw)}
+.modal.warn-modal{width:min(600px,50vw)}
+.warn-group{margin-bottom:4px}
+.warn-group-title{font-weight:600;font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.warn-sep{border:none;border-top:1px solid var(--border);margin:10px 0}
 .modal h2{font-size:16px;color:var(--text-bright);margin-bottom:8px}
 .modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:12px}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
@@ -115,7 +119,7 @@ table.c{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
   <div class="hd-inner">
     <a class="brand" href="overview.html">
       <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <b>VMR</b><span class="sub">Console</span>
+      <b>VMR</b>
     </a>
     <nav class="hd-nav">
       <a class="nav-link" href="overview.html">Overview</a>
@@ -325,25 +329,58 @@ const warnOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
-      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
-      <div id="warn-list"></div>
+    <div class="modal warn-modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors</h2>
+      <div id="warn-clear" class="wrow" hidden>
+        <span class="badge b-ok">clear</span>
+        <span class="t-dim">No config issues and no degraded endpoints.</span>
+      </div>
+      <div id="warn-errors" class="warn-group" hidden>
+        <div class="warn-group-title">Errors</div>
+        <div id="warn-errors-list"></div>
+      </div>
+      <hr id="warn-sep" class="warn-sep" hidden>
+      <div id="warn-warnings" class="warn-group" hidden>
+        <div class="warn-group-title">Warnings</div>
+        <div id="warn-warnings-list"></div>
+      </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
   document.body.appendChild(div); wireOverlay(div); return div;
 })();
 (function renderWarnings() {
   const bell = document.getElementById('warn-bell');
-  document.getElementById('warn-list').innerHTML = WARNINGS.map(w => `
-    <div class="wrow">
-      <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
-      <span>${w.text}</span><span class="when">${w.when}</span>
-    </div>`).join('');
-  const hasErr = WARNINGS.some(w => w.sev === 'err');
-  bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
-  document.getElementById('warn-ico').textContent = hasErr ? '\u{1F6A8}' : '\u26A0\uFE0F';
-  document.getElementById('warn-count').textContent = WARNINGS.length;
-  document.getElementById('warn-modal-count').textContent = WARNINGS.length + ' open';
+  const clearBox = document.getElementById('warn-clear');
+  const errBox = document.getElementById('warn-errors');
+  const warnBox = document.getElementById('warn-warnings');
+  const sep = document.getElementById('warn-sep');
+  if (!WARNINGS.length) {
+    clearBox.hidden = false;
+    errBox.hidden = true;
+    warnBox.hidden = true;
+    sep.hidden = true;
+    bell.className = 'warn-btn quiet';
+    document.getElementById('warn-ico').textContent = '\u26A0\uFE0F';
+    document.getElementById('warn-count').textContent = '0';
+  } else {
+    clearBox.hidden = true;
+    const errors = WARNINGS.filter(w => w.sev === 'err');
+    const warnings = WARNINGS.filter(w => w.sev !== 'err');
+    const renderRow = w => `
+      <div class="wrow">
+        <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
+        <span>${w.text}</span><span class="when">${w.when}</span>
+      </div>`;
+    errBox.hidden = errors.length === 0;
+    document.getElementById('warn-errors-list').innerHTML = errors.map(renderRow).join('');
+    warnBox.hidden = warnings.length === 0;
+    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderRow).join('');
+    sep.hidden = !(errors.length > 0 && warnings.length > 0);
+    const hasErr = errors.length > 0;
+    bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
+    document.getElementById('warn-ico').textContent = hasErr ? '\u{1F6A8}' : '\u26A0\uFE0F';
+    document.getElementById('warn-count').textContent = WARNINGS.length;
+  }
   document.getElementById('warn-close').onclick = () => closeOverlay(warnOverlay);
 })();
 document.getElementById('warn-bell').onclick = () => openOverlay(warnOverlay);

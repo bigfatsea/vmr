@@ -152,6 +152,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
+.modal.warn-modal{width:min(600px,50vw)}
 .modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
 .modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
@@ -161,7 +162,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 .toast.show{opacity:1}
 
 /* vitals strip */
-.vitals{display:grid;grid-template-columns:repeat(5,1fr);padding:0;overflow:hidden}
+.vitals{display:grid;grid-template-columns:repeat(4,1fr);padding:0;overflow:hidden}
 .vseg{padding:12px 15px;border-left:1px solid var(--border-soft);min-width:0}
 .vseg:first-child{border-left:none}
 .v-label{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -193,6 +194,9 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 .chart-tip .tr{color:var(--text-muted)}
 
 /* warning list rows */
+.warn-group{margin-bottom:4px}
+.warn-group-title{font-weight:600;font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
+.warn-sep{border:none;border-top:1px solid var(--border);margin:10px 0}
 .wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
 .wrow:last-child{border-bottom:none}
 .wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
@@ -217,9 +221,9 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 .chip.on[data-cls=canceled]{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.4)}
 .chip .n{opacity:.75;margin-left:4px}
 
-@media (max-width:1160px){.vitals{grid-template-columns:repeat(3,1fr)}.vseg:nth-child(4){border-left:none}}
+@media (max-width:980px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}}
 @media (max-width:1080px){.hd-uptime{display:none}}
-@media (max-width:820px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}.grid-2{grid-template-columns:1fr}}
+@media (max-width:820px){.grid-2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -229,7 +233,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   <div class="hd-inner">
     <a class="brand" href="overview.html">
       <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <b>VMR</b><span class="sub">Console</span>
+      <b>VMR</b>
     </a>
     <nav class="hd-nav">
       <a class="nav-link active" href="overview.html">Overview</a>
@@ -255,9 +259,9 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   <div class="hd-rail">
     <div class="rail-inner">
       <a class="rail-link" href="#vitals" data-rail>Overview</a>
+      <a class="rail-link" href="#live" data-rail>Live<span class="n" id="rail-live">0</span></a>
       <a class="rail-link" href="#quota" data-rail>Quota<span class="n" id="rail-quota">3</span></a>
       <a class="rail-link" href="#models" data-rail>Models<span class="n" id="rail-models">3</span></a>
-      <a class="rail-link" href="#live" data-rail>Live<span class="n" id="rail-live">0</span></a>
       <a class="rail-link" href="#failures" data-rail>Failures<span class="n" id="rail-fail">6</span></a>
       <a class="rail-link" href="#perf" data-rail>Performance</a>
       <a class="rail-link" href="#traffic" data-rail>Traffic &amp; Usage</a>
@@ -288,13 +292,6 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
         <div class="v-sub"><span>in 31.40M</span><span>out 16.80M</span><span class="t-ok help" title="cache_read / (fresh + cache_write + cache_read) — share of prompt tokens served from the upstream prompt cache">cache 62%</span></div>
       </div>
       <div class="vseg">
-        <!-- GAP G1: /stats has no merged `overall` window block yet — percentiles cannot be
-             combined client-side, so this whole segment is mock until the server computes it. -->
-        <div class="v-label">TTFT p50 <span class="win">· last 100</span></div>
-        <div class="v-main" id="v-ttft">0.93<small>s</small></div>
-        <div class="v-sub"><span>p90 2.88s</span><span class="help" title="per-request throughput: all four token components / total duration, p50 over the same window">tok/s 22.30</span></div>
-      </div>
-      <div class="vseg">
         <div class="v-label">Endpoints <span class="win">· now</span></div>
         <div class="v-main" id="v-eps">5<small> / 7 healthy</small></div>
         <div class="v-sub"><span class="t-warn">1 half-open</span><span class="t-err">1 cooldown</span></div>
@@ -302,12 +299,35 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     </div>
     <!-- process & storage detail: one line, no folding, no heading -->
     <div class="sysline">
-      <span>vmr <b>v4.2.1</b> · pid 48211</span>
+      <span>Ver. <b>v4.2.1</b> · pid 48211</span>
       <span>heap <b>412 MB</b> / sys 586 MB · 233 goroutines</span>
       <span>disk free <b>489 GB</b></span>
       <span>audit <b>on</b> · 1.20 GB · 38 files</span>
       <span>image cache <b>on</b> · 256 MB · ttl 7d</span>
     </div>
+  </div>
+
+  <!-- ============ live requests ============ -->
+  <div class="section-head" id="live">Live Requests
+    <span class="badge b-cyan" id="live-running">0 running</span>
+    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
+    <span class="spacer"></span>
+    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
+  </div>
+  <div class="table-wrap bounded">
+    <table class="c">
+      <thead><tr>
+        <th>State</th>
+        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
+        <th>Model</th><th>Caller</th>
+        <th>Provider : Model</th>
+        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
+        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
+        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
+        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
+      </tr></thead>
+      <tbody id="live-body"></tbody>
+    </table>
   </div>
 
   <!-- ============ quota budgets ============ -->
@@ -318,7 +338,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Key</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
+        <th>Provider</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
         <th style="width:190px">Progress</th><th class="num">Headroom</th><th>Resets</th>
       </tr></thead>
       <tbody>
@@ -374,7 +394,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     <table class="c">
       <thead><tr>
         <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order">PRI</th>
-        <th>Provider : Key : Model</th><th>Health</th>
+        <th>Provider : Model</th><th>Health</th>
         <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
         <th class="num" title="Share of forwarded requests over the last 24h">Share 24h</th>
         <th>Context / Capabilities</th>
@@ -437,7 +457,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     <table class="c">
       <thead><tr>
         <th class="num" title="Fallback ordering — a separate space from the per-model priority tiers">ORD</th>
-        <th>Provider : Key : Model</th><th>Health</th>
+        <th>Provider : Model</th><th>Health</th>
         <th class="num">Headroom</th><th class="num">Share 24h</th><th>Context / Capabilities</th>
       </tr></thead>
       <tbody>
@@ -461,30 +481,6 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     </table>
   </div>
 
-  <!-- ============ live requests ============ -->
-  <div class="section-head" id="live">Live Requests
-    <span class="badge b-cyan" id="live-running">0 running</span>
-    <span class="badge b-warn" id="live-queued">0 queued</span>
-    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
-    <span class="spacer"></span>
-    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
-  </div>
-  <div class="table-wrap bounded">
-    <table class="c">
-      <thead><tr>
-        <th>State</th>
-        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
-        <th>Model</th><th>Caller</th>
-        <th>Provider : Key : Model</th>
-        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
-        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
-        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
-        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
-      </tr></thead>
-      <tbody id="live-body"></tbody>
-    </table>
-  </div>
-
   <!-- ============ recent failures: the gap between "now" and the hourly aggregates ============ -->
   <!-- GAP G7: /stats has no recent_errors[] ring yet — this whole block is mock. -->
   <div class="section-head" id="failures">Recent Failures
@@ -499,7 +495,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       <thead><tr>
         <th class="num" title="Arrival time of the request; hover a row's time for its process-local request number">When</th>
         <th>Model</th><th>Caller</th>
-        <th>Provider : Key : Model</th>
+        <th>Provider : Model</th>
         <th class="num" title="Attempts made before the request was given up on">Att</th>
         <th>Outcome</th>
         <th class="num" title="Client-view total duration">Dur</th>
@@ -523,7 +519,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Key : Model</th>
+        <th>Provider : Model</th>
         <th title="Transport mode — streaming and non-streaming samples are separate rows and never share a percentile">Mode</th>
         <th class="num" title="Successful requests in the window. Fewer than the window size simply means this row has not served that many yet — the ring only keeps ok samples.">Requests</th>
         <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
@@ -742,9 +738,21 @@ const warnOverlay = (() => {
   const div = document.createElement('div');
   div.className = 'modal-overlay hidden';
   div.innerHTML = `
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
-      <h2>Warnings &amp; Errors <span class="badge b-dim" id="warn-modal-count"></span></h2>
-      <div id="warn-list"></div>
+    <div class="modal warn-modal" role="dialog" aria-modal="true" aria-label="Warnings and errors">
+      <h2>Warnings &amp; Errors</h2>
+      <div id="warn-clear" class="wrow" hidden>
+        <span class="badge b-ok">clear</span>
+        <span class="t-dim">No config issues and no degraded endpoints.</span>
+      </div>
+      <div id="warn-errors" class="warn-group" hidden>
+        <div class="warn-group-title">Errors</div>
+        <div id="warn-errors-list"></div>
+      </div>
+      <hr id="warn-sep" class="warn-sep" hidden>
+      <div id="warn-warnings" class="warn-group" hidden>
+        <div class="warn-group-title">Warnings</div>
+        <div id="warn-warnings-list"></div>
+      </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
   document.body.appendChild(div);
@@ -752,27 +760,40 @@ const warnOverlay = (() => {
   return div;
 })();
 (function renderWarnings() {
-  const list = document.getElementById('warn-list');
   const bell = document.getElementById('warn-bell');
-  const ico = document.getElementById('warn-ico');
-  const cnt = document.getElementById('warn-count');
+  const clearBox = document.getElementById('warn-clear');
+  const errBox = document.getElementById('warn-errors');
+  const warnBox = document.getElementById('warn-warnings');
+  const sep = document.getElementById('warn-sep');
   if (!WARNINGS.length) {
-    list.innerHTML = '<div class="wrow"><span class="badge b-ok">clear</span><span class="t-dim">No config issues and no degraded endpoints.</span></div>';
-    bell.className = 'warn-btn quiet'; bell.title = 'No warnings'; ico.textContent = '⚠️'; cnt.textContent = '0';
+    clearBox.hidden = false;
+    errBox.hidden = true;
+    warnBox.hidden = true;
+    sep.hidden = true;
+    bell.className = 'warn-btn quiet'; bell.title = 'No warnings';
+    document.getElementById('warn-ico').textContent = '⚠️';
+    document.getElementById('warn-count').textContent = '0';
   } else {
-    list.innerHTML = WARNINGS.map(w => `
+    clearBox.hidden = true;
+    const errors = WARNINGS.filter(w => w.sev === 'err');
+    const warnings = WARNINGS.filter(w => w.sev !== 'err');
+    const renderRow = w => `
       <div class="wrow">
         <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
         <span>${w.text}</span>
         <span class="when">${w.when}</span>
-      </div>`).join('');
-    const hasErr = WARNINGS.some(w => w.sev === 'err');
+      </div>`;
+    errBox.hidden = errors.length === 0;
+    document.getElementById('warn-errors-list').innerHTML = errors.map(renderRow).join('');
+    warnBox.hidden = warnings.length === 0;
+    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderRow).join('');
+    sep.hidden = !(errors.length > 0 && warnings.length > 0);
+    const hasErr = errors.length > 0;
     bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
-    ico.textContent = hasErr ? '🚨' : '⚠️';
-    cnt.textContent = WARNINGS.length;
+    document.getElementById('warn-ico').textContent = hasErr ? '🚨' : '⚠️';
+    document.getElementById('warn-count').textContent = WARNINGS.length;
     bell.title = WARNINGS.length + ' actionable item(s) — click for detail';
   }
-  document.getElementById('warn-modal-count').textContent = WARNINGS.length + ' open';
   document.getElementById('warn-close').onclick = () => closeOverlay(warnOverlay);
 })();
 document.getElementById('warn-bell').onclick = () => openOverlay(warnOverlay);
@@ -918,13 +939,13 @@ function endpointCell(provider, key, model) {
 }
 function renderLive() {
   const body = document.getElementById('live-body');
-  const es = SIM.entries;
-  const running = es.filter(e => e.state === 'running').length;
-  const queued = es.filter(e => e.state === 'queued').length;
+  const es = SIM.entries.filter(e => e.state === 'running');
+  const running = es.length;
   document.getElementById('live-running').textContent = running + ' running';
-  document.getElementById('live-queued').textContent = queued + ' queued';
-  document.getElementById('live-queued').className = 'badge ' + (queued ? 'b-warn' : 'b-dim');
-  document.getElementById('rail-live').textContent = es.length;
+  document.getElementById('rail-live').textContent = running;
+  const limit = 8;
+  const tableWrap = document.querySelector('#live + .table-wrap');
+  if (tableWrap) tableWrap.style.maxHeight = (limit * 44 + 56) + 'px';
   const expandBtn = document.getElementById('live-expand');
   expandBtn.hidden = es.length <= LIVE_CAP;
   expandBtn.textContent = SIM.expanded ? 'Show top ' + LIVE_CAP : 'Show all ' + es.length;
@@ -936,7 +957,7 @@ function renderLive() {
   }
   const shown = SIM.expanded ? es : es.slice(-LIVE_CAP);
   const rows = shown.map(e => `<tr>
-    <td>${e.state === 'queued' ? '<span class="badge b-warn">queued</span>' : '<span class="badge b-cyan">running</span>'}</td>
+    <td><span class="badge b-cyan">running</span></td>
     <td class="num">${elapsedCell(e)}</td>
     <td><span class="dim">${e.proto}:</span><b>${e.vmodel}</b>${modeTag(e.stream)}</td>
     <td>${e.caller}</td>
