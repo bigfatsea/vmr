@@ -1,444 +1,146 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by Gemini -->
+<!-- Ver 2026-09-15, by pi — console-unification T6: structure per docs/design/demo/help.html,
+     guide content carried over from the pre-unification help page. Chinese sibling of
+     help.html: identical DOM structure, anchors and page script (only copy is
+     translated); the page-private style block is byte-identical across both pages.
+     Shared chrome (CSS/JS/header/footer/auth modal) is injected at server start via
+     the CONSOLE_CSS / CONSOLE_JS injection markers. -->
 <html lang="zh">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VMR — Agent 配置指南</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
-  <style>
-    :root {
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --card-border: #30363d;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --text-bright: #f0f6fc;
-      --accent: #58a6ff;
-      --accent-hover: #79c0ff;
-      --green: #3fb950;
-      --green-bg: rgba(63, 185, 80, 0.15);
-      --yellow: #d29922;
-      --red: #f85149;
-      --purple: #bc8cff;
-      --cyan: #39c5cf;
-      --orange: #f0883e;
-      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: var(--font-sans);
-      font-size: 14px;
-      line-height: 1.6;
-      padding: 24px 16px;
-    }
-    .container { max-width: 1280px; margin: 0 auto; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR 控制台 — 帮助</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+/*{{CONSOLE_CSS}}*/
 
-    /* Header */
-    header {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      padding-bottom: 20px;
-      border-bottom: 1px solid var(--card-border);
-      margin-bottom: 24px;
-    }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand h1 { font-size: 20px; font-weight: 700; color: var(--text-bright); letter-spacing: -0.5px; }
-    .nav-link {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      padding: 4px 12px;
-      border-radius: 12px;
-      border: 1px solid transparent;
-      background: var(--card-border);
-      color: var(--text);
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .nav-link:hover { border-color: var(--text-muted); color: var(--text-bright); }
-    .badge {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      padding: 2px 8px;
-      border-radius: 12px;
-      background: var(--card-border);
-      border: 1px solid transparent;
-    }
-    .badge-primary { background: rgba(88, 166, 255, 0.15); color: var(--accent); border-color: rgba(88, 166, 255, 0.3); }
-    .badge-success { background: var(--green-bg); color: var(--green); border-color: rgba(63, 185, 80, 0.3); }
-    .badge-anthropic { background: rgba(188, 140, 255, 0.15); color: var(--purple); border-color: rgba(188, 140, 255, 0.3); }
-    .badge-warning { background: rgba(210, 153, 34, 0.15); color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); }
-    .badge-orange { background: rgba(240, 136, 62, 0.15); color: var(--orange); border-color: rgba(240, 136, 62, 0.3); }
-
-    /* Cards */
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-    .card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 16px;
-    }
-
-    /* Connection Info (mirrors /status.html's "Connect Your Agent" card) */
-    .connect-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 4px; }
-    .connect-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-    .connect-col-title {
-      font-size: 12px; font-weight: 600; color: var(--text-muted);
-      text-transform: uppercase; letter-spacing: 0.5px;
-      padding-bottom: 6px; border-bottom: 1px solid var(--card-border);
-    }
-    .connect-url {
-      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      font-family: var(--font-mono); font-size: 12px;
-    }
-    .connect-url code { color: var(--text-bright); word-break: break-all; min-width: 0; }
-    .connect-model {
-      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-      padding: 6px 0; border-bottom: 1px solid rgba(48, 54, 61, 0.5);
-      font-size: 12px;
-    }
-    .connect-model:last-child { border-bottom: none; }
-    .model-name { font-size: 15px; font-weight: 600; color: var(--text-bright); font-family: var(--font-mono); }
-    .connect-model .model-name { font-size: 13px; }
-    .connect-meta { color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
-
-    /* Quick Reference table (kept generic so it stays collapsed/bordered) */
-    .info-table { width: 100%; border-collapse: collapse; }
-
-    /* Auth Modal */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0, 0, 0, 0.7);
-      backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      padding: 16px;
-    }
-    .modal {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 24px;
-      width: 100%;
-      max-width: 440px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
-    }
-    .modal h2 { font-size: 18px; color: var(--text-bright); }
-    .modal p { font-size: 13px; color: var(--text-muted); }
-    .modal input {
-      font-family: var(--font-mono);
-      font-size: 13px;
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--card-border);
-      border-radius: 4px;
-      padding: 8px 10px;
-      outline: none;
-    }
-    .modal input:focus { border-color: var(--accent); }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-    .modal-actions button {
-      font-family: inherit;
-      font-size: 13px;
-      background: var(--card-bg);
-      color: var(--text);
-      border: 1px solid var(--card-border);
-      border-radius: 4px;
-      padding: 6px 14px;
-      cursor: pointer;
-    }
-    .modal-actions button:hover { border-color: var(--text-muted); }
-    .modal-actions button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
-    .modal-actions button.primary:hover { background: var(--accent-hover); }
-    .hidden { display: none !important; }
-    .auth-link {
-      color: var(--accent);
-      cursor: pointer;
-      text-decoration: none;
-      border-bottom: 1px dashed rgba(88, 166, 255, 0.5);
-    }
-    .auth-link:hover { color: var(--accent-hover); }
-
-    /* Section headings */
-    .section-head {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--text-bright);
-      margin: 32px 0 16px 0;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--card-border);
-    }
-    .section-desc {
-      color: var(--text-muted);
-      font-size: 13px;
-      margin-bottom: 20px;
-      line-height: 1.6;
-    }
-    .section-desc code {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      background: var(--card-bg);
-      padding: 1px 5px;
-      border-radius: 3px;
-      border: 1px solid var(--card-border);
-    }
-
-    /* Agent Card */
-    .agent-card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      margin-bottom: 16px;
-      overflow: hidden;
-    }
-    .agent-head {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--card-border);
-      background: rgba(255, 255, 255, 0.02);
-    }
-    .agent-head h3 {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-bright);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .agent-head .badges { display: flex; gap: 6px; flex-wrap: wrap; }
-    .agent-desc {
-      padding: 12px 18px 0 18px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
-    .agent-desc a { color: var(--accent); text-decoration: none; }
-    .agent-desc a:hover { text-decoration: underline; }
-    .agent-config {
-      padding: 12px 18px 18px 18px;
-    }
-    .config-file {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    /* Code Block */
-    .code-block {
-      position: relative;
-      background: #0d1117;
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
-      overflow: hidden;
-    }
-    .code-block .code-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 12px;
-      background: #161b22;
-      border-bottom: 1px solid var(--card-border);
-      font-size: 11px;
-      color: var(--text-muted);
-    }
-    .code-block .copy-btn {
-      font-family: inherit;
-      font-size: 11px;
-      background: transparent;
-      color: var(--text-muted);
-      border: 1px solid var(--card-border);
-      border-radius: 4px;
-      padding: 2px 8px;
-      cursor: pointer;
-      transition: all 0.15s ease;
-    }
-    .code-block .copy-btn:hover {
-      border-color: var(--text-muted);
-      color: var(--text-bright);
-    }
-    .code-block .copy-btn.copied { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-    .code-block pre {
-      padding: 14px 16px;
-      margin: 0;
-      overflow-x: auto;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      line-height: 1.5;
-      color: var(--text);
-    }
-    .code-block pre code { font-family: inherit; }
-    .code-block pre .comment { color: #8b949e; }
-    .code-block pre .key { color: #79c0ff; }
-    .code-block pre .string { color: #a5d6ff; }
-    .code-block pre .bool { color: #d2a8ff; }
-    .code-block pre .placeholder { color: #ffa657; }
-
-    @media (max-width: 768px) {
-      .agent-head { flex-direction: column; align-items: flex-start; }
-      .connect-grid { grid-template-columns: 1fr; }
-    }
-  </style>
+/* ===== help page-private styles — byte-identical across help.html / help.zh.html ===== */
+/* connection + quick-reference tables carry prose in their cells; the
+   console-wide nowrap on table.c is meant for numeric diagnostic tables */
+.card table.c td{white-space:normal}
+.mrow{padding:3px 0;font-size:var(--fs-sm)}
+.mrow b{font-family:var(--font-mono);color:var(--text-bright)}
+/* snippet blocks — the highlight classes the fill engine anchors on */
+pre.snippet{background:var(--well);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.6;overflow-x:auto;margin:10px 0 4px;white-space:pre}
+pre.snippet code{font-family:inherit}
+.snippet .comment{color:var(--text-muted)}
+.snippet .key{color:var(--cyan)}
+.snippet .string{color:var(--green)}
+.snippet .bool{color:var(--purple)}
+.snippet .placeholder{color:var(--yellow)}
+/* accordion guide — same affordances as the design demo */
+details.disc{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);margin-bottom:var(--sp-3);scroll-margin-top:var(--hd-h)}
+details.disc>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;padding:13px 16px;font-weight:600;color:var(--text-bright);font-size:var(--fs-md)}
+details.disc>summary::-webkit-details-marker{display:none}
+details.disc>summary::before{content:"▸";color:var(--text-muted);transition:transform .15s}
+details.disc[open]>summary::before{transform:rotate(90deg)}
+details.disc .body{padding:0 16px 16px}
+details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0 8px}
+.cfg-file{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px}
+</style>
 </head>
 <body>
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <div class="brand">
-        <h1>⚙ Agent 配置指南</h1>
-      </div>
-      <div class="nav-links" style="display:flex; gap:8px; align-items:center;">
-        <a href="/stats.html" class="nav-link">📊 统计</a>
-        <a href="/status.html" class="nav-link">🎛️ 状态</a>
-        <a href="/log.html" class="nav-link">💾 日志</a>
-        <a href="/help.html" class="nav-link" title="Switch to English">🌐 English</a>
-      </div>
-    </header>
 
-    <!-- Connection Info Card (dynamic) -->
-    <div class="card" id="connection-card">
-      <div class="card-title">🔌 连接信息</div>
-      <p style="font-size:13px; color:var(--text-muted); margin-bottom:4px;">
-        使用以下值，把你的 AI 编程 Agent 配置为通过本 VMR 实例路由。
-        此处不显示 <strong>API 密钥</strong> — 请向管理员索取。
-      </p>
-      <div class="connect-grid">
-        <div class="connect-col">
-          <div class="connect-col-title">Base URL</div>
-          <div id="help-base-urls" style="display:flex; flex-direction:column; gap:6px;">加载中...</div>
-        </div>
-        <div class="connect-col">
-          <div class="connect-col-title">虚拟模型</div>
-          <div id="help-models" style="display:flex; flex-direction:column;">加载中...</div>
-        </div>
-      </div>
-      <div style="margin-top:10px; font-size:12px; color:var(--text-muted); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-        <span>VMR 版本: <span id="dyn-version" style="font-family:var(--font-mono); color:var(--text-bright);">加载中...</span></span>
-        <span>API 密钥: <strong>（请咨询管理员）</strong></span>
-      </div>
+<main class="page">
+  <div class="section-head" style="margin-top:0">Agent 配置指南</div>
+  <p style="color:var(--text-muted);margin-bottom:16px;max-width:860px">
+    把任意 AI 编程 Agent 指向本 VMR 实例：通常只需要下方的一个 base URL、管理员下发的 API 密钥、
+    以及一个虚拟模型名。若 Agent 支持，还可进一步配置<strong>上下文窗口</strong>（如 <code>200k</code>）、
+    <strong>思考/推理深度</strong>（<code>high</code>、<code>budget_tokens</code>）以及<strong>视觉多模态能力</strong>
+    （<code>image</code>），以匹配 VMR 的模型元数据 —— 各客户端的细节说明见下方对应指南。
+    <a href="/help.html" lang="en" title="Switch to the English guide">English →</a>
+  </p>
+
+  <!-- connection: identity of this instance + whether this browser can talk to it -->
+  <div class="card" id="connect" style="scroll-margin-top:var(--hd-h)">
+    <div class="card-title">连接信息</div>
+    <table class="c" style="margin-bottom:12px">
+      <tbody id="help-base-urls">
+        <tr>
+          <td><span class="badge b-cyan">openai-completions</span></td>
+          <td><code>{{BASE_URL_OPENAI}}</code></td>
+          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
+        </tr>
+        <tr>
+          <td><span class="badge b-purple">anthropic-messages</span></td>
+          <td><code>{{BASE_URL_ANTHROPIC}}</code></td>
+          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">复制</button></td>
+        </tr>
+        <tr>
+          <td><span class="badge b-info">openai-responses</span></td>
+          <td><code>{{BASE_URL_OPENAI}}</code></td>
+          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
+        </tr>
+      </tbody>
+      <tbody>
+        <tr>
+          <td class="t-dim">模型</td>
+          <td id="help-models"><span class="t-dim">加载中…</span></td>
+          <td class="hint" style="text-align:right">每个虚拟模型只在它自己的协议上应答</td>
+        </tr>
+        <tr>
+          <td class="t-dim">鉴权</td>
+          <td colspan="2"><code>Authorization: Bearer &lt;key&gt;</code>（Anthropic 协议客户端为
+            <code>x-api-key</code>）—— 由管理员在 config.yaml 的 <code>api_keys:</code> 中下发，
+            本页绝不显示密钥明文。</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span class="pill p-paused" id="chk-state">尚未存储密钥</span>
+      <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="chk-detail">本浏览器还没有 API 密钥 —— 下方各客户端需要在 <code>Authorization: Bearer</code> 请求头中携带它。</span>
+      <button class="btn sm" id="chk-btn" style="margin-left:auto">检查连接</button>
+      <button class="btn sm ghost" id="chk-set">设置密钥</button>
     </div>
+  </div>
 
-    <!-- Guide -->
-    <h2 class="section-head">📖 Agent 配置指南</h2>
-    <p class="section-desc">
-      下面的每个指南展示了如何把某个 AI 编程 Agent 配置为指向本 VMR 实例。
-      始终需要三个核心值：<strong>Base URL</strong>（见上方）、<strong>API 密钥</strong>（向管理员索取）、
-      以及一个 <strong>虚拟模型名</strong>（即上面列出的模型之一）。
-      若 Agent 支持，还可进一步配置<strong>上下文窗口</strong>（如 <code>200k</code>）、<strong>思考/推理深度</strong>（如 <code>high</code>、<code>budget_tokens</code>）以及<strong>视觉多模态能力</strong>（<code>image</code>），以完全释放 VMR 上游端点的全量能力。
-      大多数 Agent 支持 OpenAI Chat Completions 协议或 Anthropic Messages 协议 —
-      选择与你所用 Agent 原生 API 匹配的协议分区。
-    </p>
+  <!-- quick reference: which protocol, configured where -->
+  <div class="card" id="quickref" style="scroll-margin-top:var(--hd-h)">
+    <div class="card-title">速查表</div>
+    <p class="hint" style="margin-bottom:10px">一图速览：用哪个协议，在哪里配置。点击 Agent 名称可打开下方对应指南。</p>
+    <table class="c">
+      <thead><tr><th>Agent</th><th>协议</th><th>配置位置</th></tr></thead>
+      <tbody>
+        <tr><td><a href="#agent-claude-code">Claude Code</a></td><td><span class="badge b-purple">anthropic-messages</span></td><td>env; ~/.claude/settings.json</td></tr>
+        <tr><td><a href="#agent-pi">Pi Agent</a></td><td><span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></td><td>~/.pi/agent/models.json</td></tr>
+        <tr><td><a href="#agent-codex">Codex CLI</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.codex/config.toml</td></tr>
+        <tr><td><a href="#agent-cline">Cline &amp; Roo Code</a></td><td><span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></td><td>VS Code 插件设置面板</td></tr>
+        <tr><td><a href="#agent-aider">Aider</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.aider.conf.yml; metadata</td></tr>
+        <tr><td><a href="#agent-opencode">OpenCode</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>opencode.json</td></tr>
+        <tr><td><a href="#agent-openclaw">OpenClaw</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.openclaw/config.yaml</td></tr>
+        <tr><td><a href="#agent-workbuddy">WorkBuddy</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.workbuddy/config.yaml</td></tr>
+        <tr><td><a href="#agent-hermes">Hermes</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.hermes/config.yaml</td></tr>
+        <tr><td><a href="#agent-opendesign">OpenDesign</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>~/.opendesign/config.yaml</td></tr>
+        <tr><td><a href="#agent-continue">Continue.dev</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>~/.continue/config.yaml（或 .json）</td></tr>
+        <tr><td><a href="#agent-cursor">Cursor（IDE 与 CLI）</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>设置 → Models; 环境变量</td></tr>
+        <tr><td><a href="#agent-responses">OpenAI Responses SDK</a></td><td><span class="badge b-info">openai-responses</span></td><td>OpenAI SDK 客户端</td></tr>
+      </tbody>
+    </table>
+  </div>
 
-    <!-- ===== Quick Reference ===== -->
-    <h3 style="font-size:15px; font-weight:600; margin:24px 0 8px 0; color:var(--text-bright); display:flex; align-items:center; gap:8px;">
-      <span>📋 快速参考</span>
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      一图速览：用哪个协议，以及在哪里配置。点击 Agent 名称可跳转到下方对应的完整配置说明。
-    </p>
+  <!-- ===== Anthropic Messages protocol ===== -->
+  <div class="sub-head">Anthropic Messages 协议 <span class="badge b-purple tight">anthropic-messages</span></div>
+  <p class="hint" style="margin-bottom:10px">原生使用 Anthropic Messages API 的 Agent。将 Base URL 指向 VMR 的 Anthropic 兼容端点；API 密钥通过 <code>x-api-key</code> 请求头发送。</p>
 
-    <div class="card" style="overflow-x:auto;">
-      <table class="info-table" style="min-width:600px;">
-        <thead>
-          <tr>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">Agent</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">协议</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">配置位置</th>
-            <th style="text-align:left; padding:8px 12px; color:var(--text-muted); font-weight:600; border-bottom:1px solid var(--card-border);">关键字段与能力参数</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-claude-code" style="color:var(--accent); text-decoration:none;">Claude Code</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-anthropic">Anthropic Messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.claude/settings.json</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-cline" style="color:var(--accent); text-decoration:none;">Cline &amp; Roo Code</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span> <span class="badge badge-anthropic">Anthropic Messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">VS Code 插件设置面板</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-pi" style="color:var(--accent); text-decoration:none;">Pi Agent</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span> <span class="badge badge-anthropic">Anthropic Messages</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.pi/agent/models.json</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-codex" style="color:var(--accent); text-decoration:none;">Codex CLI</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.codex/config.toml</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-aider" style="color:var(--accent); text-decoration:none;">Aider</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.aider.conf.yml; metadata</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-opencode" style="color:var(--accent); text-decoration:none;">OpenCode</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">opencode.json</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-openclaw" style="color:var(--accent); text-decoration:none;">OpenClaw</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.openclaw/config.yaml</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-workbuddy" style="color:var(--accent); text-decoration:none;">WorkBuddy</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.workbuddy/config.yaml</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-hermes" style="color:var(--accent); text-decoration:none;">Hermes</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">env; ~/.hermes/config.yaml</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-opendesign" style="color:var(--accent); text-decoration:none;">OpenDesign</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.opendesign/config.yaml</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-continue" style="color:var(--accent); text-decoration:none;">Continue.dev</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">~/.continue/config.yaml（或 .json）</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><a href="#agent-cursor" style="color:var(--accent); text-decoration:none;">Cursor (IDE 与 CLI)</a></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3);"><span class="badge badge-primary">OpenAI Completions</span></td><td style="padding:8px 12px; border-bottom:1px solid rgba(48,54,61,0.3); font-family:var(--font-mono); font-size:12px;">设置 -&gt; Models; 环境变量</td></tr>
-          <tr><td style="padding:8px 12px; border-bottom:0;"><a href="#agent-responses" style="color:var(--accent); text-decoration:none;">OpenAI Responses SDK</a></td><td style="padding:8px 12px; border-bottom:0;"><span class="badge badge-orange">OpenAI Responses</span></td><td style="padding:8px 12px; border-bottom:0; font-family:var(--font-mono); font-size:12px;">OpenAI SDK 客户端</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- ===== Anthropic Messages Protocol Agents ===== -->
-    <h3 style="color:var(--purple); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>Anthropic Messages 协议</span>
-      <span class="badge badge-anthropic">Anthropic Messages</span>
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      原生使用 Anthropic Messages API 的 Agent。将 Base URL 指向 VMR 的
-      Anthropic 兼容端点。API 密钥通过 <code>x-api-key</code> 请求头发送。
-    </p>
-
-    <!-- Claude Code -->
-    <div class="agent-card" id="agent-claude-code">
-      <div class="agent-head">
-        <h3>Claude Code</h3>
-        <div class="badges">
-          <span class="badge badge-anthropic">Anthropic Messages</span>
-          <span class="badge badge-success">环境变量 / settings.json</span>
-          <span class="badge badge-warning">thinking & effort</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        Anthropic 官方的终端编程 Agent。可通过环境变量或 <code>~/.claude/settings.json</code> 路由到 VMR。
+  <details class="disc" id="agent-claude-code" open>
+    <summary>Claude Code <span class="badge b-purple">anthropic-messages</span></summary>
+    <div class="body">
+      <p>Anthropic 官方的终端编程 Agent。可通过环境变量或 <code>~/.claude/settings.json</code> 路由到 VMR。
         Claude Code 会自动连接 <code>ANTHROPIC_BASE_URL</code>。
         可通过 <code>MAX_THINKING_TOKENS</code>（固定 Token 数）或 <code>CLAUDE_CODE_EFFORT_LEVEL</code> / <code>/effort</code>（自适应思考）调节推理深度。
-        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>、<code>~/.zshrc</code>，或 <code>~/.claude/settings.json</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="claude-code-env-snippet">复制</button>
-          </div>
-          <pre id="claude-code-env-snippet"><code><span class="comment"># 方案 1：Shell 环境变量</span>
+        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.bashrc、~/.zshrc 或 shell 配置（环境变量）</div>
+      <pre class="snippet" id="claude-code-env-snippet"><code><span class="comment"># Option 1: Shell Environment Variables</span>
 <span class="key">export</span> ANTHROPIC_BASE_URL={{BASE_URL_ANTHROPIC}}
 <span class="key">export</span> ANTHROPIC_AUTH_TOKEN=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> ANTHROPIC_MODEL=<span class="string">claude</span>
 
-<span class="comment"># 思考深度：Token 预算（如 8192，0 为禁用）或自适应级别（low, medium, high, max）</span>
+<span class="comment"># Reasoning budget: token budget (e.g. 8192, 0 disables) or effort level (low, medium, high, max)</span>
 <span class="key">export</span> MAX_THINKING_TOKENS=<span class="string">32768</span>
 <span class="key">export</span> CLAUDE_CODE_EFFORT_LEVEL=<span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>JSON (~/.claude/settings.json)</span>
-            <button class="copy-btn" data-copy="claude-code-json-snippet">复制</button>
-          </div>
-          <pre id="claude-code-json-snippet"><code>{
+      <button class="btn sm" data-copy="claude-code-env-snippet">复制</button>
+      <div class="cfg-file">~/.claude/settings.json</div>
+      <pre class="snippet" id="claude-code-json-snippet"><code>{
   <span class="key">"env"</span>: {
     <span class="key">"ANTHROPIC_BASE_URL"</span>: <span class="string">"{{BASE_URL_ANTHROPIC}}"</span>,
     <span class="key">"ANTHROPIC_AUTH_TOKEN"</span>: <span class="string">"YOUR_VMR_API_KEY"</span>,
@@ -446,46 +148,23 @@
   },
   <span class="key">"model"</span>: <span class="string">"claude"</span>
 }</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="claude-code-json-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- ===== OpenAI Completions Protocol Agents ===== -->
-    <h3 style="color:var(--accent); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>OpenAI Completions 协议</span>
-      <span class="badge badge-primary">OpenAI Completions</span>
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      原生使用 OpenAI Chat Completions API 的 Agent。将 Base URL 指向
-      VMR 的 OpenAI 兼容端点。API 密钥通过 <code>Authorization: Bearer</code> 请求头发送。
-    </p>
+  <!-- ===== OpenAI Completions protocol ===== -->
+  <div class="sub-head">OpenAI Completions 协议 <span class="badge b-cyan tight">openai-completions</span></div>
+  <p class="hint" style="margin-bottom:10px">原生使用 OpenAI Chat Completions API 的 Agent。将 Base URL 指向 VMR 的 OpenAI 兼容端点；API 密钥通过 <code>Authorization: Bearer</code> 请求头发送。</p>
 
-    <!-- Pi Agent -->
-    <div class="agent-card" id="agent-pi">
-      <div class="agent-head">
-        <h3>Pi Agent</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-anthropic">Anthropic Messages</span>
-          <span class="badge badge-success">models.json</span>
-          <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision & reasoning</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        Pi 是一个极简、可扩展的终端 AI 编程 Agent（<a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">earendil-works/pi-mono</a>）。
+  <details class="disc" id="agent-pi">
+    <summary>Pi Agent <span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></summary>
+    <div class="body">
+      <p>Pi 是一个极简、可扩展的终端 AI 编程 Agent（<a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">earendil-works/pi-mono</a>）。
         将 VMR 作为自定义提供方加入 <code>~/.pi/agent/models.json</code>，并显式声明 <code>contextWindow</code>、<code>maxTokens</code>、<code>input</code>（多模态能力）和 <code>reasoning</code>。
         Pi 按 API 协议区分提供方，因此 VMR 会以 <code>vmr-openai</code> 和 / 或 <code>vmr-anthropic</code> 出现——<code>openai-completions</code> 与 <code>anthropic-messages</code> 均支持。
-        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.pi/agent/models.json</code>（如果不存在则创建）</div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>JSON (~/.pi/agent/models.json)</span>
-            <button class="copy-btn" data-copy="pi-snippet">复制</button>
-          </div>
-          <pre id="pi-snippet"><code>{
+        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.pi/agent/models.json（如果不存在则创建）</div>
+      <pre class="snippet" id="pi-snippet"><code>{
   <span class="key">"providers"</span>: {
     <span class="key">"vmr"</span>: {
       <span class="key">"baseUrl"</span>: <span class="string">"{{BASE_URL_OPENAI}}"</span>,
@@ -512,145 +191,88 @@
     }
   }
 }</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="pi-snippet">复制</button>
+      <p>此代码块中的虚拟模型名、上下文窗口与 Token 预算会在 <code>/status</code> 模型列表可读后自动刷新 ——
+        VMR 实际服务的每种协议各生成一个提供方条目。</p>
     </div>
+  </details>
 
-    <!-- Codex CLI -->
-    <div class="agent-card" id="agent-codex">
-      <div class="agent-head">
-        <h3>Codex CLI</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">环境变量 / config.toml</span>
-          <span class="badge badge-warning">context & reasoning</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        OpenAI 官方的终端编程 Agent。可通过环境变量或 <code>~/.codex/config.toml</code> 路由到 VMR。
+  <details class="disc" id="agent-codex">
+    <summary>Codex CLI <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>OpenAI 官方的终端编程 Agent。可通过环境变量或 <code>~/.codex/config.toml</code> 路由到 VMR。
         支持在 <code>config.toml</code> 中配置 <code>model_reasoning_effort</code>（minimal / low / medium / high / xhigh）与 <code>model_context_window</code> 来管理模型上下文和推理深度。
-        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>、<code>~/.zshrc</code>，或 <code>~/.codex/config.toml</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="codex-env-snippet">复制</button>
-          </div>
-          <pre id="codex-env-snippet"><code><span class="comment"># 方案 1：环境变量</span>
+        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.bashrc、~/.zshrc 或 shell 配置（环境变量）</div>
+      <pre class="snippet" id="codex-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>TOML (~/.codex/config.toml)</span>
-            <button class="copy-btn" data-copy="codex-toml-snippet">复制</button>
-          </div>
-          <pre id="codex-toml-snippet"><code><span class="comment"># 默认模型与推理深度</span>
+      <button class="btn sm" data-copy="codex-env-snippet">复制</button>
+      <div class="cfg-file">~/.codex/config.toml</div>
+      <pre class="snippet" id="codex-toml-snippet"><code><span class="comment"># Model and reasoning defaults</span>
 <span class="key">model</span> = <span class="string">"coding"</span>
 <span class="key">model_reasoning_effort</span> = <span class="string">"high"</span>
 <span class="key">model_context_window</span> = <span class="bool">200000</span>
 <span class="key">model_auto_compact_token_limit</span> = <span class="bool">180000</span>
 
-<span class="comment"># VMR 自定义提供方</span>
+<span class="comment"># VMR custom provider</span>
 [<span class="key">model_providers.vmr</span>]
 <span class="key">name</span> = <span class="string">"VMR"</span>
 <span class="key">base_url</span> = <span class="string">"{{BASE_URL_OPENAI}}"</span>
 <span class="key">env_key</span> = <span class="string">"OPENAI_API_KEY"</span>
 <span class="key">wire_api</span> = <span class="string">"responses"</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="codex-toml-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Cline & Roo Code -->
-    <div class="agent-card" id="agent-cline">
-      <div class="agent-head">
-        <h3>Cline & Roo Code</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-anthropic">Anthropic Messages</span>
-          <span class="badge badge-success">界面配置</span>
-          <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision & tools</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        VS Code / VSCodium 上的自主 AI 编程扩展插件。在插件设置（⚙️）中选择 <code>OpenAI Compatible</code>（或 <code>Anthropic Compatible</code>），
+  <details class="disc" id="agent-cline">
+    <summary>Cline &amp; Roo Code <span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></summary>
+    <div class="body">
+      <p>VS Code / VSCodium 上的自主 AI 编程扩展插件。在插件设置中选择 <code>OpenAI Compatible</code>（或 <code>Anthropic Compatible</code>），
         然后填入 Base URL、API 密钥、模型名、上下文窗口及多模态视觉开关。
-        <a href="https://github.com/cline/cline" target="_blank" rel="noopener">Cline 文档 →</a> · <a href="https://github.com/RooVetGit/Roo-Cline" target="_blank" rel="noopener">Roo Code 文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">⚙️ VS Code 插件设置面板</div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>配置参数（OpenAI Compatible）</span>
-            <button class="copy-btn" data-copy="cline-snippet">复制</button>
-          </div>
-          <pre id="cline-snippet"><code><span class="comment"># Cline / Roo Code 设置面板:</span>
+        <a href="https://github.com/cline/cline" target="_blank" rel="noopener">Cline 文档 →</a> · <a href="https://github.com/RooVetGit/Roo-Cline" target="_blank" rel="noopener">Roo Code 文档 →</a></p>
+      <div class="cfg-file">插件设置面板（VS Code 界面）</div>
+      <pre class="snippet" id="cline-snippet"><code><span class="comment"># Cline / Roo Code Settings UI:</span>
 <span class="key">API Provider:</span> <span class="string">OpenAI Compatible</span>
 <span class="key">Base URL:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
 <span class="key">API Key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">Model ID:</span> <span class="string">coding</span>
 
-<span class="comment"># 高级模型设置 (Model Configuration):</span>
+<span class="comment"># Model Configuration (Advanced):</span>
 <span class="key">Context Window:</span> <span class="bool">200000</span>
 <span class="key">Max Output Tokens:</span> <span class="bool">65536</span>
-<span class="key">Include Images:</span> <span class="bool">Enabled</span>（支持图片/截图输入）
+<span class="key">Include Images:</span> <span class="bool">Enabled</span> (supports image/screenshot input)
 <span class="key">Native Tool Calling:</span> <span class="bool">Enabled</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="cline-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Aider -->
-    <div class="agent-card" id="agent-aider">
-      <div class="agent-head">
-        <h3>Aider</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">环境变量 / conf.yml</span>
-          <span class="badge badge-warning">reasoning & metadata</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        终端里的 AI 结对编程工具。支持通过环境变量或 <code>~/.aider.conf.yml</code> 将 LLM 请求路由到 VMR。
+  <details class="disc" id="agent-aider">
+    <summary>Aider <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>终端里的 AI 结对编程工具。支持通过环境变量或 <code>~/.aider.conf.yml</code> 将 LLM 请求路由到 VMR。
         可结合 <code>.aider.model.metadata.json</code> 声明完整上下文长度与多模态视觉能力，并通过 <code>--reasoning-effort</code> 或 <code>--thinking-tokens</code> 调整思考深度。
-        <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>、<code>~/.zshrc</code>、<code>~/.aider.conf.yml</code>，或 <code>.aider.model.metadata.json</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="aider-env-snippet">复制</button>
-          </div>
-          <pre id="aider-env-snippet"><code><span class="comment"># 方案 1：环境变量</span>
+        <a href="https://aider.chat/docs/config/options.html" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.bashrc、~/.zshrc 或 shell 配置（环境变量）</div>
+      <pre class="snippet" id="aider-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> AIDER_OPENAI_API_BASE={{BASE_URL_OPENAI}}
 <span class="key">export</span> AIDER_OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> AIDER_MODEL=<span class="string">openai/coding</span>
 
-<span class="comment"># 可选：推理深度与思考预算</span>
+<span class="comment"># Optional: Reasoning depth and thinking budget</span>
 <span class="key">export</span> AIDER_REASONING_EFFORT=<span class="string">high</span>
 <span class="key">export</span> AIDER_THINKING_TOKENS=<span class="string">32768</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>YAML (~/.aider.conf.yml)</span>
-            <button class="copy-btn" data-copy="aider-yaml-snippet">复制</button>
-          </div>
-          <pre id="aider-yaml-snippet"><code><span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
+      <button class="btn sm" data-copy="aider-env-snippet">复制</button>
+      <div class="cfg-file">~/.aider.conf.yml</div>
+      <pre class="snippet" id="aider-yaml-snippet"><code><span class="key">openai-api-base:</span> {{BASE_URL_OPENAI}}
 <span class="key">openai-api-key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">openai/coding</span>
 <span class="key">edit-format:</span> <span class="string">diff</span>
 <span class="key">weak-model:</span> <span class="string">openai/coding</span>
 <span class="key">reasoning-effort:</span> <span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>JSON (.aider.model.metadata.json - 上下文与视觉元数据)</span>
-            <button class="copy-btn" data-copy="aider-meta-snippet">复制</button>
-          </div>
-          <pre id="aider-meta-snippet"><code>{
+      <button class="btn sm" data-copy="aider-yaml-snippet">复制</button>
+      <div class="cfg-file">.aider.model.metadata.json —— 上下文与视觉元数据</div>
+      <pre class="snippet" id="aider-meta-snippet"><code>{
   <span class="key">"openai/coding"</span>: {
     <span class="key">"max_input_tokens"</span>: <span class="bool">200000</span>,
     <span class="key">"max_output_tokens"</span>: <span class="bool">65536</span>,
@@ -659,34 +281,18 @@
     <span class="key">"supports_images"</span>: <span class="bool">true</span>
   }
 }</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="aider-meta-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- OpenCode -->
-    <div class="agent-card" id="agent-opencode">
-      <div class="agent-head">
-        <h3>OpenCode</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">config</span>
-          <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision & reasoning</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个基于终端的 AI 编程 Agent（<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>）。
+  <details class="disc" id="agent-opencode">
+    <summary>OpenCode <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个基于终端的 AI 编程 Agent（<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>）。
         在 <code>opencode.json</code> 中配置自定义提供方，支持显式声明 <code>limit</code>（上下文与输出）、<code>modalities</code>（视觉）和 <code>reasoning</code>。
-        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>opencode.json</code>（项目根目录）或 <code>~/.config/opencode/opencode.json</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>JSON (opencode.json)</span>
-            <button class="copy-btn" data-copy="opencode-snippet">复制</button>
-          </div>
-          <pre id="opencode-snippet"><code>{
+        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">opencode.json（项目根目录）或 ~/.config/opencode/opencode.json</div>
+      <pre class="snippet" id="opencode-snippet"><code>{
   <span class="key">"$schema"</span>: <span class="string">"https://opencode.ai/config.json"</span>,
   <span class="key">"provider"</span>: {
     <span class="key">"vmr"</span>: {
@@ -723,33 +329,18 @@
     }
   }
 }</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="opencode-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- OpenClaw -->
-    <div class="agent-card" id="agent-openclaw">
-      <div class="agent-head">
-        <h3>OpenClaw</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">环境变量 / config.yaml</span>
-          <span class="badge badge-warning">thinking & vision</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个开源、兼容 Claude Code 的终端 Agent。支持 OpenAI 兼容的 API 端点。
+  <details class="disc" id="agent-openclaw">
+    <summary>OpenClaw <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个开源、兼容 Claude Code 的终端 Agent。支持 OpenAI 兼容的 API 端点。
         通过环境变量或 <code>config.yaml</code> 配置文件配置上下文窗口、视觉能力、推理深度以及思考预算。
-        <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.bashrc</code>、<code>~/.zshrc</code>，或 <code>~/.openclaw/config.yaml</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="openclaw-env-snippet">复制</button>
-          </div>
-          <pre id="openclaw-env-snippet"><code><span class="comment"># 方案 1：环境变量</span>
+        <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.bashrc、~/.zshrc 或 shell 配置（环境变量）</div>
+      <pre class="snippet" id="openclaw-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENCLAW_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENCLAW_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> OPENCLAW_MODEL=<span class="string">coding</span>
@@ -757,13 +348,9 @@
 <span class="key">export</span> OPENCLAW_MAX_TOKENS=<span class="string">65536</span>
 <span class="key">export</span> OPENCLAW_VISION=<span class="bool">true</span>
 <span class="key">export</span> OPENCLAW_REASONING_EFFORT=<span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>YAML (~/.openclaw/config.yaml)</span>
-            <button class="copy-btn" data-copy="openclaw-yaml-snippet">复制</button>
-          </div>
-          <pre id="openclaw-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
+      <button class="btn sm" data-copy="openclaw-env-snippet">复制</button>
+      <div class="cfg-file">~/.openclaw/config.yaml</div>
+      <pre class="snippet" id="openclaw-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">coding</span>
 <span class="key">context_window:</span> <span class="bool">200000</span>
@@ -772,46 +359,26 @@
 <span class="key">reasoning_effort:</span> <span class="string">high</span>
 <span class="key">thinking:</span>
   <span class="key">budget_tokens:</span> <span class="bool">32768</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="openclaw-yaml-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- WorkBuddy -->
-    <div class="agent-card" id="agent-workbuddy">
-      <div class="agent-head">
-        <h3>WorkBuddy</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">环境变量 / config.yaml</span>
-          <span class="badge badge-warning">context window</span>
-          <span class="badge badge-warning">vision & reasoning</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个基于终端的 AI 编程助手。通过环境变量或 <code>~/.workbuddy/config.yaml</code> 配置。
+  <details class="disc" id="agent-workbuddy">
+    <summary>WorkBuddy <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个基于终端的 AI 编程助手。通过环境变量或 <code>~/.workbuddy/config.yaml</code> 配置。
         支持上下文长度、最大输出 Token、多模态视觉输入及推理深度。
-        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.workbuddy/config.yaml</code> 或 <code>.workbuddy.yaml</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="workbuddy-env-snippet">复制</button>
-          </div>
-          <pre id="workbuddy-env-snippet"><code><span class="comment"># 方案 1：环境变量</span>
+        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.workbuddy/config.yaml 或 .workbuddy.yaml</div>
+      <pre class="snippet" id="workbuddy-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> WORKBUDDY_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> WORKBUDDY_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> WORKBUDDY_MODEL=<span class="string">coding</span>
 <span class="key">export</span> WORKBUDDY_CONTEXT_WINDOW=<span class="string">200000</span>
 <span class="key">export</span> WORKBUDDY_REASONING_EFFORT=<span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>YAML (~/.workbuddy/config.yaml)</span>
-            <button class="copy-btn" data-copy="workbuddy-yaml-snippet">复制</button>
-          </div>
-          <pre id="workbuddy-yaml-snippet"><code><span class="key">llm:</span>
+      <button class="btn sm" data-copy="workbuddy-env-snippet">复制</button>
+      <div class="cfg-file">~/.workbuddy/config.yaml</div>
+      <pre class="snippet" id="workbuddy-yaml-snippet"><code><span class="key">llm:</span>
   <span class="key">provider:</span> <span class="string">openai</span>
   <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
   <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
@@ -820,118 +387,68 @@
   <span class="key">max_output_tokens:</span> <span class="bool">65536</span>
   <span class="key">supports_vision:</span> <span class="bool">true</span>
   <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="workbuddy-yaml-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Hermes -->
-    <div class="agent-card" id="agent-hermes">
-      <div class="agent-head">
-        <h3>Hermes</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">env var / config</span>
-          <span class="badge badge-warning">context & vision</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个快速、可扩展的终端 AI 编程 Agent。支持通过环境变量配置 OpenAI 兼容端点的上下文长度、最大输出、视觉开关及推理深度。
-        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 环境变量，或 <code>~/.hermes/config.yaml</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Shell（环境变量）</span>
-            <button class="copy-btn" data-copy="hermes-env-snippet">复制</button>
-          </div>
-          <pre id="hermes-env-snippet"><code><span class="comment"># 方案 1：环境变量</span>
+  <details class="disc" id="agent-hermes">
+    <summary>Hermes <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个快速、可扩展的终端 AI 编程 Agent。支持通过环境变量配置 OpenAI 兼容端点的上下文长度、最大输出、视觉开关及推理深度。
+        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">环境变量，或 ~/.hermes/config.yaml</div>
+      <pre class="snippet" id="hermes-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> HERMES_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> HERMES_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> HERMES_MODEL=<span class="string">coding</span>
 
-<span class="comment"># 模型参数：上下文长度、最大输出 Token、视觉支持与推理深度</span>
+<span class="comment"># Model parameters: context window, max output tokens, vision &amp; reasoning</span>
 <span class="key">export</span> HERMES_CONTEXT_WINDOW=<span class="string">200000</span>
 <span class="key">export</span> HERMES_MAX_OUTPUT_TOKENS=<span class="string">65536</span>
 <span class="key">export</span> HERMES_VISION=<span class="bool">true</span>
 <span class="key">export</span> HERMES_REASONING_EFFORT=<span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>YAML (~/.hermes/config.yaml)</span>
-            <button class="copy-btn" data-copy="hermes-yaml-snippet">复制</button>
-          </div>
-          <pre id="hermes-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
+      <button class="btn sm" data-copy="hermes-env-snippet">复制</button>
+      <div class="cfg-file">~/.hermes/config.yaml</div>
+      <pre class="snippet" id="hermes-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">model:</span> <span class="string">coding</span>
 <span class="key">context_window:</span> <span class="bool">200000</span>
 <span class="key">max_tokens:</span> <span class="bool">65536</span>
 <span class="key">vision:</span> <span class="bool">true</span>
 <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="hermes-yaml-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- OpenDesign -->
-    <div class="agent-card" id="agent-opendesign">
-      <div class="agent-head">
-        <h3>OpenDesign</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">config</span>
-          <span class="badge badge-warning">vision</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个 AI 驱动的设计转代码 Agent。通过 OpenAI 兼容 API 路由 LLM 调用。
+  <details class="disc" id="agent-opendesign">
+    <summary>OpenDesign <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个 AI 驱动的设计转代码 Agent。通过 OpenAI 兼容 API 路由 LLM 调用。
         启用视觉多模态能力以支持 UI 截图与原型识别。
-        <a href="https://github.com/bigfatsea/opendesign" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.opendesign/config.yaml</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>YAML (~/.opendesign/config.yaml)</span>
-            <button class="copy-btn" data-copy="opendesign-snippet">复制</button>
-          </div>
-          <pre id="opendesign-snippet"><code><span class="key">llm:</span>
+        <a href="https://github.com/bigfatsea/opendesign" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.opendesign/config.yaml</div>
+      <pre class="snippet" id="opendesign-snippet"><code><span class="key">llm:</span>
   <span class="key">provider:</span> <span class="string">openai</span>
   <span class="key">base_url:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
   <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
   <span class="key">model:</span> <span class="string">coding</span>
   <span class="key">context_tokens:</span> <span class="bool">200000</span>
   <span class="key">max_output_tokens:</span> <span class="bool">65536</span>
-  <span class="comment"># 视觉能力支持 UI 设计截图与设计 Token 解析</span>
+  <span class="comment"># Vision capability enables UI screenshot &amp; design token recognition</span>
   <span class="key">vision:</span> <span class="bool">true</span>
   <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="opendesign-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Continue -->
-    <div class="agent-card" id="agent-continue">
-      <div class="agent-head">
-        <h3>Continue.dev</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">config.yaml / json</span>
-          <span class="badge badge-warning">context length</span>
-          <span class="badge badge-warning">capabilities</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        一个面向 IDE（VS Code、JetBrains）的开源 AI 代码助手。在 <code>~/.continue/config.yaml</code>（新版推荐格式）或 <code>~/.continue/config.json</code> 中将 VMR 添加为模型提供方，
+  <details class="disc" id="agent-continue">
+    <summary>Continue.dev <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>一个面向 IDE（VS Code、JetBrains）的开源 AI 代码助手。在 <code>~/.continue/config.yaml</code>（新版推荐格式）或 <code>~/.continue/config.json</code> 中将 VMR 添加为模型提供方，
         支持声明 <code>contextLength</code>、<code>maxTokens</code> 及模型能力 <code>capabilities</code>（工具调用、图片上传等）。
-        <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 <code>~/.continue/config.yaml</code>（推荐）或 <code>~/.continue/config.json</code></div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>YAML (~/.continue/config.yaml - 现代标准格式)</span>
-            <button class="copy-btn" data-copy="continue-yaml-snippet">复制</button>
-          </div>
-          <pre id="continue-yaml-snippet"><code><span class="key">models:</span>
+        <a href="https://docs.continue.dev/customize/model-providers/openai" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">~/.continue/config.yaml（新版格式）</div>
+      <pre class="snippet" id="continue-yaml-snippet"><code><span class="key">models:</span>
   - <span class="key">name:</span> <span class="string">VMR Coding</span>
     <span class="key">provider:</span> <span class="string">openai</span>
     <span class="key">model:</span> <span class="string">coding</span>
@@ -944,13 +461,9 @@
       <span class="key">contextLength:</span> <span class="bool">200000</span>
       <span class="key">maxTokens:</span> <span class="bool">65536</span>
       <span class="key">reasoningEffort:</span> <span class="string">high</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>JSON (~/.continue/config.json - 兼容格式)</span>
-            <button class="copy-btn" data-copy="continue-json-snippet">复制</button>
-          </div>
-          <pre id="continue-json-snippet"><code>{
+      <button class="btn sm" data-copy="continue-yaml-snippet">复制</button>
+      <div class="cfg-file">~/.continue/config.json（旧版格式）</div>
+      <pre class="snippet" id="continue-json-snippet"><code>{
   <span class="key">"models"</span>: [
     {
       <span class="key">"title"</span>: <span class="string">"VMR Coding"</span>,
@@ -966,581 +479,532 @@
     }
   ]
 }</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="continue-json-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Cursor (IDE & CLI) -->
-    <div class="agent-card" id="agent-cursor">
-      <div class="agent-head">
-        <h3>Cursor (IDE 与终端 Agent)</h3>
-        <div class="badges">
-          <span class="badge badge-primary">OpenAI Completions</span>
-          <span class="badge badge-success">ide settings / env var</span>
-          <span class="badge badge-warning">custom models</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        Cursor 支持在 IDE 设置中直接覆盖 OpenAI Base URL，或在终端使用 <code>cursor-agent</code> 将请求路由到自定义 OpenAI 兼容端点。
-        <a href="https://docs.cursor.com" target="_blank" rel="noopener">官方文档 →</a>
-      </p>
-      <div class="agent-config">
-        <div class="config-file">⚙️ Cursor IDE 设置 或 终端 Shell（cursor-agent）</div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Cursor IDE 设置（界面操作）</span>
-            <button class="copy-btn" data-copy="cursor-ide-snippet">复制</button>
-          </div>
-          <pre id="cursor-ide-snippet"><code><span class="comment"># 1. 打开 Cursor 设置 -> Models</span>
-<span class="comment"># 2. 在 'OpenAI API Key' 处填写：</span>
+  <details class="disc" id="agent-cursor">
+    <summary>Cursor（IDE 与 CLI） <span class="badge b-cyan">openai-completions</span></summary>
+    <div class="body">
+      <p>Cursor 支持在 IDE 设置中直接覆盖 OpenAI Base URL，或在终端使用 <code>cursor-agent</code> 将请求路由到自定义 OpenAI 兼容端点。
+        在 IDE 中覆盖 OpenAI Base URL 并添加 VMR 虚拟模型名即可。
+        <a href="https://docs.cursor.com" target="_blank" rel="noopener">官方文档 →</a></p>
+      <div class="cfg-file">Cursor IDE 设置（界面配置）</div>
+      <pre class="snippet" id="cursor-ide-snippet"><code><span class="comment"># 1. Open Cursor Settings -> Models</span>
+<span class="comment"># 2. Under 'OpenAI API Key', enter:</span>
 <span class="key">OpenAI API Key:</span> <span class="string">YOUR_VMR_API_KEY</span>
 
-<span class="comment"># 3. 开启 'Override OpenAI Base URL'，并填写：</span>
+<span class="comment"># 3. Toggle ON 'Override OpenAI Base URL', and enter:</span>
 <span class="key">OpenAI Base URL:</span> <span class="string">{{BASE_URL_OPENAI}}</span>
 
-<span class="comment"># 4. 在 'Model Names' 处点击 '+ Add Model'，添加虚拟模型名称：</span>
+<span class="comment"># 4. Under 'Model Names', click '+ Add Model' and enter your virtual model name:</span>
 <span class="key">Model:</span> <span class="string">coding</span>
-<span class="comment"># 5. 点击 'Verify' 验证连接是否成功</span></code></pre>
-        </div>
-        <div class="code-block" style="margin-top:10px;">
-          <div class="code-header">
-            <span>终端 CLI (cursor-agent)</span>
-            <button class="copy-btn" data-copy="cursor-cli-snippet">复制</button>
-          </div>
-          <pre id="cursor-cli-snippet"><code><span class="comment"># 将 Cursor CLI agent 指向 VMR</span>
+<span class="comment"># 5. Click 'Verify' to test connection</span></code></pre>
+      <button class="btn sm" data-copy="cursor-ide-snippet">复制</button>
+      <div class="cfg-file">终端 CLI（cursor-agent）</div>
+      <pre class="snippet" id="cursor-cli-snippet"><code><span class="comment"># Point Cursor CLI agent at VMR</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="cursor-cli-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- ===== OpenAI Responses Protocol ===== -->
-    <h3 style="color:var(--orange); font-size:15px; font-weight:600; margin:24px 0 12px 0; display:flex; align-items:center; gap:8px;">
-      <span>OpenAI Responses 协议</span>
-      <span class="badge badge-orange">OpenAI Responses</span>
-    </h3>
-    <p style="font-size:13px; color:var(--text-muted); margin-bottom:16px;">
-      调用新一代 OpenAI Responses API（<code>/v1/responses</code>）的工具与 SDK。
-      将 Base URL 指向 VMR，并配合 <code>openai-responses</code> 协议的虚拟模型使用。
-    </p>
+  <!-- ===== OpenAI Responses protocol ===== -->
+  <div class="sub-head">OpenAI Responses 协议 <span class="badge b-info tight">openai-responses</span></div>
+  <p class="hint" style="margin-bottom:10px">连接使用新一代 OpenAI Responses API（<code>/v1/responses</code>）的应用与 SDK。在 VMR 中配置为 <code>openai-responses</code> 协议的虚拟模型将自动处理下游请求分发与响应流转换。</p>
 
-    <!-- OpenAI Responses SDK -->
-    <div class="agent-card" id="agent-responses">
-      <div class="agent-head">
-        <h3>OpenAI Responses API (SDK 与工具)</h3>
-        <div class="badges">
-          <span class="badge badge-orange">OpenAI Responses</span>
-          <span class="badge badge-success">python / curl / sdk</span>
-          <span class="badge badge-warning">responses api</span>
-        </div>
-      </div>
-      <p class="agent-desc">
-        连接使用 OpenAI <code>/v1/responses</code> 端点的应用与 SDK。
-        在 VMR 中配置为 <code>openai-responses</code> 协议的虚拟模型将自动处理下游请求分发与响应流转换。
-      </p>
-      <div class="agent-config">
-        <div class="config-file">📄 Python SDK / API 调用</div>
-        <div class="code-block">
-          <div class="code-header">
-            <span>Python (OpenAI SDK)</span>
-            <button class="copy-btn" data-copy="responses-py-snippet">复制</button>
-          </div>
-          <pre id="responses-py-snippet"><code><span class="key">from</span> openai <span class="key">import</span> OpenAI
+  <details class="disc" id="agent-responses">
+    <summary>OpenAI Responses SDK <span class="badge b-info">openai-responses</span></summary>
+    <div class="body">
+      <p>连接使用 OpenAI <code>/v1/responses</code> 端点的工具与 SDK。
+        在 VMR 中配置为 <code>openai-responses</code> 协议的虚拟模型将自动处理下游翻译与流式转换。</p>
+      <div class="cfg-file">Python（OpenAI SDK）</div>
+      <pre class="snippet" id="responses-py-snippet"><code><span class="key">from</span> openai <span class="key">import</span> OpenAI
 
 client = OpenAI(
     base_url=<span class="string">"{{BASE_URL_OPENAI}}"</span>,
     api_key=<span class="string">"YOUR_VMR_API_KEY"</span>,
 )
 
-<span class="comment"># 请求 POST {{BASE_URL_OPENAI}}/responses</span>
+<span class="comment"># Calls POST {{BASE_URL_OPENAI}}/responses</span>
 response = client.responses.create(
     model=<span class="string">"coding"</span>,
-    input=<span class="string">"分析并重构 internal/server/auth.go 中的鉴权中间件"</span>,
+    input=<span class="string">"Analyze and refactor the auth middleware in internal/server/auth.go"</span>,
 )
 print(response.output_text)</code></pre>
-        </div>
-      </div>
+      <button class="btn sm" data-copy="responses-py-snippet">复制</button>
     </div>
+  </details>
 
-    <!-- Footer -->
-    <footer style="margin-top:40px; padding-top:16px; border-top:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted);">
-      <div>虚拟模型路由器（VMR）— Agent 配置指南</div>
-      <div>
-        <a href="https://github.com/bigfatsea/vmr" target="_blank" rel="noopener noreferrer" style="color:var(--text-muted); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">
-          <span>bigfatsea/vmr</span>
-          <svg height="14" width="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
-        </a>
-      </div>
-    </footer>
-  </div>
-
-  <!-- Auth Modal -->
-  <div id="help-auth-modal" class="modal-overlay hidden">
-    <div class="modal">
-      <h2>需要身份验证</h2>
-      <p>此 VMR 实例已启用 API 密钥身份验证。输入你的 API 密钥以查看实时虚拟模型列表和版本：</p>
-      <input type="password" id="help-api-key" placeholder="输入 API 密钥（例如 sk-...）" autocomplete="off">
-      <div id="help-auth-error" class="hidden" style="color:var(--red); font-size:12px;"></div>
-      <div class="modal-actions">
-        <button id="help-auth-cancel">取消</button>
-        <button class="primary" id="help-auth-save">连接</button>
-      </div>
+  <details class="disc" id="troubleshooting">
+    <summary>故障排查</summary>
+    <div class="body" style="font-size:var(--fs-sm);color:var(--text-muted)">
+      <p>• <b>所有请求都返回 401</b> → <code style="font-family:var(--font-mono)">Authorization: Bearer</code> 中的密钥必须与 <code style="font-family:var(--font-mono)">api_keys:</code> 中的某一匹配。</p>
+      <p>• <b>模型不存在</b> → 虚拟模型按协议区分；到 <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> 查看每个名字应答的协议。</p>
+      <p>• <b>会话中途突然 401</b> → vmr 在密钥变更后被重载过；重新设置密钥（🔑 按钮，仅存储在本浏览器）。</p>
+      <p>• <b>请求很慢或卡住</b> → 打开 <a href="/status.html#live">Overview → Live Requests</a>：红色 <i>stalled</i> 标记表示超过 10 秒没有上游字节；<i>queued</i> 计时很长表示并发闸门已满。</p>
+      <p>• <b>所有请求突然全部故障转移</b> → 到 <a href="/status.html#models">端点健康</a> 查看 cooldown，到 <a href="/status.html#quota">Quota Budgets</a> 查看是否配额耗尽。</p>
+      <p>• <b>请求刚失败，想知道为什么</b> → <a href="/status.html#failures">Overview → Recent Failures</a> 列出最近的失败及其路由错误类别；当某一类错误刷屏时，类别芯片可点击过滤。</p>
     </div>
-  </div>
+  </details>
+</main>
 
-  <script>
-    // --- Auth State ---
-    const Auth = {
-      getKey() { return localStorage.getItem('vmr_status_key') || ''; },
-      setKey(k) { localStorage.setItem('vmr_status_key', k.trim()); },
-      clearKey() { localStorage.removeItem('vmr_status_key'); },
-    };
+<script>
+/*{{CONSOLE_JS}}*/
+'use strict';
+/* ===== help page script =====
+   Shared chrome above; below is everything page-private: base-URL fill,
+   copy buttons, the snippet fill engine, the model × protocol table and the
+   connection check, all fed by the auth-gated GET /status.
 
-    // --- DOM Refs ---
-    const helpBaseUrls = document.getElementById('help-base-urls');
-    const helpModels = document.getElementById('help-models');
-    const dynVersion = document.getElementById('dyn-version');
-    const authModal = document.getElementById('help-auth-modal');
-    const helpKeyInput = document.getElementById('help-api-key');
-    const helpAuthError = document.getElementById('help-auth-error');
-    const helpAuthSave = document.getElementById('help-auth-save');
-    const helpAuthCancel = document.getElementById('help-auth-cancel');
+   Auth modal note (legacy ids): authentication is shared console chrome —
+   console.js's keyOverlay (input id "vmr-key-input"), opened by VMRAuth.guard
+   on 401 or by the header Key button. The retired page-local modal
+   (help-auth-modal / id="help-api-key") was absorbed into that shared
+   skeleton; no page-local auth markup remains. */
 
-    // --- Connection Info ---
-    const PROTO_URLS = {
-      'openai-completions': { name: 'OpenAI Completions', badge: 'badge-primary', stripV1: false },
-      'anthropic-messages': { name: 'Anthropic Messages', badge: 'badge-anthropic', stripV1: true },
-      'openai-responses':   { name: 'OpenAI Responses',   badge: 'badge-orange', stripV1: false },
-    };
+// ---- unified skeleton: header rows 1+2, rail, footer ----
+const consoleAPI = mountConsole({
+  active: 'help',
+  refresh: 'static',
+  rail: [
+    { id: 'connect', label: '连接' },
+    { id: 'quickref', label: '速查表' },
+    { id: 'agent-claude-code', label: 'Claude Code' },
+    { id: 'agent-pi', label: 'Pi Agent' },
+    { id: 'agent-codex', label: 'Codex CLI' },
+    { id: 'agent-cline', label: 'Cline / Roo' },
+    { id: 'agent-aider', label: 'Aider' },
+    { id: 'agent-opencode', label: 'OpenCode' },
+    { id: 'agent-openclaw', label: 'OpenClaw' },
+    { id: 'agent-workbuddy', label: 'WorkBuddy' },
+    { id: 'agent-hermes', label: 'Hermes' },
+    { id: 'agent-opendesign', label: 'OpenDesign' },
+    { id: 'agent-continue', label: 'Continue.dev' },
+    { id: 'agent-cursor', label: 'Cursor' },
+    { id: 'agent-responses', label: 'Responses SDK' },
+    { id: 'troubleshooting', label: '故障排查' },
+  ],
+});
 
-    function setPlaceholder() {
-      // Derive the Base URLs from the URL this visitor actually used —
-      // window.location.origin is exactly "what I typed in the address bar",
-      // so no HOST:PORT mental substitution is ever needed. OpenAI-compatible
-      // endpoints take a /v1 suffix; Anthropic endpoints (e.g. Claude Code)
-      // take the bare origin. The server has already baked the same real
-      // values into the page (derived from the request's Host); this pass
-      // re-fills from the browser's own URL so a proxy that rewrites Host
-      // still resolves to what the user sees.
-      const origin = window.location.origin;
-      helpBaseUrls.innerHTML = Object.keys(PROTO_URLS).map(proto => {
-        const def = PROTO_URLS[proto];
-        let u = origin + '/v1';
-        if (def.stripV1) u = origin;
-        return `
-          <div class="connect-url">
-            <span class="badge ${def.badge}">${esc(def.name)}</span>
-            <code>${esc(u)}</code>
-          </div>`;
-      }).join('');
-      helpModels.innerHTML = `<span class="connect-meta">加载中...</span>`;
-      dynVersion.textContent = '加载中...';
-      // Fill the same real values into every code snippet so a copy-paste is
-      // ready to go immediately, before any authentication. Only <pre> blocks
-      // are touched — a full-body innerHTML rewrite would detach the DOM
-      // references captured above and break the later /status pass.
-      document.querySelectorAll('pre').forEach(pre => {
-        pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));
-        pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_ANTHROPIC\}\}/g, esc(origin));
-      });
-    }
+// ---- protocol metadata (badge class + URL shape per protocol) ----
+const PROTO_META = {
+  'openai-completions': { badge: 'b-cyan', stripV1: false },
+  'anthropic-messages': { badge: 'b-purple', stripV1: true },
+  'openai-responses': { badge: 'b-info', stripV1: false },
+};
+const PROTO_ORDER = ['openai-completions', 'anthropic-messages', 'openai-responses'];
 
-    function replacePlaceholders(data) {
-      // Base URLs are deliberately NOT touched here: they were already filled
-      // from window.location.origin (and server-side from the request Host),
-      // which is the address this visitor's agent should point at. This pass
-      // only supplies the two facts only the auth-gated /status endpoint can.
-      // Models render exactly like /status.html's "Connect Your Agent" card
-      // (same dedup-by-name, capabilities and context window) so the two
-      // pages never drift apart.
-      const byName = new Map();
-      (data.models || []).forEach(m => {
-        if (!byName.has(m.id)) {
-          byName.set(m.id, { id: m.id, protocols: new Set(), caps: new Set(), ctx: 0 });
-        }
-        const e = byName.get(m.id);
-        if (m.protocol) e.protocols.add(m.protocol);
-        (m.capabilities || []).forEach(c => e.caps.add(c));
-        if (m.max_context_tokens > e.ctx) e.ctx = m.max_context_tokens;
-      });
-      const entries = Array.from(byName.values());
-      helpModels.innerHTML = entries.length
-        ? entries.map(m => {
-            const protoBadges = Array.from(m.protocols).map(p => {
-              const def = PROTO_URLS[p] || { name: p, badge: 'badge-primary' };
-              return `<span class="badge ${def.badge}">${esc(def.name)}</span>`;
-            }).join(' ');
-            const caps = m.caps.size ? Array.from(m.caps).join(' · ') : 'unconstrained';
-            const ctx = m.ctx > 0 ? `${fmtCtx(m.ctx)} tok` : 'unconstrained';
-            return `
-              <div class="connect-model">
-                <span class="model-name">${esc(m.id)}</span>
-                ${protoBadges}
-                <span class="connect-meta">${esc(ctx)}</span>
-                <span class="connect-meta">${esc(caps)}</span>
-              </div>`;
-          }).join('')
-        : '<span class="connect-meta">（未配置模型）</span>';
-
-      // Version
-      const ver = data.instance && data.instance.version ? data.instance.version : 'unknown';
-      dynVersion.textContent = ver;
-    }
-
-    function fmtCtx(n) {
-      return n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`;
-    }
-
-    function showAuthPrompt() {
-      helpModels.innerHTML = `<a href="javascript:void(0)" class="auth-link" id="reveal-models-link">🔒 输入 API 密钥查看</a>`;
-      dynVersion.innerHTML = `<span class="connect-meta">（输入 API 密钥查看）</span>`;
-      const link = document.getElementById('reveal-models-link');
-      if (link) link.addEventListener('click', openAuthModal);
-    }
-
-    function openAuthModal() {
-      helpKeyInput.value = Auth.getKey();
-      helpAuthError.classList.add('hidden');
-      authModal.classList.remove('hidden');
-      helpKeyInput.focus();
-    }
-
-    function closeAuthModal() {
-      authModal.classList.add('hidden');
-    }
-
-    function esc(s) {
-      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    }
-
-    // --- Live Snippet Fill ---
-    // Each Agent code block ships with static defaults (model "coding" /
-    // "claude", 200k context, 64k output, 32k thinking, high effort,
-    // YOUR_VMR_API_KEY) so a no-JS / pre-auth reader still sees a coherent
-    // config. Once GET /status is readable, single-model snippets have their
-    // model id, context window and token budgets swapped in place — the
-    // regexes are anchored to the highlight <span> wrappers the page was
-    // built with, so bare shell words (the `claude` command itself) are never
-    // touched. The four list-shaped configs (Pi, OpenCode, Continue, Aider
-    // metadata) are regenerated to enumerate EVERY virtual model of the
-    // matching protocol: a VMR operator typically wires all of them so they
-    // can switch per task. The operator's key, once entered, is injected too.
-    // Every render restarts from the cached original template, so clearing
-    // the key reverts cleanly to the defaults.
-    const snippetTpl = new Map();
-    function cacheSnippetTemplates() {
-      document.querySelectorAll('.code-block pre').forEach(pre => {
-        if (!snippetTpl.has(pre)) snippetTpl.set(pre, pre.innerHTML);
-      });
-    }
-
-    // Empirical output-token ceiling for a context window, in tiers: ~120k
-    // ctx -> 32k out, ~200k -> 64k out, >=480k (1M-class) -> 128k out.
-    // Anchored to Claude / GPT public limits; VMR carries no real max-output
-    // metadata. Clamped so it never exceeds the context window itself.
-    function maxOutFor(ctx) {
-      if (ctx >= 480000) return 131072;
-      if (ctx >= 200000) return 65536;
-      if (ctx >= 120000) return 32768;
-      return Math.min(16384, ctx);
-    }
-    function thinkFor(ctx) { return Math.min(maxOutFor(ctx) / 2, 32768); }
-
-    const HL = {
-      k: t => '<span class="key">' + esc(t) + '</span>',
-      s: t => '<span class="string">' + esc(t) + '</span>',
-      b: t => '<span class="bool">' + esc(t) + '</span>',
-    };
-
-    function snippetModels(data, proto) {
-      return ((data && data.models) || []).filter(m => m.protocol === proto).map(m => {
-        const caps = m.capabilities || [];
-        const ctx = m.max_context_tokens > 0 ? m.max_context_tokens : 200000;
-        // Empty capability set = unconstrained: assume the model reasons.
-        return { id: m.id, ctx, reasoning: caps.length === 0 || caps.indexOf('thinking') !== -1 };
-      });
-    }
-
-    function snippetValues(data) {
-      const oc = snippetModels(data, 'openai-completions');
-      const am = snippetModels(data, 'anthropic-messages');
-      const or = snippetModels(data, 'openai-responses');
-      const origin = window.location.origin;
-      const key = Auth.getKey();
-      const primary = oc[0] || am[0] || { id: 'coding', ctx: 200000 };
-      return {
-        oc, am, or,
-        baseOC: origin + '/v1',
-        baseAM: origin,
-        modelOC: (oc[0] || { id: 'coding' }).id,
-        modelAM: (am[0] || { id: 'claude' }).id,
-        modelOR: (or[0] || oc[0] || { id: 'coding' }).id,
-        ctx: primary.ctx,
-        apiKey: key || 'YOUR_VMR_API_KEY',
-      };
-    }
-
-    function fillSnippet(html, v, isResponses) {
-      const oc = isResponses ? v.modelOR : v.modelOC;
-      const out = String(maxOutFor(v.ctx));
-      const think = String(thinkFor(v.ctx));
-      const ctx = String(v.ctx);
-      const compact = String(Math.round(v.ctx * 0.9));
-      return html
-        .replace(/(<span class="string">"?)YOUR_VMR_API_KEY("?<\/span>)/g, (_, a, b) => a + esc(v.apiKey) + b)
-        .replace(/(<span class="string">openai\/)coding(<\/span>)/g, (_, a, b) => a + esc(oc) + b)
-        .replace(/(<span class="(?:string|key)">"?)coding("?<\/span>)/g, (_, a, b) => a + esc(oc) + b)
-        .replace(/(<span class="string">"?)claude("?<\/span>)/g, (_, a, b) => a + esc(v.modelAM) + b)
-        .replace(/(<span class="(?:bool|string)">"?)200000("?<\/span>)/g, (_, a, b) => a + ctx + b)
-        .replace(/(<span class="bool">)180000(<\/span>)/g, (_, a, b) => a + compact + b)
-        // every output-budget literal -> ctx-derived ceiling ...
-        .replace(/(<span class="(?:bool|string)">"?)(?:8192|16384|65536)("?<\/span>)/g, (_, a, b) => a + out + b)
-        // ... then re-target the thinking-budget fields by their var/key name
-        .replace(/([A-Z_]*THINKING_TOKENS(?:"<\/span>)?[=:]\s*<span class="(?:string|bool)">"?)\d+("?<\/span>)/g, (_, a, b) => a + think + b)
-        .replace(/(budget_tokens:<\/span>\s*<span class="bool">)\d+(<\/span>)/g, (_, a, b) => a + think + b);
-    }
-
-    function piModelBlock(m, indent, last) {
-      const p = ' '.repeat(indent);
-      return [
-        p + '{',
-        p + '  ' + HL.k('"id"') + ': ' + HL.s('"' + m.id + '"') + ',',
-        p + '  ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + ' (VMR)"') + ',',
-        p + '  ' + HL.k('"contextWindow"') + ': ' + HL.b(m.ctx) + ',',
-        p + '  ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
-        p + '  ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + '],',
-        p + '  ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
-        p + '}' + (last ? '' : ','),
-      ].join('\n');
-    }
-    function piProvider(name, api, base, key, models, indent) {
-      const p = ' '.repeat(indent);
-      return [
-        p + HL.k('"' + name + '"') + ': {',
-        p + '  ' + HL.k('"baseUrl"') + ': ' + HL.s('"' + base + '"') + ',',
-        p + '  ' + HL.k('"api"') + ': ' + HL.s('"' + api + '"') + ',',
-        p + '  ' + HL.k('"apiKey"') + ': ' + HL.s('"' + key + '"') + ',',
-        p + '  ' + HL.k('"models"') + ': [',
-        models.map((m, i) => piModelBlock(m, indent + 4, i === models.length - 1)).join('\n'),
-        p + '  ]',
-        p + '}',
-      ].join('\n');
-    }
-    function genPi(v) {
-      const provs = [];
-      if (v.oc.length) provs.push(piProvider('vmr-openai', 'openai-completions', v.baseOC, v.apiKey, v.oc, 4));
-      if (v.am.length) provs.push(piProvider('vmr-anthropic', 'anthropic-messages', v.baseAM, v.apiKey, v.am, 4));
-      if (!provs.length) return null;
-      return '{\n  ' + HL.k('"providers"') + ': {\n' + provs.join(',\n') + '\n  }\n}';
-    }
-
-    function ocModelEntry(m, last) {
-      return [
-        '        ' + HL.k('"' + m.id + '"') + ': {',
-        '          ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + '"') + ',',
-        '          ' + HL.k('"limit"') + ': {',
-        '            ' + HL.k('"context"') + ': ' + HL.b(m.ctx) + ',',
-        '            ' + HL.k('"output"') + ': ' + HL.b(maxOutFor(m.ctx)),
-        '          },',
-        '          ' + HL.k('"modalities"') + ': {',
-        '            ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + ']',
-        '          },',
-        '          ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
-        '        }' + (last ? '' : ','),
-      ].join('\n');
-    }
-    function genOpenCode(v) {
-      if (!v.oc.length) return null;
-      return [
-        '{',
-        '  ' + HL.k('"$schema"') + ': ' + HL.s('"https://opencode.ai/config.json"') + ',',
-        '  ' + HL.k('"provider"') + ': {',
-        '    ' + HL.k('"vmr"') + ': {',
-        '      ' + HL.k('"name"') + ': ' + HL.s('"VMR"') + ',',
-        '      ' + HL.k('"npm"') + ': ' + HL.s('"@ai-sdk/openai-compatible"') + ',',
-        '      ' + HL.k('"options"') + ': {',
-        '        ' + HL.k('"baseURL"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
-        '        ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"'),
-        '      },',
-        '      ' + HL.k('"models"') + ': {',
-        v.oc.map((m, i) => ocModelEntry(m, i === v.oc.length - 1)).join('\n'),
-        '      }',
-        '    }',
-        '  }',
-        '}',
-      ].join('\n');
-    }
-
-    function genContinueYaml(v) {
-      if (!v.oc.length) return null;
-      const lines = [HL.k('models:')];
-      v.oc.forEach(m => {
-        lines.push(
-          '  - ' + HL.k('name:') + ' ' + HL.s('VMR ' + m.id),
-          '    ' + HL.k('provider:') + ' ' + HL.s('openai'),
-          '    ' + HL.k('model:') + ' ' + HL.s(m.id),
-          '    ' + HL.k('apiBase:') + ' ' + HL.s(v.baseOC),
-          '    ' + HL.k('apiKey:') + ' ' + HL.s(v.apiKey),
-          '    ' + HL.k('capabilities:'),
-          '      - ' + HL.s('tool_use'),
-          '      - ' + HL.s('image_input'),
-          '    ' + HL.k('defaultCompletionOptions:'),
-          '      ' + HL.k('contextLength:') + ' ' + HL.b(m.ctx),
-          '      ' + HL.k('maxTokens:') + ' ' + HL.b(maxOutFor(m.ctx)),
-          '      ' + HL.k('reasoningEffort:') + ' ' + HL.s('high'),
-        );
-      });
-      return lines.join('\n');
-    }
-    function genContinueJson(v) {
-      if (!v.oc.length) return null;
-      const entries = v.oc.map((m, i) => [
-        '    {',
-        '      ' + HL.k('"title"') + ': ' + HL.s('"VMR ' + m.id + '"') + ',',
-        '      ' + HL.k('"provider"') + ': ' + HL.s('"openai"') + ',',
-        '      ' + HL.k('"model"') + ': ' + HL.s('"' + m.id + '"') + ',',
-        '      ' + HL.k('"apiBase"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
-        '      ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"') + ',',
-        '      ' + HL.k('"contextLength"') + ': ' + HL.b(m.ctx) + ',',
-        '      ' + HL.k('"completionOptions"') + ': {',
-        '        ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)),
-        '      },',
-        '      ' + HL.k('"capabilities"') + ': [' + HL.s('"tools"') + ', ' + HL.s('"uploadImage"') + ']',
-        '    }' + (i === v.oc.length - 1 ? '' : ','),
-      ].join('\n'));
-      return '{\n  ' + HL.k('"models"') + ': [\n' + entries.join('\n') + '\n  ]\n}';
-    }
-    function genAiderMeta(v) {
-      if (!v.oc.length) return null;
-      const entries = v.oc.map((m, i) => [
-        '  ' + HL.k('"openai/' + m.id + '"') + ': {',
-        '    ' + HL.k('"max_input_tokens"') + ': ' + HL.b(m.ctx) + ',',
-        '    ' + HL.k('"max_output_tokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
-        '    ' + HL.k('"input_cost_per_token"') + ': ' + HL.b(0) + ',',
-        '    ' + HL.k('"output_cost_per_token"') + ': ' + HL.b(0) + ',',
-        '    ' + HL.k('"supports_images"') + ': ' + HL.b('true'),
-        '  }' + (i === v.oc.length - 1 ? '' : ','),
-      ].join('\n'));
-      return '{\n' + entries.join('\n') + '\n}';
-    }
-
-    function setGen(id, code) {
-      if (code == null) return;
-      const pre = document.getElementById(id);
-      if (pre) pre.innerHTML = '<code>' + code + '</code>';
-    }
-
-    function renderSnippets(data) {
-      const v = snippetValues(data);
-      snippetTpl.forEach((tpl, pre) => {
-        pre.innerHTML = fillSnippet(tpl, v, pre.id === 'responses-py-snippet');
-      });
-      if (data && data.models && data.models.length) {
-        setGen('pi-snippet', genPi(v));
-        setGen('opencode-snippet', genOpenCode(v));
-        setGen('continue-yaml-snippet', genContinueYaml(v));
-        setGen('continue-json-snippet', genContinueJson(v));
-        setGen('aider-meta-snippet', genAiderMeta(v));
-      }
-    }
-
-    // --- Fetch Status ---
-    async function fetchStatus() {
-      const key = Auth.getKey();
-      const sentKey = key !== '';
-      const headers = {};
-      if (sentKey) headers['Authorization'] = 'Bearer ' + key;
-
-      try {
-        const resp = await fetch('/status', { headers });
-        if (resp.status === 401) {
-          if (sentKey) {
-            // A stored key exists but was rejected — open the modal with an
-            // error so the user can re-enter (same UX as the dashboard).
-            helpKeyInput.value = key;
-            helpAuthError.textContent = 'API 密钥无效或已过期，请重新输入：';
-            helpAuthError.classList.remove('hidden');
-            authModal.classList.remove('hidden');
-            helpKeyInput.focus();
-          } else {
-            showAuthPrompt();
-          }
-          return;
-        }
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        replacePlaceholders(data);
-        renderSnippets(data);
-      } catch (err) {
-        helpModels.innerHTML = `<span class="connect-meta">（无法连接 vmr）</span>`;
-        dynVersion.textContent = '—';
-      }
-    }
-
-    // --- Modal Handlers ---
-    helpAuthCancel.addEventListener('click', closeAuthModal);
-
-    helpAuthSave.addEventListener('click', () => {
-      const val = helpKeyInput.value.trim();
-      if (val) {
-        Auth.setKey(val);
-      } else {
-        Auth.clearKey();
-      }
-      closeAuthModal();
-      renderSnippets(null); // instant key swap; fetchStatus refines models next
-      fetchStatus();
+// ---- copy with ✓ feedback (snippet blocks and single values) ----
+function copyText(txt, btn) {
+  const done = () => { const o = btn.textContent; btn.textContent = '已复制 ✓'; setTimeout(() => btn.textContent = o, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => fallback(txt, done));
+  } else fallback(txt, done);
+}
+function fallback(txt, done) {
+  const ta = document.createElement('textarea'); ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) {}
+  ta.remove();
+}
+function wireCopyButtons() {
+  document.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pre = document.getElementById(btn.getAttribute('data-copy'));
+      if (pre) copyText(pre.innerText, btn);
     });
+  });
+  document.querySelectorAll('[data-copy-value]').forEach(btn => {
+    btn.addEventListener('click', () => copyText(btn.getAttribute('data-copy-value'), btn));
+  });
+}
 
-    helpKeyInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        helpAuthSave.click();
-      }
-    });
+// ---- base URLs ----
+// The server baked the request-Host values into {{BASE_URL_OPENAI}} /
+// {{BASE_URL_ANTHROPIC}} at serve time (so view-source / no-JS readers see
+// real addresses); this pass re-fills from window.location.origin — the URL
+// the visitor's browser actually shows — so a proxy that rewrites Host still
+// resolves to what the user sees. Snippet placeholders are swapped too, so a
+// copy is ready before any authentication.
+function fillBaseURLs() {
+  const origin = window.location.origin;
+  const urls = {
+    'openai-completions': origin + '/v1',
+    'anthropic-messages': origin,
+    'openai-responses': origin + '/v1',
+  };
+  document.getElementById('help-base-urls').innerHTML = PROTO_ORDER.map(p => {
+    const def = PROTO_META[p];
+    const u = urls[p];
+    return '<tr><td><span class="badge ' + def.badge + '">' + esc(p) + '</span></td>' +
+      '<td><code>' + esc(u) + '</code></td>' +
+      '<td style="text-align:right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">复制</button></td></tr>';
+  }).join('');
+  document.querySelectorAll('pre').forEach(pre => {
+    pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));
+    pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_ANTHROPIC\}\}/g, esc(origin));
+  });
+}
 
-    // Close modal on overlay click
-    authModal.addEventListener('click', (e) => {
-      if (e.target === authModal) closeAuthModal();
-    });
+// ---- model × protocol table (live, from /status) ----
+function renderModels(data) {
+  const box = document.getElementById('help-models');
+  if (!data || !data.models || !data.models.length) {
+    box.innerHTML = '<span class="t-dim">（未配置模型）</span>';
+    return;
+  }
+  // dedup by virtual model name across protocols — one row per name
+  const byName = new Map();
+  (data.models || []).forEach(m => {
+    if (!byName.has(m.id)) byName.set(m.id, { id: m.id, protocols: new Set(), caps: new Set(), ctx: 0 });
+    const e = byName.get(m.id);
+    if (m.protocol) e.protocols.add(m.protocol);
+    (m.capabilities || []).forEach(c => e.caps.add(c));
+    if (m.max_context_tokens > e.ctx) e.ctx = m.max_context_tokens;
+  });
+  box.innerHTML = Array.from(byName.values()).map(m => {
+    const badges = Array.from(m.protocols).map(p => {
+      const def = PROTO_META[p] || { badge: 'b-dim' };
+      return '<span class="badge ' + def.badge + '">' + esc(p) + '</span>';
+    }).join(' ');
+    const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : '不限';
+    const caps = m.caps.size ? Array.from(m.caps).join(' · ') : '不限';
+    return '<div class="mrow"><b>' + esc(m.id) + '</b> ' + badges +
+      ' <span class="t-dim">· ' + esc(ctx) + ' · ' + esc(caps) + '</span></div>';
+  }).join('');
+}
 
-    // --- Copy Buttons ---
-    document.querySelectorAll('.copy-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const id = btn.getAttribute('data-copy');
-        const pre = document.getElementById(id);
-        if (!pre) return;
-        const text = pre.textContent || pre.innerText;
-        navigator.clipboard.writeText(text).then(() => {
-          btn.textContent = '已复制！';
-          btn.classList.add('copied');
-          setTimeout(() => {
-            btn.textContent = '复制';
-            btn.classList.remove('copied');
-          }, 2000);
-        }).catch(() => {
-          // Fallback
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          btn.textContent = '已复制！';
-          btn.classList.add('copied');
-          setTimeout(() => {
-            btn.textContent = '复制';
-            btn.classList.remove('copied');
-          }, 2000);
-        });
-      });
-    });
+function showAuthPrompt() {
+  const box = document.getElementById('help-models');
+  box.innerHTML = '<a href="javascript:void(0)" id="reveal-models-link">🔑 输入 API 密钥后显示</a>';
+  const link = document.getElementById('reveal-models-link');
+  if (link) link.addEventListener('click', openKeyModal);
+}
 
-    // --- Init ---
-    setPlaceholder();
-    cacheSnippetTemplates();
-    renderSnippets(null);
-    fetchStatus();
-  </script>
+// ---- connection check: a real probe against GET /status ----
+// States: 'idle' (nothing probed yet), 'ok', 'auth' (401 — key required or
+// rejected), 'err' (network / non-200). The probe IS the guarded /status
+// fetch, so checking the connection and loading the model table are the same
+// request — no second code path to drift.
+let lastCheck = 'idle', lastModels = 0, lastProtocols = 0;
+function paintCheck() {
+  const st = document.getElementById('chk-state');
+  const det = document.getElementById('chk-detail');
+  const hasKey = VMRAuth.has();
+  if (lastCheck === 'ok') {
+    st.className = 'pill p-live'; st.textContent = '连接正常';
+    det.innerHTML = '<code>GET /status</code> 返回 <b>' + lastModels + '</b> 个虚拟模型，覆盖 <b>' + lastProtocols + '</b> 种协议。';
+  } else if (lastCheck === 'auth') {
+    st.className = 'pill p-down'; st.textContent = '401 —— 需要密钥';
+    det.innerHTML = '本实例启用了 API 密钥认证。请先设置密钥（🔑）以加载实时模型列表。';
+  } else if (lastCheck === 'err') {
+    st.className = 'pill p-down'; st.textContent = '不可达';
+    det.innerHTML = '<code>GET /status</code> 请求失败 —— 网络错误或非 200 响应。';
+  } else if (hasKey) {
+    st.className = 'pill p-paused'; st.textContent = '已存储密钥 ' + VMRAuth.tail();
+    det.innerHTML = '密钥仅存储在本浏览器。点击<b>检查连接</b>可对照 <code>GET /status</code> 验证。';
+  } else {
+    st.className = 'pill p-paused'; st.textContent = '尚未存储密钥';
+    det.innerHTML = '本浏览器还没有 API 密钥 —— 下方各客户端需要在 <code>Authorization: Bearer</code> 请求头中携带它。';
+  }
+}
+function authHeaders() {
+  const h = {};
+  if (VMRAuth.has()) h['Authorization'] = 'Bearer ' + VMRAuth.get();
+  return h;
+}
+async function fetchStatus(allowPrompt) {
+  const doFetch = () => fetch('/status', { headers: authHeaders() });
+  let resp;
+  try {
+    // VMRAuth.guard opens the shared key modal on 401 and retries once with
+    // the saved key; a cancelled prompt lands here with the 401 response.
+    resp = allowPrompt ? await VMRAuth.guard(doFetch) : await doFetch();
+  } catch (e) {
+    lastCheck = 'err'; paintCheck(); return;
+  }
+  if (resp.status === 401) {
+    lastCheck = 'auth'; paintCheck(); showAuthPrompt(); return;
+  }
+  if (!resp.ok) { lastCheck = 'err'; paintCheck(); return; }
+  try {
+    const data = await resp.json();
+    lastCheck = 'ok';
+    lastModels = (data.models || []).length;
+    lastProtocols = new Set((data.models || []).map(m => m.protocol)).size;
+    ConsoleAlerts.set(data.alerts || []);
+    renderFooterIdentity(data.instance || {});
+    renderModels(data);
+    renderSnippets(data);
+  } catch (e) {
+    lastCheck = 'err';
+  }
+  paintCheck();
+}
+function renderFooterIdentity(inst) {
+  consoleAPI.setUptime(inst.uptime ? '已运行 ' + inst.uptime : '—');
+  consoleAPI.setFooterIdentity('Virtual Model Router (VMR) · v' + (inst.version || '?') +
+    ' · pid ' + (inst.pid || '?') + ' · ' + (inst.go_version || '?') + ' · ' + (inst.os_arch || '?') +
+    ' · listen ' + (inst.listen || '?'));
+}
+
+// ---- Live Snippet Fill ----
+// Each agent code block ships with static defaults (model "coding" /
+// "claude", 200k context, 64k output, 32k thinking, high effort,
+// YOUR_VMR_API_KEY) so a no-JS / pre-auth reader still sees a coherent
+// config. Once GET /status is readable, single-model snippets have their
+// model id, context window and token budgets swapped in place — the
+// regexes are anchored to the highlight <span> wrappers the page was
+// built with, so bare shell words (the `claude` command itself) are never
+// touched. The four list-shaped configs (Pi, OpenCode, Continue, Aider
+// metadata) are regenerated to enumerate EVERY virtual model of the
+// matching protocol: a VMR operator typically wires all of them so they
+// can switch per task. The operator's key, once entered, is injected too.
+// Every render restarts from the cached original template, so clearing
+// the key reverts cleanly to the defaults.
+const snippetTpl = new Map();
+function cacheSnippetTemplates() {
+  document.querySelectorAll('.code-block pre, pre.snippet').forEach(pre => {
+    if (!snippetTpl.has(pre)) snippetTpl.set(pre, pre.innerHTML);
+  });
+}
+
+// Empirical output-token ceiling for a context window, in tiers: ~120k
+// ctx -> 32k out, ~200k -> 64k out, >=480k (1M-class) -> 128k out.
+// Anchored to Claude / GPT public limits; VMR carries no real max-output
+// metadata. Clamped so it never exceeds the context window itself.
+function maxOutFor(ctx) {
+  if (ctx >= 480000) return 131072;
+  if (ctx >= 200000) return 65536;
+  if (ctx >= 120000) return 32768;
+  return Math.min(16384, ctx);
+}
+function thinkFor(ctx) { return Math.min(maxOutFor(ctx) / 2, 32768); }
+
+const HL = {
+  k: t => '<span class="key">' + esc(t) + '</span>',
+  s: t => '<span class="string">' + esc(t) + '</span>',
+  b: t => '<span class="bool">' + esc(t) + '</span>',
+};
+
+function snippetModels(data, proto) {
+  return ((data && data.models) || []).filter(m => m.protocol === proto).map(m => {
+    const caps = m.capabilities || [];
+    const ctx = m.max_context_tokens > 0 ? m.max_context_tokens : 200000;
+    // Empty capability set = unconstrained: assume the model reasons.
+    return { id: m.id, ctx, reasoning: caps.length === 0 || caps.indexOf('thinking') !== -1 };
+  });
+}
+
+function snippetValues(data) {
+  const oc = snippetModels(data, 'openai-completions');
+  const am = snippetModels(data, 'anthropic-messages');
+  const or = snippetModels(data, 'openai-responses');
+  const origin = window.location.origin;
+  const key = VMRAuth.get();
+  const primary = oc[0] || am[0] || { id: 'coding', ctx: 200000 };
+  return {
+    oc, am, or,
+    baseOC: origin + '/v1',
+    baseAM: origin,
+    modelOC: (oc[0] || { id: 'coding' }).id,
+    modelAM: (am[0] || { id: 'claude' }).id,
+    modelOR: (or[0] || oc[0] || { id: 'coding' }).id,
+    ctx: primary.ctx,
+    apiKey: key || 'YOUR_VMR_API_KEY',
+  };
+}
+
+function fillSnippet(html, v, isResponses) {
+  const oc = isResponses ? v.modelOR : v.modelOC;
+  const out = String(maxOutFor(v.ctx));
+  const think = String(thinkFor(v.ctx));
+  const ctx = String(v.ctx);
+  const compact = String(Math.round(v.ctx * 0.9));
+  return html
+    .replace(/(<span class="string">"?)YOUR_VMR_API_KEY("?<\/span>)/g, (_, a, b) => a + esc(v.apiKey) + b)
+    .replace(/(<span class="string">openai\/)coding(<\/span>)/g, (_, a, b) => a + esc(oc) + b)
+    .replace(/(<span class="(?:string|key)">"?)coding("?<\/span>)/g, (_, a, b) => a + esc(oc) + b)
+    .replace(/(<span class="string">"?)claude("?<\/span>)/g, (_, a, b) => a + esc(v.modelAM) + b)
+    .replace(/(<span class="(?:bool|string)">"?)200000("?<\/span>)/g, (_, a, b) => a + ctx + b)
+    .replace(/(<span class="bool">)180000(<\/span>)/g, (_, a, b) => a + compact + b)
+    // every output-budget literal -> ctx-derived ceiling ...
+    .replace(/(<span class="(?:bool|string)">"?)(?:8192|16384|65536)("?<\/span>)/g, (_, a, b) => a + out + b)
+    // ... then re-target the thinking-budget fields by their var/key name
+    .replace(/([A-Z_]*THINKING_TOKENS(?:"<\/span>)?[=:]\s*<span class="(?:string|bool)">"?)\d+("?<\/span>)/g, (_, a, b) => a + think + b)
+    .replace(/(budget_tokens:<\/span>\s*<span class="bool">)\d+(<\/span>)/g, (_, a, b) => a + think + b);
+}
+
+function piModelBlock(m, indent, last) {
+  const p = ' '.repeat(indent);
+  return [
+    p + '{',
+    p + '  ' + HL.k('"id"') + ': ' + HL.s('"' + m.id + '"') + ',',
+    p + '  ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + ' (VMR)"') + ',',
+    p + '  ' + HL.k('"contextWindow"') + ': ' + HL.b(m.ctx) + ',',
+    p + '  ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
+    p + '  ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + '],',
+    p + '  ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
+    p + '}' + (last ? '' : ','),
+  ].join('\n');
+}
+function piProvider(name, api, base, key, models, indent) {
+  const p = ' '.repeat(indent);
+  return [
+    p + HL.k('"' + name + '"') + ': {',
+    p + '  ' + HL.k('"baseUrl"') + ': ' + HL.s('"' + base + '"') + ',',
+    p + '  ' + HL.k('"api"') + ': ' + HL.s('"' + api + '"') + ',',
+    p + '  ' + HL.k('"apiKey"') + ': ' + HL.s('"' + key + '"') + ',',
+    p + '  ' + HL.k('"models"') + ': [',
+    models.map((m, i) => piModelBlock(m, indent + 4, i === models.length - 1)).join('\n'),
+    p + '  ]',
+    p + '}',
+  ].join('\n');
+}
+function genPi(v) {
+  const provs = [];
+  if (v.oc.length) provs.push(piProvider('vmr-openai', 'openai-completions', v.baseOC, v.apiKey, v.oc, 4));
+  if (v.am.length) provs.push(piProvider('vmr-anthropic', 'anthropic-messages', v.baseAM, v.apiKey, v.am, 4));
+  if (!provs.length) return null;
+  return '{\n  ' + HL.k('"providers"') + ': {\n' + provs.join(',\n') + '\n  }\n}';
+}
+
+function ocModelEntry(m, last) {
+  return [
+    '        ' + HL.k('"' + m.id + '"') + ': {',
+    '          ' + HL.k('"name"') + ': ' + HL.s('"' + m.id + '"') + ',',
+    '          ' + HL.k('"limit"') + ': {',
+    '            ' + HL.k('"context"') + ': ' + HL.b(m.ctx) + ',',
+    '            ' + HL.k('"output"') + ': ' + HL.b(maxOutFor(m.ctx)),
+    '          },',
+    '          ' + HL.k('"modalities"') + ': {',
+    '            ' + HL.k('"input"') + ': [' + HL.s('"text"') + ', ' + HL.s('"image"') + ']',
+    '          },',
+    '          ' + HL.k('"reasoning"') + ': ' + HL.b(m.reasoning),
+    '        }' + (last ? '' : ','),
+  ].join('\n');
+}
+function genOpenCode(v) {
+  if (!v.oc.length) return null;
+  return [
+    '{',
+    '  ' + HL.k('"$schema"') + ': ' + HL.s('"https://opencode.ai/config.json"') + ',',
+    '  ' + HL.k('"provider"') + ': {',
+    '    ' + HL.k('"vmr"') + ': {',
+    '      ' + HL.k('"name"') + ': ' + HL.s('"VMR"') + ',',
+    '      ' + HL.k('"npm"') + ': ' + HL.s('"@ai-sdk/openai-compatible"') + ',',
+    '      ' + HL.k('"options"') + ': {',
+    '        ' + HL.k('"baseURL"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
+    '        ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"'),
+    '      },',
+    '      ' + HL.k('"models"') + ': {',
+    v.oc.map((m, i) => ocModelEntry(m, i === v.oc.length - 1)).join('\n'),
+    '      }',
+    '    }',
+    '  }',
+    '}',
+  ].join('\n');
+}
+
+function genContinueYaml(v) {
+  if (!v.oc.length) return null;
+  const lines = [HL.k('models:')];
+  v.oc.forEach(m => {
+    lines.push(
+      '  - ' + HL.k('name:') + ' ' + HL.s('VMR ' + m.id),
+      '    ' + HL.k('provider:') + ' ' + HL.s('openai'),
+      '    ' + HL.k('model:') + ' ' + HL.s(m.id),
+      '    ' + HL.k('apiBase:') + ' ' + HL.s(v.baseOC),
+      '    ' + HL.k('apiKey:') + ' ' + HL.s(v.apiKey),
+      '    ' + HL.k('capabilities:'),
+      '      - ' + HL.s('tool_use'),
+      '      - ' + HL.s('image_input'),
+      '    ' + HL.k('defaultCompletionOptions:'),
+      '      ' + HL.k('contextLength:') + ' ' + HL.b(m.ctx),
+      '      ' + HL.k('maxTokens:') + ' ' + HL.b(maxOutFor(m.ctx)),
+      '      ' + HL.k('reasoningEffort:') + ' ' + HL.s('high'),
+    );
+  });
+  return lines.join('\n');
+}
+function genContinueJson(v) {
+  if (!v.oc.length) return null;
+  const entries = v.oc.map((m, i) => [
+    '    {',
+    '      ' + HL.k('"title"') + ': ' + HL.s('"VMR ' + m.id + '"') + ',',
+    '      ' + HL.k('"provider"') + ': ' + HL.s('"openai"') + ',',
+    '      ' + HL.k('"model"') + ': ' + HL.s('"' + m.id + '"') + ',',
+    '      ' + HL.k('"apiBase"') + ': ' + HL.s('"' + v.baseOC + '"') + ',',
+    '      ' + HL.k('"apiKey"') + ': ' + HL.s('"' + v.apiKey + '"') + ',',
+    '      ' + HL.k('"contextLength"') + ': ' + HL.b(m.ctx) + ',',
+    '      ' + HL.k('"completionOptions"') + ': {',
+    '        ' + HL.k('"maxTokens"') + ': ' + HL.b(maxOutFor(m.ctx)),
+    '      },',
+    '      ' + HL.k('"capabilities"') + ': [' + HL.s('"tools"') + ', ' + HL.s('"uploadImage"') + ']',
+    '    }' + (i === v.oc.length - 1 ? '' : ','),
+  ].join('\n'));
+  return '{\n  ' + HL.k('"models"') + ': [\n' + entries.join('\n') + '\n  ]\n}';
+}
+function genAiderMeta(v) {
+  if (!v.oc.length) return null;
+  const entries = v.oc.map((m, i) => [
+    '  ' + HL.k('"openai/' + m.id + '"') + ': {',
+    '    ' + HL.k('"max_input_tokens"') + ': ' + HL.b(m.ctx) + ',',
+    '    ' + HL.k('"max_output_tokens"') + ': ' + HL.b(maxOutFor(m.ctx)) + ',',
+    '    ' + HL.k('"input_cost_per_token"') + ': ' + HL.b(0) + ',',
+    '    ' + HL.k('"output_cost_per_token"') + ': ' + HL.b(0) + ',',
+    '    ' + HL.k('"supports_images"') + ': ' + HL.b('true'),
+    '  }' + (i === v.oc.length - 1 ? '' : ','),
+  ].join('\n'));
+  return '{\n' + entries.join('\n') + '\n}';
+}
+
+function setGen(id, code) {
+  if (code == null) return;
+  const pre = document.getElementById(id);
+  if (pre) pre.innerHTML = '<code>' + code + '</code>';
+}
+
+function renderSnippets(data) {
+  const v = snippetValues(data);
+  snippetTpl.forEach((tpl, pre) => {
+    pre.innerHTML = fillSnippet(tpl, v, pre.id === 'responses-py-snippet');
+  });
+  if (data && data.models && data.models.length) {
+    setGen('pi-snippet', genPi(v));
+    setGen('opencode-snippet', genOpenCode(v));
+    setGen('continue-yaml-snippet', genContinueYaml(v));
+    setGen('continue-json-snippet', genContinueJson(v));
+    setGen('aider-meta-snippet', genAiderMeta(v));
+  }
+}
+
+// ---- buttons ----
+document.getElementById('chk-btn').addEventListener('click', async () => {
+  await fetchStatus(true);
+  toast(lastCheck === 'ok' ? '连接正常 —— ' + lastModels + ' 个虚拟模型'
+    : lastCheck === 'auth' ? 'API 密钥缺失或无效'
+    : '连接检查失败');
+});
+document.getElementById('chk-set').addEventListener('click', openKeyModal);
+// Key modal save/clear are console.js-owned; refresh the page's views when
+// they fire. Save during a guard continuation is already retried by the
+// guard itself — the extra plain fetch is idempotent and keeps the direct
+// (Key-button) path fresh too.
+['vmr-key-save', 'vmr-key-clear'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', () => { lastCheck = 'idle'; paintCheck(); fetchStatus(false); });
+});
+
+// ---- boot ----
+fillBaseURLs();          // real base URLs first, so snippet templates carry them
+cacheSnippetTemplates();
+renderSnippets(null);    // static defaults; /status refines them next
+paintCheck();
+wireCopyButtons();
+fetchStatus(true);       // guarded /status fetch — models, check, alerts, footer
+</script>
 </body>
 </html>
