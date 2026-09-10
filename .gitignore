@@ -86,3 +86,6 @@ _subtasks
 
 # alma agent tooling scratch state
 .alma-snapshots
+
+# Agent Forge 运行时产物（spawn.sh 自动追加）
+.forge/
