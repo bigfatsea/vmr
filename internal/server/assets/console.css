@@ -1,0 +1,200 @@
+/* console.css — single source for the console pages (design §3).
+   Extracted from docs/design/demo/{overview,log,help}.html shared blocks;
+   page-private styles (terminal, chart, snippets, demo chrome) stay in
+   each page's own <style>. Pages carry the CSS injection marker in a
+   comment and get this file inlined once at server start. */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  /* surfaces */
+  --bg:#0d1117;--surface:#161b22;--surface-2:#1c2128;--border:#30363d;--border-soft:rgba(48,54,61,.4);--well:#090d13;
+  /* text */
+  --text:#c9d1d9;--text-muted:#8b949e;--text-bright:#f0f6fc;
+  /* semantic colours (bg variants are the 15%-alpha forms) */
+  --accent:#58a6ff;--accent-hover:#79c0ff;
+  --green:#3fb950;--yellow:#d29922;--orange:#e8813a;--red:#f85149;--purple:#bc8cff;--cyan:#39c5cf;--pink:#f778ba;
+  --green-bg:rgba(63,185,80,.15);--yellow-bg:rgba(210,153,34,.15);--red-bg:rgba(248,81,73,.15);
+  --cyan-bg:rgba(57,197,207,.15);--purple-bg:rgba(188,140,255,.15);--accent-bg:rgba(88,166,255,.14);
+  /* fonts */
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --fs-xs:11px;--fs-sm:12px;--fs-md:13px;--fs-lg:14px;--fs-xl:16px;--fs-2xl:18px;--fs-3xl:20px;
+  /* spacing & radii */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;
+  --r-sm:6px;--r-md:8px;--r-pill:999px;
+  /* page width & skeleton height — anchor offsets defined once */
+  --page-max:1280px;
+  --hd-h:88px;              /* header (identity row + section rail) — anchors offset by this */
+}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font-sans);font-size:var(--fs-md);line-height:1.55}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:2px}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:transparent}
+
+/* text utilities — pages use classes, never raw colours (design token discipline) */
+.t-ok{color:var(--green)}.t-warn{color:var(--yellow)}.t-err{color:var(--red)}
+.t-dim{color:var(--text-muted)}.t-key{color:var(--purple)}.t-accent{color:var(--accent)}
+.t-strong{color:var(--text-bright);font-weight:600}
+.hint{font-size:var(--fs-xs);color:var(--text-muted)}
+.help{border-bottom:1px dotted var(--text-muted);cursor:help}
+
+/* header: identity row + page rail, one block (sticky on scrolling pages) */
+.console-header{position:sticky;top:0;z-index:50;background:rgba(22,27,34,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.console-header.full{position:static;background:var(--surface)}   /* Log variant: page owns scrolling */
+.hd-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:14px;padding:10px 16px}
+.hd-inner.full{max-width:none;gap:12px;padding:9px 16px}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none}
+.brand:hover{text-decoration:none}
+.brand svg{display:block}
+.brand b{color:var(--text-bright);font-size:var(--fs-lg);letter-spacing:-.3px}
+.brand .sub{font-size:var(--fs-xs);color:var(--text-muted);border:1px solid var(--border);border-radius:var(--r-pill);padding:1px 8px}
+.hd-nav{display:flex;gap:8px;margin-left:6px}
+.hd-right{margin-left:auto;display:flex;align-items:center;gap:9px}
+.nav-link{font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 11px;border-radius:var(--r-pill);border:1px solid transparent;background:var(--surface-2);color:var(--text-muted);text-decoration:none;white-space:nowrap}
+.nav-link:hover{color:var(--text-bright);text-decoration:none}
+.nav-link.active{color:var(--text-bright);background:var(--accent-bg);border-color:var(--accent)}
+/* refresh pill doubles as the freshness indicator: it also carries the paused state */
+.refresh-pill{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
+.refresh-pill:hover{color:var(--text-bright);border-color:var(--text-muted)}
+.refresh-pill.paused{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+/* alert pill, far right: glyph carries severity, count carries volume */
+.warn-btn{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:var(--fs-xs);padding:3px 10px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;line-height:1.4}
+.warn-btn .ico{font-size:12px;line-height:1}
+.warn-btn.has-warn{color:var(--yellow);border-color:rgba(210,153,34,.4);background:var(--yellow-bg)}
+.warn-btn.has-err{color:var(--red);border-color:rgba(248,81,73,.4);background:var(--red-bg)}
+.warn-btn.quiet{opacity:.6}
+
+/* row 2 — the page's own rail (section anchors / page toolbar) */
+.hd-rail{border-top:1px solid var(--border-soft)}
+.rail-inner{max-width:var(--page-max);margin:0 auto;display:flex;align-items:center;gap:3px;padding:5px 16px;overflow-x:auto;scrollbar-width:none}
+.rail-inner.full{max-width:none;flex-wrap:wrap;padding:6px 16px;gap:8px}
+.rail-inner::-webkit-scrollbar{display:none}
+.rail-inner .spacer{flex:1}
+.rail-link{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);padding:3px 10px;border-radius:var(--r-sm);white-space:nowrap;text-decoration:none;border:1px solid transparent}
+.rail-link:hover{color:var(--text-bright);background:var(--surface-2);text-decoration:none}
+.rail-link.active{color:var(--accent);background:var(--accent-bg);border-color:rgba(88,166,255,.3)}
+.rail-link .n{color:var(--text-muted);margin-left:5px}
+.rail-link.active .n{color:var(--accent)}
+
+/* footer */
+.console-footer{border-top:1px solid var(--border);background:var(--surface);margin-top:32px}
+.console-footer.full{margin-top:0;flex-shrink:0}                  /* Log status-bar variant */
+.ft-inner{max-width:var(--page-max);margin:0 auto;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--text-muted);font-size:var(--fs-sm)}
+.ft-inner.full{max-width:none;padding:7px 16px;font-size:var(--fs-xs);font-family:var(--font-mono)}
+.ft-inner a{color:var(--text-muted);display:inline-flex;align-items:center;gap:5px}
+.ft-inner a:hover{color:var(--text)}
+
+/* layout & components */
+.page{max-width:var(--page-max);margin:0 auto;padding:18px 16px 8px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-4);margin-bottom:var(--sp-4)}
+.card-title{font-size:var(--fs-md);font-weight:600;color:var(--text-bright);margin-bottom:var(--sp-3)}
+.section-head{display:flex;align-items:center;gap:10px;margin:24px 0 9px;font-size:var(--fs-xl);font-weight:600;color:var(--text-bright);scroll-margin-top:var(--hd-h)}
+.section-head:first-of-type{margin-top:4px}
+.section-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
+.section-head .spacer{flex:1}
+/* one visual rank below section-head — reserved for genuine sub-tables */
+.sub-head{display:flex;align-items:center;gap:9px;margin:14px 0 7px;font-size:var(--fs-lg);font-weight:600;color:var(--text)}
+.sub-head .count{font-size:var(--fs-xs);color:var(--text-muted);font-weight:400}
+.sub-head .spacer{flex:1}
+.btn{font-family:inherit;font-size:var(--fs-md);background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-weight:500;transition:border-color .15s,background .15s}
+.btn:hover{border-color:var(--text-muted)}
+.btn.primary{background:var(--accent);color:#0d1117;border:none;font-weight:600}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn.ghost{background:transparent}
+.btn.sm{font-size:var(--fs-sm);padding:3px 9px}
+.btn.on{color:var(--text-bright);border-color:var(--accent);background:var(--accent-bg)}
+.seg{display:inline-flex;gap:4px;align-items:center}
+.seg-label{font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-right:2px}
+.badge{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 8px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);white-space:nowrap}
+.b-ok{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.b-warn{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.35)}
+.b-err{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.35)}
+.b-info{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.b-cyan{background:var(--cyan-bg);color:var(--cyan);border-color:rgba(57,197,207,.35)}
+.b-purple{background:var(--purple-bg);color:var(--purple);border-color:rgba(188,140,255,.35)}
+.b-dim{background:var(--surface-2);color:var(--text-muted)}
+.badge.tight{padding:1px 7px}
+/* status pill — all four states defined; a missing one means bare text when
+   a stream pauses or dies (design §3 explicitly calls this out) */
+.pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
+.p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
+.p-connecting{color:var(--yellow);border-color:rgba(210,153,34,.3);background:var(--yellow-bg)}
+.p-down{color:var(--red);border-color:rgba(248,81,73,.3);background:var(--red-bg)}
+.p-paused{color:var(--text-muted);border-color:var(--border);background:var(--surface-2)}
+.input{font-family:inherit;font-size:var(--fs-md);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;outline:none;transition:border-color .15s}
+.input:hover{border-color:var(--text-muted)}
+.input:focus{border-color:var(--accent)}
+.table-wrap{border:1px solid var(--border);border-radius:var(--r-md);overflow:auto;background:var(--surface);margin-bottom:var(--sp-4)}
+/* bounded height so the sticky header row actually sticks while a long table scrolls */
+.table-wrap.bounded{max-height:56vh}
+table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-sm)}
+.c th{background:var(--surface-2);color:var(--text-muted);font-weight:600;padding:7px 12px;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;position:sticky;top:0;z-index:2}
+.c td{padding:7px 12px;border-bottom:1px solid var(--border-soft);font-family:var(--font-mono);white-space:nowrap}
+.c tbody tr:last-child td{border-bottom:none}
+.c tbody tr:hover{background:rgba(88,166,255,.045)}
+.c tfoot td{padding:7px 12px;border-top:1px solid var(--border);background:var(--surface-2);font-family:var(--font-mono);color:var(--text-muted);white-space:nowrap}
+.c td.num,.c th.num,.c tfoot td.num{text-align:right;font-variant-numeric:tabular-nums}
+.c td .dim,.c .dim{color:var(--text-muted)}
+/* group boundary inside a rowspan-grouped table */
+.c tr.grp td{border-top:1px solid var(--border)}
+.c tbody tr:first-child.grp td{border-top:none}
+/* long identifiers must truncate, never push the diagnostic columns off-screen */
+.ep{display:inline-block;max-width:290px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
+.zero td{color:var(--text-muted)}
+/* transport mode: streaming vs single-JSON samples never share a percentile.
+   Spelled out, never an icon — a glyph makes the reader learn a legend first. */
+.mode{font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:var(--r-pill);border:1px solid;margin-left:6px}
+.m-stream{color:var(--cyan);background:var(--cyan-bg);border-color:rgba(57,197,207,.35)}
+.m-json{color:var(--text-muted);background:var(--surface-2);border-color:var(--border)}
+.c td > .mode:first-child{margin-left:0}   /* in its own Mode column, not trailing a name */
+.progress{height:6px;background:var(--well);border-radius:3px;overflow:hidden;min-width:90px}
+.progress>span{display:block;height:100%;border-radius:3px;background:var(--accent);transition:width .4s ease}
+.progress>span.warn{background:var(--yellow)}
+.progress>span.danger{background:var(--red)}
+.sharebar{height:4px;background:var(--well);border-radius:2px;overflow:hidden;width:64px;display:inline-block;vertical-align:middle;margin-right:7px}
+.sharebar>span{display:block;height:100%;background:var(--accent);opacity:.75}
+.modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
+.modal-overlay.hidden{display:none}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
+.modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
+.modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
+.modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
+.modal-actions{display:flex;justify-content:flex-end;gap:var(--sp-2);margin-top:var(--sp-3)}
+.modal-actions .left{margin-right:auto}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--surface-2);border:1px solid var(--border);color:var(--text-bright);padding:8px 16px;border-radius:var(--r-pill);font-size:var(--fs-sm);z-index:150;opacity:0;transition:opacity .25s;pointer-events:none;box-shadow:0 8px 24px rgba(1,4,9,.5)}
+.toast.show{opacity:1}
+
+/* vitals strip */
+.vitals{display:grid;grid-template-columns:repeat(5,1fr);padding:0;overflow:hidden}
+.vseg{padding:12px 15px;border-left:1px solid var(--border-soft);min-width:0}
+.vseg:first-child{border-left:none}
+.v-label{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v-label .win{text-transform:none;letter-spacing:0;color:#6e7681}
+.v-main{font-size:var(--fs-3xl);font-weight:700;color:var(--text-bright);font-family:var(--font-mono);line-height:1.2;font-variant-numeric:tabular-nums}
+.v-main small{font-size:var(--fs-md);color:var(--text-muted);font-weight:400}
+.v-sub{font-size:var(--fs-xs);color:var(--text-muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:2px 10px;font-family:var(--font-mono)}
+.sysline{border-top:1px solid var(--border-soft);padding:9px 15px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);display:flex;flex-wrap:wrap;gap:4px 22px}
+.sysline b{color:var(--text);font-weight:400}
+
+/* priority tiers + live-table states */
+.pri{font-family:var(--font-mono);font-size:10px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid}
+.pri-1{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
+.pri-2{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
+.pri-n{background:var(--surface-2);color:var(--text-muted);border-color:var(--border)}
+.stall{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.4);font-weight:700;animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+
+/* warning-list rows (alert modal) */
+.wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
+.wrow:last-child{border-bottom:none}
+.wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
+
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+
+@media (max-width:1160px){.vitals{grid-template-columns:repeat(3,1fr)}.vseg:nth-child(4){border-left:none}}
+@media (max-width:1080px){.hd-uptime{display:none}}
+@media (max-width:820px){.vitals{grid-template-columns:1fr 1fr}.vseg:nth-child(3){border-left:none}.grid-2{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
