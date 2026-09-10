@@ -4,6 +4,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/livestats"
 	"vmr/internal/router"
@@ -237,7 +239,7 @@ models:
 
 	// Give the done() hooks time to run, then confirm nothing was booked.
 	time.Sleep(50 * time.Millisecond)
-	snapshot := lstats.Snapshot()
+	snapshot := lstats.Snapshot(livestats.HourlyTailDefault)
 	if len(snapshot.Hourly) != 0 || len(snapshot.Daily) != 0 || len(snapshot.ByProviderModel) != 0 {
 		t.Errorf("pre-probe failures booked: hourly=%d daily=%d providers=%d",
 			len(snapshot.Hourly), len(snapshot.Daily), len(snapshot.ByProviderModel))
@@ -248,7 +250,7 @@ models:
 		t.Fatalf("valid request status = %d, want 200", resp.StatusCode)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if got := lstats.Snapshot().Hourly; len(got) == 0 {
+	if got := lstats.Snapshot(livestats.HourlyTailDefault).Hourly; len(got) == 0 {
 		t.Error("valid routed request was not booked into the ledger")
 	}
 }
@@ -297,7 +299,7 @@ models:
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if got := lstats.Snapshot().ByProviderModel; len(got) == 0 || got[0].OK != 1 {
+	if got := lstats.Snapshot(livestats.HourlyTailDefault).ByProviderModel; len(got) == 0 || got[0].OK != 1 {
 		t.Errorf("audit-off request not booked: %+v", got)
 	}
 }
@@ -306,16 +308,24 @@ models:
 // contract. The dashboard reads these keys by exact name; json.Marshal of the
 // wire types must emit them, and the embedded JS must not carry the three
 // access patterns that were silently wrong (ttft_p50 vs ttft_p50_ms in the
-// Quantiles tag, r.name vs r.value in DimensionRow, and taking the last
+// WindowBlock tag, r.name vs r.value in DimensionRow, and taking the last
 // (period x dims) row of hourly[]/daily[] as if it were the period total).
+// The revoked tps rate keys (design §8) must not reappear on the wire.
 func TestStatsHTMLJSONContract(t *testing.T) {
 	var resp statsResponse
 	resp.Concurrency.Limit, resp.Concurrency.InFlight, resp.Concurrency.Waiting = 8, 3, 1
-	q := &livestats.Quantiles{TTFTP50: 100, TTFTP90: 200, TPSP50: 50, TPSP90: 90}
+	wb := &livestats.WindowBlock{N: 43, Tokens: livestats.TokenCounts{In: 1200, Out: 900}, TTFTP50: 412, TTFTP90: 680, ToksP50: 41.2, ToksP90: 55.7}
 	resp.Inflight = []router.InflightEntry{{Seq: 1, State: "running", VModel: "coding"}}
+	resp.Overall = wb
+	resp.RecentErrors = []livestats.RecentErrorRow{{
+		TS: time.Now(), VModel: "agent", Protocol: "anthropic-messages", Stream: true,
+		ClientKeyTag: "openclaw", Provider: "p1-main", KeyLabel: "main",
+		Model: "claude-opus-4.6", Attempt: 2, Outcome: "error",
+		ErrorClass: "upstream_5xx", Status: 502, DurMS: 4100,
+	}}
 	resp.ByProviderModel = []livestats.ProviderRow{{
-		Provider: "p1", Model: "m1", Stream: true, OK: 5,
-		Tokens: livestats.TokenCounts{In: 100, Out: 60}, Last10: q, Last100: q,
+		Provider: "p1", KeyLabel: "main", Model: "m1", Stream: true, OK: 5,
+		Tokens: livestats.TokenCounts{In: 100, Out: 60}, Last10: wb, Last100: wb,
 	}}
 	resp.ByKeyLabel = []livestats.DimensionRow{{Value: "main", OK: 5, Count: 5}}
 	resp.ByClientKeyTag = resp.ByKeyLabel
@@ -329,11 +339,17 @@ func TestStatsHTMLJSONContract(t *testing.T) {
 	js := string(b)
 	for _, key := range []string{
 		`"in_flight":`, `"waiting":`, `"ttft_p50_ms":`, `"ttft_p90_ms":`,
-		`"tps_p50":`, `"tps_p90":`, `"value":`, `"counters":`, `"last_100":`,
+		`"toks_p50":`, `"toks_p90":`, `"n":43`, `"tokens":`,
+		`"key_label":`, `"overall":`, `"recent_errors":`,
+		`"attempt":2`, `"error_class":"upstream_5xx"`, `"status":502`,
+		`"value":`, `"counters":`, `"last_100":`,
 	} {
 		if !strings.Contains(js, key) {
 			t.Errorf("statsResponse JSON missing a key the dashboard reads: %s", key)
 		}
+	}
+	if strings.Contains(js, `"tps_`) {
+		t.Error("statsResponse JSON still carries a revoked tps rate key (design §8: only toks)")
 	}
 
 	html := string(statsHTMLPage)
@@ -347,6 +363,242 @@ func TestStatsHTMLJSONContract(t *testing.T) {
 			t.Errorf("stats.html JS still carries a known-broken pattern: %q", bad)
 		}
 	}
+}
+
+// TestParseRangeTail pins the ?range= vocabulary (contracts §1.5): 24h/3d/7d
+// select the 24/72/168-hour tails; anything else — missing, malformed,
+// out-of-vocabulary — falls back to the 48h default. The 7d cap is the
+// deliberate ceiling.
+func TestParseRangeTail(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", livestats.HourlyTailDefault},
+		{"24h", 24},
+		{"3d", 72},
+		{"7d", 168},
+		{"48h", livestats.HourlyTailDefault},
+		{"1d", livestats.HourlyTailDefault},
+		{"30d", livestats.HourlyTailDefault},
+		{"24H", livestats.HourlyTailDefault},
+		{"bogus", livestats.HourlyTailDefault},
+	}
+	for _, c := range cases {
+		if got := parseRangeTail(c.in); got != c.want {
+			t.Errorf("parseRangeTail(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// TestSampleFromRecordTerminalAttempt pins the recent_errors inputs
+// (contracts §1.6): error_class/status quote the terminal attempt — the
+// winning attempt when the request forwarded, else the last attempt —
+// verbatim (no re-classification), and Attempt is the 1-based try count.
+func TestSampleFromRecordTerminalAttempt(t *testing.T) {
+	forwarded := func(p, kl, m string) audit.Attempt {
+		return audit.Attempt{
+			Provider: p, KeyLabel: kl, Model: m, Forwarded: true,
+			Response: &audit.Message{Status: 200},
+			Tokens:   &audit.TokenCount{In: 10, Out: 5},
+		}
+	}
+	failed := func(class string, status int) audit.Attempt {
+		a := audit.Attempt{ErrorClass: class}
+		if status != 0 {
+			a.Response = &audit.Message{Status: status}
+		}
+		return a
+	}
+
+	cases := []struct {
+		name       string
+		attempts   []audit.Attempt
+		wantClass  string
+		wantStatus int
+		wantTry    int
+	}{
+		{"no attempts", nil, "", 0, 0},
+		{"all failed: last attempt wins the stamp",
+			[]audit.Attempt{failed("auth", 401), failed("upstream_5xx", 502)},
+			"upstream_5xx", 502, 2},
+		{"winning attempt takes precedence over later failures",
+			[]audit.Attempt{forwarded("p1", "main", "m1"), failed("upstream_5xx", 502)},
+			"", 200, 2},
+		{"single forwarded attempt",
+			[]audit.Attempt{forwarded("p1", "main", "m1")},
+			"", 200, 1},
+		{"failed attempt without a response keeps status 0",
+			[]audit.Attempt{failed("network", 0)},
+			"network", 0, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := sampleFromRecord(&audit.Record{Outcome: "error", Attempts: c.attempts})
+			if s.ErrorClass != c.wantClass {
+				t.Errorf("error_class = %q, want %q (verbatim, never re-classified)", s.ErrorClass, c.wantClass)
+			}
+			if s.Status != c.wantStatus {
+				t.Errorf("status = %d, want %d", s.Status, c.wantStatus)
+			}
+			if s.Attempt != c.wantTry {
+				t.Errorf("attempt = %d, want %d", s.Attempt, c.wantTry)
+			}
+		})
+	}
+
+	// Winning-attempt service identity still rides the forwarded attempt.
+	s := sampleFromRecord(&audit.Record{Outcome: "ok", Attempts: []audit.Attempt{forwarded("p1", "main", "m1")}})
+	if s.Provider != "p1" || s.KeyLabel != "main" || s.Model != "m1" {
+		t.Errorf("service identity = %s/%s/%s, want p1/main/m1", s.Provider, s.KeyLabel, s.Model)
+	}
+	if s.Tokens.In != 10 || s.Tokens.Out != 5 {
+		t.Errorf("tokens = %+v, want in=10 out=5", s.Tokens)
+	}
+
+	// A never-forwarded failure keeps the service face empty (§4.2).
+	s = sampleFromRecord(&audit.Record{Outcome: "error", Attempts: []audit.Attempt{failed("auth", 401)}})
+	if s.Provider != "" || s.KeyLabel != "" || s.Model != "" {
+		t.Errorf("unforwarded failure must carry no service identity: %+v", s)
+	}
+
+	if got := sampleFromRecord(nil); got != (livestats.Sample{}) {
+		t.Errorf("nil record must map to the zero sample, got %+v", got)
+	}
+}
+
+// TestStatsRangeHourlyWindow drives /stats?range= end to end: 30 distinct
+// observed hours land in every tail that covers them, the 24h tail keeps
+// only the newest 24, invalid values fall back to the default, daily[] is
+// untouched by the range, and concurrent polls of different ranges share
+// the per-tail cache cleanly (run under -race).
+func TestStatsRangeHourlyWindow(t *testing.T) {
+	cfg, err := config.Parse([]byte(`listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai-completions: http://127.0.0.1:9}
+    api_key: sk-up
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+
+	lstats, err := livestats.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lstats.Close() })
+
+	// 30 distinct observed hours ending at the current hour.
+	now := time.Now()
+	for i := 0; i < 30; i++ {
+		lstats.Record(livestats.Sample{
+			TS:     now.Add(-time.Duration(i) * time.Hour),
+			VModel: "coding", Outcome: livestats.OutcomeOK,
+		})
+	}
+
+	ts := httptest.NewServer(New(rt, nil).WithLiveStats(lstats).Handler())
+	t.Cleanup(ts.Close)
+
+	get := func(rq string) (*statsResponse, string) {
+		res, err := http.Get(ts.URL + "/stats" + rq)
+		if err != nil {
+			t.Fatalf("GET %s: %v", rq, err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("GET %s status = %d", rq, res.StatusCode)
+		}
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("read %s: %v", rq, err)
+		}
+		body := string(b)
+		var out statsResponse
+		if err := json.Unmarshal(b, &out); err != nil {
+			t.Fatalf("decode %s: %v", rq, err)
+		}
+		return &out, body
+	}
+
+	if _, body := get("?range=24h"); lenHourly(t, body) != 24 {
+		t.Errorf("24h tail kept %d hourly rows, want 24", lenHourly(t, body))
+	}
+	if _, body := get("?range=3d"); lenHourly(t, body) != 30 {
+		t.Errorf("3d tail kept %d hourly rows, want 30", lenHourly(t, body))
+	}
+	if _, body := get("?range=7d"); lenHourly(t, body) != 30 {
+		t.Errorf("7d tail kept %d hourly rows, want 30", lenHourly(t, body))
+	}
+	def, defBody := get("")
+	if len(def.Hourly) != 30 {
+		t.Errorf("default tail kept %d hourly rows, want 30", len(def.Hourly))
+	}
+	if strings.Contains(defBody, `"overall":`) {
+		t.Error("overall must be omitted when no ring samples exist")
+	}
+	if !strings.Contains(defBody, `"recent_errors":[]`) {
+		t.Errorf("recent_errors must be present (empty array) in every payload: %s", defBody)
+	}
+
+	// daily[] is fixed regardless of range: same rows under every tail.
+	days := len(def.Daily)
+	if days == 0 {
+		t.Fatal("expected daily rows")
+	}
+	for _, rq := range []string{"?range=24h", "?range=3d", "?range=7d", "?range=bogus"} {
+		r, _ := get(rq)
+		if len(r.Daily) != days {
+			t.Errorf("%s: daily rows = %d, want %d (daily is range-invariant)", rq, len(r.Daily), days)
+		}
+	}
+
+	// Concurrent mixed-range polls: the per-tail cache must hold up under
+	// -race with no cross-range contamination.
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			rqs := []string{"", "?range=24h", "?range=3d", "?range=7d", "?range=bogus"}
+			for i := 0; i < 20; i++ {
+				r, _ := get(rqs[(w+i)%len(rqs)])
+				want := 30
+				if rqs[(w+i)%len(rqs)] == "?range=24h" {
+					want = 24
+				}
+				if len(r.Hourly) != want {
+					t.Errorf("concurrent %s: hourly rows = %d, want %d", rqs[(w+i)%len(rqs)], len(r.Hourly), want)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+}
+
+// lenHourly counts hourly rows in the decoded payload. daily[] rows share
+// the same row shape, so the count is taken from the struct, not by
+// pattern-matching the wire.
+func lenHourly(t *testing.T, body string) int {
+	t.Helper()
+	var out statsResponse
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return len(out.Hourly)
 }
 
 // TestStatsHTMLContainsNavMarkers confirms /stats.html links to sibling pages.

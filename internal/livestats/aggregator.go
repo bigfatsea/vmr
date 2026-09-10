@@ -9,11 +9,11 @@ import (
 )
 
 // Aggregator is the completion-time ledger (§3.4/§4): in-memory counters for
-// the current hour, the rollup history's memory image, and the per-provider
-// TTFT/TPS rings — plus the current hour's slim file handle. One mutex
-// covers all memory state and the file append (§4.3: one lock per request,
-// coarse by design); Record never blocks on anything but that mutex and the
-// file write.
+// the current hour, the rollup history's memory image, the per-endpoint
+// performance rings, and the recent_errors ring — plus the current hour's
+// slim file handle. One mutex covers all memory state and the file append
+// (§4.3: one lock per request, coarse by design); Record never blocks on
+// anything but that mutex and the file write.
 type Aggregator struct {
 	mu     sync.Mutex
 	dir    string
@@ -25,13 +25,27 @@ type Aggregator struct {
 	cur    map[dimsKey]Counters
 	rings  map[ringKey]*ring
 
+	// recentErrs is the recent_errors ring (§8.1): the last recentErrCap
+	// non-ok samples, stored newest first. Purely in-memory — restart
+	// clears it, nothing is ever persisted, no bodies.
+	recentErrs []Sample
+
 	// snapCache serves the /stats read path (CachedSnapshot): a full fold is
 	// O(rollup), and the dashboard polls ~1s from possibly several tabs at
-	// once, so without this each poll would hold mu through the fold.
-	snapCache Snapshot
-	snapAt    time.Time
-	snapValid bool
+	// once, so without this each poll would hold mu through the fold. Keyed
+	// by the hourly tail so ?range= variants don't thrash each other.
+	snapCache map[int]cachedSnap
 }
+
+// cachedSnap is one tail-window's cached fold with its fill time.
+type cachedSnap struct {
+	snap Snapshot
+	at   time.Time
+}
+
+// snapCacheMax bounds the per-tail cache defensively: callers can only ask
+// for the four range keys, so anything beyond that is a programming error.
+const snapCacheMax = 8
 
 // New builds the aggregator and performs synchronous restart recovery (§7):
 // load rollup (last-wins) → catch-up-roll older slim files → rebuild current
@@ -57,7 +71,8 @@ func NewAt(dir string, now func() time.Time) (*Aggregator, error) {
 
 // recover runs the §7 startup sequence. Rollup load and slim rebuild
 // degrade gracefully (unreadable history starts empty; a corrupt line is
-// skipped); only a failure to create the log dir is fatal.
+// skipped); only a failure to create the log dir is fatal. recentErrs
+// deliberately starts empty — the ring is purely in-memory (§8.1).
 func (a *Aggregator) recover(now time.Time) error {
 	a.hour = hourStartOf(now)
 	if err := os.MkdirAll(a.dir, dirMode); err != nil {
@@ -173,6 +188,7 @@ func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 	c.addSample(s)
 	a.cur[key] = c
 	addRing(a.rings, s)
+	a.recentErrs = bookRecentError(a.recentErrs, s)
 
 	if appendFile && a.slim != nil {
 		row := slimRow{
@@ -214,10 +230,25 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 	c.addSample(s)
 	a.rollup[hour][key] = c
 	addRing(a.rings, s)
+	a.recentErrs = bookRecentError(a.recentErrs, s)
 
 	// In last-wins semantics, appending the updated total ensures subsequent
 	// loads reflect the merged state without an upsert.
 	_ = appendJSONL(a.rollupPath(), countersRow(hour, key, c))
+}
+
+// bookRecentError appends one non-ok sample to the recent_errors ring
+// (§8.1): newest first, capped at recentErrCap, error and canceled both
+// in, error_class/status/attempt passed through verbatim.
+func bookRecentError(ring []Sample, s Sample) []Sample {
+	if s.Outcome == OutcomeOK {
+		return ring
+	}
+	ring = append(ring, s)
+	if len(ring) > recentErrCap {
+		ring = ring[len(ring)-recentErrCap:]
+	}
+	return ring
 }
 
 // addRing applies the ring admission rule (§4.2): ok + forwarded + measured
@@ -226,13 +257,13 @@ func addRing(rings map[ringKey]*ring, s Sample) {
 	if s.Outcome != OutcomeOK || s.Provider == "" || s.TTFTMS == 0 {
 		return
 	}
-	k := ringKey{s.Provider, s.Model, s.Stream}
+	k := ringKey{s.Provider, s.KeyLabel, s.Model, s.Stream}
 	r := rings[k]
 	if r == nil {
 		r = &ring{}
 		rings[k] = r
 	}
-	r.add(ringEntry{ts: s.TS, durMS: s.DurMS, ttftMS: s.TTFTMS, tokensOut: s.Tokens.Out})
+	r.add(ringEntry{ts: s.TS, durMS: s.DurMS, ttftMS: s.TTFTMS, tokens: s.Tokens})
 }
 
 // rollHourLocked closes the open hour: roll slim files older than newHour
@@ -265,30 +296,37 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 }
 
 // Snapshot aggregates the whole ledger, fresh every call. Read path, holds
-// the same coarse mutex (§4.3). Tests and callers needing an exact read use
-// this; the /stats HTTP path uses CachedSnapshot.
-func (a *Aggregator) Snapshot() Snapshot {
+// the same coarse mutex (§4.3). hourlyTail bounds the hourly[] window
+// (HourlyTailDefault, or 24/72/168 via /stats?range=). Tests and callers
+// needing an exact read use this; the /stats HTTP path uses CachedSnapshot.
+func (a *Aggregator) Snapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.snapshotLocked()
+	return a.snapshotLocked(hourlyTail)
 }
 
 // CachedSnapshot is Snapshot for the /stats read path: it reuses the last
-// fold for up to snapCacheTTL so N concurrent dashboard pollers cost one
-// aggregation, not N. Record never invalidates it — a monitor tolerates a
-// second of lag (§4.3). Uses the injectable clock so the window is testable.
-func (a *Aggregator) CachedSnapshot() Snapshot {
+// fold per hourly tail for up to snapCacheTTL so N concurrent dashboard
+// pollers cost one aggregation, not N. Record never invalidates it — a
+// monitor tolerates a second of lag (§4.3). Uses the injectable clock so
+// the window is testable.
+func (a *Aggregator) CachedSnapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.snapValid {
-		if d := a.now().Sub(a.snapAt); d >= 0 && d < snapCacheTTL {
-			return a.snapCache
+	if a.snapCache == nil {
+		a.snapCache = make(map[int]cachedSnap)
+	}
+	if c, ok := a.snapCache[hourlyTail]; ok {
+		if d := a.now().Sub(c.at); d >= 0 && d < snapCacheTTL {
+			return c.snap
 		}
 	}
-	a.snapCache = a.snapshotLocked()
-	a.snapAt = a.now()
-	a.snapValid = true
-	return a.snapCache
+	snap := a.snapshotLocked(hourlyTail)
+	if len(a.snapCache) >= snapCacheMax {
+		a.snapCache = make(map[int]cachedSnap) // defensive: only 4 tails are legal
+	}
+	a.snapCache[hourlyTail] = cachedSnap{snap: snap, at: a.now()}
+	return snap
 }
 
 // Close releases the slim file handle and the advisory dir lock; the

@@ -8,13 +8,17 @@ import (
 
 // Snapshot is the JSON-ready read-time aggregation behind GET /stats
 // (design §8). Everything is computed at read time from the in-memory
-// ledger; nothing here mutates aggregator state.
+// ledger; nothing here mutates aggregator state. Hourly is parameterized
+// by the caller's tail (HourlyTailDefault, or 24/72/168 via ?range=);
+// daily[] is always the last dailyTail local-calendar days with data.
 type Snapshot struct {
-	Hourly          []HourlyRow    `json:"hourly"`
-	Daily           []HourlyRow    `json:"daily"`
-	ByProviderModel []ProviderRow  `json:"by_provider_model"`
-	ByClientKeyTag  []DimensionRow `json:"by_client_key_tag"`
-	ByKeyLabel      []DimensionRow `json:"by_key_label"`
+	Hourly          []HourlyRow      `json:"hourly"`
+	Daily           []HourlyRow      `json:"daily"`
+	Overall         *WindowBlock     `json:"overall,omitempty"`
+	RecentErrors    []RecentErrorRow `json:"recent_errors"`
+	ByProviderModel []ProviderRow    `json:"by_provider_model"`
+	ByClientKeyTag  []DimensionRow   `json:"by_client_key_tag"`
+	ByKeyLabel      []DimensionRow   `json:"by_key_label"`
 }
 
 // HourlyRow is one (hour or day × dims) group in the hourly/daily slices.
@@ -25,23 +29,45 @@ type HourlyRow struct {
 	Counters Counters  `json:"counters"`
 }
 
-// ProviderRow is the per-(provider, model, stream) cumulative + mean
-// profile with the ring's recent TTFT/TPS percentiles. Stream is part of
-// the identity so the two TPS denominators never share a percentile pool.
+// RecentErrorRow is one recent_errors[] entry (contracts §1.4): the
+// failure/canceled detail the hourly counters flatten away. Purely
+// in-memory, never persisted, no bodies. ErrorClass quotes the routing
+// half's stamp verbatim — the stats side never re-classifies. Status 0
+// (no HTTP exchange) is omitted.
+type RecentErrorRow struct {
+	TS           time.Time `json:"ts"`
+	VModel       string    `json:"vmodel"`
+	Protocol     string    `json:"protocol"`
+	Stream       bool      `json:"stream"`
+	ClientKeyTag string    `json:"client_key_tag"`
+	Provider     string    `json:"provider"`
+	KeyLabel     string    `json:"key_label"`
+	Model        string    `json:"model"`
+	Attempt      int       `json:"attempt"`
+	Outcome      string    `json:"outcome"`
+	ErrorClass   string    `json:"error_class"`
+	Status       int       `json:"status,omitempty"`
+	DurMS        int64     `json:"dur_ms"`
+}
+
+// ProviderRow is the per-(provider, key_label, model, stream) cumulative +
+// mean profile with the ring's recent window blocks. Stream is part of the
+// identity so the two request shapes never share a percentile pool.
 type ProviderRow struct {
-	Provider   string      `json:"provider"`
-	Model      string      `json:"model"`
-	Stream     bool        `json:"stream"`
-	OK         int64       `json:"ok"`
-	Error      int64       `json:"error"`
-	Canceled   int64       `json:"canceled"`
-	Tokens     TokenCounts `json:"tokens"`
-	DurMS      SumCount    `json:"dur_ms"`
-	TTFTMS     SumCount    `json:"ttft_ms"`
-	DurMSMean  float64     `json:"dur_ms_mean"`
-	TTFTMSMean float64     `json:"ttft_ms_mean"`
-	Last10     *Quantiles  `json:"last_10,omitempty"`
-	Last100    *Quantiles  `json:"last_100,omitempty"`
+	Provider   string       `json:"provider"`
+	KeyLabel   string       `json:"key_label"`
+	Model      string       `json:"model"`
+	Stream     bool         `json:"stream"`
+	OK         int64        `json:"ok"`
+	Error      int64        `json:"error"`
+	Canceled   int64        `json:"canceled"`
+	Tokens     TokenCounts  `json:"tokens"`
+	DurMS      SumCount     `json:"dur_ms"`
+	TTFTMS     SumCount     `json:"ttft_ms"`
+	DurMSMean  float64      `json:"dur_ms_mean"`
+	TTFTMSMean float64      `json:"ttft_ms_mean"`
+	Last10     *WindowBlock `json:"last_10,omitempty"`
+	Last100    *WindowBlock `json:"last_100,omitempty"`
 }
 
 // DimensionRow is one group of a usage profile sliced along a single axis.
@@ -79,9 +105,10 @@ func (r *hourRow) add(h time.Time, c Counters) {
 	r.byHr[h.Unix()] = acc
 }
 
-// snapshotLocked aggregates the whole ledger for /stats. Caller holds the
-// mutex.
-func (a *Aggregator) snapshotLocked() Snapshot {
+// snapshotLocked aggregates the whole ledger for /stats. hourlyTail is the
+// caller-chosen hourly window (contracts §1.5); dailyTail is fixed. Caller
+// holds the mutex.
+func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	// request-face dimension profiles accumulate across every group; the
 	// provider profile covers forwarded samples only (§4.2).
 	type axis map[string]*Counters
@@ -101,7 +128,7 @@ func (a *Aggregator) snapshotLocked() Snapshot {
 			bookAxis(byTag, k.clientKeyTag, c)
 			bookAxis(byLabel, k.keyLabel, c)
 			if k.provider != "" {
-				kk := ringKey{k.provider, k.model, k.stream}
+				kk := ringKey{k.provider, k.keyLabel, k.model, k.stream}
 				p := prov[kk]
 				if p == nil {
 					p = &Counters{}
@@ -117,7 +144,7 @@ func (a *Aggregator) snapshotLocked() Snapshot {
 	}
 	fold(a.cur, a.hour)
 
-	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings)
+	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.recentErrs, hourlyTail)
 }
 
 // bookAxis adds a group's request-face outcome counts and tokens to a
@@ -138,8 +165,9 @@ func bookAxis(m map[string]*Counters, v string, c Counters) {
 }
 
 // assembleSnapshot folds the hour rows into hourly/daily slices, builds the
-// provider rows with ring percentiles, and orders everything.
-func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring) Snapshot {
+// provider rows with their recent window blocks, the overall block over the
+// union of all ring samples (contracts §1.3), and the recent_errors rows.
+func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, recentErrs []Sample, hourlyTail int) Snapshot {
 	// hourly[] keeps the most recent hourlyTail hours with data; daily[] the
 	// most recent dailyTail local-calendar-days. Both windows are derived from
 	// the full observed-hour set before either is truncated.
@@ -207,6 +235,8 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 		}
 	}
 	snap.Daily = sortedDaily(daily)
+	snap.Overall = overallBlock(rings)
+	snap.RecentErrors = recentErrorRows(recentErrs)
 	snap.ByProviderModel = buildProviderRows(prov, rings)
 	snap.ByClientKeyTag = buildAxisRows(byTag)
 	snap.ByKeyLabel = buildAxisRows(byLabel)
@@ -255,10 +285,40 @@ func sortedDaily(m map[string]*HourlyRow) []HourlyRow {
 	return rows
 }
 
-// buildProviderRows merges cumulative counters with each ring's percentile
-// window. A ring whose key has no counters left (rolled away, or restarted
-// into an empty current hour) still shows up, so the recent-performance
-// view never goes blind.
+// overallBlock merges the union of every ring's samples into one window
+// block (contracts §1.3): percentiles cannot be merged per key, so the
+// server computes the block over the raw union at read time.
+func overallBlock(rings map[ringKey]*ring) *WindowBlock {
+	var all []ringEntry
+	for _, r := range rings {
+		all = append(all, r.last(ringCap)...)
+	}
+	if len(all) == 0 {
+		return nil
+	}
+	return windowBlock(all)
+}
+
+// recentErrorRows maps the in-memory ring (append order, oldest last) to
+// its wire shape, newest first (contracts §1.4).
+func recentErrorRows(recentErrs []Sample) []RecentErrorRow {
+	rows := make([]RecentErrorRow, 0, len(recentErrs))
+	for i := len(recentErrs) - 1; i >= 0; i-- {
+		s := recentErrs[i]
+		rows = append(rows, RecentErrorRow{
+			TS: s.TS, VModel: s.VModel, Protocol: s.Protocol, Stream: s.Stream,
+			ClientKeyTag: s.ClientKeyTag, Provider: s.Provider, KeyLabel: s.KeyLabel,
+			Model: s.Model, Attempt: s.Attempt, Outcome: s.Outcome,
+			ErrorClass: s.ErrorClass, Status: s.Status, DurMS: s.DurMS,
+		})
+	}
+	return rows
+}
+
+// buildProviderRows merges cumulative counters with each ring's recent
+// window blocks. A ring whose key has no counters left (rolled away, or
+// restarted into an empty current hour) still shows up, so the
+// recent-performance view never goes blind.
 func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []ProviderRow {
 	keys := make([]ringKey, 0, len(prov))
 	for k := range prov {
@@ -273,6 +333,9 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 		if c := strings.Compare(x.provider, y.provider); c != 0 {
 			return c
 		}
+		if c := strings.Compare(x.keyLabel, y.keyLabel); c != 0 {
+			return c
+		}
 		if c := strings.Compare(x.model, y.model); c != 0 {
 			return c
 		}
@@ -280,7 +343,7 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 	})
 	rows := make([]ProviderRow, 0, len(keys))
 	for _, k := range keys {
-		row := ProviderRow{Provider: k.provider, Model: k.model, Stream: k.stream}
+		row := ProviderRow{Provider: k.provider, KeyLabel: k.keyLabel, Model: k.model, Stream: k.stream}
 		if c := prov[k]; c != nil {
 			row.OK, row.Error, row.Canceled = c.OK, c.Error, c.Canceled
 			row.Tokens, row.DurMS, row.TTFTMS = c.Tokens, c.DurMS, c.TTFTMS
@@ -292,8 +355,8 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 			}
 		}
 		if r := rings[k]; r != nil && r.n > 0 {
-			row.Last10 = quantilesFor(r.last(10), k.stream)
-			row.Last100 = quantilesFor(r.last(ringCap), k.stream)
+			row.Last10 = windowBlock(r.last(10))
+			row.Last100 = windowBlock(r.last(ringCap))
 		}
 		rows = append(rows, row)
 	}

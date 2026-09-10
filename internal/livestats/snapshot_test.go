@@ -70,7 +70,7 @@ func TestSnapshot_HourlyDailyAndDimensions(t *testing.T) {
 	}
 	agg.Record(s3)
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 
 	// 1. Hourly rows: must have 3 distinct entries across the 3 hours
 	if len(snap.Hourly) != 3 {
@@ -116,8 +116,9 @@ func TestSnapshot_StreamVsNonStreamProviderRows(t *testing.T) {
 	}
 	defer agg.Close()
 
-	// Add 10 streaming samples:
-	// tokensOut=150, dur=4000ms, ttft=1000ms -> tps = 150 / 3.0s = 50.0
+	// 10 streaming + 10 non-streaming samples with identical tuples:
+	// toks = (100+50)/4.0s = 37.5 under the single dur_ms denominator
+	// (design §8: tps revoked, stream and non-stream share one pool rule).
 	for i := 0; i < 10; i++ {
 		agg.Record(Sample{
 			TS:       now.Add(time.Duration(i) * time.Second),
@@ -128,13 +129,8 @@ func TestSnapshot_StreamVsNonStreamProviderRows(t *testing.T) {
 			Model:    "m1",
 			DurMS:    4000,
 			TTFTMS:   1000,
-			Tokens:   TokenCounts{Out: 150},
+			Tokens:   TokenCounts{In: 100, Out: 50},
 		})
-	}
-
-	// Add 10 non-streaming samples:
-	// tokensOut=100, dur=5000ms, ttft=500ms -> non-stream tps = 100 / 5.0s = 20.0
-	for i := 0; i < 10; i++ {
 		agg.Record(Sample{
 			TS:       now.Add(time.Duration(20+i) * time.Second),
 			VModel:   "coding",
@@ -142,14 +138,13 @@ func TestSnapshot_StreamVsNonStreamProviderRows(t *testing.T) {
 			Outcome:  OutcomeOK,
 			Provider: "p1",
 			Model:    "m1",
-			DurMS:    5000,
-			TTFTMS:   500,
-			Tokens:   TokenCounts{Out: 100},
+			DurMS:    4000,
+			TTFTMS:   1000,
+			Tokens:   TokenCounts{In: 100, Out: 50},
 		})
 	}
 
-	snap := agg.Snapshot()
-	// Must have two separate ProviderRow entries (stream=false and stream=true)
+	snap := agg.Snapshot(HourlyTailDefault)
 	if len(snap.ByProviderModel) != 2 {
 		t.Fatalf("expected 2 provider rows (stream vs non-stream), got %d", len(snap.ByProviderModel))
 	}
@@ -163,20 +158,78 @@ func TestSnapshot_StreamVsNonStreamProviderRows(t *testing.T) {
 		}
 	}
 
-	// Check streaming row percentiles
-	if rowStream.Last10 == nil {
-		t.Fatalf("streaming Last10 nil")
+	for name, r := range map[string]ProviderRow{"stream": rowStream, "non-stream": rowNonStream} {
+		if r.Last10 == nil {
+			t.Fatalf("%s Last10 nil", name)
+		}
+		if r.Last10.N != 10 {
+			t.Errorf("%s Last10 n = %d, want 10 (actual window fill)", name, r.Last10.N)
+		}
+		if math.Abs(r.Last10.ToksP50-37.5) > 1e-4 {
+			t.Errorf("%s toks p50 = %f, want 37.5 (uniform denominator)", name, r.Last10.ToksP50)
+		}
+		if r.Last10.TTFTP50 != 1000 {
+			t.Errorf("%s ttft p50 = %d, want 1000", name, r.Last10.TTFTP50)
+		}
+		if r.Last10.Tokens.In != 1000 || r.Last10.Tokens.Out != 500 {
+			t.Errorf("%s window token sums wrong: %+v", name, r.Last10.Tokens)
+		}
 	}
-	if math.Abs(rowStream.Last10.TPSP50-50.0) > 1e-4 {
-		t.Errorf("expected stream TPS p50=50.0, got %f", rowStream.Last10.TPSP50)
+}
+
+// TestSnapshot_OverallMatchesSingleRingLast100 pins the contracts §1.3
+// invariant: with exactly one ring key, overall must agree numerically with
+// that key's last_100 — the union is then just that ring's window.
+func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local)
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	// 12 samples on one key: ttft/tokens/dur all vary, so every field of
+	// the block is non-trivial.
+	for i := 0; i < 12; i++ {
+		agg.Record(Sample{
+			TS:       now.Add(time.Duration(i) * time.Second),
+			VModel:   "coding",
+			Stream:   true,
+			Outcome:  OutcomeOK,
+			Provider: "p1",
+			KeyLabel: "main",
+			Model:    "m1",
+			DurMS:    int64(1000 + i*100),
+			TTFTMS:   int64(100 + i*10),
+			Tokens:   TokenCounts{In: int64(100 + i), Out: int64(i)},
+		})
 	}
 
-	// Check non-streaming row percentiles
-	if rowNonStream.Last10 == nil {
-		t.Fatalf("non-streaming Last10 nil")
+	snap := agg.Snapshot(HourlyTailDefault)
+	if len(snap.ByProviderModel) != 1 {
+		t.Fatalf("expected 1 provider row, got %d", len(snap.ByProviderModel))
 	}
-	if math.Abs(rowNonStream.Last10.TPSP50-20.0) > 1e-4 {
-		t.Errorf("expected non-stream TPS p50=20.0, got %f", rowNonStream.Last10.TPSP50)
+	if snap.Overall == nil {
+		t.Fatal("overall block missing with ring data present")
+	}
+	last100 := snap.ByProviderModel[0].Last100
+	if last100 == nil {
+		t.Fatal("last_100 block missing")
+	}
+	if snap.Overall.N != last100.N {
+		t.Errorf("overall n = %d, want last_100 n %d", snap.Overall.N, last100.N)
+	}
+	if snap.Overall.Tokens != last100.Tokens {
+		t.Errorf("overall tokens %+v, want %+v", snap.Overall.Tokens, last100.Tokens)
+	}
+	if snap.Overall.TTFTP50 != last100.TTFTP50 || snap.Overall.TTFTP90 != last100.TTFTP90 {
+		t.Errorf("overall ttft p50/p90 = %d/%d, want %d/%d",
+			snap.Overall.TTFTP50, snap.Overall.TTFTP90, last100.TTFTP50, last100.TTFTP90)
+	}
+	if snap.Overall.ToksP50 != last100.ToksP50 || snap.Overall.ToksP90 != last100.ToksP90 {
+		t.Errorf("overall toks p50/p90 = %f/%f, want %f/%f",
+			snap.Overall.ToksP50, snap.Overall.ToksP90, last100.ToksP50, last100.ToksP90)
 	}
 }
 
@@ -202,7 +255,7 @@ func TestSnapshot_DailyTailBoundsHistory(t *testing.T) {
 		})
 	}
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 	if len(snap.Daily) != dailyTail {
 		t.Fatalf("daily rows = %d, want dailyTail=%d", len(snap.Daily), dailyTail)
 	}
@@ -239,7 +292,7 @@ func TestSnapshot_DailyBucketsUseLocalCalendarDay(t *testing.T) {
 		Provider: "p1", Model: "m1", Tokens: TokenCounts{In: 1, Out: 1},
 	})
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 	if len(snap.Daily) != 1 {
 		t.Fatalf("expected 1 daily row, got %d", len(snap.Daily))
 	}

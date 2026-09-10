@@ -71,7 +71,7 @@ func TestAggregator_AttributionRules(t *testing.T) {
 	}
 	agg.Record(sValid)
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 
 	// Verify ProviderRow
 	if len(snap.ByProviderModel) != 1 {
@@ -155,7 +155,7 @@ func TestAggregator_HourlyLazyRollAndFileLifecycle(t *testing.T) {
 	}
 
 	// Snapshot should reflect both hour 10 and hour 11 in hourly[]
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 	if len(snap.Hourly) != 2 {
 		t.Errorf("expected 2 hourly rows, got %d", len(snap.Hourly))
 	}
@@ -222,7 +222,7 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 		t.Errorf("hour 10 slim should remain open for write")
 	}
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 
 	// Ring must have recovered the last ≤100 samples (samples 21..120)
 	if len(snap.ByProviderModel) != 1 {
@@ -305,7 +305,7 @@ func TestAggregator_CachedSnapshotStaleWindow(t *testing.T) {
 	}
 
 	agg.Record(mk())
-	first := agg.CachedSnapshot()
+	first := agg.CachedSnapshot(HourlyTailDefault)
 	if got := providerOK(first); got != 1 {
 		t.Fatalf("cached OK after 1 record = %d, want 1", got)
 	}
@@ -313,16 +313,16 @@ func TestAggregator_CachedSnapshotStaleWindow(t *testing.T) {
 	// Within the TTL: a new record is not reflected by CachedSnapshot, but
 	// Snapshot sees it immediately.
 	agg.Record(mk())
-	if got := providerOK(agg.CachedSnapshot()); got != 1 {
+	if got := providerOK(agg.CachedSnapshot(HourlyTailDefault)); got != 1 {
 		t.Errorf("cached OK within TTL = %d, want stale 1", got)
 	}
-	if got := providerOK(agg.Snapshot()); got != 2 {
+	if got := providerOK(agg.Snapshot(HourlyTailDefault)); got != 2 {
 		t.Errorf("fresh Snapshot OK = %d, want 2", got)
 	}
 
 	// Past the TTL: CachedSnapshot recomputes.
 	clock = clock.Add(snapCacheTTL + time.Millisecond)
-	if got := providerOK(agg.CachedSnapshot()); got != 2 {
+	if got := providerOK(agg.CachedSnapshot(HourlyTailDefault)); got != 2 {
 		t.Errorf("cached OK past TTL = %d, want refreshed 2", got)
 	}
 }
@@ -371,15 +371,15 @@ func TestAggregator_Concurrency(t *testing.T) {
 				}
 				agg.Record(s)
 				if i%10 == 0 {
-					_ = agg.Snapshot()
-					_ = agg.CachedSnapshot()
+					_ = agg.Snapshot(HourlyTailDefault)
+					_ = agg.CachedSnapshot(HourlyTailDefault)
 				}
 			}
 		}(w)
 	}
 	wg.Wait()
 
-	snap := agg.Snapshot()
+	snap := agg.Snapshot(HourlyTailDefault)
 	expectedTotal := int64(workers * perWorker)
 	if len(snap.ByProviderModel) != 1 {
 		t.Fatalf("expected 1 provider model row, got %d", len(snap.ByProviderModel))
