@@ -13,10 +13,10 @@ func TestRing_AddAndLast(t *testing.T) {
 	// Fill with 150 entries: should retain only the last 100.
 	for i := 1; i <= 150; i++ {
 		r.add(ringEntry{
-			ts:        now.Add(time.Duration(i) * time.Second),
-			durMS:     int64(i * 10),
-			ttftMS:    int64(i),
-			tokensOut: int64(i * 2),
+			ts:     now.Add(time.Duration(i) * time.Second),
+			durMS:  int64(i * 10),
+			ttftMS: int64(i),
+			tokens: TokenCounts{Out: int64(i * 2)},
 		})
 	}
 
@@ -79,37 +79,83 @@ func TestNearestRank_KnownDistribution(t *testing.T) {
 	}
 }
 
-func TestTPSCalculation_StreamVsNonStream(t *testing.T) {
-	// Sample with 100 tokens out, dur 5000ms, ttft 1000ms.
-	e := ringEntry{
-		durMS:     5000,
-		ttftMS:    1000,
-		tokensOut: 100,
+// TestWindowBlock_ToksDenominatorIsUniform pins the single toks rate
+// (design §8): stream and non-stream entries share the dur_ms denominator,
+// so the same tuple yields the same toks regardless of stream.
+func TestWindowBlock_ToksDenominatorIsUniform(t *testing.T) {
+	entries := []ringEntry{
+		{durMS: 5000, ttftMS: 1000, tokens: TokenCounts{Out: 100}}, // toks = 100/5.0 = 20.0
+		{durMS: 5000, ttftMS: 1000, tokens: TokenCounts{Out: 100}},
+	}
+	// Stream and non-stream keys only differ in admission, never in the
+	// rate formula: windowBlock takes no stream argument at all.
+	for _, stream := range []bool{false, true} {
+		wb := windowBlock(entries)
+		if wb == nil {
+			t.Fatalf("stream=%v: nil block", stream)
+		}
+		if math.Abs(wb.ToksP50-20.0) > 1e-6 {
+			t.Errorf("stream=%v: toks p50 = %f, want 20.0", stream, wb.ToksP50)
+		}
+	}
+}
+
+// TestWindowBlock_ExclusionRules pins the percentile-pool admission rules
+// (contracts §1.2): ttft==0 (unmeasured) stays out of the ttft pools; a
+// zero-token-total or non-positive dur_ms sample stays out of the toks
+// pools — while n still counts every sample in the window and tokens still
+// sums the four components.
+func TestWindowBlock_ExclusionRules(t *testing.T) {
+	entries := []ringEntry{
+		{durMS: 1000, ttftMS: 100, tokens: TokenCounts{In: 100, Out: 100}}, // toks = 200 tok / 1s = 200
+		{durMS: 1000, ttftMS: 0, tokens: TokenCounts{Out: 400}},            // no ttft; toks = 400
+		{durMS: 1000, ttftMS: 300, tokens: TokenCounts{}},                  // zero tokens: no toks
+		{durMS: 0, ttftMS: 300, tokens: TokenCounts{Out: 500}},             // zero span: no toks
+		{durMS: 2000, ttftMS: 200, tokens: TokenCounts{CacheRead: 300}},    // toks = 150
+	}
+	wb := windowBlock(entries)
+	if wb.N != 5 {
+		t.Errorf("n = %d, want 5 (every sample counts)", wb.N)
+	}
+	if wb.Tokens.In != 100 || wb.Tokens.Out != 1000 || wb.Tokens.CacheRead != 300 {
+		t.Errorf("tokens sums wrong: %+v", wb.Tokens)
+	}
+	// ttft pool = {100, 300, 200} sorted: p50=200, p90=300.
+	if wb.TTFTP50 != 200 || wb.TTFTP90 != 300 {
+		t.Errorf("ttft p50/p90 = %d/%d, want 200/300", wb.TTFTP50, wb.TTFTP90)
+	}
+	// toks pool = {200, 400, 150} sorted: p50=200, p90=400.
+	if math.Abs(wb.ToksP50-200) > 1e-6 || math.Abs(wb.ToksP90-400) > 1e-6 {
+		t.Errorf("toks p50/p90 = %f/%f, want 200/400", wb.ToksP50, wb.ToksP90)
 	}
 
-	// Streaming TPS denominator: (durMS - ttftMS) / 1000 = (5000 - 1000) / 1000 = 4.0s
-	// TPS = 100 / 4.0 = 25.0
-	tpsStream := tpsOf(e, true)
-	if math.Abs(tpsStream-25.0) > 1e-6 {
-		t.Errorf("streaming TPS: expected 25.0, got %f", tpsStream)
+	// All-unmeasured ttft and all-zero tokens leave the pools empty.
+	empty := windowBlock([]ringEntry{
+		{durMS: 1000, ttftMS: 0},
+		{durMS: 1000, ttftMS: 0, tokens: TokenCounts{}},
+	})
+	if empty.TTFTP50 != 0 || empty.TTFTP90 != 0 || empty.ToksP50 != 0 || empty.ToksP90 != 0 {
+		t.Errorf("expected zeroed percentiles, got %+v", empty)
 	}
+}
 
-	// Non-streaming TPS denominator: durMS / 1000 = 5000 / 1000 = 5.0s
-	// TPS = 100 / 5.0 = 20.0
-	tpsNonStream := tpsOf(e, false)
-	if math.Abs(tpsNonStream-20.0) > 1e-6 {
-		t.Errorf("non-streaming TPS: expected 20.0, got %f", tpsNonStream)
+// TestWindowBlock_CountsActualSamples pins that n reflects the window's
+// real fill level, not the nominal capacity (contracts §1.2).
+func TestWindowBlock_CountsActualSamples(t *testing.T) {
+	r := &ring{}
+	now := time.Now()
+	for i := 0; i < 7; i++ {
+		r.add(ringEntry{ts: now.Add(time.Duration(i) * time.Second), durMS: 1000, ttftMS: 50, tokens: TokenCounts{Out: 10}})
 	}
-
-	// Zero tokens out: should drop out (0.0)
-	eZeroTokens := ringEntry{durMS: 1000, ttftMS: 100, tokensOut: 0}
-	if v := tpsOf(eZeroTokens, true); v != 0 {
-		t.Errorf("zero tokens expected 0, got %f", v)
+	wb := windowBlock(r.last(10))
+	if wb == nil || wb.N != 7 {
+		t.Fatalf("n = %d, want 7 (ring not full)", r.n)
 	}
-
-	// Non-positive span: should drop out (0.0)
-	eNoSpan := ringEntry{durMS: 100, ttftMS: 100, tokensOut: 10}
-	if v := tpsOf(eNoSpan, true); v != 0 {
-		t.Errorf("zero span streaming expected 0, got %f", v)
+	// tokens = 7 × {Out:10}
+	if wb.Tokens.Out != 70 {
+		t.Errorf("tokens.out sum = %d, want 70", wb.Tokens.Out)
+	}
+	if wb.TTFTP50 != 50 || math.Abs(wb.ToksP50-10) > 1e-6 {
+		t.Errorf("percentiles wrong: %+v", wb)
 	}
 }

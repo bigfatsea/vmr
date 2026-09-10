@@ -7,13 +7,15 @@ import (
 )
 
 type ringKey struct {
-	provider, model string
-	stream          bool
+	provider, keyLabel, model string
+	stream                    bool
 }
 
 // ring is a fixed-capacity circular buffer of raw per-request tuples
-// (design §3.4): percentiles and TPS are computed at read time, so a
-// formula fix never requires data migration.
+// (design §3.4): percentiles and rates are computed at read time, so a
+// formula fix never requires data migration. Entries keep the four-way
+// token tally, not just the generated count — both the window's usage
+// total and the single-request toks rate need all four components.
 type ring struct {
 	buf  [ringCap]ringEntry
 	next int
@@ -21,10 +23,10 @@ type ring struct {
 }
 
 type ringEntry struct {
-	ts        time.Time
-	durMS     int64
-	ttftMS    int64
-	tokensOut int64
+	ts     time.Time
+	durMS  int64
+	ttftMS int64
+	tokens TokenCounts
 }
 
 func (r *ring) add(e ringEntry) {
@@ -49,42 +51,47 @@ func (r *ring) last(k int) []ringEntry {
 	return out
 }
 
-// quantilesFor computes nearest-rank p50/p90 over a sorted copy of the
-// entries, at read time (§3.4). stream selects the TPS denominator (§8).
-func quantilesFor(entries []ringEntry, stream bool) *Quantiles {
-	ttfts := make([]int64, len(entries))
-	tps := make([]float64, 0, len(entries))
-	for i, e := range entries {
-		ttfts[i] = e.ttftMS
-		if v := tpsOf(e, stream); v > 0 {
-			tps = append(tps, v)
+// windowBlock is the WindowBlock computation over a raw-entry window
+// (contracts §1.2): n is the window's actual entry count, tokens are the
+// four-way sums, ttft/toks percentiles are nearest-rank. ttft_ms==0 is
+// "unmeasured" and stays out of the ttft pools (design §4.2); a sample
+// with zero total tokens or a non-positive dur_ms stays out of the toks
+// pool. The toks denominator is dur_ms for both stream and non-stream
+// (design §8: tps revoked, one rate).
+func windowBlock(entries []ringEntry) *WindowBlock {
+	wb := &WindowBlock{N: int64(len(entries))}
+	if len(entries) == 0 {
+		return wb
+	}
+	ttfts := make([]int64, 0, len(entries))
+	toks := make([]float64, 0, len(entries))
+	for _, e := range entries {
+		wb.Tokens.add(e.tokens)
+		if e.ttftMS != 0 {
+			ttfts = append(ttfts, e.ttftMS)
+		}
+		if v := toksOf(e); v > 0 {
+			toks = append(toks, v)
 		}
 	}
 	slices.Sort(ttfts)
-	slices.Sort(tps)
-	return &Quantiles{
-		TTFTP50: nearestRankInt(ttfts, 0.5),
-		TTFTP90: nearestRankInt(ttfts, 0.9),
-		TPSP50:  nearestRankFloat(tps, 0.5),
-		TPSP90:  nearestRankFloat(tps, 0.9),
-	}
+	slices.Sort(toks)
+	wb.TTFTP50 = nearestRankInt(ttfts, 0.5)
+	wb.TTFTP90 = nearestRankInt(ttfts, 0.9)
+	wb.ToksP50 = nearestRankFloat(toks, 0.5)
+	wb.ToksP90 = nearestRankFloat(toks, 0.9)
+	return wb
 }
 
-// tpsOf applies the stream-keyed TPS denominator (§8). Samples with no
-// generated tokens or no measurable span yield 0 and drop out of the TPS
-// percentile population.
-func tpsOf(e ringEntry, stream bool) float64 {
-	if e.tokensOut <= 0 {
+// toksOf applies the single toks rate (design §8): the four-way token sum
+// over the whole request span. Zero-token or non-positive-span samples
+// yield 0 and drop out of the percentile population.
+func toksOf(e ringEntry) float64 {
+	total := e.tokens.In + e.tokens.Out + e.tokens.CacheRead + e.tokens.CacheWrite
+	if total <= 0 || e.durMS <= 0 {
 		return 0
 	}
-	durMS := e.durMS
-	if stream {
-		durMS -= e.ttftMS
-	}
-	if durMS <= 0 {
-		return 0
-	}
-	return float64(e.tokensOut) / (float64(durMS) / 1000)
+	return float64(total) / (float64(e.durMS) / 1000)
 }
 
 // nearestRank{Int,Float} are the nearest-rank percentile over a pre-sorted

@@ -13,18 +13,22 @@ const (
 	OutcomeCanceled = "canceled"
 )
 
-// ringCap is the per-(provider, model, stream) latency-window capacity:
-// last_100 with no room to spare (design §3.4).
+// ringCap is the per-(provider, key_label, model, stream) latency-window
+// capacity: last_100 with no room to spare (design §3.4).
 const ringCap = 100
 
-// hourlyTail / dailyTail bound Snapshot's hourly[]/daily[] to the most recent
-// N distinct hours / local-calendar-days with data. The rollup file is never
-// auto-deleted, so without dailyTail the daily slice would grow linearly with
-// deployment age and be rebuilt in full on every /stats poll.
+// hourlyTailDefault is the /stats hourly[] tail when no ?range= narrows it
+// (design §8): the last 48 distinct hours with data. dailyTail is fixed —
+// ?range= never touches daily[]. The rollup file is never auto-deleted, so
+// without these tails both slices would grow linearly with deployment age
+// and be rebuilt in full on every /stats poll.
 const (
-	hourlyTail = 48
-	dailyTail  = 90
+	HourlyTailDefault = 48
+	dailyTail         = 90
 )
+
+// recentErrCap bounds the in-memory recent_errors ring (design §8.1).
+const recentErrCap = 50
 
 // snapCacheTTL bounds how stale CachedSnapshot may be. /stats polls at ~1s
 // from possibly several dashboards; without a cache each poll would hold the
@@ -57,12 +61,17 @@ type SumCount struct {
 	N   int64 `json:"n"`
 }
 
-// Quantiles carries nearest-rank p50/p90 over the ring for one key.
-type Quantiles struct {
-	TTFTP50 int64   `json:"ttft_p50_ms"`
-	TTFTP90 int64   `json:"ttft_p90_ms"`
-	TPSP50  float64 `json:"tps_p50"`
-	TPSP90  float64 `json:"tps_p90"`
+// WindowBlock is the read-time portrait of one recent-sample window
+// (contracts §1.2): the window's actual sample count, its four-way token
+// totals, and nearest-rank ttft/toks percentiles. The only rate is toks —
+// tps was revoked (design §8).
+type WindowBlock struct {
+	N       int64       `json:"n"`
+	Tokens  TokenCounts `json:"tokens"`
+	TTFTP50 int64       `json:"ttft_p50_ms"`
+	TTFTP90 int64       `json:"ttft_p90_ms"`
+	ToksP50 float64     `json:"toks_p50"`
+	ToksP90 float64     `json:"toks_p90"`
 }
 
 // Sample is one completed request as the completion hook sees it. TS is the
@@ -70,7 +79,9 @@ type Quantiles struct {
 // and KeyLabel are the winning attempt's service identity — all empty when
 // the request never forwarded, in which case only the request-face outcome
 // count is booked (design §4.2). TTFTMS 0 means unmeasured and is excluded
-// from ttft sums and the ring.
+// from ttft sums and the ring. ErrorClass/Status/Attempt feed only the
+// recent_errors ring (contracts §1.6) — memory-only, slim/rollup never
+// carry them; ErrorClass/Status quote the terminal attempt verbatim.
 type Sample struct {
 	TS           time.Time
 	VModel       string
@@ -84,6 +95,9 @@ type Sample struct {
 	DurMS        int64
 	TTFTMS       int64
 	Tokens       TokenCounts
+	ErrorClass   string
+	Status       int
+	Attempt      int
 }
 
 // Dims mirrors the rollup row's dims object — same key names, same order as
