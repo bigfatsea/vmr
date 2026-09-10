@@ -29,7 +29,22 @@ type (
 		Endpoint string `json:"endpoint"`
 		Protocol string `json:"protocol"`
 		Priority int    `json:"priority"`
+		// G3/G5: endpoint identity split out from the synthetic Endpoint name
+		// (adapter/provider/model, still emitted unchanged) plus the fallback
+		// marker — from_fallback is a plain bool (no omitempty): the Overview
+		// page splits the main and fallback topology tables on it, so the
+		// zero value must be present as `false`, not vanish.
+		Provider     string `json:"provider"`
+		KeyLabel     string `json:"key_label"`
+		Model        string `json:"model"`
+		FromFallback bool   `json:"from_fallback"`
 		health.Status
+		// G4: account-level quota headroom, joined from the same QuotaStatus
+		// rows the quota section renders (differential discipline: never
+		// restate the formula). *float64+omitempty — a plain float64 would
+		// erase a genuinely exhausted account's 0.00, which is the one state
+		// the console must show in red (§8.5 color scale). nil = unmetered.
+		Headroom         *float64 `json:"headroom,omitempty"`
 		Capabilities     []string `json:"capabilities"`
 		MaxContextTokens int64    `json:"max_context_tokens"`
 	}
@@ -97,13 +112,20 @@ func cachedDiskFreeSpace(dir string) uint64 {
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	snap, now, t := s.rt.Snapshot(), time.Now(), s.rt.Telemetry.Snapshot()
+	// One QuotaStatus read feeds three consumers (quota section, endpoint
+	// headroom join, quota alerts) — same rows, same instant, so the three
+	// views can never disagree about an account's state.
+	qs := s.rt.QuotaStatus()
 	body := map[string]any{
 		"instance": s.instanceBlock(snap, instanceBaseURLs(requestScheme(r), r.Host)), "system": s.systemBlock(snap),
 		"traffic": map[string]any{"requests": t.Requests, "tokens": t.Tokens, "sticky": map[string]any{"entries": s.rt.Sticky.Len()}},
-		"models":  statusModels(snap, now, s.rt.Health), "current_time": now,
+		"models":  statusModels(snap, now, s.rt.Health, qs), "current_time": now,
 	}
-	if qs := s.rt.QuotaStatus(); len(qs) > 0 {
+	if len(qs) > 0 {
 		body["quota"] = qs
+	}
+	if alerts := s.statusAlerts(snap, now, qs); len(alerts) > 0 {
+		body["alerts"] = alerts
 	}
 	if ab := s.auditBlock(snap); ab != nil {
 		body["audit"] = ab
@@ -114,7 +136,7 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	router.WriteJSON(w, http.StatusOK, body)
 }
 
-func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry) (models []modelStatus) {
+func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry, qs []router.QuotaProviderStatus) (models []modelStatus) {
 	for _, p := range fmtutil.SortedKeys(snap.Models) {
 		for _, name := range fmtutil.SortedKeys(snap.Models[p]) {
 			route := snap.Models[p][name]
@@ -129,7 +151,9 @@ func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry) (mod
 				}
 				eps[i] = endpointStatus{
 					Endpoint: ep.Name(), Protocol: p, Priority: ep.Priority,
-					Status: h.Status(ep.HealthKey(), now), Capabilities: all, MaxContextTokens: ep.MaxContextTokens,
+					Provider: ep.Provider, KeyLabel: ep.KeyLabel, Model: ep.Model, FromFallback: ep.FromFallback,
+					Headroom: endpointHeadroom(ep, qs),
+					Status:   h.Status(ep.HealthKey(), now), Capabilities: all, MaxContextTokens: ep.MaxContextTokens,
 				}
 			}
 			sort.Strings(caps)
