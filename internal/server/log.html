@@ -1,329 +1,378 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by ox-alpha -->
+<!-- Ver 2026-09-14, by pi — console-unification Log page (real /log stream) -->
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VMR Live Log</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
-  <style>
-    :root {
-      --bg: #0d1117;
-      --card-bg: #161b22;
-      --card-border: #30363d;
-      --text: #c9d1d9;
-      --text-muted: #8b949e;
-      --text-bright: #f0f6fc;
-      --accent: #58a6ff;
-      --accent-hover: #79c0ff;
-      --green: #3fb950;
-      --red: #f85149;
-      --yellow: #d29922;
-      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; }
-    body {
-      background-color: var(--bg);
-      color: var(--text);
-      font-family: var(--font-sans);
-      font-size: 14px;
-      display: flex;
-      flex-direction: column;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Log</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<style>
+/*{{CONSOLE_CSS}}*/
 
-    header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
-      border-bottom: 1px solid var(--card-border);
-      background: var(--card-bg);
-      flex-shrink: 0;
-    }
-    header h1 { font-size: 15px; font-weight: 700; color: var(--text-bright); }
-    #conn-state {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      padding: 2px 10px;
-      border-radius: 12px;
-      border: 1px solid transparent;
-    }
-    #conn-state.live { color: var(--green); border-color: rgba(63,185,80,.3); background: rgba(63,185,80,.15); }
-    #conn-state.connecting { color: var(--yellow); border-color: rgba(210,153,34,.3); background: rgba(210,153,34,.15); }
-    #conn-state.down { color: var(--red); border-color: rgba(248,81,73,.3); background: rgba(248,81,73,.15); }
-    .spacer { flex: 1; }
-    .nav-link {
-      font-family: var(--font-mono);
-      font-size: 11px;
-      padding: 2px 10px;
-      border-radius: 12px;
-      border: 1px solid var(--card-border);
-      background: var(--card-bg);
-      color: var(--text);
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .nav-link:hover { border-color: var(--text-muted); color: var(--text-bright); }
-    #line-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
-    button {
-      font-family: inherit;
-      font-size: 13px;
-      background: var(--card-bg);
-      color: var(--text);
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 5px 12px;
-      cursor: pointer;
-      outline: none;
-    }
-    button:hover { border-color: var(--text-muted); }
-    button.primary { background: var(--accent); color: #0d1117; border: none; font-weight: 600; }
-    button.primary:hover { background: var(--accent-hover); }
+/* ===== Log-page private styles (terminal chrome; not shared with other pages) ===== */
 
-    main { position: relative; flex: 1; min-height: 0; display: flex; }
-    pre#log {
-      flex: 1;
-      overflow-y: auto;
-      margin: 0;
-      padding: 12px 16px 20px;
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      line-height: 1.55;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-    #jump-bottom {
-      position: absolute;
-      right: 24px;
-      bottom: 20px;
-      display: none;
-      box-shadow: 0 4px 12px rgba(0,0,0,.5);
-    }
+/* The Log page owns its own scrolling: body is a flex column, header and
+   footer are fixed-size, main fills the rest and scrolls internally. */
+body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.6);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-    }
-    .modal-overlay.hidden { display: none; }
-    .modal {
-      width: min(420px, calc(100vw - 32px));
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 8px;
-      padding: 24px;
-    }
-    .modal h2 { font-size: 16px; color: var(--text-bright); margin-bottom: 10px; }
-    .modal p { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; }
-    .modal input {
-      width: 100%;
-      font-family: var(--font-mono);
-      font-size: 13px;
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--card-border);
-      border-radius: 6px;
-      padding: 8px 10px;
-      outline: none;
-      margin-bottom: 14px;
-    }
-    .modal input:focus { border-color: var(--accent); }
-    #auth-error { color: var(--red); font-size: 12px; margin: -6px 0 10px; }
-    #auth-error.hidden { display: none; }
-    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
-  </style>
+/* connection-error banner — a separate, named element distinct from the
+   jump-to-bottom chip. Reconnect lives here and nowhere else. */
+#conn-banner{
+  display:none;align-items:center;gap:10px;
+  padding:8px 16px;
+  background:var(--red-bg);border-bottom:1px solid rgba(248,81,73,.35);
+  color:var(--red);font-size:var(--fs-sm);
+  flex-shrink:0;
+}
+#conn-banner.show{display:flex}
+#conn-banner .spacer{flex:1}
+
+/* terminal viewport */
+main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+pre#log{
+  flex:1;overflow-y:auto;margin:0;padding:12px 16px 20px;
+  font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.55;
+  white-space:pre-wrap;word-break:break-all;
+}
+pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
+
+/* log line structural classes */
+.ln{display:block}
+.ln .t{color:#6e7681}
+.ln .lv{font-weight:600}
+.ln.inf .lv{color:var(--accent)}
+.ln.ok  .lv{color:var(--green)}
+.ln.wrn .lv{color:var(--yellow)}
+.ln.err .lv{color:var(--red)}
+.ln.err{background:rgba(248,81,73,.06)}
+.ln.wrn{background:rgba(210,153,34,.05)}
+.ln .m{color:var(--text)}
+.ln mark{background:rgba(210,153,34,.35);color:var(--text-bright);border-radius:2px}
+.empty{color:var(--text-muted);padding:18px 0;font-family:var(--font-sans)}
+
+/* jump-to-bottom chip — one meaning: scroll to the bottom and resume autoscroll.
+   Reconnect is in #conn-banner, never here. */
+#jump{
+  position:absolute;right:22px;bottom:18px;
+  display:none;align-items:center;gap:6px;
+  background:var(--accent);color:#0d1117;border:none;border-radius:var(--r-pill);
+  padding:5px 13px;font:600 var(--fs-sm) var(--font-sans);cursor:pointer;
+  box-shadow:0 6px 20px rgba(1,4,9,.5);
+}
+#jump.show{display:inline-flex}
+
+/* level filter chips in the rail (console.css has .lvl-group/.lvl-label/.lvl) */
+.lvl-group{display:inline-flex;gap:4px;align-items:center}
+.lvl-label{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);margin-right:2px}
+.lvl{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
+.lvl.on{color:var(--text-bright)}
+.lvl[data-lvl=ERR].on{background:var(--red-bg);color:var(--red);border-color:rgba(248,81,73,.4)}
+.lvl[data-lvl=WRN].on{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.4)}
+.lvl[data-lvl=OK].on{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.4)}
+.lvl[data-lvl=INF].on{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.4)}
+</style>
 </head>
 <body>
-  <header>
-    <h1>VMR Live Log</h1>
-    <span id="conn-state" class="connecting">connecting</span>
-    <div class="spacer"></div>
-    <span id="line-count">0 lines</span>
-    <a href="/stats.html" class="nav-link" title="Live stats">📊 Stats</a>
-    <a href="/status.html" class="nav-link" title="Status dashboard">🎛️ Status</a>
-    <button id="btn-clear" title="Clear the displayed log">&#128465;&#65039; Clear</button>
-    <button id="btn-key">&#128273; Key</button>
-    <button id="btn-retry" class="primary" style="display:none;">Retry</button>
-  </header>
 
-  <main>
-    <pre id="log"></pre>
-    <button id="jump-bottom">&darr; Bottom</button>
-  </main>
+<!-- mountConsole injects header (rows 1+2), footer, and shared modals.
+     The rail content below is appended by the page script after mount. -->
 
-  <div id="auth-modal" class="modal-overlay hidden">
-    <div class="modal">
-      <h2>Authentication Required</h2>
-      <p>This VMR instance is protected with API Key authentication. Please enter your API Key to view the live log:</p>
-      <input type="password" id="input-api-key" placeholder="Enter API Key (e.g. sk-...)" autocomplete="off">
-      <div id="auth-error" class="hidden">Invalid or expired key — please re-enter:</div>
-      <div class="modal-actions">
-        <button id="btn-auth-cancel">Cancel</button>
-        <button class="primary" id="btn-auth-save">Connect</button>
-      </div>
-    </div>
-  </div>
+<!-- disconnection banner: stands alone, separate from the jump chip -->
+<div id="conn-banner">
+  <span>Log stream disconnected.</span>
+  <span class="spacer"></span>
+  <button class="btn sm" id="btn-retry">⟳ Reconnect</button>
+</div>
 
-  <script>
-    'use strict';
+<main class="term">
+  <pre id="log"></pre>
+  <button id="jump">↓ <span id="jump-n">0</span> new</button>
+</main>
 
-    // Same credential store as status.html: one key per vmr instance serves
-    // both pages, so entering it once unlocks both.
-    const Auth = {
-      getKey() { return localStorage.getItem('vmr_status_key') || ''; },
-      setKey(k) { localStorage.setItem('vmr_status_key', k.trim()); },
-      clearKey() { localStorage.removeItem('vmr_status_key'); }
-    };
+<script>
+/*{{CONSOLE_JS}}*/
 
-    const dom = {
-      state: document.getElementById('conn-state'),
-      count: document.getElementById('line-count'),
-      log: document.getElementById('log'),
-      jump: document.getElementById('jump-bottom'),
-      retry: document.getElementById('btn-retry'),
-      keyBtn: document.getElementById('btn-key'),
-      clearBtn: document.getElementById('btn-clear'),
-      modal: document.getElementById('auth-modal'),
-      input: document.getElementById('input-api-key'),
-      authError: document.getElementById('auth-error'),
-      btnCancel: document.getElementById('btn-auth-cancel'),
-      btnSave: document.getElementById('btn-auth-save')
-    };
+/* ===== Log page runtime ===== */
 
-    let controller = null;   // AbortController for the in-flight stream
-    let lineTotal = 0;
-    let nearBottom = true;   // auto-scroll only while the user hasn't scrolled up
+/* Ring buffer cap — kept at 512 to match the server-side logtee default.
+   The buffer is the source-of-truth for filtering and Copy view. */
+const BUFFER = 512;
 
-    function setState(cls, label) {
-      dom.state.className = cls;
-      dom.state.textContent = label;
-      dom.retry.style.display = cls === 'down' ? '' : 'none';
+/* Heuristic log-level classification.
+   Real log lines from vmr carry no structured level field — they are plain
+   Go log text. We classify by keyword inspection so level chips are useful,
+   but this is *display-only*: the same line may match differently if the
+   format ever changes. See console-unification §8.6 task description. */
+function classifyLevel(text) {
+  // ERR: explicit error= key, panic, or HTTP 5xx class marker
+  if (/\berror=|\bpanic\b|class=.*5[0-9][0-9]/.test(text)) return 'ERR';
+  // WRN: cooldown or stale signals
+  if (/\bcooldown\b|\bstale\b|\btransient\b/.test(text)) return 'WRN';
+  // OK: explicit ok / success signals
+  if (/\bOK\b|\bhealthy\b|\bcache hit\b/.test(text)) return 'OK';
+  return 'INF';
+}
+
+/* DOM refs */
+const logEl    = document.getElementById('log');
+const jumpEl   = document.getElementById('jump');
+const jumpNEl  = document.getElementById('jump-n');
+const bannerEl = document.getElementById('conn-banner');
+
+/* State */
+let allLines       = [];   // {t: timestamp-prefix|'', lv: 'ERR'|'WRN'|'OK'|'INF', raw: string}
+let autoscroll     = true;
+let newSinceScroll = 0;
+let paused         = false;  // rendering paused; stream keeps running
+let filterEl       = null;   // wired after rail is built
+const levels       = { ERR: true, WRN: true, OK: true, INF: true };
+
+/* mountConsole — inject header, footer, modals */
+const con = mountConsole({
+  active: 'log',
+  rail: [],          // Log page toolbar is injected inline below, not as section anchors
+  refresh: 'stream',
+});
+
+/* Build the page toolbar (rail row 2) inline.
+   mountConsole leaves the #hd-rail-inner element; we populate it here.
+   The spacer is already appended by mountConsole for full-bleed pages. */
+const railEl = document.getElementById('hd-rail-inner');
+railEl.insertAdjacentHTML('afterbegin', `
+  <span class="lvl-group">
+    <span class="lvl-label">level</span>
+    <button class="lvl on" data-lvl="ERR">ERR</button>
+    <button class="lvl on" data-lvl="WRN">WRN</button>
+    <button class="lvl on" data-lvl="OK">OK</button>
+    <button class="lvl on" data-lvl="INF">INF</button>
+  </span>
+  <input class="input" id="filter" placeholder="filter substring…" style="width:230px" autocomplete="off">
+  <button class="btn sm ghost" id="btn-clear-filter" title="Clear substring filter and re-enable every level">Reset filters</button>
+  <span class="spacer"></span>
+  <button class="btn sm" id="btn-pause" title="Pause rendering (⌘P / Ctrl+P) — buffer keeps filling">⏸ Pause</button>
+  <button class="btn sm ghost" id="btn-wrap" title="Toggle soft wrapping of long lines">Wrap: on</button>
+  <button class="btn sm ghost" id="btn-copy" title="Copy every currently visible line to the clipboard">Copy view</button>
+`);
+
+filterEl = document.getElementById('filter');
+
+/* ---- filter / level helpers ---- */
+
+function passes(o) {
+  if (!levels[o.lv]) return false;
+  const f = filterEl ? filterEl.value.trim().toLowerCase() : '';
+  return !f || o.raw.toLowerCase().includes(f);
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+/* Highlight the filter substring within already-escaped HTML. */
+function markup(text) {
+  const f = filterEl ? filterEl.value.trim() : '';
+  const safe = esc(text);
+  if (!f) return safe;
+  const needle = esc(f).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(needle, 'gi'), m => '<mark>' + m + '</mark>');
+}
+
+function appendLine(o) {
+  const cls = { INF: 'inf', OK: 'ok', WRN: 'wrn', ERR: 'err' }[o.lv] || 'inf';
+  const tPart = o.t ? `<span class="t">${esc(o.t)}</span> ` : '';
+  const html = `<span class="ln ${cls}">${tPart}<span class="lv">${o.lv}</span> <span class="m">${markup(o.raw)}</span></span>\n`;
+  const atBottom = autoscroll && (logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8);
+  logEl.insertAdjacentHTML('beforeend', html);
+  // trim DOM to BUFFER+8 to avoid unbounded growth during long sessions
+  while (logEl.children.length > BUFFER + 8) logEl.firstChild.remove();
+  if (atBottom) {
+    logEl.scrollTop = logEl.scrollHeight;
+  } else {
+    newSinceScroll++;
+    jumpNEl.textContent = newSinceScroll;
+    jumpEl.classList.add('show');
+  }
+}
+
+function repaint() {
+  const kept = allLines.filter(passes);
+  logEl.innerHTML = '';
+  if (!kept.length) {
+    logEl.innerHTML = `<div class="empty">No line in the ${allLines.length}-line buffer matches the current level and substring filters.</div>`;
+  } else {
+    kept.forEach(appendLine);
+  }
+  logEl.scrollTop = logEl.scrollHeight;
+  updateStatus();
+}
+
+/* Footer left: "N shown / M lines · level all · filter off" */
+function updateStatus() {
+  const shown = allLines.filter(passes).length;
+  const total = allLines.length;
+  const countText = shown === total ? total + ' lines' : shown + ' shown / ' + total + ' lines';
+  const offLevels = Object.keys(levels).filter(k => !levels[k]);
+  const levelText = offLevels.length
+    ? (Object.keys(levels).filter(k => levels[k]).join('+') || 'none')
+    : 'all';
+  const f = filterEl ? filterEl.value.trim() : '';
+  const filterText = f ? `"${f}"` : 'off';
+  con.setFooterIdentity(`${countText} · level ${levelText} · filter ${filterText}`);
+}
+
+/* ---- scroll behavior ---- */
+
+logEl.addEventListener('scroll', () => {
+  const atBottom = logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8;
+  if (atBottom) {
+    autoscroll = true;
+    newSinceScroll = 0;
+    jumpEl.classList.remove('show');
+  } else {
+    autoscroll = false;
+  }
+});
+
+jumpEl.addEventListener('click', () => {
+  logEl.scrollTop = logEl.scrollHeight;
+  autoscroll = true;
+  newSinceScroll = 0;
+  jumpEl.classList.remove('show');
+});
+
+/* ---- filter / level controls ---- */
+
+filterEl.addEventListener('input', () => { repaint(); });
+
+document.querySelectorAll('.lvl').forEach(b => {
+  b.addEventListener('click', () => {
+    levels[b.dataset.lvl] = !levels[b.dataset.lvl];
+    b.classList.toggle('on', levels[b.dataset.lvl]);
+    repaint();
+  });
+});
+
+document.getElementById('btn-clear-filter').addEventListener('click', () => {
+  filterEl.value = '';
+  Object.keys(levels).forEach(k => levels[k] = true);
+  document.querySelectorAll('.lvl').forEach(b => b.classList.add('on'));
+  repaint();
+});
+
+document.getElementById('btn-wrap').addEventListener('click', function () {
+  logEl.classList.toggle('nowrap');
+  this.textContent = 'Wrap: ' + (logEl.classList.contains('nowrap') ? 'off' : 'on');
+});
+
+document.getElementById('btn-copy').addEventListener('click', () => {
+  const txt = allLines.filter(passes).map(o => (o.t ? o.t + ' ' : '') + o.lv + ' ' + o.raw).join('\n');
+  const n = allLines.filter(passes).length;
+  const done = () => toast('Copied ' + n + ' lines');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(done).catch(done);
+  } else {
+    done();
+  }
+});
+
+/* ---- Pause (⌘P / Ctrl+P) ---- */
+
+function setPauseState(p) {
+  paused = p;
+  const btn = document.getElementById('btn-pause');
+  btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+  btn.classList.toggle('on', paused);
+  con.setStreamState(paused ? 'paused' : (streamDown ? 'down' : 'streaming'));
+}
+
+document.getElementById('btn-pause').addEventListener('click', () => setPauseState(!paused));
+
+document.addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'p' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    setPauseState(!paused);
+  }
+});
+
+/* ---- stream state ---- */
+
+let streamDown = false;
+let controller = null;
+
+function setDown(down) {
+  streamDown = down;
+  if (down) {
+    bannerEl.classList.add('show');
+    con.setStreamState('down');
+  } else {
+    bannerEl.classList.remove('show');
+    con.setStreamState(paused ? 'paused' : 'streaming');
+  }
+}
+
+/* ---- /log stream consumer ---- */
+
+/* ingestLine adds one raw text line from the stream. Heartbeat (blank)
+   lines emitted by the server for keepalive are silently discarded. */
+function ingestLine(rawLine) {
+  if (rawLine === '') return;   // server keepalive newline — skip
+  const o = { t: '', lv: classifyLevel(rawLine), raw: rawLine };
+  allLines.push(o);
+  if (allLines.length > BUFFER) allLines.shift();
+  if (!paused && passes(o)) appendLine(o);
+  updateStatus();
+}
+
+async function readStream(reader) {
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      ingestLine(line);
     }
+  }
+  if (buf !== '') ingestLine(buf);
+}
 
-    // esc isn't needed anywhere below on purpose: lines go in via
-    // textContent/createTextNode, never innerHTML, so a log line containing
-    // markup-shaped bytes renders as text.
-    function appendLine(text) {
-      dom.log.appendChild(document.createTextNode(text + '\n'));
-      lineTotal++;
-      dom.count.textContent = lineTotal.toLocaleString() + ' lines';
-      if (nearBottom) dom.log.scrollTop = dom.log.scrollHeight;
+async function connect() {
+  if (controller) controller.abort();
+  controller = new AbortController();
+  setDown(false);
+  con.setStreamState('connecting');
+
+  try {
+    // VMRAuth.guard handles 401: shows the shared auth modal, retries once.
+    const resp = await VMRAuth.guard(() =>
+      fetch('/log', {
+        headers: VMRAuth.has() ? { 'Authorization': 'Bearer ' + VMRAuth.get() } : {},
+        signal: controller.signal,
+      })
+    );
+    if (!resp.ok || !resp.body) {
+      throw new Error('HTTP ' + resp.status);
     }
+    con.setStreamState('streaming');
+    await readStream(resp.body.getReader());
+    // Server closed the connection (restart / shutdown) — treat as down.
+    setDown(true);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;   // superseded by a newer connect()
+    setDown(true);
+  }
+}
 
-    dom.log.addEventListener('scroll', () => {
-      nearBottom = dom.log.scrollTop + dom.log.clientHeight >= dom.log.scrollHeight - 40;
-      dom.jump.style.display = nearBottom ? 'none' : '';
-    });
-    dom.jump.addEventListener('click', () => {
-      nearBottom = true;
-      dom.jump.style.display = 'none';
-      dom.log.scrollTop = dom.log.scrollHeight;
-    });
+/* Reconnect button in the disconnection banner */
+document.getElementById('btn-retry').addEventListener('click', () => connect());
 
-    function keyHeaders() {
-      const h = {};
-      const k = Auth.getKey();
-      if (k) h['Authorization'] = 'Bearer ' + k;
-      return h;
-    }
-
-    async function connect() {
-      if (controller) controller.abort();
-      controller = new AbortController();
-      setState('connecting', 'connecting');
-
-      try {
-        const resp = await fetch('/log', { headers: keyHeaders(), signal: controller.signal });
-        if (resp.status === 401) {
-          promptForKey(false);
-          return;
-        }
-        if (!resp.ok || !resp.body) {
-          throw new Error('HTTP ' + resp.status);
-        }
-        setState('live', 'live');
-        await readStream(resp.body.getReader());
-        // Server closed the stream (restart/shutdown) — not an error.
-        setState('down', 'disconnected');
-      } catch (err) {
-        if (err && err.name === 'AbortError') return; // superseded by a newer connect()
-        setState('down', 'disconnected');
-      }
-    }
-
-    // readStream chunks raw bytes and splits them into complete lines; a
-    // partial trailing line is held back until its newline arrives.
-    async function readStream(reader) {
-      const decoder = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (line !== '') appendLine(line);
-        }
-      }
-      if (buf !== '') appendLine(buf);
-    }
-
-    function promptForKey(afterFailure) {
-      dom.authError.classList.toggle('hidden', !afterFailure);
-      dom.modal.classList.remove('hidden');
-      dom.input.value = '';
-      dom.input.focus();
-    }
-
-    dom.btnSave.addEventListener('click', () => {
-      const k = dom.input.value.trim();
-      if (!k) return;
-      Auth.setKey(k);
-      dom.modal.classList.add('hidden');
-      connect();
-    });
-    dom.input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') dom.btnSave.click();
-    });
-    dom.btnCancel.addEventListener('click', () => {
-      dom.modal.classList.add('hidden');
-      setState('down', 'auth required');
-    });
-
-    // Clear wipes only the local view: the server's ring buffer and the
-    // live stream are untouched, so new lines keep arriving right after.
-    dom.clearBtn.addEventListener('click', () => {
-      dom.log.textContent = '';
-      lineTotal = 0;
-      dom.count.textContent = '0 lines';
-    });
-
-    dom.keyBtn.addEventListener('click', () => {
-      const k = Auth.getKey();
-      const next = prompt('API Key' + (k ? ' (currently ***' + k.slice(-4) + ')' : '') + ' — leave empty to clear:', k);
-      if (next === null) return;
-      if (next.trim() === '') Auth.clearKey();
-      else Auth.setKey(next);
-      refreshKeyButton();
-      connect();
-    });
-    function refreshKeyButton() {
-      const k = Auth.getKey();
-      dom.keyBtn.textContent = k ? '\u{1F511} ***' + k.slice(-4) : '\u{1F511} Key';
-    }
-
-    dom.retry.addEventListener('click', connect);
-
-    refreshKeyButton();
-    connect();
-  </script>
+/* ---- boot ---- */
+updateStatus();
+connect();
+</script>
 </body>
 </html>

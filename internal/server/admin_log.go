@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"vmr/internal/logtee"
@@ -29,14 +30,20 @@ func (s *Server) WithLogTee(tee *logtee.Tee) *Server {
 	return s
 }
 
-// logPage serves the self-contained static live-log shell, unauthenticated:
-// like status.html it contains zero business data. The embedded JS opens
+// logPageAssembled is logHTMLPage with console.css/console.js injected once
+// at server start (same pattern as other console pages using assembleConsolePage).
+var logPageAssembled = sync.OnceValue(func() []byte {
+	return assembleConsolePage(logHTMLPage)
+})
+
+// logPage serves the assembled live-log shell, unauthenticated: like
+// status.html it contains zero business data. The embedded JS opens
 // GET /log itself (which enforces s.auth) and prompts for a key on 401.
 func (s *Server) logPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
-	w.Write(logHTMLPage)
+	w.Write(logPageAssembled())
 }
 
 // adminLog streams the process's live console log as text/plain — one line
