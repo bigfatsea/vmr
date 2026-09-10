@@ -17,6 +17,13 @@ function fmtKMG(v) {
   if (v >= 1e3) return dec2(v / 1e3) + 'K';
   return String(Math.round(v));
 }
+function fmtRate(v) {
+  if (!isFinite(v) || v <= 0) return '—';
+  if (v >= 1e9) return dec2(v / 1e9) + 'B';
+  if (v >= 1e6) return dec2(v / 1e6) + 'M';
+  if (v >= 1e3) return dec2(v / 1e3) + 'K';
+  return dec2(v);
+}
 // Byte quantities carry their unit separated by a space (489 GB, 1.20 GB).
 function fmtBytes(v) {
   if (!isFinite(v)) return '—';
@@ -195,19 +202,13 @@ const ConsoleAlerts = {
       const errors = items.filter(a => a.severity === 'error');
       const warnings = items.filter(a => a.severity !== 'error');
 
-      const renderRow = a => {
-        const isErr = a.severity === 'error';
-        const badgeCls = isErr ? 'b-err' : 'b-warn';
-        const badgeText = isErr ? 'error' : 'warn';
-        const whenHtml = a.ref ? ` <span class="when">${esc(a.ref)}</span>` : '';
-        return `<div class="wrow"><span class="badge ${badgeCls}">${badgeText}</span><span>${esc(a.message)}</span>${whenHtml}</div>`;
-      };
+      const renderItem = a => `<li>${esc(a.message)}</li>`;
 
       errBox.hidden = errors.length === 0;
-      document.getElementById('warn-errors-list').innerHTML = errors.length > 0 ? errors.map(renderRow).join('') : '';
+      document.getElementById('warn-errors-list').innerHTML = errors.length > 0 ? errors.map(renderItem).join('') : '';
 
       warnBox.hidden = warnings.length === 0;
-      document.getElementById('warn-warnings-list').innerHTML = warnings.length > 0 ? warnings.map(renderRow).join('') : '';
+      document.getElementById('warn-warnings-list').innerHTML = warnings.length > 0 ? warnings.map(renderItem).join('') : '';
 
       sep.hidden = !(errors.length > 0 && warnings.length > 0);
 
@@ -231,12 +232,12 @@ const warnOverlay = (() => {
       </div>
       <div id="warn-errors" class="warn-group" hidden>
         <div class="warn-group-title">Errors</div>
-        <div id="warn-errors-list"></div>
+        <ul id="warn-errors-list" class="warn-list"></ul>
       </div>
       <hr id="warn-sep" class="warn-sep" hidden>
       <div id="warn-warnings" class="warn-group" hidden>
         <div class="warn-group-title">Warnings</div>
-        <div id="warn-warnings-list"></div>
+        <ul id="warn-warnings-list" class="warn-list"></ul>
       </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;

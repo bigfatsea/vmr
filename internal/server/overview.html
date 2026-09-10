@@ -27,7 +27,7 @@
 /* page-private layout classes — the console discipline keeps inline style out of static markup */
 .card.strip{padding:0;overflow:hidden;scroll-margin-top:var(--hd-h)}
 .col-progress{width:190px}
-.col-share{width:130px}
+.col-share{width:90px}
 .empty-cell{text-align:center;padding:26px}
 
 /* Recent Failures chips */
@@ -74,8 +74,6 @@
   <div class="section-head" id="live">Live Requests
     <span class="badge b-cyan" id="live-running">0 running</span>
     <span class="count">in-flight only — a request leaves this table the moment it completes</span>
-    <span class="spacer"></span>
-    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
   </div>
   <div class="table-wrap bounded">
     <table class="c">
@@ -102,7 +100,7 @@
     <table class="c">
       <thead><tr>
         <th>Provider</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
-        <th class="col-progress">Progress</th><th class="num">Headroom</th><th>Resets</th>
+        <th class="col-progress">Progress</th><th class="num">Headroom</th><th class="num" title="Requests routed within this account's quota over the last 24h, and their share of all forwarded requests">Req 24h</th><th>Resets</th>
       </tr></thead>
       <tbody id="quota-body"></tbody>
     </table>
@@ -111,33 +109,18 @@
   <!-- ============ virtual models & endpoint topology ============ -->
   <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology
     <span class="badge b-dim" id="models-count-badge">0 models · 0 endpoints</span>
-    <span class="count">share = this endpoint's share of all forwarded requests in the last 24h</span>
+    <span class="count">share = this endpoint's share of requests for its virtual model in the last 24h</span>
   </div>
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order">PRI</th>
+        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
         <th>Provider : Model</th><th>Health</th>
         <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
-        <th class="num" title="Share of forwarded requests over the last 24h">Share 24h</th>
+        <th class="num" title="Requests this endpoint served over the last 24h, and their share of this virtual model's requests">Req 24h</th>
         <th>Context / Capabilities</th>
       </tr></thead>
       <tbody id="models-body"></tbody>
-    </table>
-  </div>
-
-  <div class="sub-head">Fallback Endpoints
-    <span class="badge b-dim" id="fallback-count-badge">0</span>
-    <span class="count">tried after every priority tier of the matched virtual model is exhausted</span>
-  </div>
-  <div class="table-wrap">
-    <table class="c">
-      <thead><tr>
-        <th class="num" title="Fallback ordering — a separate space from the per-model priority tiers">ORD</th>
-        <th>Provider : Model</th><th>Health</th>
-        <th class="num">Headroom</th><th class="num">Share 24h</th><th>Context / Capabilities</th>
-      </tr></thead>
-      <tbody id="fallback-body"></tbody>
     </table>
   </div>
 
@@ -213,7 +196,7 @@
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share">Share</th></tr></thead>
+          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
           <tbody id="usage-key"></tbody>
           <tfoot id="usage-key-foot"></tfoot>
         </table>
@@ -225,7 +208,7 @@
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share">Share</th></tr></thead>
+          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
           <tbody id="usage-caller"></tbody>
           <tfoot id="usage-caller-foot"></tfoot>
         </table>
@@ -446,7 +429,7 @@ function renderVitalsAndSysline(statusData, statsData) {
 }
 
 // ============ Render Quota Budgets ============
-function renderQuota(quotaList, models) {
+function renderQuota(quotaList, models, statsData) {
   const tbody = document.getElementById('quota-body');
   const countBadge = document.getElementById('quota-count-badge');
   const list = quotaList || [];
@@ -454,7 +437,7 @@ function renderQuota(quotaList, models) {
   consoleApi.setRailCount('quota', list.length);
 
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">
       <div class="t-dim">No quota budgets configured.</div>
       <div class="hint">Quota limits cap token or request pace across accounts.</div>
     </td></tr>`;
@@ -473,21 +456,41 @@ function renderQuota(quotaList, models) {
     });
   });
 
+  // Calculate 24h request counts for quota share
+  const now = Date.now();
+  const h24Ago = now - 24 * 3600 * 1000;
+  let totalAllReqs24h = 0;
+  const provReqs24h = new Map();
+  const provModelReqs24h = new Map();
+
+  (statsData && statsData.hourly || []).forEach(row => {
+    const rowTime = new Date(row.hour).getTime();
+    if (rowTime < h24Ago) return;
+    const c = row.counters || {};
+    const reqs = (c.ok || 0) + (c.error || 0) + (c.canceled || 0);
+    if (reqs <= 0) return;
+    totalAllReqs24h += reqs;
+
+    const d = row.dims || {};
+    if (d.provider) {
+      provReqs24h.set(d.provider, (provReqs24h.get(d.provider) || 0) + reqs);
+      if (d.model) {
+        const pmKey = d.provider + '\x00' + d.model;
+        provModelReqs24h.set(pmKey, (provModelReqs24h.get(pmKey) || 0) + reqs);
+      }
+    }
+  });
+
   tbody.innerHTML = list.map(q => {
     let pName = q.provider;
-    let kName = '';
     if (providerKeyMap[q.provider]) {
       pName = providerKeyMap[q.provider].p;
-      kName = providerKeyMap[q.provider].k;
     } else if (q.provider.includes('-')) {
       const idx = q.provider.lastIndexOf('-');
       pName = q.provider.slice(0, idx);
-      kName = q.provider.slice(idx + 1);
     }
 
-    const provCell = kName
-      ? `<span class="ep" title="${esc(pName)} : ${esc(kName)}">${esc(pName)} : <span class="badge b-purple tight">${esc(kName)}</span></span>`
-      : `<span class="ep" title="${esc(pName)}">${esc(pName)}</span>`;
+    const provCell = `<span class="ep" title="${esc(pName)}">${esc(pName)}</span>`;
 
     const isBucket = q.role === 'bucket';
     const limitTitle = isBucket
@@ -518,6 +521,20 @@ function renderQuota(quotaList, models) {
     const hrTitle = headroomTitle(hr);
     const hrVal = fmtHeadroom(hr);
 
+    const reqProvider = provReqs24h.has(q.provider) ? q.provider : pName;
+    let matchedReqs = 0;
+    if (q.models && q.models.length > 0) {
+      q.models.forEach(m => {
+        matchedReqs += provModelReqs24h.get(reqProvider + '\x00' + m) || 0;
+      });
+    } else {
+      matchedReqs = provReqs24h.get(reqProvider) || 0;
+    }
+    const sharePct = totalAllReqs24h > 0 ? (matchedReqs / totalAllReqs24h * 100) : 0;
+    const shareCell = totalAllReqs24h > 0
+      ? `${fmtInt(matchedReqs)} · ${fmtPct(sharePct)}`
+      : '<span class="dim" title="No requests in the last 24h">—</span>';
+
     return `<tr>
       <td>${provCell}</td>
       <td>${limitBadge}</td>
@@ -529,165 +546,124 @@ function renderQuota(quotaList, models) {
         <span class="hint">${hintHtml}</span>
       </td>
       <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
+      <td class="num">${shareCell}</td>
       <td class="t-dim">${formatReset(q.period_ends_at)}</td>
     </tr>`;
   }).join('');
 }
 
-// ============ Render Virtual Models & Fallback ============
-function renderModelsAndFallback(modelsList, statsData) {
+// ============ Render Virtual Models & Endpoint Topology ============
+function renderModels(modelsList, statsData) {
   const modelsBody = document.getElementById('models-body');
-  const fallbackBody = document.getElementById('fallback-body');
   const modelsBadge = document.getElementById('models-count-badge');
-  const fallbackBadge = document.getElementById('fallback-count-badge');
   const list = modelsList || [];
 
-  // Calculate 24h shares from statsData.hourly
+  // Calculate 24h per-virtual-model request totals and per-endpoint request counts
   const now = Date.now();
   const h24Ago = now - 24 * 3600 * 1000;
-  let totalForwarded24h = 0;
-  const epReqs24h = new Map();
+  const vmTotalReqs24h = new Map();
+  const vmEpReqs24h = new Map();
 
   (statsData && statsData.hourly || []).forEach(row => {
     const rowTime = new Date(row.hour).getTime();
     if (rowTime < h24Ago) return;
     const d = row.dims;
-    if (!d || !d.provider) return;
-    const reqs = (row.counters.ok || 0) + (row.counters.error || 0) + (row.counters.canceled || 0);
+    if (!d || !d.vmodel || !d.protocol) return;
+    const c = row.counters || {};
+    const reqs = (c.ok || 0) + (c.error || 0) + (c.canceled || 0);
     if (reqs <= 0) return;
-    totalForwarded24h += reqs;
-    const key = `${d.provider}:${d.key_label || ''}:${d.model}`;
-    epReqs24h.set(key, (epReqs24h.get(key) || 0) + reqs);
+
+    const vmKey = `${d.protocol}:${d.vmodel}`;
+    vmTotalReqs24h.set(vmKey, (vmTotalReqs24h.get(vmKey) || 0) + reqs);
+
+    if (d.provider && d.model) {
+      const epKey = `${vmKey}\x00${d.provider}\x00${d.model}`;
+      vmEpReqs24h.set(epKey, (vmEpReqs24h.get(epKey) || 0) + reqs);
+    }
   });
 
-  let mainEpCount = 0;
+  let totalEpCount = 0;
   const mainRows = [];
-  const fallbackEps = [];
-  const seenFallback = new Set();
 
   list.forEach(m => {
-    const eps = m.endpoints || [];
-    const main = eps.filter(ep => !ep.from_fallback);
-    const fb = eps.filter(ep => ep.from_fallback);
-
-    fb.forEach(ep => {
-      const epKey = ep.endpoint || `${ep.provider}:${ep.key_label || ''}:${ep.model}`;
-      if (!seenFallback.has(epKey)) {
-        seenFallback.add(epKey);
-        fallbackEps.push(ep);
+    // Sort endpoints: main endpoints first (by priority), fallback endpoints at the bottom
+    const eps = (m.endpoints || []).slice().sort((a, b) => {
+      if (!!a.from_fallback !== !!b.from_fallback) {
+        return a.from_fallback ? 1 : -1;
       }
+      return (a.priority || 0) - (b.priority || 0);
     });
 
-    if (main.length > 0) {
-      mainEpCount += main.length;
-      main.forEach((ep, idx) => {
+    if (eps.length > 0) {
+      totalEpCount += eps.length;
+      eps.forEach((ep, idx) => {
         mainRows.push({
           model: m,
           ep,
           isFirst: idx === 0,
-          rowspan: main.length,
+          rowspan: eps.length,
         });
       });
     }
   });
 
-  modelsBadge.textContent = `${list.length} models · ${mainEpCount} endpoints`;
-  fallbackBadge.textContent = String(fallbackEps.length);
+  modelsBadge.textContent = `${list.length} models · ${totalEpCount} endpoints`;
   consoleApi.setRailCount('models', list.length);
 
-  // Main table
   if (!mainRows.length) {
     modelsBody.innerHTML = `<tr><td colspan="7" class="empty-cell">
       <div class="t-dim">No virtual models configured.</div>
       <div class="hint">Virtual models map incoming protocols and aliases to candidate endpoints.</div>
     </td></tr>`;
-  } else {
-    modelsBody.innerHTML = mainRows.map(r => {
-      const m = r.model;
-      const ep = r.ep;
-      const nowMs = Date.now();
-      const hInfo = endpointHealthInfo(ep, nowMs);
-
-      const epKey = `${ep.provider}:${ep.key_label || ''}:${ep.model}`;
-      const count24h = epReqs24h.get(epKey) || 0;
-      const sharePct = totalForwarded24h > 0 ? (count24h / totalForwarded24h * 100) : 0;
-      const shareCell = totalForwarded24h > 0
-        ? `<span class="sharebar"><span style="width:${sharePct.toFixed(0)}%"></span></span>${dec2(sharePct)}%`
-        : '<span class="dim" title="No forwarded traffic in the last 24h">—</span>';
-
-      const priClass = ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n');
-
-      const ctx = ep.max_context_tokens > 0 ? fmtKMG(ep.max_context_tokens) : '—';
-      const caps = (ep.capabilities && ep.capabilities.length > 0)
-        ? '<span class="dim">· ' + ep.capabilities.map(esc).join(' · ') + '</span>'
-        : '';
-
-      const hr = ep.headroom;
-      const hrCls = headroomClass(hr);
-      const hrTitle = headroomTitle(hr);
-      const hrVal = fmtHeadroom(hr);
-
-      const fullTitle = `${ep.provider} : ${ep.key_label || '—'} : ${ep.model}`;
-      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : <span class="t-key">${esc(ep.key_label || '—')}</span> : ${esc(ep.model)}</span>`;
-
-      let modelCell = '';
-      if (r.isFirst) {
-        modelCell = `<td rowspan="${r.rowspan}"><span class="dim">${esc(m.protocol)}:</span><br><span class="t-strong">${esc(m.id)}</span></td>`;
-      }
-
-      return `<tr class="${r.isFirst ? 'grp' : ''}">
-        ${modelCell}
-        <td class="num"><span class="pri ${priClass}">P${ep.priority}</span></td>
-        <td>${epCell}</td>
-        <td>${hInfo.badge}</td>
-        <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
-        <td class="num">${shareCell}</td>
-        <td>${ctx} ${caps}</td>
-      </tr>`;
-    }).join('');
+    return;
   }
 
-  // Fallback table
-  if (!fallbackEps.length) {
-    fallbackBody.innerHTML = `<tr><td colspan="6" class="empty-cell">
-      <div class="t-dim">No fallback endpoints configured.</div>
-      <div class="hint">Fallback endpoints are tried when all model endpoints are exhausted.</div>
-    </td></tr>`;
-  } else {
-    fallbackBody.innerHTML = fallbackEps.map((ep, idx) => {
-      const nowMs = Date.now();
-      const hInfo = endpointHealthInfo(ep, nowMs);
+  modelsBody.innerHTML = mainRows.map(r => {
+    const m = r.model;
+    const ep = r.ep;
+    const nowMs = Date.now();
+    const hInfo = endpointHealthInfo(ep, nowMs);
 
-      const epKey = `${ep.provider}:${ep.key_label || ''}:${ep.model}`;
-      const count24h = epReqs24h.get(epKey) || 0;
-      const sharePct = totalForwarded24h > 0 ? (count24h / totalForwarded24h * 100) : 0;
-      const shareCell = totalForwarded24h > 0
-        ? `<span class="sharebar"><span style="width:${sharePct.toFixed(0)}%"></span></span>${dec2(sharePct)}%`
-        : '<span class="dim" title="No forwarded traffic in the last 24h">—</span>';
+    const vmKey = `${m.protocol}:${m.id}`;
+    const vmTotal = vmTotalReqs24h.get(vmKey) || 0;
+    const epCount = vmEpReqs24h.get(`${vmKey}\x00${ep.provider}\x00${ep.model}`) || 0;
+    const sharePct = vmTotal > 0 ? (epCount / vmTotal * 100) : 0;
+    const shareCell = vmTotal > 0
+      ? `${fmtInt(epCount)} · ${fmtPct(sharePct)}`
+      : '<span class="dim" title="No requests for this virtual model in the last 24h">—</span>';
 
-      const ctx = ep.max_context_tokens > 0 ? fmtKMG(ep.max_context_tokens) : '—';
-      const caps = (ep.capabilities && ep.capabilities.length > 0)
-        ? '<span class="dim">· ' + ep.capabilities.map(esc).join(' · ') + '</span>'
-        : '';
+    const priCell = ep.from_fallback
+      ? '<span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
+      : `<span class="pri ${ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n')}">P${ep.priority}</span>`;
 
-      const hr = ep.headroom;
-      const hrCls = headroomClass(hr);
-      const hrTitle = headroomTitle(hr);
-      const hrVal = fmtHeadroom(hr);
+    const ctx = ep.max_context_tokens > 0 ? fmtKMG(ep.max_context_tokens) : '—';
+    const caps = (ep.capabilities && ep.capabilities.length > 0)
+      ? '<span class="dim">· ' + ep.capabilities.map(esc).join(' · ') + '</span>'
+      : '';
 
-      const fullTitle = `${ep.provider} : ${ep.key_label || '—'} : ${ep.model}`;
-      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : <span class="t-key">${esc(ep.key_label || '—')}</span> : ${esc(ep.model)}</span>`;
+    const hr = ep.headroom;
+    const hrCls = headroomClass(hr);
+    const hrTitle = headroomTitle(hr);
+    const hrVal = fmtHeadroom(hr);
 
-      return `<tr>
-        <td class="num"><span class="pri pri-n">${idx + 1}</span></td>
-        <td>${epCell}</td>
-        <td>${hInfo.badge}</td>
-        <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
-        <td class="num">${shareCell}</td>
-        <td>${ctx} ${caps}</td>
-      </tr>`;
-    }).join('');
-  }
+    const fullTitle = `${ep.provider} : ${ep.model}`;
+    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${esc(ep.model)}</span>`;
+
+    let modelCell = '';
+    if (r.isFirst) {
+      modelCell = `<td rowspan="${r.rowspan}"><span class="dim">${esc(m.protocol)}:</span><br><span class="t-strong">${esc(m.id)}</span></td>`;
+    }
+
+    return `<tr class="${r.isFirst ? 'grp' : ''}">
+      ${modelCell}
+      <td class="num">${priCell}</td>
+      <td>${epCell}</td>
+      <td>${hInfo.badge}</td>
+      <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
+      <td class="num">${shareCell}</td>
+      <td>${ctx} ${caps}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ============ Render Live Requests ============
@@ -701,14 +677,14 @@ function renderLive(inflightList) {
 
   const limit = (lastStatsData && lastStatsData.concurrency && lastStatsData.concurrency.limit) ||
                 (lastStatusData && lastStatusData.instance && lastStatusData.instance.concurrency && lastStatusData.instance.concurrency.limit) || 0;
+  const fixedRows = limit > 0 ? limit : 5;
+  const fixedHeight = fixedRows * 38 + 36;
   const tableWrap = document.querySelector('#live + .table-wrap');
   if (tableWrap) {
-    tableWrap.style.maxHeight = limit > 0 ? (limit * 44 + 56) + 'px' : '';
+    tableWrap.style.height = fixedHeight + 'px';
+    tableWrap.style.maxHeight = fixedHeight + 'px';
+    tableWrap.style.overflowY = 'auto';
   }
-
-  const expandBtn = document.getElementById('live-expand');
-  expandBtn.hidden = es.length <= LIVE_CAP;
-  expandBtn.textContent = liveExpanded ? `Show top ${LIVE_CAP}` : `Show all ${es.length}`;
 
   if (!es.length) {
     body.innerHTML = `<tr><td colspan="9" class="empty-cell">
@@ -717,8 +693,6 @@ function renderLive(inflightList) {
     </td></tr>`;
     return;
   }
-
-  const shown = liveExpanded ? es : es.slice(-LIVE_CAP);
 
   function elapsedCell(e) {
     const s = Math.max(0, Math.floor((Date.now() - new Date(e.ts).getTime()) / 1000));
@@ -743,11 +717,11 @@ function renderLive(inflightList) {
 
   function endpointCell(e) {
     if (!e.provider) return '<span class="dim" title="Request waiting for upstream selection">— routing</span>';
-    const full = `${e.provider} : ${e.key_label || ''} : ${e.model || ''}`;
-    return `<span class="ep" title="${esc(full)}">${esc(e.provider)} : <span class="t-key">${esc(e.key_label || '—')}</span> : ${esc(e.model || '—')}</span>`;
+    const full = `${e.provider} : ${e.model || ''}`;
+    return `<span class="ep" title="${esc(full)}">${esc(e.provider)} : ${esc(e.model || '—')}</span>`;
   }
 
-  const rows = shown.map(e => `<tr>
+  body.innerHTML = es.map(e => `<tr>
     <td><span class="badge b-cyan">running</span></td>
     <td class="num">${elapsedCell(e)}</td>
     <td><span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}</td>
@@ -758,16 +732,7 @@ function renderLive(inflightList) {
     <td class="num">${e.est_in > 0 ? fmtInt(e.est_in) : '<span class="dim" title="Input tokens not estimated">—</span>'}</td>
     <td class="num">${e.est_out > 0 ? fmtInt(e.est_out) : '<span class="dim" title="compressed response body — output tokens cannot be counted">—</span>'}</td>
   </tr>`).join('');
-
-  const more = (!liveExpanded && es.length > LIVE_CAP)
-    ? `<tr><td colspan="9" class="hint empty-cell">… ${es.length - LIVE_CAP} more in flight — use “Show all”</td></tr>` : '';
-  body.innerHTML = rows + more;
 }
-
-document.getElementById('live-expand').onclick = () => {
-  liveExpanded = !liveExpanded;
-  renderLive(lastStatsData && lastStatsData.inflight);
-};
 
 // ============ Render Recent Failures ============
 function renderFailures(failuresList) {
@@ -810,8 +775,8 @@ function renderFailures(failuresList) {
 
   function endpointFailCell(f) {
     if (!f.provider) return '<span class="dim" title="Request aborted before forwarding">— never forwarded</span>';
-    const full = `${f.provider} : ${f.key_label || ''} : ${f.model || ''}`;
-    return `<span class="ep" title="${esc(full)}">${esc(f.provider)} : <span class="t-key">${esc(f.key_label || '—')}</span> : ${esc(f.model || '—')}</span>`;
+    const full = `${f.provider} : ${f.model || ''}`;
+    return `<span class="ep" title="${esc(full)}">${esc(f.provider)} : ${esc(f.model || '—')}</span>`;
   }
 
   body.innerHTML = filtered.map(f => {
@@ -854,10 +819,10 @@ function renderPerf(byProviderModel, basis) {
     const n = wb ? (wb.n || 0) : 0;
     const none = n === 0;
 
-    const isFirstOfGroup = i === 0 || rows[i - 1].provider !== r.provider || rows[i - 1].key_label !== r.key_label || rows[i - 1].model !== r.model;
+    const isFirstOfGroup = i === 0 || rows[i - 1].provider !== r.provider || rows[i - 1].model !== r.model;
 
-    const pk = `${r.provider} : ${r.key_label || '—'} : ${r.model}`;
-    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : <span class="t-key">${esc(r.key_label || '—')}</span> : ${esc(r.model)}</span>` +
+    const pk = `${r.provider} : ${r.model}`;
+    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : ${esc(r.model)}</span>` +
       (none ? ' <span class="badge b-dim tight" title="This endpoint has not completed a request in this mode within the window">no samples</span>' : '');
 
     const nCell = none
@@ -878,7 +843,7 @@ function renderPerf(byProviderModel, basis) {
       outCell = fmtKMG(wb.tokens.out || 0);
       ttftCell = `${fmtTTFT(wb.ttft_p50_ms)} <span class="dim">/</span> ${fmtTTFT(wb.ttft_p90_ms)}`;
       toksCell = (wb.toks_p50 > 0 || wb.toks_p90 > 0)
-        ? `${dec2(wb.toks_p50)} <span class="dim">/</span> ${dec2(wb.toks_p90)}`
+        ? `<span title="p50: ${dec2(wb.toks_p50 || 0)} toks/s · p90: ${dec2(wb.toks_p90 || 0)} toks/s">${fmtRate(wb.toks_p50)} <span class="dim">/</span> ${fmtRate(wb.toks_p90)}</span>`
         : '<span class="dim" title="No throughput measurement">—</span>';
     }
 
@@ -1128,7 +1093,7 @@ function renderUsage(hourlyRows, rangeKey) {
           <td class="num"><span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}">${fmtInt(r.err)}</span></td>
           <td class="num">${fmtKMG(r.incw)} <span class="dim">/</span> ${fmtKMG(r.cr)}</td>
           <td class="num">${fmtKMG(r.out)}</td>
-          <td class="num"><span class="sharebar"><span style="width:${share.toFixed(0)}%"></span></span>${fmtPct(share)}</td>
+          <td class="num">${fmtPct(share)}</td>
         </tr>`;
       }).join('');
   }
@@ -1205,8 +1170,8 @@ async function refreshAll() {
 
     // Render sections
     renderVitalsAndSysline(statusData, statsData);
-    renderQuota(statusData.quota || [], statusData.models || []);
-    renderModelsAndFallback(statusData.models || [], statsData);
+    renderQuota(statusData.quota || [], statusData.models || [], statsData);
+    renderModels(statusData.models || [], statsData);
     renderLive(statsData.inflight || []);
     renderFailures(statsData.recent_errors || []);
     renderPerf(statsData.by_provider_model || [], perfBasis);

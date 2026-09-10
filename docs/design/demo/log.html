@@ -86,11 +86,11 @@ main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:colu
 #conn-banner.show{display:flex}
 #conn-banner .spacer{flex:1}
 pre#log{
-  flex:1;overflow-y:auto;margin:0;padding:12px 16px 20px;
-  font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.2;
+  flex:1;overflow-y:auto;margin:0;padding:6px 12px 14px;
+  font-family:var(--font-mono);font-size:11.5px;line-height:1.1;
   white-space:pre-wrap;word-break:break-all;
 }
-.ln{display:block;line-height:1.2;font-family:var(--font-mono)}
+.ln{display:block;line-height:1.1;font-family:var(--font-mono);padding:0;margin:0}
 .ln .t{color:#6e7681}
 .ln .sq{color:#6e7681}
 .ln.inf .lv{color:var(--accent)}
@@ -119,10 +119,12 @@ pre#log{
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);max-height:80vh;overflow:auto;box-shadow:0 16px 48px rgba(1,4,9,.6)}
-.modal.warn-modal{width:min(600px,50vw)}
+.modal.warn-modal{width:50vw;min-width:320px;max-width:92vw}
+.warn-list{list-style:disc;padding-left:20px;margin:6px 0}
+.warn-list li{padding:3px 0;font-size:var(--fs-sm);color:var(--text);line-height:1.5;word-break:break-word}
 .warn-group{margin-bottom:4px}
 .warn-group-title{font-weight:600;font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
-.warn-sep{border:none;border-top:1px solid var(--border);margin:10px 0}
+.warn-sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 .modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
 .modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
@@ -266,9 +268,9 @@ function toast(msg) {
 }
 /* warning bell — same content contract as Overview (actionable state only) */
 const WARNINGS = [
-  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
-  { sev: 'err', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.', when: '2m ago' },
-  { sev: 'warn', text: 'openrouter : backup — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.', when: 'now' },
+  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.' },
+  { sev: 'err', text: 'openrouter : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.' },
+  { sev: 'warn', text: 'openrouter — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.' },
 ];
 const warnOverlay = (() => {
   const div = document.createElement('div');
@@ -282,12 +284,12 @@ const warnOverlay = (() => {
       </div>
       <div id="warn-errors" class="warn-group" hidden>
         <div class="warn-group-title">Errors</div>
-        <div id="warn-errors-list"></div>
+        <ul id="warn-errors-list" class="warn-list"></ul>
       </div>
       <hr id="warn-sep" class="warn-sep" hidden>
       <div id="warn-warnings" class="warn-group" hidden>
         <div class="warn-group-title">Warnings</div>
-        <div id="warn-warnings-list"></div>
+        <ul id="warn-warnings-list" class="warn-list"></ul>
       </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
@@ -311,15 +313,11 @@ const warnOverlay = (() => {
     clearBox.hidden = true;
     const errors = WARNINGS.filter(w => w.sev === 'err');
     const warnings = WARNINGS.filter(w => w.sev !== 'err');
-    const renderRow = w => `
-      <div class="wrow">
-        <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
-        <span>${w.text}</span><span class="when">${w.when}</span>
-      </div>`;
+    const renderItem = w => `<li>${w.text}</li>`;
     errBox.hidden = errors.length === 0;
-    document.getElementById('warn-errors-list').innerHTML = errors.map(renderRow).join('');
+    document.getElementById('warn-errors-list').innerHTML = errors.map(renderItem).join('');
     warnBox.hidden = warnings.length === 0;
-    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderRow).join('');
+    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderItem).join('');
     sep.hidden = !(errors.length > 0 && warnings.length > 0);
     const hasErr = errors.length > 0;
     bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
@@ -377,7 +375,7 @@ function markup(text) {
 function appendLine(o) {
   const cls = { INF: 'inf', OK: 'ok', WRN: 'wrn', ERR: 'err' }[o.lv.trim()] || 'inf';
   const sq = o.sq ? `<span class="sq">#${o.sq}</span> ` : '';
-  const html = `<span class="ln ${cls}"><span class="t">${o.t}</span> <span class="lv">${esc(o.lv)}</span> ${sq}<span class="m">${markup(o.m)}</span></span>\n`;
+  const html = `<span class="ln ${cls}"><span class="t">${o.t}</span> <span class="lv">${esc(o.lv)}</span> ${sq}<span class="m">${markup(o.m)}</span></span>`;
   const stick = autoscroll && (logEl.scrollTop + logEl.clientHeight >= logEl.scrollHeight - 8);
   logEl.insertAdjacentHTML('beforeend', html);
   while (logEl.children.length > BUFFER + 8) logEl.firstChild.remove();

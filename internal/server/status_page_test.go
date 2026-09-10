@@ -65,10 +65,6 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 		}
 	}
 
-	if !strings.Contains(body, "Fallback Endpoints") {
-		t.Errorf("body missing 'Fallback Endpoints' subhead")
-	}
-
 	if !strings.Contains(body, "mountConsole") {
 		t.Errorf("body missing 'mountConsole'")
 	}

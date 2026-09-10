@@ -198,8 +198,8 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 | Header 徽章行（version/pid/listen/osarch/uptime） | uptime 留 Header；version/pid 进 `.sysline` 首段；go/os-arch/listen 只进 Footer | Header / sysline / Footer |
 | 四张大指标卡 + Storage 卡 | 合成**一条 vitals 指标带**（单卡四段，§8.3）；系统明细/存储/audit 收成**单行** `.sysline`（无折叠、无标题） | 首屏 |
 | 黄色告警 banner | 移除，并入 Header 最右的**告警 pill**（只留可操作项） | Header |
-| Quota 表 | 保留，列重构（§8.4-a） | Quota Budgets 区 |
-| Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 主端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**单列一张同构表** | Virtual Models 区 |
+| Quota 表 | 保留，列重构（§8.4-a），含 Req 24h 列 | Quota Budgets 区 |
+| Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**直接补在对应虚拟模型底部**（PRI 标 FB） | Virtual Models 区 |
 | Connect Your Agent 卡 | **删除**（导航已有 Help；连接信息归 Help 页的 Connection 卡） | — |
 | stats 并发卡 | 删除（与 vitals 并发段重复，去重） | — |
 | stats in-flight 表 | 并入，列序与列义重构（§8.4-c），**随整页刷新** | Live Requests 区 |
@@ -225,10 +225,9 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 ```
 Overview 页（单页，自上而下）
 ├─ vitals 指标带（4 段）+ sysline 系统详情单行        ← /status
-├─ Quota Budgets                                     ← /status
-├─ Virtual Models & Endpoint Topology                ← /status + /stats（Share 列 join）
-│   └─ Fallback Endpoints（同构独立表）
 ├─ Live Requests                                     ← /stats（in-flight 注册表）
+├─ Quota Budgets                                     ← /status
+├─ Virtual Models & Endpoint Topology（含 Fallback） ← /status + /stats（Share 列 join）
 ├─ Recent Failures                                   ← /stats（新增 recent_errors 环）
 ├─ Performance by Provider & Model（10/100 切换）    ← /stats
 └─ Traffic & Usage（单一时间窗控制整带）             ← /stats
@@ -272,19 +271,19 @@ audit 开关与占用 / image cache 开关与占用。go 版本、os-arch、list
 | Headroom | 两位小数无量纲比值（§8.5） |
 | Resets | **绝对时刻 + 相对时长**：`04:00 · in 47m`。同一列内三种格式（`in 16d` / `04:00 (9h)`）不可比 |
 
-**b. Virtual Models & Endpoint Topology**（Fallback 表同构，仅首列不同）
+**b. Virtual Models & Endpoint Topology**（Fallback 端点直接追加在每个虚拟模型底部，PRI 标 FB）
 
 | 列 | 说明 |
 | --- | --- |
 | Virtual Model | **带协议前缀**：淡色 `anthropic-messages:` + 亮色模型名。虚拟模型是 per-protocol 的，接入方要在这张表上就能判断该往哪个协议发；跨端点用 rowspan 合并，组首行加实线上边框 |
-| PRI（Fallback 表为 ORD） | 优先级层级。Fallback 的排序是**独立空间**，用中性 `.pri-n` 徽章从 1 起编号，不套主模型的 P1/P2 色板 |
-| Provider : Model | key 段紫色；超长走 `.ep` 省略号 + `title` 全量 |
+| PRI | 优先级层级。主端点标 P1/P2...，Fallback 端点标中性 `FB` 徽章 |
+| Provider : Model | 不含中间 Key 部分；超长走 `.ep` 省略号 + `title` 全量 |
 | Health | `healthy` / `half-open` / `cooldown 2m 13s`。**悬停必须给因果**：连续失败次数 + 最近错误类别；half-open 额外说明"下一个请求是唯一的试探" |
 | Headroom | 账户级 quota headroom，与 §8.4-a 同源同色阶（§8.5）；无 quota 的账户 `—` |
-| Share 24h | **迷你条 + 百分比**，该端点在过去 24h 转发请求中的份额。这一列把"配置意图"与"运行现实"放进同一行——没有它，拓扑表是纯配置视图，回答不了"我配了 5 个端点，现在谁在扛" |
+| Req 24h | **纯数值**：`请求数 · 占比%`（如 `32 · 12.22%`），无进度条。占比为该端点占该 Virtual Model 过去 24h 请求数的比例 |
 | Context / Capabilities | 合并列：`200K` + 淡色 `· tools · image · thinking`。上下文窗口与能力标签都是同一个端点的静态属性，拆两列只是把一行读两遍 |
 
-Share 列的数据来自 `/status`（拓扑）与 `/stats`（`by_provider_model` 的请求数）的一次
+Req 24h 列的数据来自 `/status`（拓扑）与 `/stats`（`by_provider_model` 的请求数）的一次
 **客户端 join**——同一次刷新里各取一次，不污染 `/status` 的契约。口径按**请求数**，
 不按 token（token 份额受模型差异影响，回答不了"流量落在哪"）。
 

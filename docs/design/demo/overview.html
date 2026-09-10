@@ -152,7 +152,9 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 .modal-overlay{position:fixed;inset:0;background:rgba(1,4,9,.72);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(3px)}
 .modal-overlay.hidden{display:none}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--sp-5);width:min(520px,92vw);box-shadow:0 16px 48px rgba(1,4,9,.6);max-height:80vh;overflow:auto}
-.modal.warn-modal{width:min(600px,50vw)}
+.modal.warn-modal{width:50vw;min-width:320px;max-width:92vw}
+.warn-list{list-style:disc;padding-left:20px;margin:6px 0}
+.warn-list li{padding:3px 0;font-size:var(--fs-sm);color:var(--text);line-height:1.5;word-break:break-word}
 .modal h2{font-size:var(--fs-xl);color:var(--text-bright);margin-bottom:var(--sp-2);display:flex;align-items:center;gap:9px}
 .modal p{font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:var(--sp-3)}
 .modal .err{color:var(--red);font-size:var(--fs-sm);min-height:18px;margin:6px 0}
@@ -196,7 +198,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 /* warning list rows */
 .warn-group{margin-bottom:4px}
 .warn-group-title{font-weight:600;font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em}
-.warn-sep{border:none;border-top:1px solid var(--border);margin:10px 0}
+.warn-sep{border:none;border-top:1px solid var(--border);margin:12px 0}
 .wrow{display:flex;align-items:flex-start;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border-soft);font-size:var(--fs-sm)}
 .wrow:last-child{border-bottom:none}
 .wrow .when{margin-left:auto;color:var(--text-muted);font-family:var(--font-mono);font-size:var(--fs-xs);white-space:nowrap}
@@ -311,10 +313,8 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
   <div class="section-head" id="live">Live Requests
     <span class="badge b-cyan" id="live-running">0 running</span>
     <span class="count">in-flight only — a request leaves this table the moment it completes</span>
-    <span class="spacer"></span>
-    <button class="btn sm ghost" id="live-expand" hidden>Show all</button>
   </div>
-  <div class="table-wrap bounded">
+  <div class="table-wrap bounded" style="height:340px;max-height:340px;overflow-y:auto">
     <table class="c">
       <thead><tr>
         <th>State</th>
@@ -339,11 +339,11 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
     <table class="c">
       <thead><tr>
         <th>Provider</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
-        <th style="width:190px">Progress</th><th class="num">Headroom</th><th>Resets</th>
+        <th style="width:190px">Progress</th><th class="num">Headroom</th><th class="num" title="Requests routed within this account's quota over the last 24h, and their share of all forwarded requests">Req 24h</th><th>Resets</th>
       </tr></thead>
       <tbody>
         <tr>
-          <td>packycode : <span class="badge b-purple tight">main</span></td>
+          <td>packycode</td>
           <td><span class="badge b-cyan" title="bucket — the longest-period limit on this account. Unused allowance is real waste, so spare headroom raises routing priority.">bucket · tokens / 1mo</span></td>
           <td class="t-dim">all models</td>
           <td class="num">100M</td><td class="num">68.20M</td>
@@ -352,10 +352,11 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
             <span class="hint">68.20% used</span>
           </td>
           <td class="num t-warn help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Below 1 = spending ahead of the clock.">0.60</td>
+          <td class="num">1,248 · 38.2%</td>
           <td class="t-dim">10-01 00:00 <span class="dim">· in 16d</span></td>
         </tr>
         <tr>
-          <td>deepseek : <span class="badge b-dim tight">a1b2c3</span></td>
+          <td>deepseek</td>
           <td><span class="badge b-purple" title="gate — a shorter-period rate cap. Near-saturation lowers routing priority; it never raises it.">gate · requests / 1d</span></td>
           <td class="t-dim">cheap</td>
           <td class="num">25,000</td><td class="num">3,211</td>
@@ -364,10 +365,11 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
             <span class="hint">12.84% used</span>
           </td>
           <td class="num t-ok help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Above 1 = under-using the budget.">2.33</td>
+          <td class="num">586 · 17.9%</td>
           <td class="t-dim">04:00 <span class="dim">· in 9h</span></td>
         </tr>
         <tr>
-          <td>openrouter : <span class="badge b-purple tight">backup</span></td>
+          <td>openrouter</td>
           <td><span class="badge b-purple" title="gate — a shorter-period rate cap. Near-saturation lowers routing priority; it never raises it.">gate · requests / 1d</span></td>
           <td class="t-dim">all models</td>
           <td class="num">10,000</td><td class="num">9,800</td>
@@ -376,6 +378,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
             <span class="hint t-err">98% used · 200 left</span>
           </td>
           <td class="num t-warn help" title="(1 − used_frac) / time_left_frac, clamped to [0,5]. Below 1 = spending ahead of the clock.">0.61</td>
+          <td class="num">321 · 9.8%</td>
           <td class="t-dim">04:00 <span class="dim">· in 47m</span></td>
         </tr>
       </tbody>
@@ -387,95 +390,85 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
        GAP G4: no per-endpoint headroom (read-side join with quota.Registry).
        GAP G6: Share 24h needs /stats?range=24h — the hourly tail is fixed at 48h today. -->
   <div class="section-head" id="models">Virtual Models &amp; Endpoint Topology
-    <span class="badge b-dim">3 models · 5 endpoints</span>
-    <span class="count">share = this endpoint's share of all forwarded requests in the last 24h</span>
+    <span class="badge b-dim">3 models · 8 endpoints</span>
+    <span class="count">share = this endpoint's share of requests for its virtual model in the last 24h</span>
   </div>
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order">PRI</th>
+        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
         <th>Provider : Model</th><th>Health</th>
         <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
-        <th class="num" title="Share of forwarded requests over the last 24h">Share 24h</th>
+        <th class="num" title="Requests this endpoint served over the last 24h, and their share of this virtual model's requests">Req 24h</th>
         <th>Context / Capabilities</th>
       </tr></thead>
       <tbody>
         <tr class="grp">
-          <td rowspan="2"><span class="dim">anthropic-messages:</span><br><span class="t-strong">coding</span></td>
+          <td rowspan="3"><span class="dim">anthropic-messages:</span><br><span class="t-strong">coding</span></td>
           <td class="num"><span class="pri pri-1">P1</span></td>
-          <td><span class="ep" title="packycode : main : claude-sonnet-4">packycode : <span class="t-key">main</span> : claude-sonnet-4</span></td>
+          <td><span class="ep" title="packycode : claude-sonnet-4">packycode : claude-sonnet-4</span></td>
           <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
           <td class="num t-warn">0.60</td>
-          <td class="num"><span class="sharebar"><span style="width:38%"></span></span>38.2%</td>
+          <td class="num">1,248 · 74.3%</td>
           <td>200K <span class="dim">· tools · image</span></td>
         </tr>
         <tr>
           <td class="num"><span class="pri pri-1">P1</span></td>
-          <td><span class="ep" title="packycode : backup : claude-sonnet-4">packycode : <span class="t-key">backup</span> : claude-sonnet-4</span></td>
+          <td><span class="ep" title="packycode : claude-sonnet-4">packycode : claude-sonnet-4</span></td>
           <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
           <td class="num t-warn">0.60</td>
-          <td class="num"><span class="sharebar"><span style="width:11%"></span></span>11.4%</td>
+          <td class="num">386 · 23.0%</td>
           <td>200K <span class="dim">· tools · image</span></td>
         </tr>
+        <tr>
+          <td class="num"><span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span></td>
+          <td><span class="ep" title="deepseek : deepseek-v3.2">deepseek : deepseek-v3.2</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num">45 · 2.7%</td>
+          <td>128K <span class="dim">· tools</span></td>
+        </tr>
         <tr class="grp">
-          <td rowspan="2"><span class="dim">anthropic-messages:</span><br><span class="t-strong">agent</span></td>
+          <td rowspan="3"><span class="dim">anthropic-messages:</span><br><span class="t-strong">agent</span></td>
           <td class="num"><span class="pri pri-1">P1</span></td>
-          <td><span class="ep" title="packycode : main : claude-opus-4.6">packycode : <span class="t-key">main</span> : claude-opus-4.6</span></td>
+          <td><span class="ep" title="packycode : claude-opus-4.6">packycode : claude-opus-4.6</span></td>
           <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
           <td class="num t-warn">0.60</td>
-          <td class="num"><span class="sharebar"><span style="width:25%"></span></span>24.7%</td>
+          <td class="num">808 · 79.4%</td>
           <td>200K <span class="dim">· tools · image · thinking</span></td>
         </tr>
         <tr>
           <td class="num"><span class="pri pri-2">P2</span></td>
-          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-r2">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-r2</span></td>
+          <td><span class="ep" title="deepseek : deepseek-r2">deepseek : deepseek-r2</span></td>
           <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
           <td class="num t-ok">2.33</td>
-          <td class="num"><span class="sharebar"><span style="width:6%"></span></span>6.1%</td>
+          <td class="num">200 · 19.6%</td>
           <td>128K <span class="dim">· tools · thinking</span></td>
         </tr>
-        <tr class="grp">
-          <td><span class="dim">openai-completions:</span><br><span class="t-strong">cheap</span></td>
-          <td class="num"><span class="pri pri-1">P1</span></td>
-          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-chat">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-chat</span></td>
-          <td><span class="badge b-warn" title="Cooldown elapsed — the next request is the single half-open trial. Last error: transient 429 (4m ago).">half-open</span></td>
-          <td class="num t-ok">2.33</td>
-          <td class="num"><span class="sharebar"><span style="width:18%"></span></span>17.9%</td>
-          <td>128K <span class="dim">· tools</span></td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-
-  <!-- GAP G5: fallback endpoints are merged into each model's endpoints[] and /status does not
-       expose core.Endpoint.FromFallback, so this table cannot be split out yet. -->
-  <div class="sub-head">Fallback Endpoints
-    <span class="badge b-dim">2</span>
-    <span class="count">tried after every priority tier of the matched virtual model is exhausted</span>
-  </div>
-  <div class="table-wrap">
-    <table class="c">
-      <thead><tr>
-        <th class="num" title="Fallback ordering — a separate space from the per-model priority tiers">ORD</th>
-        <th>Provider : Model</th><th>Health</th>
-        <th class="num">Headroom</th><th class="num">Share 24h</th><th>Context / Capabilities</th>
-      </tr></thead>
-      <tbody>
         <tr>
-          <td class="num"><span class="pri pri-n">1</span></td>
-          <td><span class="ep" title="deepseek : a1b2c3 : deepseek-v3.2">deepseek : <span class="t-dim">a1b2c3</span> : deepseek-v3.2</span></td>
-          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
-          <td class="num t-ok">2.33</td>
-          <td class="num"><span class="sharebar"><span style="width:1%"></span></span>1.4%</td>
-          <td>128K <span class="dim">· tools</span></td>
-        </tr>
-        <tr>
-          <td class="num"><span class="pri pri-n">2</span></td>
-          <td><span class="ep" title="openrouter : backup : anthropic/claude-opus-4.6">openrouter : <span class="t-key">backup</span> : anthropic/claude-opus-4.6</span></td>
+          <td class="num"><span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span></td>
+          <td><span class="ep" title="openrouter : anthropic/claude-opus-4.6">openrouter : anthropic/claude-opus-4.6</span></td>
           <td><span class="badge b-err" title="Excluded from routing until the cooldown expires. Cause: upstream 500 (transient), 3 consecutive failures.">cooldown 2m 13s</span></td>
           <td class="num t-warn">0.61</td>
-          <td class="num"><span class="sharebar"><span style="width:1%"></span></span>0.3%</td>
+          <td class="num">10 · 1.0%</td>
           <td>200K <span class="dim">· tools · image · thinking</span></td>
+        </tr>
+        <tr class="grp">
+          <td rowspan="2"><span class="dim">openai-completions:</span><br><span class="t-strong">cheap</span></td>
+          <td class="num"><span class="pri pri-1">P1</span></td>
+          <td><span class="ep" title="deepseek : deepseek-chat">deepseek : deepseek-chat</span></td>
+          <td><span class="badge b-warn" title="Cooldown elapsed — the next request is the single half-open trial. Last error: transient 429 (4m ago).">half-open</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num">586 · 92.9%</td>
+          <td>128K <span class="dim">· tools</span></td>
+        </tr>
+        <tr>
+          <td class="num"><span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span></td>
+          <td><span class="ep" title="deepseek : deepseek-v3.2">deepseek : deepseek-v3.2</span></td>
+          <td><span class="badge b-ok" title="0 consecutive failures">healthy</span></td>
+          <td class="num t-ok">2.33</td>
+          <td class="num">45 · 7.1%</td>
+          <td>128K <span class="dim">· tools</span></td>
         </tr>
       </tbody>
     </table>
@@ -559,7 +552,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
+          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:90px" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
           <tbody id="usage-key"></tbody>
           <tfoot id="usage-key-foot"></tfoot>
         </table>
@@ -571,7 +564,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
+          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:90px" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
           <tbody id="usage-caller"></tbody>
           <tfoot id="usage-caller-foot"></tfoot>
         </table>
@@ -695,6 +688,13 @@ function fmtKMG(v) {
   if (v >= 1e3) return dec2(v / 1e3) + 'K';
   return String(Math.round(v));
 }
+function fmtRate(v) {
+  if (!isFinite(v) || v <= 0) return '—';
+  if (v >= 1e9) return dec2(v / 1e9) + 'B';
+  if (v >= 1e6) return dec2(v / 1e6) + 'M';
+  if (v >= 1e3) return dec2(v / 1e3) + 'K';
+  return dec2(v);
+}
 function fmtPct(v) { return dec2(v) + '%'; }
 function fmtInt(v) { return Math.round(v).toLocaleString('en-US'); }
 function toast(msg) {
@@ -730,9 +730,9 @@ const modeTag = isStream => MODE_TAG[isStream ? 'stream' : 'json'];
    A rolling metric (e.g. "84 errors in 24h") would pin the badge permanently
    and train the operator to ignore it — error rate belongs in the vitals. ===== */
 const WARNINGS = [
-  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.', when: '12m ago' },
-  { sev: 'err', text: 'openrouter : backup : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.', when: '2m ago' },
-  { sev: 'warn', text: 'openrouter : backup — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.', when: 'now' },
+  { sev: 'warn', text: 'Config reloaded 12m ago (SIGHUP): 1 issue — fallback_endpoints[0].providers[1] "deepseek-old" matches no provider.' },
+  { sev: 'err', text: 'openrouter : anthropic/claude-opus-4.6 — endpoint in cooldown 2m 13s after 3 consecutive upstream 500s.' },
+  { sev: 'warn', text: 'openrouter — requests/1d gate at 98% with 47m left in the period; this account will stop taking traffic.' },
 ];
 const warnOverlay = (() => {
   const div = document.createElement('div');
@@ -746,12 +746,12 @@ const warnOverlay = (() => {
       </div>
       <div id="warn-errors" class="warn-group" hidden>
         <div class="warn-group-title">Errors</div>
-        <div id="warn-errors-list"></div>
+        <ul id="warn-errors-list" class="warn-list"></ul>
       </div>
       <hr id="warn-sep" class="warn-sep" hidden>
       <div id="warn-warnings" class="warn-group" hidden>
         <div class="warn-group-title">Warnings</div>
-        <div id="warn-warnings-list"></div>
+        <ul id="warn-warnings-list" class="warn-list"></ul>
       </div>
       <div class="modal-actions"><button class="btn" id="warn-close">Close</button></div>
     </div>`;
@@ -777,16 +777,11 @@ const warnOverlay = (() => {
     clearBox.hidden = true;
     const errors = WARNINGS.filter(w => w.sev === 'err');
     const warnings = WARNINGS.filter(w => w.sev !== 'err');
-    const renderRow = w => `
-      <div class="wrow">
-        <span class="badge ${w.sev === 'err' ? 'b-err' : 'b-warn'}">${w.sev === 'err' ? 'error' : 'warn'}</span>
-        <span>${w.text}</span>
-        <span class="when">${w.when}</span>
-      </div>`;
+    const renderItem = w => `<li>${w.text}</li>`;
     errBox.hidden = errors.length === 0;
-    document.getElementById('warn-errors-list').innerHTML = errors.map(renderRow).join('');
+    document.getElementById('warn-errors-list').innerHTML = errors.map(renderItem).join('');
     warnBox.hidden = warnings.length === 0;
-    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderRow).join('');
+    document.getElementById('warn-warnings-list').innerHTML = warnings.map(renderItem).join('');
     sep.hidden = !(errors.length > 0 && warnings.length > 0);
     const hasErr = errors.length > 0;
     bell.className = 'warn-btn ' + (hasErr ? 'has-err' : 'has-warn');
@@ -935,7 +930,7 @@ function attemptCell(n) {
 }
 function endpointCell(provider, key, model) {
   if (!provider) return '<span class="dim">— never forwarded</span>';
-  return `<span class="ep" title="${provider} : ${key} : ${model}">${provider} : <span class="t-key">${key}</span> : ${model}</span>`;
+  return `<span class="ep" title="${provider} : ${model}">${provider} : ${model}</span>`;
 }
 function renderLive() {
   const body = document.getElementById('live-body');
@@ -944,19 +939,20 @@ function renderLive() {
   document.getElementById('live-running').textContent = running + ' running';
   document.getElementById('rail-live').textContent = running;
   const limit = 8;
+  const fixedHeight = limit * 38 + 36;
   const tableWrap = document.querySelector('#live + .table-wrap');
-  if (tableWrap) tableWrap.style.maxHeight = (limit * 44 + 56) + 'px';
-  const expandBtn = document.getElementById('live-expand');
-  expandBtn.hidden = es.length <= LIVE_CAP;
-  expandBtn.textContent = SIM.expanded ? 'Show top ' + LIVE_CAP : 'Show all ' + es.length;
+  if (tableWrap) {
+    tableWrap.style.height = fixedHeight + 'px';
+    tableWrap.style.maxHeight = fixedHeight + 'px';
+    tableWrap.style.overflowY = 'auto';
+  }
   if (!es.length) {
     body.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:26px">
       <div class="t-dim">No requests in flight at the last refresh.</div>
       <div class="hint">Completed requests are not listed here — see Recent Failures, Performance and Traffic below.</div></td></tr>`;
     return;
   }
-  const shown = SIM.expanded ? es : es.slice(-LIVE_CAP);
-  const rows = shown.map(e => `<tr>
+  const rows = es.map(e => `<tr>
     <td><span class="badge b-cyan">running</span></td>
     <td class="num">${elapsedCell(e)}</td>
     <td><span class="dim">${e.proto}:</span><b>${e.vmodel}</b>${modeTag(e.stream)}</td>
@@ -967,11 +963,8 @@ function renderLive() {
     <td class="num">${fmtInt(e.estIn)}</td>
     <td class="num">${e.outUnknown ? '<span class="dim" title="compressed response body — output tokens cannot be counted">—</span>' : fmtInt(e.estOut)}</td>
   </tr>`).join('');
-  const more = (!SIM.expanded && es.length > LIVE_CAP)
-    ? `<tr><td colspan="9" class="hint" style="text-align:center">… ${es.length - LIVE_CAP} more in flight — use “Show all”</td></tr>` : '';
-  body.innerHTML = rows + more;
+  body.innerHTML = rows;
 }
-document.getElementById('live-expand').onclick = () => { SIM.expanded = !SIM.expanded; renderLive(); };
 function updateVitals() {
   const running = SIM.entries.filter(e => e.state === 'running').length;
   const queued = SIM.entries.filter(e => e.state === 'queued').length;
@@ -1050,20 +1043,20 @@ function renderFailures() {
    error markers cover them. */
 const PERF = {
   '10': [
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', n: 10, incw: '0.21M', cr: '0.06M', out: '0.11M', ttft: '742ms / 1.88s', toks: '26.10 / 19.20' },
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', n: 2, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.18s / 1.31s', toks: '20.80 / 18.40' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', n: 6, incw: '0.11M', cr: '0.03M', out: '0.06M', ttft: '1.02s / 1.44s', toks: '23.50 / 17.10' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', n: 0 },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', n: 3, incw: '0.05M', cr: '0.02M', out: '0.03M', ttft: '1.51s / 2.02s', toks: '17.60 / 11.90' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', n: 0 },
+    { pk: 'packycode : claude-sonnet-4', mode: 'stream', n: 10, incw: '0.21M', cr: '0.06M', out: '0.11M', ttft: '742ms / 1.88s', toks: '1.35K / 980' },
+    { pk: 'packycode : claude-sonnet-4', mode: 'json', n: 2, incw: '0.02M', cr: '0.01M', out: '0.01M', ttft: '1.18s / 1.31s', toks: '940 / 720' },
+    { pk: 'packycode : claude-opus-4.6', mode: 'stream', n: 6, incw: '0.11M', cr: '0.03M', out: '0.06M', ttft: '1.02s / 1.44s', toks: '1.15K / 820' },
+    { pk: 'packycode : claude-opus-4.6', mode: 'json', n: 0 },
+    { pk: 'deepseek : deepseek-v3.2', mode: 'stream', n: 3, incw: '0.05M', cr: '0.02M', out: '0.03M', ttft: '1.51s / 2.02s', toks: '890 / 640' },
+    { pk: 'deepseek : deepseek-v3.2', mode: 'json', n: 0 },
   ],
   '100': [
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'stream', n: 100, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', toks: '24.80 / 17.60' },
-    { pk: 'packycode : main : claude-sonnet-4', mode: 'json', n: 43, incw: '0.31M', cr: '0.09M', out: '0.14M', ttft: '1.24s / 3.02s', toks: '19.40 / 13.10' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'stream', n: 100, incw: '1.86M', cr: '0.55M', out: '0.97M', ttft: '934ms / 2.88s', toks: '22.30 / 15.90' },
-    { pk: 'packycode : backup : claude-sonnet-4', mode: 'json', n: 18, incw: '0.12M', cr: '0.04M', out: '0.06M', ttft: '1.41s / 2.10s', toks: '18.70 / 14.20' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'stream', n: 89, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', toks: '18.90 / 12.40' },
-    { pk: 'deepseek : a1b2c3 : deepseek-v3.2', mode: 'json', n: 21, incw: '0.14M', cr: '0.05M', out: '0.07M', ttft: '2.05s / 5.40s', toks: '15.20 / 10.30' },
+    { pk: 'packycode : claude-sonnet-4', mode: 'stream', n: 100, incw: '1.94M', cr: '0.58M', out: '1.01M', ttft: '812ms / 2.41s', toks: '1.25K / 880' },
+    { pk: 'packycode : claude-sonnet-4', mode: 'json', n: 43, incw: '0.31M', cr: '0.09M', out: '0.14M', ttft: '1.24s / 3.02s', toks: '980 / 660' },
+    { pk: 'packycode : claude-opus-4.6', mode: 'stream', n: 100, incw: '1.86M', cr: '0.55M', out: '0.97M', ttft: '934ms / 2.88s', toks: '1.12K / 790' },
+    { pk: 'packycode : claude-opus-4.6', mode: 'json', n: 18, incw: '0.12M', cr: '0.04M', out: '0.06M', ttft: '1.41s / 2.10s', toks: '920 / 710' },
+    { pk: 'deepseek : deepseek-v3.2', mode: 'stream', n: 89, incw: '1.34M', cr: '0.48M', out: '0.74M', ttft: '1.62s / 4.10s', toks: '950 / 620' },
+    { pk: 'deepseek : deepseek-v3.2', mode: 'json', n: 21, incw: '0.14M', cr: '0.05M', out: '0.07M', ttft: '2.05s / 5.40s', toks: '760 / 510' },
   ],
 };
 function renderPerf(basis) {
@@ -1079,7 +1072,7 @@ function renderPerf(basis) {
         ? `<span class="t-warn" title="Window not full: this row has only ${r.n} of ${cap} samples, so the percentiles rest on ${r.n} requests">${fmtInt(r.n)}</span>`
         : fmtInt(r.n));
     return `<tr class="${none ? 'zero ' : ''}${first ? 'grp' : ''}">
-      <td><span class="ep" title="${r.pk}">${r.pk.replace(/ : ([\w-]+) : /, ' : <span class="t-key">$1</span> : ')}</span>
+      <td><span class="ep" title="${r.pk}">${r.pk}</span>
         ${none ? '<span class="badge b-dim tight" title="This endpoint has not completed a request in this mode within the window">no samples</span>' : ''}</td>
       <td><span class="mode m-${r.mode}" title="${r.mode === 'stream' ? 'streaming response (SSE)' : 'non-streaming response (single JSON body)'}">${r.mode}</span></td>
       <td class="num">${nCell}</td>
@@ -1260,7 +1253,7 @@ function usageRows(rows) {
         <td class="num"><span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}">${fmtInt(r.err)}</span></td>
         <td class="num">${fmtKMG(r.incw)} <span class="dim">/</span> ${fmtKMG(r.cr)}</td>
         <td class="num">${fmtKMG(r.out)}</td>
-        <td class="num"><span class="sharebar"><span style="width:${share.toFixed(0)}%"></span></span>${fmtPct(share)}</td>
+        <td class="num">${fmtPct(share)}</td>
       </tr>`;
     }).join('');
 }
