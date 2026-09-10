@@ -278,9 +278,16 @@ func TestLogPage_ServesHTML(t *testing.T) {
 		t.Errorf("Content-Type = %q, want text/html", ct)
 	}
 	body := w.Body.String()
-	for _, marker := range []string{"VMR Live Log", "vmr_status_key", "readStream", "btn-clear", `href="/status.html"`} {
+	// Feature markers that must be present in the assembled page.
+	for _, marker := range []string{"VMR Console \u2014 Log", "mountConsole", "conn-banner", "btn-retry", "btn-pause", "classifyLevel"} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("body missing %q", marker)
+		}
+	}
+	// Injection markers must be replaced by assembleConsolePage — no residue.
+	for _, marker := range []string{"CONSOLE_CSS", "CONSOLE_JS"} {
+		if strings.Contains(body, marker) {
+			t.Errorf("body still contains injection marker %q (assembleConsolePage not applied)", marker)
 		}
 	}
 }
