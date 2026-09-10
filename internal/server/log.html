@@ -10,6 +10,7 @@
 /*{{CONSOLE_CSS}}*/
 
 /* ===== Log-page private styles (terminal chrome; not shared with other pages) ===== */
+.w230{width:230px}
 
 /* The Log page owns its own scrolling: body is a flex column, header and
    footer are fixed-size, main fills the rest and scrolls internally. */
@@ -38,7 +39,7 @@ pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
 
 /* log line structural classes */
 .ln{display:block}
-.ln .t{color:#6e7681}
+.ln .t{color:var(--text-dim)}
 .ln .lv{font-weight:600}
 .ln.inf .lv{color:var(--accent)}
 .ln.ok  .lv{color:var(--green)}
@@ -55,7 +56,7 @@ pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
 #jump{
   position:absolute;right:22px;bottom:18px;
   display:none;align-items:center;gap:6px;
-  background:var(--accent);color:#0d1117;border:none;border-radius:var(--r-pill);
+  background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--r-pill);
   padding:5px 13px;font:600 var(--fs-sm) var(--font-sans);cursor:pointer;
   box-shadow:0 6px 20px rgba(1,4,9,.5);
 }
@@ -146,7 +147,7 @@ railEl.insertAdjacentHTML('afterbegin', `
     <button class="lvl on" data-lvl="OK">OK</button>
     <button class="lvl on" data-lvl="INF">INF</button>
   </span>
-  <input class="input" id="filter" placeholder="filter substring…" style="width:230px" autocomplete="off">
+  <input class="input w230" id="filter" placeholder="filter substring…" autocomplete="off">
   <button class="btn sm ghost" id="btn-clear-filter" title="Clear substring filter and re-enable every level">Reset filters</button>
   <span class="spacer"></span>
   <button class="btn sm" id="btn-pause" title="Pause rendering (⌘P / Ctrl+P) — buffer keeps filling">⏸ Pause</button>

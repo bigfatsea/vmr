@@ -156,6 +156,8 @@
 - **in-flight 请求注册表（`router/inflight.go`）归属路由运行态，永不落盘、不结算进完成时账本**：排队、逐 attempt 发出、流式逐块盖章等事件发生在 router 内部，早于任何 audit record 产生；完成时钩子（`server.done`）对每个请求恰好记账一次，in-flight 仅补充"请求进行中"的内存观测空窗，条目在请求结束时整条删除，两条路径互不写对方的数据。
 - **`last_byte_at` 与 `est_out` 逐块盖章、刻意不节流**：`last_byte_at` 的语义是"上游最后一块数据真实到达的时刻"，用于卡死检测；若按时间或字节数攒批，节流后的盖章时间反而滞后于真实末块到达时间，让已卡死的流显得"更新鲜"，方向恰好做反；成本上每块只有一次 `OutTokens()`（per-stream 互斥锁内读计数器，本来每块就进过一次）+ 几次 per-entry 原子写，零内存分配，千块/秒极端流下也远低于 JSON/SSE 协议开销，无需攒批。
 - **body 上传与 probe 阶段对 in-flight 注册表不可见**：注册点设在 `TopLevelProbe` + `authenticate` 之后、`AcquireSlot` 之前，因为未获得协议与虚拟模型名前的请求无法归属维度，且慢速客户端 body 上传并不占用并发槽，不属于并发门排队观测的对象。
+- **Overview 头部告警 pill 的端点告警只在 cooldown 期间在列**（`server/alerts.go`）：cooldown = 该端点此刻被排除在路由外，是「需要动手的状态」；`consecutive_failures>0` 但未冷却的降级态由拓扑表 Health 列（带因果悬停）承载——无流量时残留失败计数不消零，进告警会把徽章永久钉在非零，违反告警收敛纪律（已登记于 console-unification 实施契约 §5）。
+- **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流，给日志行加结构化字段牵动 stderr 格式与全部日志消费者；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
 
 ---
 
@@ -442,6 +444,18 @@
 - **为什么待定**：消费方是本地状态展示，错误折叠的误导面小；真正「missing is not zero」的纪律挂在会进报表与配额决策的数字上。
 - **可能方案**：返回 `(value, ok)` 并让消费方显式展示 unknown。
 - **触发条件**：状态看板数字开始参与任何自动决策（而不仅是人看）。
+
+#### 2.101 [低，待观察] Overview 告警 pill 的 quota 阈值上线后看噪音再调
+
+- **现状**：quota 告警阈值写死在 `server/alerts.go`（used ≥ 100% → error；≥ 90% → warning），是实施轮主控拍板值（contracts §2.1 / D4）。
+- **为什么待定**：阈值本身没有权威来源（quota 评分曲线只有 headroom=1 一个语义分界），90% 是否过吵取决于真实用量曲线；先跑真实流量再定，不预调。
+- **触发条件**：告警 pill 长期非零但无实际可操作事项（噪音），或濒临耗尽从未提前告警（漏报）。
+
+#### 2.102 [低，待决] recent_errors 与 Log 页之间无进程内请求号关联
+
+- **现状**：console-unification 设计 §8.4-d 提出 Recent Failures 条目保留进程内请求号、与 Log 页每行同号互跳；但 audit.Record 与 `/log` 行目前都不携带任何请求号，实施轮未为它加字段（加号牵动 audit 格式与日志消费者，越界）。
+- **可能方案**：给 Record 加进程级 seq 并在 logfmt 前缀携带（成本：日志格式变更 + audit schema 演进 + report 兼容）；或接受无关联（Log 页有子串过滤可按时间窗人工对齐）。
+- **为什么待定**：关联的实际排障收益未经验证，而格式变更成本确定。
 
 #### 2.98 [低，待触发] `archtest` 的 `funcLineExemptions` 以「文件:函数名」为键，同文件重名方法共用一条
 

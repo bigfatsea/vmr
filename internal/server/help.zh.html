@@ -15,6 +15,17 @@
 /*{{CONSOLE_CSS}}*/
 
 /* ===== help page-private styles — byte-identical across help.html / help.zh.html ===== */
+/* one-shot layout utilities: the console discipline keeps inline style out of static markup */
+.t-right{text-align:right}
+.mt0{margin-top:0}
+.mb10{margin-bottom:10px}
+.mb12{margin-bottom:12px}
+.ml-auto{margin-left:auto}
+.mono{font-family:var(--font-mono)}
+.anchor{scroll-margin-top:var(--hd-h)}
+.sub-note{font-size:var(--fs-sm);color:var(--text-muted)}
+.row-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.lede{color:var(--text-muted);margin-bottom:16px;max-width:860px}
 /* connection + quick-reference tables carry prose in their cells; the
    console-wide nowrap on table.c is meant for numeric diagnostic tables */
 .card table.c td{white-space:normal}
@@ -42,8 +53,8 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <body>
 
 <main class="page">
-  <div class="section-head" style="margin-top:0">Agent 配置指南</div>
-  <p style="color:var(--text-muted);margin-bottom:16px;max-width:860px">
+  <div class="section-head" class="mt0">Agent 配置指南</div>
+  <p class="lede">
     把任意 AI 编程 Agent 指向本 VMR 实例：通常只需要下方的一个 base URL、管理员下发的 API 密钥、
     以及一个虚拟模型名。若 Agent 支持，还可进一步配置<strong>上下文窗口</strong>（如 <code>200k</code>）、
     <strong>思考/推理深度</strong>（<code>high</code>、<code>budget_tokens</code>）以及<strong>视觉多模态能力</strong>
@@ -52,31 +63,31 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
   </p>
 
   <!-- connection: identity of this instance + whether this browser can talk to it -->
-  <div class="card" id="connect" style="scroll-margin-top:var(--hd-h)">
+  <div class="card" id="connect" class="anchor">
     <div class="card-title">连接信息</div>
-    <table class="c" style="margin-bottom:12px">
+    <table class="c" class="mb12">
       <tbody id="help-base-urls">
         <tr>
           <td><span class="badge b-cyan">openai-completions</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
         </tr>
         <tr>
           <td><span class="badge b-purple">anthropic-messages</span></td>
           <td><code>{{BASE_URL_ANTHROPIC}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">复制</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">复制</button></td>
         </tr>
         <tr>
           <td><span class="badge b-info">openai-responses</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">复制</button></td>
         </tr>
       </tbody>
       <tbody>
         <tr>
           <td class="t-dim">模型</td>
           <td id="help-models"><span class="t-dim">加载中…</span></td>
-          <td class="hint" style="text-align:right">每个虚拟模型只在它自己的协议上应答</td>
+          <td class="hint" class="t-right">每个虚拟模型只在它自己的协议上应答</td>
         </tr>
         <tr>
           <td class="t-dim">鉴权</td>
@@ -86,18 +97,18 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
         </tr>
       </tbody>
     </table>
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div class="row-wrap">
       <span class="pill p-paused" id="chk-state">尚未存储密钥</span>
-      <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="chk-detail">本浏览器还没有 API 密钥 —— 下方各客户端需要在 <code>Authorization: Bearer</code> 请求头中携带它。</span>
-      <button class="btn sm" id="chk-btn" style="margin-left:auto">检查连接</button>
+      <span class="sub-note" id="chk-detail">本浏览器还没有 API 密钥 —— 下方各客户端需要在 <code>Authorization: Bearer</code> 请求头中携带它。</span>
+      <button class="btn sm" id="chk-btn" class="ml-auto">检查连接</button>
       <button class="btn sm ghost" id="chk-set">设置密钥</button>
     </div>
   </div>
 
   <!-- quick reference: which protocol, configured where -->
-  <div class="card" id="quickref" style="scroll-margin-top:var(--hd-h)">
+  <div class="card" id="quickref" class="anchor">
     <div class="card-title">速查表</div>
-    <p class="hint" style="margin-bottom:10px">一图速览：用哪个协议，在哪里配置。点击 Agent 名称可打开下方对应指南。</p>
+    <p class="hint" class="mb10">一图速览：用哪个协议，在哪里配置。点击 Agent 名称可打开下方对应指南。</p>
     <table class="c">
       <thead><tr><th>Agent</th><th>协议</th><th>配置位置</th></tr></thead>
       <tbody>
@@ -120,7 +131,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== Anthropic Messages protocol ===== -->
   <div class="sub-head">Anthropic Messages 协议 <span class="badge b-purple tight">anthropic-messages</span></div>
-  <p class="hint" style="margin-bottom:10px">原生使用 Anthropic Messages API 的 Agent。将 Base URL 指向 VMR 的 Anthropic 兼容端点；API 密钥通过 <code>x-api-key</code> 请求头发送。</p>
+  <p class="hint" class="mb10">原生使用 Anthropic Messages API 的 Agent。将 Base URL 指向 VMR 的 Anthropic 兼容端点；API 密钥通过 <code>x-api-key</code> 请求头发送。</p>
 
   <details class="disc" id="agent-claude-code" open>
     <summary>Claude Code <span class="badge b-purple">anthropic-messages</span></summary>
@@ -154,7 +165,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== OpenAI Completions protocol ===== -->
   <div class="sub-head">OpenAI Completions 协议 <span class="badge b-cyan tight">openai-completions</span></div>
-  <p class="hint" style="margin-bottom:10px">原生使用 OpenAI Chat Completions API 的 Agent。将 Base URL 指向 VMR 的 OpenAI 兼容端点；API 密钥通过 <code>Authorization: Bearer</code> 请求头发送。</p>
+  <p class="hint" class="mb10">原生使用 OpenAI Chat Completions API 的 Agent。将 Base URL 指向 VMR 的 OpenAI 兼容端点；API 密钥通过 <code>Authorization: Bearer</code> 请求头发送。</p>
 
   <details class="disc" id="agent-pi">
     <summary>Pi Agent <span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></summary>
@@ -512,7 +523,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== OpenAI Responses protocol ===== -->
   <div class="sub-head">OpenAI Responses 协议 <span class="badge b-info tight">openai-responses</span></div>
-  <p class="hint" style="margin-bottom:10px">连接使用新一代 OpenAI Responses API（<code>/v1/responses</code>）的应用与 SDK。在 VMR 中配置为 <code>openai-responses</code> 协议的虚拟模型将自动处理下游请求分发与响应流转换。</p>
+  <p class="hint" class="mb10">连接使用新一代 OpenAI Responses API（<code>/v1/responses</code>）的应用与 SDK。在 VMR 中配置为 <code>openai-responses</code> 协议的虚拟模型将自动处理下游请求分发与响应流转换。</p>
 
   <details class="disc" id="agent-responses">
     <summary>OpenAI Responses SDK <span class="badge b-info">openai-responses</span></summary>
@@ -539,8 +550,8 @@ print(response.output_text)</code></pre>
 
   <details class="disc" id="troubleshooting">
     <summary>故障排查</summary>
-    <div class="body" style="font-size:var(--fs-sm);color:var(--text-muted)">
-      <p>• <b>所有请求都返回 401</b> → <code style="font-family:var(--font-mono)">Authorization: Bearer</code> 中的密钥必须与 <code style="font-family:var(--font-mono)">api_keys:</code> 中的某一匹配。</p>
+    <div class="body" class="sub-note">
+      <p>• <b>所有请求都返回 401</b> → <code class="mono">Authorization: Bearer</code> 中的密钥必须与 <code class="mono">api_keys:</code> 中的某一匹配。</p>
       <p>• <b>模型不存在</b> → 虚拟模型按协议区分；到 <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> 查看每个名字应答的协议。</p>
       <p>• <b>会话中途突然 401</b> → vmr 在密钥变更后被重载过；重新设置密钥（🔑 按钮，仅存储在本浏览器）。</p>
       <p>• <b>请求很慢或卡住</b> → 打开 <a href="/status.html#live">Overview → Live Requests</a>：红色 <i>stalled</i> 标记表示超过 10 秒没有上游字节；<i>queued</i> 计时很长表示并发闸门已满。</p>
@@ -558,11 +569,9 @@ print(response.output_text)</code></pre>
    copy buttons, the snippet fill engine, the model × protocol table and the
    connection check, all fed by the auth-gated GET /status.
 
-   Auth modal note (legacy ids): authentication is shared console chrome —
+   Auth modal note: authentication is shared console chrome —
    console.js's keyOverlay (input id "vmr-key-input"), opened by VMRAuth.guard
-   on 401 or by the header Key button. The retired page-local modal
-   (help-auth-modal / id="help-api-key") was absorbed into that shared
-   skeleton; no page-local auth markup remains. */
+   on 401 or by the header Key button. No page-local auth markup remains. */
 
 // ---- unified skeleton: header rows 1+2, rail, footer ----
 const consoleAPI = mountConsole({
@@ -640,7 +649,7 @@ function fillBaseURLs() {
     const u = urls[p];
     return '<tr><td><span class="badge ' + def.badge + '">' + esc(p) + '</span></td>' +
       '<td><code>' + esc(u) + '</code></td>' +
-      '<td style="text-align:right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">复制</button></td></tr>';
+      '<td class="t-right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">复制</button></td></tr>';
   }).join('');
   document.querySelectorAll('pre').forEach(pre => {
     pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));

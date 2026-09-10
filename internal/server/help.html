@@ -14,6 +14,17 @@
 /*{{CONSOLE_CSS}}*/
 
 /* ===== help page-private styles — byte-identical across help.html / help.zh.html ===== */
+/* one-shot layout utilities: the console discipline keeps inline style out of static markup */
+.t-right{text-align:right}
+.mt0{margin-top:0}
+.mb10{margin-bottom:10px}
+.mb12{margin-bottom:12px}
+.ml-auto{margin-left:auto}
+.mono{font-family:var(--font-mono)}
+.anchor{scroll-margin-top:var(--hd-h)}
+.sub-note{font-size:var(--fs-sm);color:var(--text-muted)}
+.row-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.lede{color:var(--text-muted);margin-bottom:16px;max-width:860px}
 /* connection + quick-reference tables carry prose in their cells; the
    console-wide nowrap on table.c is meant for numeric diagnostic tables */
 .card table.c td{white-space:normal}
@@ -41,8 +52,8 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <body>
 
 <main class="page">
-  <div class="section-head" style="margin-top:0">Agent Configuration Guides</div>
-  <p style="color:var(--text-muted);margin-bottom:16px;max-width:860px">
+  <div class="section-head" class="mt0">Agent Configuration Guides</div>
+  <p class="lede">
     Point any AI coding agent at this VMR instance: the base URL below, an API key from your
     administrator, and a virtual model name are all most clients need. Where an agent supports it,
     also configure context window (e.g. <code>200k</code>), reasoning effort
@@ -52,31 +63,31 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
   </p>
 
   <!-- connection: identity of this instance + whether this browser can talk to it -->
-  <div class="card" id="connect" style="scroll-margin-top:var(--hd-h)">
+  <div class="card" id="connect" class="anchor">
     <div class="card-title">Connection</div>
-    <table class="c" style="margin-bottom:12px">
+    <table class="c" class="mb12">
       <tbody id="help-base-urls">
         <tr>
           <td><span class="badge b-cyan">openai-completions</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
         </tr>
         <tr>
           <td><span class="badge b-purple">anthropic-messages</span></td>
           <td><code>{{BASE_URL_ANTHROPIC}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">Copy</button></td>
         </tr>
         <tr>
           <td><span class="badge b-info">openai-responses</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td style="text-align:right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
         </tr>
       </tbody>
       <tbody>
         <tr>
           <td class="t-dim">models</td>
           <td id="help-models"><span class="t-dim">loading…</span></td>
-          <td class="hint" style="text-align:right">a virtual model only answers on its own protocol</td>
+          <td class="hint" class="t-right">a virtual model only answers on its own protocol</td>
         </tr>
         <tr>
           <td class="t-dim">auth</td>
@@ -86,18 +97,18 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
         </tr>
       </tbody>
     </table>
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <div class="row-wrap">
       <span class="pill p-paused" id="chk-state">no key stored</span>
-      <span style="font-size:var(--fs-sm);color:var(--text-muted)" id="chk-detail">No API key in this browser yet — agents below need one in the <code>Authorization: Bearer</code> header.</span>
-      <button class="btn sm" id="chk-btn" style="margin-left:auto">Check connection</button>
+      <span class="sub-note" id="chk-detail">No API key in this browser yet — agents below need one in the <code>Authorization: Bearer</code> header.</span>
+      <button class="btn sm" id="chk-btn" class="ml-auto">Check connection</button>
       <button class="btn sm ghost" id="chk-set">Set key</button>
     </div>
   </div>
 
   <!-- quick reference: which protocol, configured where -->
-  <div class="card" id="quickref" style="scroll-margin-top:var(--hd-h)">
+  <div class="card" id="quickref" class="anchor">
     <div class="card-title">Quick Reference</div>
-    <p class="hint" style="margin-bottom:10px">Which protocol to use, and where to configure it. Click an agent to open its guide below.</p>
+    <p class="hint" class="mb10">Which protocol to use, and where to configure it. Click an agent to open its guide below.</p>
     <table class="c">
       <thead><tr><th>Agent</th><th>Protocol</th><th>Config location</th></tr></thead>
       <tbody>
@@ -120,7 +131,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== Anthropic Messages protocol ===== -->
   <div class="sub-head">Anthropic Messages Protocol <span class="badge b-purple tight">anthropic-messages</span></div>
-  <p class="hint" style="margin-bottom:10px">Agents that natively speak the Anthropic Messages API. Point the base URL at VMR's Anthropic-compatible endpoint; the key is sent via the <code>x-api-key</code> header.</p>
+  <p class="hint" class="mb10">Agents that natively speak the Anthropic Messages API. Point the base URL at VMR's Anthropic-compatible endpoint; the key is sent via the <code>x-api-key</code> header.</p>
 
   <details class="disc" id="agent-claude-code" open>
     <summary>Claude Code <span class="badge b-purple">anthropic-messages</span></summary>
@@ -154,7 +165,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== OpenAI Completions protocol ===== -->
   <div class="sub-head">OpenAI Completions Protocol <span class="badge b-cyan tight">openai-completions</span></div>
-  <p class="hint" style="margin-bottom:10px">Agents that natively speak the OpenAI Chat Completions API. Point the base URL at VMR's OpenAI-compatible endpoint; the key is sent via the <code>Authorization: Bearer</code> header.</p>
+  <p class="hint" class="mb10">Agents that natively speak the OpenAI Chat Completions API. Point the base URL at VMR's OpenAI-compatible endpoint; the key is sent via the <code>Authorization: Bearer</code> header.</p>
 
   <details class="disc" id="agent-pi">
     <summary>Pi Agent <span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></summary>
@@ -514,7 +525,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 
   <!-- ===== OpenAI Responses protocol ===== -->
   <div class="sub-head">OpenAI Responses Protocol <span class="badge b-info tight">openai-responses</span></div>
-  <p class="hint" style="margin-bottom:10px">Applications and SDKs calling the next-generation OpenAI Responses API (<code>/v1/responses</code>). Virtual models configured under the <code>openai-responses</code> protocol handle downstream translation and streaming.</p>
+  <p class="hint" class="mb10">Applications and SDKs calling the next-generation OpenAI Responses API (<code>/v1/responses</code>). Virtual models configured under the <code>openai-responses</code> protocol handle downstream translation and streaming.</p>
 
   <details class="disc" id="agent-responses">
     <summary>OpenAI Responses SDK <span class="badge b-info">openai-responses</span></summary>
@@ -541,10 +552,10 @@ print(response.output_text)</code></pre>
 
   <details class="disc" id="troubleshooting">
     <summary>Troubleshooting</summary>
-    <div class="body" style="font-size:var(--fs-sm);color:var(--text-muted)">
-      <p>• <b>401 from every request</b> → the key in <code style="font-family:var(--font-mono)">Authorization: Bearer</code> must match an entry of <code style="font-family:var(--font-mono)">api_keys:</code>.</p>
+    <div class="body" class="sub-note">
+      <p>• <b>401 from every request</b> → the key in <code class="mono">Authorization: Bearer</code> must match an entry of <code class="mono">api_keys:</code>.</p>
       <p>• <b>Unknown model</b> → virtual models are per-protocol; check <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> for the protocol each name answers on.</p>
-      <p>• <b>401s appearing mid-session</b> → vmr was reloaded with a changed <code style="font-family:var(--font-mono)">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
+      <p>• <b>401s appearing mid-session</b> → vmr was reloaded with a changed <code class="mono">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
       <p>• <b>A request feels slow or hangs</b> → open <a href="/status.html#live">Overview → Live Requests</a>: a red <i>stalled</i> badge means no upstream byte for over 10s; a long <i>queued</i> elapsed means the concurrency gate is full.</p>
       <p>• <b>All requests suddenly fail over</b> → check <a href="/status.html#models">endpoint health</a> for cooldowns, and <a href="/status.html#quota">Quota Budgets</a> for a saturated gate.</p>
       <p>• <b>A request just failed and you want to know why</b> → <a href="/status.html#failures">Overview → Recent Failures</a> lists the last failures with the router's own error class; the class chips double as a filter when one class floods the buffer.</p>
@@ -560,11 +571,9 @@ print(response.output_text)</code></pre>
    copy buttons, the snippet fill engine, the model × protocol table and the
    connection check, all fed by the auth-gated GET /status.
 
-   Auth modal note (legacy ids): authentication is shared console chrome —
+   Auth modal note: authentication is shared console chrome —
    console.js's keyOverlay (input id "vmr-key-input"), opened by VMRAuth.guard
-   on 401 or by the header Key button. The retired page-local modal
-   (help-auth-modal / id="help-api-key") was absorbed into that shared
-   skeleton; no page-local auth markup remains. */
+   on 401 or by the header Key button. No page-local auth markup remains. */
 
 // ---- unified skeleton: header rows 1+2, rail, footer ----
 const consoleAPI = mountConsole({
@@ -642,7 +651,7 @@ function fillBaseURLs() {
     const u = urls[p];
     return '<tr><td><span class="badge ' + def.badge + '">' + esc(p) + '</span></td>' +
       '<td><code>' + esc(u) + '</code></td>' +
-      '<td style="text-align:right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">Copy</button></td></tr>';
+      '<td class="t-right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">Copy</button></td></tr>';
   }).join('');
   document.querySelectorAll('pre').forEach(pre => {
     pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));

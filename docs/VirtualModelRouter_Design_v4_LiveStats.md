@@ -529,12 +529,15 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   单列为后续任务——已登记 `KNOWN_ISSUES`，当前 report 仍从 body 反解析。
 - `internal/config`：`expandProviderAPIKeys` 在展开期携带 label（单一 `api_key` 推导尾 6 位），随快照进入 `core.Endpoint` 供盖章。
 - `archtest`：`livestats` 加入 leaf 包清单；行预算按增量常规调整。
-- **控制台 Overview 页所需的读侧增量**（与 console-unification 同一批落地，逐条都在本文
-  上面有出处）：ring key 加 `key_label`、ring 条目存四分量（§3.4）；`by_provider_model[]`
-  行带 `key_label`、`last_10`/`last_100` 升级为含 `n` 与 `tokens` 的窗口块、`tps` 撤销改
-  `toks`、新增 `overall`（§8）；新增 `recent_errors[]`（§8.1）；`/stats` 支持 `?range=`（§8）。
-  与之配套的 `/status` 增补（端点行的 `provider`/`key_label`/`model` 拆分字段与 quota
-  headroom join）属于 Part 1 的契约，记在 console-unification 的实施清单里。
+- **控制台 Overview 页所需的读侧增量（已全部落地）**（逐条都在本文上面有出处）：ring key 加
+  `key_label`、ring 条目存四分量（§3.4）；`by_provider_model[]` 行带 `key_label`、
+  `last_10`/`last_100` 升级为含 `n` 与 `tokens` 的窗口块、`tps` 撤销改 `toks`、新增
+  `overall`（§8）；新增 `recent_errors[]`（§8.1）；`/stats` 支持 `?range=`（§8，读缓存按
+  range 分键）。与之配套的 `/status` 增补（告警 `alerts[]`、端点行的 `provider`/`key_label`/
+  `model`/`from_fallback` 拆分字段与 quota headroom join）随 console-unification 实施轮
+  同批落地；展示页并入控制台 Overview（`/status.html`），`/stats.html` 退役。实施期裁定
+  （告警仅 cooldown 触发等）见 `_subtasks/console-unification/contracts.md` §5 与
+  `KNOWN_ISSUES` 对应条目。
 - 测试重点：滚动幂等（同文件滚两次 rollup 数值一致）；重启恢复（rollup + slim 补滚 + ring
   重建）；token 盖章 vs quota 扣费差分；`ttft=0` 排除；last-wins 消化重复 rollup 行；
   in-flight 快照一致性（`-race`）与 failover 覆盖、排队取消清理、TRUNCATED panic 路径

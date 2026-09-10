@@ -133,7 +133,7 @@ const keyOverlay = (() => {
     <div class="modal" role="dialog" aria-modal="true" aria-label="Authentication">
       <h2>Authentication Required</h2>
       <p>This VMR instance is protected by API key authentication. The key is stored only in this browser's localStorage — it is never sent anywhere but this instance.</p>
-      <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off" style="width:100%">
+      <input class="input" type="password" id="vmr-key-input" placeholder="sk-..." autocomplete="off">
       <div class="err" id="vmr-key-err"></div>
       <div class="modal-actions">
         <button class="btn ghost left" id="vmr-key-clear">Clear stored key</button>
@@ -349,6 +349,7 @@ function mountConsole(opts) {
       if (!el) return;
       if (state === 'streaming') { el.className = 'pill p-live'; el.textContent = 'streaming'; el.title = 'Receiving the live log stream'; }
       else if (state === 'paused') { el.className = 'pill p-paused'; el.textContent = 'paused'; el.title = 'Rendering paused — the server keeps streaming'; }
+      else if (state === 'connecting') { el.className = 'pill p-connecting'; el.textContent = 'connecting'; el.title = 'Connecting to the log stream'; }
       else { el.className = 'pill p-down'; el.textContent = 'down'; el.title = 'The log stream is disconnected'; }
     },
     // instance identity (version · pid · go · os-arch · listen) — footer only (§8.1)

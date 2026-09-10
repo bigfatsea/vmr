@@ -183,14 +183,11 @@ func TestHelpPage_ServesHTML(t *testing.T) {
 			t.Errorf("%s: body still contains {{BASE_URL_*}} placeholders", path)
 		}
 
-		// Auth-reveal UX: the page must include the modal and password field
-		// (opened on click when auth is configured), never a persistent
-		// always-visible input alongside the info card.
-		if !strings.Contains(body, "help-auth-modal") {
-			t.Errorf("%s: body missing auth modal", path)
-		}
-		if !strings.Contains(body, `id="help-api-key"`) {
-			t.Errorf("%s: body missing API key input in modal", path)
+		// Auth-reveal UX: the page has no page-local auth markup — the shared
+		// console keyOverlay (console.js) is the only key entry point, opened on
+		// click or on 401 by VMRAuth.guard.
+		if !strings.Contains(body, `id="vmr-key-input"`) {
+			t.Errorf("%s: body missing shared console auth modal input", path)
 		}
 	}
 }

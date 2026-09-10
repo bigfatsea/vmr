@@ -11,6 +11,11 @@
 /* Chart private styles */
 .chart-legend{display:flex;gap:16px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-bottom:6px;align-items:center}
 .chart-legend .dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.chart-legend .dot.fresh{background:var(--accent)}
+.chart-legend .dot.cw{background:var(--purple)}
+.chart-legend .dot.cr{background:var(--cyan)}
+.chart-legend .dot.out{background:var(--green)}
+.chart-legend .spacer{flex:1}
 .chart-legend .line{display:inline-block;width:16px;height:2px;background:var(--yellow);margin-right:5px;vertical-align:3px}
 .chart-legend .xdot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:5px;vertical-align:0}
 .chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:14px;margin-bottom:var(--sp-4);position:relative}
@@ -18,6 +23,12 @@
 .chart-tip{position:absolute;z-index:60;display:none;pointer-events:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 11px;font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text);box-shadow:0 8px 24px rgba(1,4,9,.55);white-space:nowrap;line-height:1.7}
 .chart-tip b{color:var(--text-bright)}
 .chart-tip .tr{color:var(--text-muted)}
+
+/* page-private layout classes — the console discipline keeps inline style out of static markup */
+.card.strip{padding:0;overflow:hidden;scroll-margin-top:var(--hd-h)}
+.col-progress{width:190px}
+.col-share{width:130px}
+.empty-cell{text-align:center;padding:26px}
 
 /* Recent Failures chips */
 .chips{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}
@@ -33,7 +44,7 @@
 <main class="page">
 
   <!-- ============ vitals strip ============ -->
-  <div class="card" style="padding:0;overflow:hidden;scroll-margin-top:var(--hd-h)" id="vitals">
+  <div class="card strip" id="vitals">
     <div class="vitals">
       <div class="vseg">
         <div class="v-label">Concurrency <span class="win">· now</span></div>
@@ -73,7 +84,7 @@
     <table class="c">
       <thead><tr>
         <th>Provider : Key</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
-        <th style="width:190px">Progress</th><th class="num">Headroom</th><th>Resets</th>
+        <th class="col-progress">Progress</th><th class="num">Headroom</th><th>Resets</th>
       </tr></thead>
       <tbody id="quota-body"></tbody>
     </table>
@@ -192,11 +203,11 @@
     <div class="chart-legend">
       <span><span class="line"></span>requests <span class="dim">(right axis)</span></span>
       <span><span class="xdot"></span>bucket with errors</span>
-      <span class="spacer" style="flex:1"></span>
-      <span><span class="dot" style="background:var(--accent)"></span>tok in · fresh</span>
-      <span><span class="dot" style="background:var(--purple)"></span>tok in · cache write</span>
-      <span><span class="dot" style="background:var(--cyan)"></span>tok in · cache read</span>
-      <span><span class="dot" style="background:var(--green)"></span>tok out <span class="dim">(left axis)</span></span>
+      <span class="spacer"></span>
+      <span><span class="dot fresh"></span>tok in · fresh</span>
+      <span><span class="dot cw"></span>tok in · cache write</span>
+      <span><span class="dot cr"></span>tok in · cache read</span>
+      <span><span class="dot out"></span>tok out <span class="dim">(left axis)</span></span>
     </div>
     <div id="chart"></div>
   </div>
@@ -208,7 +219,7 @@
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
+          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share">Share</th></tr></thead>
           <tbody id="usage-key"></tbody>
           <tfoot id="usage-key-foot"></tfoot>
         </table>
@@ -220,7 +231,7 @@
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num" style="width:130px">Share</th></tr></thead>
+          <thead><tr><th>Client Key Tag</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share">Share</th></tr></thead>
           <tbody id="usage-caller"></tbody>
           <tfoot id="usage-caller-foot"></tfoot>
         </table>
@@ -465,7 +476,7 @@ function renderQuota(quotaList, models) {
   consoleApi.setRailCount('quota', list.length);
 
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:26px">
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-cell">
       <div class="t-dim">No quota budgets configured.</div>
       <div class="hint">Quota limits cap token or request pace across accounts.</div>
     </td></tr>`;
@@ -608,7 +619,7 @@ function renderModelsAndFallback(modelsList, statsData) {
 
   // Main table
   if (!mainRows.length) {
-    modelsBody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:26px">
+    modelsBody.innerHTML = `<tr><td colspan="7" class="empty-cell">
       <div class="t-dim">No virtual models configured.</div>
       <div class="hint">Virtual models map incoming protocols and aliases to candidate endpoints.</div>
     </td></tr>`;
@@ -660,7 +671,7 @@ function renderModelsAndFallback(modelsList, statsData) {
 
   // Fallback table
   if (!fallbackEps.length) {
-    fallbackBody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:26px">
+    fallbackBody.innerHTML = `<tr><td colspan="6" class="empty-cell">
       <div class="t-dim">No fallback endpoints configured.</div>
       <div class="hint">Fallback endpoints are tried when all model endpoints are exhausted.</div>
     </td></tr>`;
@@ -718,7 +729,7 @@ function renderLive(inflightList) {
   expandBtn.textContent = liveExpanded ? `Show top ${LIVE_CAP}` : `Show all ${es.length}`;
 
   if (!es.length) {
-    body.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:26px">
+    body.innerHTML = `<tr><td colspan="9" class="empty-cell">
       <div class="t-dim">No requests in flight at the last refresh.</div>
       <div class="hint">Completed requests are not listed here — see Recent Failures, Performance and Traffic below.</div>
     </td></tr>`;
@@ -770,7 +781,7 @@ function renderLive(inflightList) {
   </tr>`).join('');
 
   const more = (!liveExpanded && es.length > LIVE_CAP)
-    ? `<tr><td colspan="9" class="hint" style="text-align:center">… ${es.length - LIVE_CAP} more in flight — use “Show all”</td></tr>` : '';
+    ? `<tr><td colspan="9" class="hint empty-cell">… ${es.length - LIVE_CAP} more in flight — use “Show all”</td></tr>` : '';
   body.innerHTML = rows + more;
 }
 
@@ -811,7 +822,7 @@ function renderFailures(failuresList) {
   const filtered = failFilter ? es.filter(f => (f.error_class || f.outcome || 'unknown') === failFilter) : es;
 
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:26px">
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">
       <div class="t-dim">No failed request in the current buffer.</div>
       <div class="hint">The buffer holds the last 50 failures and is cleared on restart.</div>
     </td></tr>`;
@@ -849,7 +860,7 @@ function renderPerf(byProviderModel, basis) {
   const cap = Number(basis);
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:26px">
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">
       <div class="t-dim">No provider models recorded.</div>
       <div class="hint">Performance metrics are computed from completed successful requests.</div>
     </td></tr>`;
@@ -1119,7 +1130,7 @@ function renderUsage(hourlyRows, rangeKey) {
 
   function usageRows(rows, emptyText) {
     if (!rows.length) {
-      return `<tr><td colspan="5" style="text-align:center;padding:20px">
+      return `<tr><td colspan="5" class="empty-cell">
         <div class="t-dim">${emptyText}</div>
         <div class="hint">Completed requests in the window will appear here.</div>
       </td></tr>`;

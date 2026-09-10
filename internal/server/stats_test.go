@@ -294,14 +294,13 @@ models:
 	}
 }
 
-// TestStatsHTMLJSONContract guards the /stats JSON <-> stats.html JS wire
-// contract. The dashboard reads these keys by exact name; json.Marshal of the
-// wire types must emit them, and the embedded JS must not carry the three
-// access patterns that were silently wrong (ttft_p50 vs ttft_p50_ms in the
-// WindowBlock tag, r.name vs r.value in DimensionRow, and taking the last
-// (period x dims) row of hourly[]/daily[] as if it were the period total).
-// The revoked tps rate keys (design §8) must not reappear on the wire.
-func TestStatsHTMLJSONContract(t *testing.T) {
+// TestStatsJSONContract guards the /stats JSON keys the Overview page reads by
+// exact name: json.Marshal of the wire types must emit them, and the page must
+// not carry the three access patterns that were silently wrong (ttft_p50 vs
+// ttft_p50_ms in the WindowBlock tag, r.name vs r.value in DimensionRow, and
+// taking the last (period x dims) row of hourly[]/daily[] as if it were the
+// period total). The revoked tps rate keys (design §8) must not reappear.
+func TestStatsJSONContract(t *testing.T) {
 	var resp statsResponse
 	resp.Concurrency.Limit, resp.Concurrency.InFlight, resp.Concurrency.Waiting = 8, 3, 1
 	wb := &livestats.WindowBlock{N: 43, Tokens: livestats.TokenCounts{In: 1200, Out: 900}, TTFTP50: 412, TTFTP90: 680, ToksP50: 41.2, ToksP90: 55.7}

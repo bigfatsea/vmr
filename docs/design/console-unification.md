@@ -2,8 +2,11 @@
 
 # VMR 控制台统一设计方案（Console Unification）
 
-**状态：v5，方案已定稿，待进入代码实施轮。** 本篇只做方案设计与静态 Demo
-（`docs/design/demo/`），**不改动任何现有代码**——`internal/server/*.html`、各 JSON API、
+**状态：v6，已实施（本轮落地：G1–G8 数据缺口 + console.css/console.js 单一来源 +
+Overview/Log/Help 三页重构 + /stats.html 退役；Demo 目录保留为设计参照）。** 本篇做方案
+设计与静态 Demo（`docs/design/demo/`），实施轮的数据契约冻结与实施期裁定记录见
+`_subtasks/console-unification/contracts.md`（含 §5 实施期修订：端点告警仅 cooldown 触发、
+error_class 为 core.ErrorClass 实际词表值）。——`internal/server/assets/`、各 JSON API、
 路由挂载全部维持现状。三轮评审 + 2026-09-09 Dashboard 专项 Review 的全部决策已并入正文，
 决策记录见 §11，未纳入本轮的条目见 §12。
 
