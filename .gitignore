@@ -42,6 +42,7 @@ _subtasks
 .vscode/
 .claude
 .agents
+.pi
 
 # Router-generated quota accounting state, when log_dir resolves to the
 # repo root (e.g. a smoke-test run) — the normal default is
