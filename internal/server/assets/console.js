@@ -376,7 +376,7 @@ function mountConsole(opts) {
       const el = railInner.querySelector('[data-rail-n="' + id + '"]');
       if (el) el.textContent = String(n);
     },
-    // stream slot (Log): 'streaming' | 'paused' | 'down'
+    // stream slot (Log): 'streaming' | 'connecting' | 'paused' | 'down'
     setStreamState(state) {
       const el = document.getElementById('hd-conn');
       if (!el) return;

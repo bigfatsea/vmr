@@ -432,8 +432,10 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
     一个 12 样本的 p90 当成 100 样本的 p90 来读；
   - `overall`：把所有 ring 的样本并在一起后算出的同一个窗口块。分位数不可合并，所以
     这一项**必须由服务端在读时对样本并集算**，消费者拿到分行数据后自己是算不出来的。
-    它存在的唯一理由是控制台首屏那个"全局 TTFT p50"——没有它，首屏就只能显示某一个
-    端点的延迟，或者干脆不显示延迟；
+    它是为控制台首屏那个"全局 TTFT p50"加的——不过该 vitals 段在 console polish 轮
+    据用户反馈移除了（见 console-unification 设计文档），`overall` **目前无内置消费者**，
+    作为 `/stats` JSON 契约的一部分保留（无害、已测、可外部消费；若首屏日后要补延迟
+    信号会重新用上）；无 ring 样本时为 `null`；
   - `recent_errors[]`：最近 50 条失败/取消请求的明细环（§8.1）；
   - `by_client_key_tag[]`：按调用方 key 的**累计**用量画像；
   - `by_key_label[]`：按上游凭据的**累计**用量画像（多账号/多 key 的 provider 由此分账）。

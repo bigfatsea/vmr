@@ -360,6 +360,9 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 		rec.DurMS = time.Since(rec.TS).Milliseconds()
 		rec.TTFTMS = rw.ttftMS
 		rec.Client.Response = rw.message()
+		if rec.Client.Response == nil && rw.status != 0 {
+			rec.Client.Response = &audit.Message{Status: rw.status}
+		}
 		canceled := r.Context().Err() != nil
 		rec.Outcome = audit.OutcomeFor(rw.status, canceled)
 		if s.audit != nil {

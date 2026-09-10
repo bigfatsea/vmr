@@ -292,6 +292,22 @@ models:
 	if got := lstats.Snapshot(livestats.HourlyTailDefault).ByProviderModel; len(got) == 0 || got[0].OK != 1 {
 		t.Errorf("audit-off request not booked: %+v", got)
 	}
+
+	// A request with no candidates (e.g. unknown model) without audit:
+	// recorder is in status-only mode, but recent_errors must still carry
+	// the client-facing status (404) and synthesized "no_candidate" class.
+	if resp, _ := chat(t, ts, `{"model":"missing","messages":[{"role":"user","content":"hi"}]}`, nil); resp.StatusCode != 404 {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	time.Sleep(50 * time.Millisecond)
+	snapNoAudit := lstats.Snapshot(livestats.HourlyTailDefault)
+	if len(snapNoAudit.RecentErrors) == 0 {
+		t.Fatalf("recent_errors empty in status-only mode")
+	}
+	lastErr := snapNoAudit.RecentErrors[0]
+	if lastErr.Status != 404 || lastErr.ErrorClass != "no_candidate" || lastErr.Attempt != 0 {
+		t.Errorf("recent_errors[0] = %+v, want status 404 / error_class no_candidate / attempt 0", lastErr)
+	}
 }
 
 // TestStatsJSONContract guards the /stats JSON keys the Overview page reads by
@@ -395,7 +411,7 @@ func TestSampleFromRecordTerminalAttempt(t *testing.T) {
 		wantStatus int
 		wantTry    int
 	}{
-		{"no attempts", nil, "", 0, 0},
+		{"no attempts", nil, "no_candidate", 0, 0},
 		{"all failed: last attempt wins the stamp",
 			[]audit.Attempt{failed("auth", 401), failed("upstream_5xx", 502)},
 			"upstream_5xx", 502, 2},
@@ -437,6 +453,30 @@ func TestSampleFromRecordTerminalAttempt(t *testing.T) {
 	s = sampleFromRecord(&audit.Record{Outcome: "error", Attempts: []audit.Attempt{failed("auth", 401)}})
 	if s.Provider != "" || s.KeyLabel != "" || s.Model != "" {
 		t.Errorf("unforwarded failure must carry no service identity: %+v", s)
+	}
+
+	// No attempt at all (every candidate cooling down → vmr_no_candidates):
+	// Status falls back to the client-facing code, the only terminal fact,
+	// and ErrorClass synthesizes "no_candidate".
+	s = sampleFromRecord(&audit.Record{
+		Outcome: "error",
+		Client:  audit.Exchange{Response: &audit.Message{Status: 503}},
+	})
+	if s.Attempt != 0 || s.ErrorClass != "no_candidate" {
+		t.Errorf("no-attempt failure: want attempt 0 / error_class \"no_candidate\", got %+v", s)
+	}
+	if s.Status != 503 {
+		t.Errorf("no-attempt failure Status = %d, want 503 (client-facing fallback)", s.Status)
+	}
+
+	// Client-canceled with no attempt: ErrorClass stays empty so the
+	// frontend falls back to outcome ("canceled").
+	s = sampleFromRecord(&audit.Record{
+		Outcome: "canceled",
+		Client:  audit.Exchange{Response: &audit.Message{Status: 499}},
+	})
+	if s.Attempt != 0 || s.ErrorClass != "" {
+		t.Errorf("no-attempt canceled: want attempt 0 / empty error_class, got %+v", s)
 	}
 
 	if got := sampleFromRecord(nil); got != (livestats.Sample{}) {

@@ -158,11 +158,15 @@ function FmtDuration(ms) {
   return `${s}s`;
 }
 
-// Auth management aligns with internal/server/status.html contract (§6.5).
+// Auth: these report pages hit the same running vmr instance's auth-gated
+// data endpoints as the built-in console. They keep their own key name
+// (`vmr_status_key`) but read the console's `vmr_key` as a fallback, so a
+// user who unlocked the console isn't prompted again here (the console does
+// the mirror-image legacy read of `vmr_status_key`). Clearing removes both.
 const Auth = {
   getKey() {
     try {
-      return localStorage.getItem('vmr_status_key') || '';
+      return localStorage.getItem('vmr_status_key') || localStorage.getItem('vmr_key') || '';
     } catch (_) {
       return '';
     }
@@ -175,6 +179,7 @@ const Auth = {
   clearKey() {
     try {
       localStorage.removeItem('vmr_status_key');
+      localStorage.removeItem('vmr_key');
     } catch (_) {}
   },
   getHeaders() {

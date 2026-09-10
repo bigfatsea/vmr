@@ -57,10 +57,11 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 7. **颜色语义唯一**：红/黄/绿**只表达健康度**，永远不表达分类。任何"用颜色区分类别"的
    需求走中性色（cyan / purple / blue）或直接写字。一个健康的账号绝不能因为它的 limit
    恰好是 gate 而顶着一枚红徽章。
-8. **首屏回答五个问题**：忙不忙（并发）、量多大（请求）、烧多少（token）、快不快（TTFT）、
-   有没有坏（端点健康）。进程自身的内存/协程/磁盘不是这五个之一——它们进 `.sysline`，
-   不占首屏指标位；而**纯静态的身份信息（go 版本、os-arch、listen 地址）连 sysline 都不占**，
-   只在 Footer 出现一次。
+8. **首屏回答的几个问题**：忙不忙（并发）、量多大（请求）、烧多少（token）、有没有坏
+   （端点健康）。延迟（TTFT）一度也占一段，polish 轮据用户反馈移除——它需要滚到
+   Performance 区才看细分，首屏一个全局 p50 的信息量不足以占一个指标位。进程自身的
+   内存/协程/磁盘也不是首屏问题——它们进 `.sysline`，不占指标位；而**纯静态的身份信息
+   （go 版本、os-arch、listen 地址）连 sysline 都不占**，只在 Footer 出现一次。
 9. **每个数字自带口径**：窗口（`since start` / `last 100` / 选定时间段）与单位写在标签上，
    公式与边界条件进 `title`。屏幕上不允许出现无法判断窗口的聚合数。
 
@@ -137,8 +138,9 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
     **滚动统计量（"过去 24h 有 84 个错误"）不进告警**：它永远为真，会把徽章永久钉在非零上，
     把运维训练成无视告警；错误率属于 vitals。
 - **行 2（页面自有导轨）**：Overview=区块锚点条（带计数与滚动高亮）；Log=终端工具条
-  （level 芯片 / 子串过滤 / Pause / Wrap / Copy view）；Help=指南锚点条。三页共用
-  `.hd-rail` 容器与 `.rail-link` 样式，只是内容不同。
+  （level 芯片 / 子串过滤 / Pause / Copy view）；Help=指南锚点条。三页共用
+  `.hd-rail` 容器与 `.rail-link` 样式，只是内容不同。（Wrap 切换在 polish 轮删除——
+  日志始终软换行，一个只影响换行的开关不值一个工具条位。）
 - **Key 按钮三态**：未存键 → `🔑 Set Key`；已存键 → `🔑 ····abcd`（悬停说明存储位置）；
   点击统一打开 §6 的 modal。
 - **Footer**：两栏 slim 条，左=实例完整身份，右=仓库链接。Log 页的 footer 是同构**状态条**
@@ -194,7 +196,7 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 | 现状块（status/stats） | 压缩策略 | 去处 |
 | --- | --- | --- |
 | Header 徽章行（version/pid/listen/osarch/uptime） | uptime 留 Header；version/pid 进 `.sysline` 首段；go/os-arch/listen 只进 Footer | Header / sysline / Footer |
-| 四张大指标卡 + Storage 卡 | 合成**一条 vitals 指标带**（单卡五段，§8.3）；系统明细/存储/audit 收成**单行** `.sysline`（无折叠、无标题） | 首屏 |
+| 四张大指标卡 + Storage 卡 | 合成**一条 vitals 指标带**（单卡四段，§8.3）；系统明细/存储/audit 收成**单行** `.sysline`（无折叠、无标题） | 首屏 |
 | 黄色告警 banner | 移除，并入 Header 最右的**告警 pill**（只留可操作项） | Header |
 | Quota 表 | 保留，列重构（§8.4-a） | Quota Budgets 区 |
 | Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 主端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**单列一张同构表** | Virtual Models 区 |
@@ -215,13 +217,14 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 - Live 表**不做**独立轮询。**将来要提升实时精度时走 SSE，而不是第二个轮询时钟**——
   秒级轮询会在页面上引入两套节奏与两个"数据有多旧"的答案，而 SSE 是单向推送，
   Live 区可以在整页节奏之外自然更新，不需要第二个时钟。本轮不做，先跑最简形态。
-- 长页的可导航性由 Header 第二行的**区块导轨**承担：`Overview / Quota / Models / Live /
-  Failures / Performance / Traffic & Usage`，条目带计数（Live 显示当前在飞数、Failures 显示
-  缓冲条数），滚动时高亮当前区块。锚点偏移统一用 `--hd-h`，不在各处手写像素。
+- 长页的可导航性由 Header 第二行的**区块导轨**承担：`Overview / Live / Quota / Models /
+  Failures / Performance / Traffic & Usage`（Live 在 Quota 之前——polish 轮据反馈前移，
+  §8.4-c），条目带计数（Live 显示当前 running 数、Failures 显示缓冲条数），滚动时高亮
+  当前区块。区块的锚点偏移统一用 `--hd-h`（`scroll-margin-top`）。
 
 ```
 Overview 页（单页，自上而下）
-├─ vitals 指标带（5 段）+ sysline 系统详情单行        ← /status
+├─ vitals 指标带（4 段）+ sysline 系统详情单行        ← /status
 ├─ Quota Budgets                                     ← /status
 ├─ Virtual Models & Endpoint Topology                ← /status + /stats（Share 列 join）
 │   └─ Fallback Endpoints（同构独立表）
@@ -242,11 +245,14 @@ Overview 页（单页，自上而下）
 | Tokens | 四分量总和 | `in` / `out` / `cache N%`（口径进 title） | `· since start` |
 | Endpoints | `healthy / total` | `N half-open` · `N cooldown` | `· now` |
 
-注：原 TTFT p50 段已移除，首屏 vitals 精简为四段。
-
 原第四段 "System"（heap · goroutines · disk）**删除**：它与紧随其后的 `.sysline` 逐字重复，
-且占据了首屏五个槽位中的一个去回答一个几乎不会先问的问题。腾出的两个槽位交给
-**延迟**与**端点健康**——它们才是"快不快 / 有没有坏"的抓手，原方案里要滚到页面中部才看得到。
+且占了一个首屏槽位去回答一个几乎不会先问的问题。腾出的槽位交给**端点健康**——"有没有坏"
+的抓手，原方案里要滚到页面中部才看得到。
+
+设计草案里还有第五段 **TTFT p50**（读 `/stats` 的 `overall` 合并窗口块）；polish 轮据用户
+反馈移除——首屏一个全局 p50 的信息量不足以占一个指标位，延迟的细分在 Performance 区
+按端点 × 传输方式给。`/stats.overall` 作为 JSON 契约保留（见 LiveStats 文档），目前无
+内置消费者。
 
 `.sysline` 只承载**会变的运行态**：`vmr <version> · pid` / heap+sys+goroutines / disk free /
 audit 开关与占用 / image cache 开关与占用。go 版本、os-arch、listen 地址是启动即固定的
@@ -461,7 +467,7 @@ Log 页另有两条：断线用**独立横幅 + Reconnect 按钮**（不许把"�
 | 文件 | 内容 | 模拟交互 |
 | --- | --- | --- |
 | `overview.html` | 平铺单页：vitals(5段)+sysline / Quota / Models+Fallback / Live / Recent Failures / Performance / Traffic & Usage（图 + 两张 Usage 表，单一时间窗） | ① 区块导轨跳转 + 滚动高亮 ② 告警 pill 弹窗（3 条可操作 mock，⚠️/🚨 随严重度切换）③ 刷新倒计时点击即刷（Live 表随整页推进：请求生命周期、failover、stall 跨刷新演化）④ 图表 hover 导引带 + DOM tooltip（requests、错误数与错误率、tok in 总计及三分项、tok out）⑤ 单一 24h/3d/7d 控件联动图表与两表 ⑥ Performance 窗口切换（整行同窗口：计数、token、分位一起变；json 行在 last-10 下呈现 `no samples` 态）⑦ 鉴权 modal（存键/清除/演示 401）⑧ Demo 控制面板（暂停/注卡死/注排队积压/演示 401/重置，可折叠） |
-| `log.html` | 满宽终端 | level 芯片过滤、子串过滤（命中高亮）、Wrap 切换、Copy view、Pause（⌘P，含可见按钮）、自动滚动 + 上滚暂停 + "↓ N new" chip、~45s 模拟断线 → **独立横幅 + Reconnect**、统一 footer 状态条（`N shown / M lines`） |
+| `log.html` | 满宽终端 | level 芯片过滤、子串过滤（命中高亮）、Copy view、Pause（⌘P，含可见按钮）、自动滚动 + 上滚暂停 + "↓ N new" chip、~45s 模拟断线 → **独立横幅 + Reconnect**、统一 footer 状态条（`N shown / M lines`） |
 | `help.html` | Agent 指南 | Connection 卡（base_url 复制、模型 × 协议对照、auth 说明）、指南锚点导轨、手风琴、片段复制（✓ 反馈）、连接检查（读共享 Key）、Troubleshooting 直链 Overview 锚点 |
 | `index.html` | Demo 入口 | — |
 
@@ -573,5 +579,8 @@ G2–G5 属于 Part 1 的 `/status` 契约，只在本文登记。
 
 - **Usage 表的 $ 成本估算**：`internal/pricing` 已有两层费率解析能力，`/stats` 目前不带价格。
   落地时必须贯彻 pricing 包的既有纪律——unpriced 显示 `—` 而不是 `$0.00`（"nil 是未知不是免费"）。
-- **vitals 的趋势暗示**：当前五段都是标量，没有"比一小时前更糟了吗"的信号。
+- **vitals 的趋势暗示**：当前四段都是标量，没有"比一小时前更糟了吗"的信号。
   `hourly[]` 的数据足以画迷你 sparkline，但会显著抬高指标带高度，暂不做。
+- **首屏延迟信号**：TTFT p50 段在 polish 轮移除后，首屏不再有"快不快"的抓手，
+  `/stats.overall` 也随之无消费者（作 JSON 契约保留）。若日后要补，候选位置：
+  sysline 副段、或 vitals 某段的副行。

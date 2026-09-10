@@ -158,6 +158,8 @@
 - **body 上传与 probe 阶段对 in-flight 注册表不可见**：注册点设在 `TopLevelProbe` + `authenticate` 之后、`AcquireSlot` 之前，因为未获得协议与虚拟模型名前的请求无法归属维度，且慢速客户端 body 上传并不占用并发槽，不属于并发门排队观测的对象。
 - **Overview 头部告警 pill 的端点告警只在 cooldown 期间在列**（`server/alerts.go`）：cooldown = 该端点此刻被排除在路由外，是「需要动手的状态」；`consecutive_failures>0` 但未冷却的降级态由拓扑表 Health 列（带因果悬停）承载——无流量时残留失败计数不消零，进告警会把徽章永久钉在非零，违反告警收敛纪律（已登记于 console-unification 实施契约 §5）。
 - **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流，给日志行加结构化字段牵动 stderr 格式与全部日志消费者；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
+- **`/stats.overall` 合并窗口块目前无内置消费者，作为 JSON 契约保留**：它是为控制台首屏那一段"全局 TTFT p50"加的（分位数不可跨 ring 合并，只能服务端在读时对样本并集算）；该 vitals段在 console polish 轮据用户反馈移除，`overall` 随之空转。删掉它是纯粹的契约收缩且要改测试，收益为零；留着无害（已测、可外部消费、首屏日后补延迟信号会重新用上）。无 ring 样本时为 `null`。见 console-unification 设计文档「未纳入本轮」与 LiveStats 设计文档 `/stats` 契约段。
+- **零 attempt 失败（全端点冷却等）的错误类别由 `sampleFromRecord` 合成为 `no_candidate`，audit.Record 不扩充顶层字段**：一批失败导致所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，路由半区未向上游发起任何 attempt，因而 `audit.Record.Attempts` 为空。`server.sampleFromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为 `livestats.Sample` 合成 `error_class="no_candidate"` 并由客户端侧 HTTP 响应码（503 等）兜底 `status`，使控制台 Recent Failures 能够准确区分并过滤最常见的级联冷却失败，而无需为了展示层需求扩充审计日志顶层 schema。
 
 ---
 
@@ -456,6 +458,19 @@
 - **现状**：console-unification 设计 §8.4-d 提出 Recent Failures 条目保留进程内请求号、与 Log 页每行同号互跳；但 audit.Record 与 `/log` 行目前都不携带任何请求号，实施轮未为它加字段（加号牵动 audit 格式与日志消费者，越界）。
 - **可能方案**：给 Record 加进程级 seq 并在 logfmt 前缀携带（成本：日志格式变更 + audit schema 演进 + report 兼容）；或接受无关联（Log 页有子串过滤可按时间窗人工对齐）。
 - **为什么待定**：关联的实际排障收益未经验证，而格式变更成本确定。
+
+#### 2.104 [低] 拓扑表 Headroom 列只反映 bucket limit，不反映更紧的 gate
+
+- **现状**：`endpointHeadroom`（`server/alerts.go`）在账户无 limit 触顶时返回 **bucket limit** 的 headroom（经 `quota.BucketIndex` 选定），不取账户所有 applicable limit 里最小的那个。于是一个被近饱和的短周期 gate 限流的账户，端点行 Headroom 仍显示绿色的 bucket 值——比它实际的路由有效余量乐观。差分测试钉住的是"端点 headroom == 对应 QuotaStatus 行的 headroom（同源）"，没钉住"选的是哪一行"。
+- **为什么可接受**：与 Quota Budgets 表一致（那张表也逐 limit 各显各的 headroom）；gate 的紧迫感设计上由 Quota 表的 Progress 红条承担（console-unification §8.5）。端点表没有 Progress 列是这条的短板。
+- **可能方案**：改取 applicable limit 里 headroom 最小者；或端点表补一个迷你 gate 指示。
+- **触发条件**：运维因端点 Headroom 显示健康而没预判到 gate 限流。
+
+#### 2.105 [低] `/status` 告警 `ref`（`provider:key_label:model`）在同名 provider 跨协议组复用时不唯一
+
+- **现状**：同一个 provider 名可以同时出现在 `providers.openai` 与 `providers.anthropic` 下（`core.Endpoint.HealthKey` 的文档明确支持）。这两个是不同端点、各有独立健康状态，但告警 `ref` 只有 `provider:key_label:model` 三段，会撞在一起；`endpointAlerts` 按 `ref+message` 去重、`statusAlerts` 末尾 `sort.SliceStable` 遇到 `(severity,kind,ref)` 全等时保留 map 迭代序 → 同 ref 的多条告警排序在两次请求间可能不稳定。拓扑表不受影响（它按虚拟模型分组，协议在组首行可见）。
+- **可能方案**：`ref` 加协议前缀（`anthropic-messages:provider:key_label:model`），或去重键并入 `HealthKey`。
+- **为什么待定**：需要这种少见配置 + 影响仅是告警列表排序抖动，非功能错误。
 
 #### 2.98 [低，待触发] `archtest` 的 `funcLineExemptions` 以「文件:函数名」为键，同文件重名方法共用一条
 

@@ -818,7 +818,10 @@ function renderFailures(failuresList) {
     const isCancelled = f.error_class === 'canceled' || f.outcome === 'canceled';
     const clsBadge = `<span class="badge ${isCancelled ? 'b-warn' : 'b-err'}">${esc(f.error_class || f.outcome)}</span>`;
     const code = f.status ? ` <span class="dim">${f.status}</span>` : '';
-    const att = f.attempt > 1 ? `<span class="badge b-warn tight" title="Attempts before failure">#${f.attempt}</span>` : '<span class="dim">1</span>';
+    const att = f.attempt > 1
+      ? `<span class="badge b-warn tight" title="Attempts before failure">#${f.attempt}</span>`
+      : (f.attempt >= 1 ? '<span class="dim">1</span>'
+                        : '<span class="dim" title="No upstream attempt was made — every candidate was cooling down">—</span>');
 
     return `<tr>
       <td class="num">${formatWhen(f.ts)}</td>

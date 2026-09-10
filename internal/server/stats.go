@@ -120,7 +120,11 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 // status quote the terminal attempt — the winning one when the request
 // forwarded, else the last attempt — verbatim, never re-classified;
 // Attempt is the 1-based ordinal of the attempt that ended the request
-// (0 when there were none).
+// (0 when there were none). When no attempt was built at all (every
+// candidate cooling down → vmr_no_candidates, or a pre-dispatch build
+// error), there is no upstream status to quote, so Status falls back to
+// the client-facing response code — the only terminal fact that exists —
+// and ErrorClass synthesizes "no_candidate" for error outcomes.
 func sampleFromRecord(rec *audit.Record) livestats.Sample {
 	if rec == nil {
 		return livestats.Sample{}
@@ -163,6 +167,13 @@ func sampleFromRecord(rec *audit.Record) livestats.Sample {
 		s.ErrorClass = final.ErrorClass
 		if final.Response != nil {
 			s.Status = final.Response.Status
+		}
+	} else {
+		if rec.Client.Response != nil {
+			s.Status = rec.Client.Response.Status
+		}
+		if rec.Outcome == "error" {
+			s.ErrorClass = "no_candidate"
 		}
 	}
 	return s

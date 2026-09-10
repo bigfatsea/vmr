@@ -277,11 +277,15 @@ document.getElementById('btn-copy').addEventListener('click', () => {
 /* ---- Pause (⌘P / Ctrl+P) ---- */
 
 function setPauseState(p) {
+  const wasPaused = paused;
   paused = p;
   const btn = document.getElementById('btn-pause');
   btn.textContent = paused ? '▶ Resume' : '⏸ Pause';
   btn.classList.toggle('on', paused);
   con.setStreamState(paused ? 'paused' : (streamDown ? 'down' : 'streaming'));
+  // On resume, backfill the lines that arrived into allLines while rendering
+  // was frozen — the stream never stopped, so they are already buffered.
+  if (wasPaused && !paused) repaint();
 }
 
 document.getElementById('btn-pause').addEventListener('click', () => setPauseState(!paused));
