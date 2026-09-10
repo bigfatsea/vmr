@@ -256,6 +256,11 @@ func cmdStart(args []string) error {
 		Handler: server.New(rt, auditLog).WithLogTee(tee).WithLiveStats(liveAgg).
 			WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
+		// Close idle keep-alives after 120s so a vanished client can't park a
+		// socket forever. Applies only BETWEEN requests — in-flight requests,
+		// SSE streams and /log are unaffected. ReadTimeout stays 0: slow bodies
+		// are already bounded per-handler via SetReadDeadline.
+		IdleTimeout: 120 * time.Second,
 	}
 	logger.Printf("vmr listening on %s (%d models)", cfg.Listen, len(cfg.Models))
 

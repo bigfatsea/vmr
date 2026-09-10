@@ -344,12 +344,21 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 // recorder that captures response status and TTFT always, and the response
 // body only when auditing is on (recorder.captureBody).
 func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request) (rec *audit.Record, ww http.ResponseWriter, done func()) {
+	reqMsg := audit.Message{Method: r.Method, Path: r.URL.Path}
+	// Redact the request headers only when they'll actually be written: with
+	// -audit=false the completion hook feeds live stats, and sampleFromRecord
+	// never reads Client.Request.Headers — the redact (a full header-map copy
+	// per request) would be pure waste, the same reason the recorder skips
+	// captureBody in that mode.
+	if s.audit != nil {
+		reqMsg.Headers = audit.Redact(r.Header)
+	}
 	rec = &audit.Record{
 		TS:       time.Now(),
 		Protocol: protocol,
 		Client: audit.Exchange{
 			Addr:    r.RemoteAddr,
-			Request: audit.Message{Method: r.Method, Path: r.URL.Path, Headers: audit.Redact(r.Header)},
+			Request: reqMsg,
 		},
 	}
 	// captureBody only when auditing: with -audit=false the completion hook

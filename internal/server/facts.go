@@ -172,6 +172,12 @@ func estimateTextTokens(body []byte, spans [][2]int) int64 {
 // carrying both an image and a document sums both spans — an over-estimate,
 // the safe direction, not a correctness bug.
 func estimateDocumentTokens(body []byte, spans [][2]int) int64 {
+	// No attachment payload spans → no document bytes to size, whatever
+	// markers the body text might mention. Skip the 4 whole-body Contains
+	// scans below on the ~95% of requests that carry no attachment at all.
+	if len(spans) == 0 {
+		return 0
+	}
 	hasMarker := false
 	for _, m := range documentMarkers {
 		if bytes.Contains(body, m) {

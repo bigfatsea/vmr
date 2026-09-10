@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"vmr/internal/config"
@@ -96,21 +97,33 @@ func isClientWriteError(err error) bool {
 	var cwe *clientWriteError
 	return errors.As(err, &cwe)
 }
+
+// copyFlushBufSize is the forwarding chunk size — one Read from the
+// normalized upstream body, one Write to the client.
+const copyFlushBufSize = 32 << 10
+
+// copyFlushBufPool holds the buffers copyFlush hands between its reader
+// goroutine and its write loop. A package-level sync.Pool (not a per-call
+// pair of freshly allocated buffers) so a streaming-heavy workload reuses
+// them across requests instead of producing 2×32KiB of garbage per forwarded
+// response — the same reason internal/audit pools its encode buffer. At most
+// two buffers are ever live for one copyFlush (one being written to the
+// client, one being read from upstream): the unbuffered chunk channel is the
+// real throttle — the reader can be at most one chunk ahead — so the pool
+// needs no depth limit of its own. A buffer not returned on a panic / early-
+// return path is simply collected.
+var copyFlushBufPool = sync.Pool{New: func() any { b := make([]byte, copyFlushBufSize); return &b }}
+
 func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle time.Duration) error {
 	flusher, _ := w.(http.Flusher)
 	type chunk struct {
-		buf []byte
+		buf *[]byte
 		n   int
 		err error
 	}
 	ch := make(chan chunk)
 	done := make(chan struct{})
 	defer close(done)
-
-	const bufSize = 32 << 10
-	bufPool := make(chan []byte, 2)
-	bufPool <- make([]byte, bufSize)
-	bufPool <- make([]byte, bufSize)
 
 	go func() {
 		defer func() {
@@ -127,16 +140,12 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 			}
 		}()
 		for {
-			var buf []byte
+			bufp := copyFlushBufPool.Get().(*[]byte)
+			n, err := body.Read(*bufp)
 			select {
-			case buf = <-bufPool:
+			case ch <- chunk{buf: bufp, n: n, err: err}:
 			case <-done:
-				return
-			}
-			n, err := body.Read(buf)
-			select {
-			case ch <- chunk{buf: buf, n: n, err: err}:
-			case <-done:
+				copyFlushBufPool.Put(bufp)
 				return
 			}
 			if err != nil {
@@ -152,7 +161,7 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 			return ctx.Err()
 		case c := <-ch:
 			if c.n > 0 {
-				if _, werr := w.Write(c.buf[:c.n]); werr != nil {
+				if _, werr := w.Write((*c.buf)[:c.n]); werr != nil {
 					return &clientWriteError{werr}
 				}
 				if flusher != nil {
@@ -160,10 +169,7 @@ func copyFlush(ctx context.Context, w http.ResponseWriter, body io.Reader, idle 
 				}
 			}
 			if c.buf != nil {
-				select {
-				case bufPool <- c.buf[:cap(c.buf)]:
-				default:
-				}
+				copyFlushBufPool.Put(c.buf)
 			}
 			if c.err != nil {
 				if c.err == io.EOF {
