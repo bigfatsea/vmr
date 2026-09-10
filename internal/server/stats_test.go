@@ -19,8 +19,8 @@ import (
 )
 
 // TestStatsEndpointAuthAndContent verifies GET /stats authentication,
-// in-flight snapshot reflection during execution, post-completion ledger
-// update, and /stats.html page rendering.
+// in-flight snapshot reflection during execution, and post-completion ledger
+// update.
 func TestStatsEndpointAuthAndContent(t *testing.T) {
 	// Upstream with a latch so we can inspect GET /stats while a request
 	// is actively in-flight.
@@ -68,24 +68,14 @@ models:
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	// 1. /stats.html is accessible unauthenticated
-	resp, err := http.Get(ts.URL + "/stats.html")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != 200 {
-		t.Fatalf("GET /stats.html status=%d", resp.StatusCode)
-	}
-	resp.Body.Close()
-
-	// 2. GET /stats without auth returns 401
-	resp, _ = http.Get(ts.URL + "/stats")
+	// 1. GET /stats without auth returns 401
+	resp, _ := http.Get(ts.URL + "/stats")
 	if resp.StatusCode != 401 {
 		t.Fatalf("GET /stats without auth status=%d, want 401", resp.StatusCode)
 	}
 	resp.Body.Close()
 
-	// 3. Start a background chat request that pauses inside upstream
+	// 2. Start a background chat request that pauses inside upstream
 	var chatWG sync.WaitGroup
 	chatWG.Add(1)
 	go func() {
@@ -351,18 +341,6 @@ func TestStatsHTMLJSONContract(t *testing.T) {
 	if strings.Contains(js, `"tps_`) {
 		t.Error("statsResponse JSON still carries a revoked tps rate key (design §8: only toks)")
 	}
-
-	html := string(statsHTMLPage)
-	for _, want := range []string{"ttft_p50_ms", "r.value", "sumLatestPeriod"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("stats.html JS missing corrected access pattern: %q", want)
-		}
-	}
-	for _, bad := range []string{"r.name", "data.daily[data.daily.length", "data.hourly[data.hourly.length"} {
-		if strings.Contains(html, bad) {
-			t.Errorf("stats.html JS still carries a known-broken pattern: %q", bad)
-		}
-	}
 }
 
 // TestParseRangeTail pins the ?range= vocabulary (contracts §1.5): 24h/3d/7d
@@ -599,21 +577,4 @@ func lenHourly(t *testing.T, body string) int {
 		t.Fatalf("decode: %v", err)
 	}
 	return len(out.Hourly)
-}
-
-// TestStatsHTMLContainsNavMarkers confirms /stats.html links to sibling pages.
-func TestStatsHTMLContainsNavMarkers(t *testing.T) {
-	for _, marker := range []string{
-		"VMR Live Stats",
-		`href="/status.html"`,
-		`href="/log.html"`,
-		`href="/help.html"`,
-		"In-flight Requests",
-		"Performance by Provider & Model",
-		"Usage by Upstream Key Label",
-	} {
-		if !strings.Contains(string(statsHTMLPage), marker) {
-			t.Errorf("stats.html missing marker: %s", marker)
-		}
-	}
 }

@@ -46,37 +46,50 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "VMR Dashboard") {
-		t.Errorf("body missing 'VMR Dashboard'")
-	}
-	if !strings.Contains(body, "renderDashboard") {
-		t.Errorf("body missing 'renderDashboard'")
-	}
-	if !strings.Contains(body, "fetchStatus") {
-		t.Errorf("body missing 'fetchStatus'")
-	}
-	if !strings.Contains(body, `href="/help.html"`) {
-		t.Errorf("body missing cross-link to /help.html")
-	}
-	if !strings.Contains(body, `href="/log.html"`) {
-		t.Errorf("body missing cross-link to /log.html")
-	}
-	if !strings.Contains(body, "connect-base-urls") {
-		t.Errorf("body missing connection info card")
-	}
-	if !strings.Contains(body, "connect-models") {
-		t.Errorf("body missing model list")
+	if !strings.Contains(body, "VMR Console — Overview") {
+		t.Errorf("body missing 'VMR Console — Overview'")
 	}
 
-	// Topology view redesign (2026-08-28): protocol moved to a header tag and
-	// the per-row PROTOCOL column is gone.
-	for _, want := range []string{"model-header-left", "model-tags"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing topology-view element %q", want)
+	// Overview page markers: all 7 section anchors
+	for _, anchor := range []string{
+		`id="vitals"`,
+		`id="quota"`,
+		`id="models"`,
+		`id="live"`,
+		`id="failures"`,
+		`id="perf"`,
+		`id="traffic"`,
+	} {
+		if !strings.Contains(body, anchor) {
+			t.Errorf("body missing overview section anchor %q", anchor)
 		}
 	}
-	if strings.Contains(body, ">PROTOCOL</th>") {
-		t.Errorf("body still has the per-row PROTOCOL column (should be a header tag now)")
+
+	if !strings.Contains(body, "Fallback Endpoints") {
+		t.Errorf("body missing 'Fallback Endpoints' subhead")
+	}
+
+	if !strings.Contains(body, "mountConsole") {
+		t.Errorf("body missing 'mountConsole'")
+	}
+	if !strings.Contains(body, "active: 'overview'") {
+		t.Errorf("body missing mountConsole active: 'overview'")
+	}
+
+	// Shared console assets injection
+	if !strings.Contains(body, "console-header") {
+		t.Errorf("body missing injected console-header class from console.css")
+	}
+	if !strings.Contains(body, "VMRAuth") {
+		t.Errorf("body missing injected VMRAuth from console.js")
+	}
+
+	// /stats.html must now return 404
+	reqStats := httptest.NewRequest("GET", "/stats.html", nil)
+	wStats := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(wStats, reqStats)
+	if wStats.Code != http.StatusNotFound {
+		t.Fatalf("/stats.html status = %d, want %d", wStats.Code, http.StatusNotFound)
 	}
 }
 
