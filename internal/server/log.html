@@ -32,13 +32,12 @@ body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
 pre#log{
   flex:1;overflow-y:auto;margin:0;padding:12px 16px 20px;
-  font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.55;
+  font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.2;
   white-space:pre-wrap;word-break:break-all;
 }
-pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
 
 /* log line structural classes */
-.ln{display:block}
+.ln{display:block;line-height:1.2;font-family:var(--font-mono)}
 .ln .t{color:var(--text-dim)}
 .ln .lv{font-weight:600}
 .ln.inf .lv{color:var(--accent)}
@@ -63,6 +62,7 @@ pre#log.nowrap{white-space:pre;word-break:normal;overflow-x:auto}
 #jump.show{display:inline-flex}
 
 /* level filter chips in the rail (console.css has .lvl-group/.lvl-label/.lvl) */
+.rail-sep{width:1px;height:16px;background:var(--border);margin:0 6px;align-self:center;flex-shrink:0}
 .lvl-group{display:inline-flex;gap:4px;align-items:center}
 .lvl-label{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);margin-right:2px}
 .lvl{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer}
@@ -141,18 +141,19 @@ const con = mountConsole({
 const railEl = document.getElementById('hd-rail-inner');
 railEl.insertAdjacentHTML('afterbegin', `
   <span class="lvl-group">
-    <span class="lvl-label">level</span>
+    <span class="lvl-label">Level:</span>
     <button class="lvl on" data-lvl="ERR">ERR</button>
     <button class="lvl on" data-lvl="WRN">WRN</button>
     <button class="lvl on" data-lvl="OK">OK</button>
     <button class="lvl on" data-lvl="INF">INF</button>
   </span>
-  <input class="input w230" id="filter" placeholder="filter substring…" autocomplete="off">
-  <button class="btn sm ghost" id="btn-clear-filter" title="Clear substring filter and re-enable every level">Reset filters</button>
-  <span class="spacer"></span>
-  <button class="btn sm" id="btn-pause" title="Pause rendering (⌘P / Ctrl+P) — buffer keeps filling">⏸ Pause</button>
-  <button class="btn sm ghost" id="btn-wrap" title="Toggle soft wrapping of long lines">Wrap: on</button>
-  <button class="btn sm ghost" id="btn-copy" title="Copy every currently visible line to the clipboard">Copy view</button>
+  <span class="rail-sep"></span>
+  <input class="input w230" id="filter" placeholder="keyword filter" autocomplete="off">
+  <button class="btn sm ghost" id="btn-clear-filter" title="Clear keyword filter and reset level chips">Clear</button>
+  <span class="rail-sep"></span>
+  <button class="btn sm" id="btn-pause" title="Pause rendering (⌘P / Ctrl+P)">⏸ Pause</button>
+  <span class="rail-sep"></span>
+  <button class="btn sm ghost" id="btn-copy" title="Copy visible lines to clipboard">Copy</button>
 `);
 
 filterEl = document.getElementById('filter');
@@ -218,7 +219,9 @@ function updateStatus() {
     : 'all';
   const f = filterEl ? filterEl.value.trim() : '';
   const filterText = f ? `"${f}"` : 'off';
-  con.setFooterIdentity(`${countText} · level ${levelText} · filter ${filterText}`);
+  const text = `${countText} · level ${levelText} · filter ${filterText}`;
+  if (con.setTermStatus) con.setTermStatus(text);
+  else con.setFooterIdentity(text);
 }
 
 /* ---- scroll behavior ---- */
@@ -258,11 +261,6 @@ document.getElementById('btn-clear-filter').addEventListener('click', () => {
   Object.keys(levels).forEach(k => levels[k] = true);
   document.querySelectorAll('.lvl').forEach(b => b.classList.add('on'));
   repaint();
-});
-
-document.getElementById('btn-wrap').addEventListener('click', function () {
-  logEl.classList.toggle('nowrap');
-  this.textContent = 'Wrap: ' + (logEl.classList.contains('nowrap') ? 'off' : 'on');
 });
 
 document.getElementById('btn-copy').addEventListener('click', () => {
@@ -370,6 +368,20 @@ async function connect() {
 
 /* Reconnect button in the disconnection banner */
 document.getElementById('btn-retry').addEventListener('click', () => connect());
+
+// 页面 load 时异步拉一次 /status 更新 header
+async function refreshStatus() {
+  try {
+    const resp = await VMRAuth.guard(() => fetch('/status'));
+    if (!resp.ok) return;
+    const d = await resp.json();
+    ConsoleAlerts.set((d.alerts || []));
+    const inst = d.instance || {};
+    con.setUptime(inst.uptime ? 'up ' + inst.uptime : '—');
+    con.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
+  } catch (_) {}
+}
+document.addEventListener('DOMContentLoaded', refreshStatus);
 
 /* ---- boot ---- */
 updateStatus();
