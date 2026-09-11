@@ -706,10 +706,8 @@ func TestRewriteRoles_MalformedElementFailsOpen(t *testing.T) {
 	t.Parallel()
 	roleMap := map[string]string{"developer": "system"}
 
-	// Element 2 is truncated mid-key ("role\"dev" has no closing quote).
-	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"dev` + `"` + `}]}`)
-	// 上面的拼接为了表达"键未闭合"——直接构造确定性畸形：
-	raw = []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"developer","content":"unterminated`)
+	// Element 2's "content" value is unterminated — a truncated body.
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"developer","content":"unterminated`)
 
 	out, err := RewriteRoles(raw, roleMap)
 	if err != nil {
