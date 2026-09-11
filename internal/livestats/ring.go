@@ -13,8 +13,8 @@ type ringKey struct {
 // ring is a fixed-capacity circular buffer of raw per-request tuples
 // (design §3.4): percentiles and rates are computed at read time, so a
 // formula fix never requires data migration. Entries keep the four-way
-// token tally, not just the generated count — both the window's usage
-// total and the single-request toks rate need all four components.
+// token tally, not just the generated count — the window's usage total
+// needs all four components even though the toks rate only needs out.
 type ring struct {
 	buf  [ringCap]ringEntry
 	next int
@@ -25,6 +25,7 @@ type ringEntry struct {
 	ts     time.Time
 	durMS  int64
 	ttftMS int64
+	stream bool
 	tokens TokenCounts
 }
 
@@ -54,9 +55,9 @@ func (r *ring) last(k int) []ringEntry {
 // (contracts §1.2): n is the window's actual entry count, tokens are the
 // four-way sums, ttft/toks percentiles are nearest-rank. ttft_ms==0 is
 // "unmeasured" and stays out of the ttft pools (design §4.2); a sample
-// with zero total tokens or a non-positive dur_ms stays out of the toks
-// pool. The toks denominator is dur_ms for both stream and non-stream
-// (design §8: tps revoked, one rate).
+// with zero output tokens or a non-positive generation span stays out of
+// the toks pool (design §8: one throughput caliber, tokens.out over the
+// generation-only span).
 func windowBlock(entries []ringEntry) *WindowBlock {
 	wb := &WindowBlock{N: int64(len(entries))}
 	if len(entries) == 0 {
@@ -82,15 +83,24 @@ func windowBlock(entries []ringEntry) *WindowBlock {
 	return wb
 }
 
-// toksOf applies the single toks rate (design §8): the four-way token sum
-// over the whole request span. Zero-token or non-positive-span samples
-// yield 0 and drop out of the percentile population.
+// toksOf applies the single toks rate (design §8): output-token generation
+// throughput. For a streamed sample the span excludes the prefill/wait
+// phase (dur_ms - ttft_ms) — the client-visible TTFT already answers "was
+// the wait slow", so folding it into the rate too would just dilute the
+// generation signal. A non-streamed sample delivers its whole body in one
+// write, so ttft_ms there marks "response ready" rather than a distinct
+// prefill phase — the full dur_ms is the honest span. Zero-output or
+// non-positive-span samples yield 0 and drop out of the percentile
+// population.
 func toksOf(e ringEntry) float64 {
-	total := e.tokens.In + e.tokens.Out + e.tokens.CacheRead + e.tokens.CacheWrite
-	if total <= 0 || e.durMS <= 0 {
+	if e.tokens.Out <= 0 || e.durMS <= 0 {
 		return 0
 	}
-	return float64(total) / (float64(e.durMS) / 1000)
+	spanMS := e.durMS
+	if e.stream && e.ttftMS > 0 && e.durMS > e.ttftMS {
+		spanMS = e.durMS - e.ttftMS
+	}
+	return float64(e.tokens.Out) / (float64(spanMS) / 1000)
 }
 
 // nearestRank{Int,Float} are the nearest-rank percentile over a pre-sorted

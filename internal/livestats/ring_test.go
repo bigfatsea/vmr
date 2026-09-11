@@ -79,24 +79,24 @@ func TestNearestRank_KnownDistribution(t *testing.T) {
 	}
 }
 
-// TestWindowBlock_ToksDenominatorIsUniform pins the single toks rate
-// (design §8): stream and non-stream entries share the dur_ms denominator,
-// so the same tuple yields the same toks regardless of stream.
-func TestWindowBlock_ToksDenominatorIsUniform(t *testing.T) {
-	entries := []ringEntry{
-		{durMS: 5000, ttftMS: 1000, tokens: TokenCounts{Out: 100}}, // toks = 100/5.0 = 20.0
-		{durMS: 5000, ttftMS: 1000, tokens: TokenCounts{Out: 100}},
+// TestWindowBlock_ToksStreamSubtractsTTFT pins the toks rate's per-stream
+// span (design §8): a streamed sample's denominator drops the prefill/wait
+// phase (dur_ms - ttft_ms), while a non-streamed sample — whose ttft_ms
+// marks "response ready", not a distinct prefill phase — keeps the whole
+// dur_ms. Same raw tuple, different stream flag, different rate.
+func TestWindowBlock_ToksStreamSubtractsTTFT(t *testing.T) {
+	streamed := windowBlock([]ringEntry{
+		{durMS: 5000, ttftMS: 1000, stream: true, tokens: TokenCounts{Out: 100}}, // toks = 100/4.0 = 25.0
+	})
+	if math.Abs(streamed.ToksP50-25.0) > 1e-6 {
+		t.Errorf("streamed: toks p50 = %f, want 25.0", streamed.ToksP50)
 	}
-	// Stream and non-stream keys only differ in admission, never in the
-	// rate formula: windowBlock takes no stream argument at all.
-	for _, stream := range []bool{false, true} {
-		wb := windowBlock(entries)
-		if wb == nil {
-			t.Fatalf("stream=%v: nil block", stream)
-		}
-		if math.Abs(wb.ToksP50-20.0) > 1e-6 {
-			t.Errorf("stream=%v: toks p50 = %f, want 20.0", stream, wb.ToksP50)
-		}
+
+	nonStreamed := windowBlock([]ringEntry{
+		{durMS: 5000, ttftMS: 1000, stream: false, tokens: TokenCounts{Out: 100}}, // toks = 100/5.0 = 20.0
+	})
+	if math.Abs(nonStreamed.ToksP50-20.0) > 1e-6 {
+		t.Errorf("non-streamed: toks p50 = %f, want 20.0", nonStreamed.ToksP50)
 	}
 }
 
@@ -107,11 +107,11 @@ func TestWindowBlock_ToksDenominatorIsUniform(t *testing.T) {
 // sums the four components.
 func TestWindowBlock_ExclusionRules(t *testing.T) {
 	entries := []ringEntry{
-		{durMS: 1000, ttftMS: 100, tokens: TokenCounts{In: 100, Out: 100}}, // toks = 200 tok / 1s = 200
+		{durMS: 1000, ttftMS: 100, tokens: TokenCounts{In: 100, Out: 100}}, // toks = 100 tok-out / 1s = 100
 		{durMS: 1000, ttftMS: 0, tokens: TokenCounts{Out: 400}},            // no ttft; toks = 400
-		{durMS: 1000, ttftMS: 300, tokens: TokenCounts{}},                  // zero tokens: no toks
+		{durMS: 1000, ttftMS: 300, tokens: TokenCounts{}},                  // zero out: no toks
 		{durMS: 0, ttftMS: 300, tokens: TokenCounts{Out: 500}},             // zero span: no toks
-		{durMS: 2000, ttftMS: 200, tokens: TokenCounts{CacheRead: 300}},    // toks = 150
+		{durMS: 2000, ttftMS: 200, tokens: TokenCounts{CacheRead: 300}},    // zero out: no toks
 	}
 	wb := windowBlock(entries)
 	if wb.N != 5 {
@@ -124,9 +124,9 @@ func TestWindowBlock_ExclusionRules(t *testing.T) {
 	if wb.TTFTP50 != 200 || wb.TTFTP90 != 300 {
 		t.Errorf("ttft p50/p90 = %d/%d, want 200/300", wb.TTFTP50, wb.TTFTP90)
 	}
-	// toks pool = {200, 400, 150} sorted: p50=200, p90=400.
-	if math.Abs(wb.ToksP50-200) > 1e-6 || math.Abs(wb.ToksP90-400) > 1e-6 {
-		t.Errorf("toks p50/p90 = %f/%f, want 200/400", wb.ToksP50, wb.ToksP90)
+	// toks pool = {100, 400} sorted: p50=100, p90=400.
+	if math.Abs(wb.ToksP50-100) > 1e-6 || math.Abs(wb.ToksP90-400) > 1e-6 {
+		t.Errorf("toks p50/p90 = %f/%f, want 100/400", wb.ToksP50, wb.ToksP90)
 	}
 
 	// All-unmeasured ttft and all-zero tokens leave the pools empty.

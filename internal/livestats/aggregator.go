@@ -321,7 +321,7 @@ func addRing(rings map[ringKey]*ring, s Sample) {
 		r = &ring{}
 		rings[k] = r
 	}
-	r.add(ringEntry{ts: s.TS, durMS: s.DurMS, ttftMS: s.TTFTMS, tokens: s.Tokens})
+	r.add(ringEntry{ts: s.TS, durMS: s.DurMS, ttftMS: s.TTFTMS, stream: s.Stream, tokens: s.Tokens})
 }
 
 // rollHourLocked closes the open hour: roll slim files older than newHour

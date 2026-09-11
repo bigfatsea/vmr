@@ -81,7 +81,9 @@ type SumCount struct {
 // WindowBlock is the read-time portrait of one recent-sample window
 // (contracts §1.2): the window's actual sample count, its four-way token
 // totals, and nearest-rank ttft/toks percentiles. The only rate is toks —
-// tps was revoked (design §8).
+// output-token generation throughput: tokens.out over (dur_ms - ttft_ms)
+// for streamed samples, tokens.out / dur_ms for non-streamed ones
+// (design §8).
 type WindowBlock struct {
 	N       int64       `json:"n"`
 	Tokens  TokenCounts `json:"tokens"`

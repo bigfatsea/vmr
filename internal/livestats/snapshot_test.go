@@ -116,9 +116,10 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 	}
 	defer agg.Close()
 
-	// 10 streaming + 10 non-streaming samples with identical tuples:
-	// toks = (100+50)/4.0s = 37.5 under the single dur_ms denominator.
-	// Stream and non-stream share the same ring and merge into 1 row.
+	// 10 streaming + 10 non-streaming samples with identical tuples, but
+	// toks differs by stream: streamed = 50/((4000-1000)/1000) = 16.667,
+	// non-streamed = 50/(4000/1000) = 12.5. Stream and non-stream still
+	// share the same ring and merge into 1 row.
 	for i := 0; i < 10; i++ {
 		agg.Record(Sample{
 			TS:       now.Add(time.Duration(i) * time.Second),
@@ -165,8 +166,11 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 	if r.Last100.N != 20 {
 		t.Errorf("Last100 n = %d, want 20 (both modes shared ring)", r.Last100.N)
 	}
-	if math.Abs(r.Last10.ToksP50-37.5) > 1e-4 {
-		t.Errorf("toks p50 = %f, want 37.5", r.Last10.ToksP50)
+	// Last10 = the 5 most recent stream + 5 most recent non-stream samples,
+	// interleaved by insertion order: pool = {12.5×5, 16.667×5} sorted,
+	// p50 = ceil(0.5×10) = 5th element = 12.5 (still inside the low block).
+	if math.Abs(r.Last10.ToksP50-12.5) > 1e-4 {
+		t.Errorf("toks p50 = %f, want 12.5", r.Last10.ToksP50)
 	}
 	if r.Last10.TTFTP50 != 1000 {
 		t.Errorf("ttft p50 = %d, want 1000", r.Last10.TTFTP50)

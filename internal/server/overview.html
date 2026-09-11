@@ -107,7 +107,7 @@
 
   <!-- ============ performance ============ -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">rows with no requests in the selected window are hidden; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
+    <span class="count">Empty rows are hidden; all columns share one window, sized by Requests</span>
     <span class="spacer"></span>
     <span class="seg">
       <span class="seg-label">window</span>
@@ -123,7 +123,7 @@
         <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
         <th class="num" title="Output tokens over the window">Tok out</th>
         <th class="num" title="Time to first token — nearest-rank percentiles over the successful requests in the window">TTFT p50 / p90</th>
-        <th class="num" title="Per-request throughput: all four token components / total duration, then nearest-rank percentiles over the window">Tok/s p50 / p90</th>
+        <th class="num" title="Output-token generation throughput per request: streamed requests exclude the time-to-first-token wait, non-streamed use the full duration — then nearest-rank percentiles over the window">Tok OUT/s p50 / p90</th>
       </tr></thead>
       <tbody id="perf-body"></tbody>
     </table>
@@ -693,7 +693,7 @@ function renderModels(modelsList, statsData) {
       : '<span class="dim" title="No requests for this virtual model in the last 24h">—</span>';
 
     const priCell = ep.from_fallback
-      ? '<span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
+      ? '<span class="pri pri-fb" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
       : `<span class="pri ${ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n')}">P${ep.priority}</span>`;
 
     const fullTitle = `${ep.provider} : ${ep.model}`;
@@ -774,7 +774,7 @@ function renderPerf(byProviderModel, basis) {
       outCell = fmtKMG(wb.tokens.out || 0);
       ttftCell = `${fmtTTFT(wb.ttft_p50_ms)} <span class="dim">/</span> ${fmtTTFT(wb.ttft_p90_ms)}`;
       toksCell = (wb.toks_p50 > 0 || wb.toks_p90 > 0)
-        ? `<span title="p50: ${dec2(wb.toks_p50 || 0)} toks/s · p90: ${dec2(wb.toks_p90 || 0)} toks/s">${fmtRate(wb.toks_p50)} <span class="dim">/</span> ${fmtRate(wb.toks_p90)}</span>`
+        ? `<span title="p50: ${dec2(wb.toks_p50 || 0)} tok out/s · p90: ${dec2(wb.toks_p90 || 0)} tok out/s">${fmtRate(wb.toks_p50)} <span class="dim">/</span> ${fmtRate(wb.toks_p90)}</span>`
         : '<span class="dim" title="No throughput measurement">—</span>';
     }
 

@@ -124,35 +124,19 @@ func TestHelpPage_ServesHTML(t *testing.T) {
 		if !strings.Contains(body, "Agent Configuration Guide") {
 			t.Errorf("%s: body missing 'Agent Configuration Guide'", path)
 		}
-		if !strings.Contains(body, "Claude Code") {
-			t.Errorf("%s: body missing 'Claude Code' agent section", path)
-		}
-		if !strings.Contains(body, "Pi Agent") {
-			t.Errorf("%s: body missing 'Pi Agent' section", path)
-		}
-		if !strings.Contains(body, "Codex CLI") {
-			t.Errorf("%s: body missing 'Codex CLI' section", path)
-		}
-		if !strings.Contains(body, "Aider") {
-			t.Errorf("%s: body missing 'Aider' section", path)
-		}
-		if !strings.Contains(body, "OpenCode") {
-			t.Errorf("%s: body missing 'OpenCode' section", path)
-		}
-		if !strings.Contains(body, "OpenClaw") {
-			t.Errorf("%s: body missing 'OpenClaw' section", path)
-		}
-		if !strings.Contains(body, "WorkBuddy") {
-			t.Errorf("%s: body missing 'WorkBuddy' section", path)
-		}
-		if !strings.Contains(body, "Hermes") {
-			t.Errorf("%s: body missing 'Hermes' section", path)
-		}
-		if !strings.Contains(body, "OpenDesign") {
-			t.Errorf("%s: body missing 'OpenDesign' section", path)
-		}
-		if !strings.Contains(body, "Continue.dev") {
-			t.Errorf("%s: body missing 'Continue.dev' section", path)
+		for _, name := range []string{
+			"Claude Code",
+			"Codex",
+			"OpenClaw",
+			"OpenCode",
+			"Cursor",
+			"Hermes",
+			"Pi Agent",
+			"WorkBuddy",
+		} {
+			if !strings.Contains(body, name) {
+				t.Errorf("%s: body missing %q agent section", path, name)
+			}
 		}
 		if !strings.Contains(body, "help-base-urls") {
 			t.Errorf("%s: body missing dynamic connection info section", path)
@@ -265,7 +249,6 @@ func TestHelpPage_SnippetFillEngine(t *testing.T) {
 			"cacheSnippetTemplates()",
 			"function genPi(",
 			"function genOpenCode(",
-			`pre.id === 'responses-py-snippet'`,
 		} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s: snippet-fill engine missing %q", path, want)
