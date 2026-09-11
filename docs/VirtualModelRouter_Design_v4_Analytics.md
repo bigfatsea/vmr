@@ -292,7 +292,7 @@ Journey  一条缝合链（Chain []*ctxgraph.Lineage）渲染成的连续叙事
 
 | `FindingCode` | 判据 | 依据 |
 | --- | --- | --- |
-| `exact_repeat_tool_call` | 同一 `(工具名, 参数)` 对（`toolCallKey`，§3.5b 的 `toolCallRepeats` 同一份底层实现）重复出现 ≥ `exactRepeatThreshold`（3）次 | MAST 最高发失败模式（Step repetition，15.7%）；真实案例：`anthropics/claude-code#19699`（同一命令连续报错 7 次以上才被人工打断）、`#15909`（重试 300+ 次、耗时 4.6 小时） |
+| `exact_repeat_tool_call` | 同一 `(工具名, 参数)` 对（`toolCallKey`，§3.5b 的 `toolCallRepeats` 同一份底层实现）重复出现 ≥ `exactRepeatThreshold`（3）次，且重复在时间上局部聚簇——相邻两次出现间隔 ≤ `maxRepeatGap`（2）个 Step 才计入同一次循环 run，按 run 触发（散布在长会话各处的同参数调用是工作节奏，不是循环） | MAST 最高发失败模式（Step repetition，15.7%）；真实案例：`anthropics/claude-code#19699`（同一命令连续报错 7 次以上才被人工打断）、`#15909`（重试 300+ 次、耗时 4.6 小时） |
 | `narration_without_action` | 连续 ≥ `narrationMinRun`（3）个无 `tool_call` 的 Step，相邻 `RespText` 词集合 Jaccard 相似度 ≥ `narrationJaccardThreshold`（0.5） | `anthropics/claude-code#27281`（反复说"让我现在组装文档"却不触发工具调用，直到耗尽上下文窗口） |
 | `error_then_unverified_success` | 一次 `is_error` 标记后，同 Task 内直到最后一个 Step（携带 `Finish`）都没出现"看起来像验证"的调用（`verificationLikeToolRe`，一个局部启发式，不是正式的读写分类器） | Replit/Google Gemini CLI/Amazon 三起独立报道的真实生产事故，共同点是"面对含糊错误响应自行脑补了乐观结论" |
 | `reasoning_action_mismatch` | 推理文本**最后一句**（`lastSentence`，非全文）提取到的实体（`chatmsg.ExtractEntities`）里，有实体在本轮 `tool_call` 参数里找不到子串意义上的匹配（`entityReferenced`，双向 `Contains`，不要求完全相等） | MAST 第二高发模式（Reasoning-action mismatch，13.2%） |

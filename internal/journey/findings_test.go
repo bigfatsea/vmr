@@ -76,6 +76,95 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("scattered repeats across a long session: no finding", func(t *testing.T) {
+		// The same call at steps 5, 10 and 15 (gaps of 5 > maxRepeatGap) is a
+		// working session's rhythm, not a loop — this is the §2.115 false
+		// positive the run split exists to kill.
+		var steps []*Step
+		for i := 1; i <= 15; i++ {
+			s := &Step{Seq: i}
+			if i == 5 || i == 10 || i == 15 {
+				s.ToolCalls = []chatmsg.ToolCall{tc("git", `{"args":["status"]}`)}
+			}
+			steps = append(steps, s)
+		}
+		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		for _, f := range got {
+			if f.Code == FindingExactRepeatToolCall {
+				t.Fatalf("unexpected finding for scattered repeats: %+v", f)
+			}
+		}
+	})
+
+	t.Run("gap beyond maxRepeatGap breaks the run", func(t *testing.T) {
+		// Same call at 1, 2, 5: the first gap is 1, the second is 3
+		// (> maxRepeatGap) — the run breaks, so no run reaches the threshold
+		// even though the global count is 3.
+		var steps []*Step
+		for i := 1; i <= 5; i++ {
+			s := &Step{Seq: i}
+			if i == 1 || i == 2 || i == 5 {
+				s.ToolCalls = []chatmsg.ToolCall{tc("bash", `{"cmd":"go vet ./..."}`)}
+			}
+			steps = append(steps, s)
+		}
+		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		for _, f := range got {
+			if f.Code == FindingExactRepeatToolCall {
+				t.Fatalf("unexpected finding: run broke at gap %d: %+v", maxRepeatGap+1, f)
+			}
+		}
+	})
+
+	t.Run("two separate runs fire two findings", func(t *testing.T) {
+		var steps []*Step
+		for i := 1; i <= 12; i++ {
+			s := &Step{Seq: i}
+			if i <= 3 || i >= 10 {
+				s.ToolCalls = []chatmsg.ToolCall{tc("bash", `{"cmd":"go build"}`)}
+			}
+			steps = append(steps, s)
+		}
+		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		var hits []Finding
+		for _, f := range got {
+			if f.Code == FindingExactRepeatToolCall {
+				hits = append(hits, f)
+			}
+		}
+		if len(hits) != 2 {
+			t.Fatalf("got %d findings for two disjoint runs, want 2: %+v", len(hits), hits)
+		}
+		if hits[0].StepSeq != 3 || hits[1].StepSeq != 12 {
+			t.Errorf("StepSeqs = %d,%d; want 3,12 (each run's last occurrence)", hits[0].StepSeq, hits[1].StepSeq)
+		}
+	})
+
+	t.Run("interleaved loop still fires", func(t *testing.T) {
+		// A real loop often interleaves one unrelated call between retries:
+		// same call at 1,3,5 (gaps of 2 = maxRepeatGap) is one run of 3.
+		var steps []*Step
+		for i := 1; i <= 5; i++ {
+			s := &Step{Seq: i}
+			if i%2 == 1 {
+				s.ToolCalls = []chatmsg.ToolCall{tc("bash", `{"cmd":"go build"}`)}
+			} else {
+				s.ToolCalls = []chatmsg.ToolCall{tc("read", `{"path":"main.go"}`)}
+			}
+			steps = append(steps, s)
+		}
+		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		var hits int
+		for _, f := range got {
+			if f.Code == FindingExactRepeatToolCall {
+				hits++
+			}
+		}
+		if hits != 1 {
+			t.Fatalf("got %d findings for an interleaved loop, want 1", hits)
+		}
+	})
 }
 
 func TestDetectNarrationWithoutAction(t *testing.T) {

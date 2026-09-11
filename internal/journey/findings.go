@@ -143,6 +143,16 @@ func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
 // loop" bar — that's why the finding text says "suspected", not "confirmed".
 const exactRepeatThreshold = 3
 
+// maxRepeatGap is how many Steps may separate two consecutive occurrences of
+// the same (name, args) call while both still count toward one loop run. A
+// loop is a temporal phenomenon: real ones re-issue the identical call
+// within a step or two of the previous attempt (occasionally interleaving
+// one unrelated call); the same call three times spread across a long
+// session is working rhythm, not a loop. Without this bound the global
+// count flagged exactly those rhythmic repeats (§2.115). Same
+// calibration-pending status as exactRepeatThreshold.
+const maxRepeatGap = 2
+
 // toolCallGroup is one (name, args) key's full occurrence list across a
 // Journey — toolCallRepeats (metrics.go) only tags pairwise repeat/not, this
 // groups by the same toolCallKey identity to get a count and the related
@@ -172,16 +182,27 @@ func groupToolCallsByKey(steps []*Step) []toolCallGroup {
 func detectExactRepeatToolCall(steps []*Step, tx i18n.JourneyFindingsText) []Finding {
 	var out []Finding
 	for _, g := range groupToolCallsByKey(steps) {
-		if len(g.Seqs) < exactRepeatThreshold {
-			continue
+		// Split the occurrence list into maximal runs of locally-clustered
+		// repeats (consecutive gaps <= maxRepeatGap) and fire per run, not
+		// per global count.
+		runStart := 0
+		for i := 1; i <= len(g.Seqs); i++ {
+			if i < len(g.Seqs) && g.Seqs[i]-g.Seqs[i-1] <= maxRepeatGap {
+				continue
+			}
+			run := g.Seqs[runStart:i]
+			runStart = i
+			if len(run) < exactRepeatThreshold {
+				continue
+			}
+			ft := tx.ExactRepeatToolCall(g.Name, len(run))
+			last := run[len(run)-1]
+			related := append([]int(nil), run[:len(run)-1]...)
+			out = append(out, Finding{
+				Code: FindingExactRepeatToolCall, StepSeq: last, RelatedSeq: related,
+				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+			})
 		}
-		ft := tx.ExactRepeatToolCall(g.Name, len(g.Seqs))
-		last := g.Seqs[len(g.Seqs)-1]
-		related := append([]int(nil), g.Seqs[:len(g.Seqs)-1]...)
-		out = append(out, Finding{
-			Code: FindingExactRepeatToolCall, StepSeq: last, RelatedSeq: related,
-			Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
-		})
 	}
 	return out
 }
