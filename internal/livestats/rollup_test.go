@@ -191,7 +191,7 @@ func TestRollupFile_LastWinsAndCorruptLineTolerance(t *testing.T) {
 
 func TestRollSlimFile_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	hour := time.Date(2026, 9, 7, 11, 0, 0, 0, time.Local)
+	hour := time.Date(2026, 9, 7, 11, 0, 0, 0, time.UTC)
 	slimName := hourFileName(hour)
 
 	f, err := os.OpenFile(filepath.Join(dir, slimName), os.O_CREATE|os.O_WRONLY, 0o600)

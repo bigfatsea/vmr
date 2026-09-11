@@ -246,19 +246,15 @@ func TestAdminLog_SlowReaderIsDisconnected(t *testing.T) {
 	// Deliberately never read resp.Body.
 
 	// Wait for the subscriber to register, then flood enough bytes to fill
-	// both socket buffers so the handler's next write blocks.
+	// both socket buffers so the handler's next write blocks and hits its deadline.
 	deadline := time.Now().Add(2 * time.Second)
 	for tee.Subscribers() == 0 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	big := strings.Repeat("x", 32<<10)
-	for i := 0; i < 64; i++ {
-		tee.Write([]byte(big + "\n"))
-	}
-
-	// The blocked write must hit its deadline and the goroutine must exit.
+	big := strings.Repeat("x", 64<<10)
 	deadline = time.Now().Add(3 * time.Second)
 	for tee.Subscribers() != 0 && time.Now().Before(deadline) {
+		tee.Write([]byte(big + "\n"))
 		time.Sleep(10 * time.Millisecond)
 	}
 	if got := tee.Subscribers(); got != 0 {
