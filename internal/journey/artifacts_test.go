@@ -60,7 +60,32 @@ func TestExtractArtifacts_StructuredAndBash(t *testing.T) {
 		t.Fatalf("expected at least 3 artifacts, got %d: %+v", len(artifacts), artifacts)
 	}
 
-	// 1. read_file should be captured with op edit
+	// 1. step 1's read_file README.md: classifyToolName's default for
+	// read-only tools is edit, so it must surface as its own edit-shaped
+	// touch — FirstStep 1, Count 1, not heuristic.
+	var readme *Artifact
+	for i := range artifacts {
+		if artifacts[i].Path == "README.md" {
+			readme = &artifacts[i]
+			break
+		}
+	}
+	if readme == nil {
+		t.Fatalf("README.md not found in artifacts: %+v", artifacts)
+	}
+	if readme.Op != ArtifactOpEdit {
+		t.Errorf("README.md Op = %v, want edit", readme.Op)
+	}
+	if readme.FirstStep != 1 {
+		t.Errorf("README.md FirstStep = %d, want 1", readme.FirstStep)
+	}
+	if readme.Count != 1 {
+		t.Errorf("README.md Count = %d, want 1", readme.Count)
+	}
+	if readme.Heuristic {
+		t.Errorf("README.md Heuristic = true, want false")
+	}
+
 	// 2. src/main.go should have op write (escalated from edit), firstStep 2, count 2, heuristic false
 	var mainGo *Artifact
 	for i := range artifacts {

@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -269,6 +271,52 @@ func TestDeriveID_StableAcrossIndependentScans(t *testing.T) {
 	}
 	if j1.ID != j2.ID {
 		t.Errorf("ID not stable: %q vs %q", j1.ID, j2.ID)
+	}
+}
+
+// TestDeriveID_KeepsWriteTimeOffsetNotDisplayZone pins journey's documented
+// DisplayZone exemption (AGENTS.md "Timezone: one display authority"): the
+// id's start/end are formatted straight off the manifests' write-time
+// offset — a property of the audited data, so two machines in different
+// timezones analyzing the same audit files derive the identical id — never
+// re-rendered through fmtutil.DisplayZone (the reading machine's zone).
+func TestDeriveID_KeepsWriteTimeOffsetNotDisplayZone(t *testing.T) {
+	for _, off := range []int{8 * 3600, -5 * 3600} {
+		zone := time.FixedZone("write", off)
+		at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, zone) }
+		sys := msg("system", "sys")
+		u1 := msg("user", "offset")
+		r1 := mkRec(at(0), "", []any{sys, u1}, sseText("ok"))
+		r2 := mkRec(at(1), "", []any{sys, u1, msg("user", "more")}, sseText("ok2"))
+
+		path := writeJSONL(t, []audit.Record{r1, r2})
+		l := onlyLineage(t, path)
+		j, err := Build(l, taskseg.Generic, i18n.EN)
+		if err != nil {
+			t.Fatalf("offset %+d: Build: %v", off, err)
+		}
+		// TestMain pins DisplayZone to UTC, so its rendering of these
+		// instants differs from the write-offset wall clock (10:00/10:01)
+		// — the id must carry the latter, never the former.
+		for _, want := range []string{"20260709T100000", "20260709T100100"} {
+			if !strings.Contains(j.ID, want) {
+				t.Errorf("offset %+d: ID = %q, want it to contain write-time wall clock %s", off, j.ID, want)
+			}
+		}
+		root, last := l.Manifests[0], l.Manifests[len(l.Manifests)-1]
+		for _, m := range []*ctxgraph.Manifest{root, last} {
+			if rerendered := m.TS.In(fmtutil.DisplayZone).Format(idTimeLayout); strings.Contains(j.ID, rerendered) {
+				t.Errorf("offset %+d: ID = %q, contains DisplayZone-re-rendered timestamp %s", off, j.ID, rerendered)
+			}
+		}
+		// A globally switched DisplayZone must not leak into the id either.
+		saved := fmtutil.DisplayZone
+		fmtutil.DisplayZone = time.FixedZone("elsewhere", 13*3600)
+		switched := deriveID([]*ctxgraph.Lineage{l})
+		fmtutil.DisplayZone = saved
+		if unswitched := deriveID([]*ctxgraph.Lineage{l}); switched != unswitched {
+			t.Errorf("offset %+d: ID changed under a different DisplayZone: %q vs %q", off, unswitched, switched)
+		}
 	}
 }
 

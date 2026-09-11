@@ -180,3 +180,138 @@ func TestArchitecture_ReportI18nPairing_Negative(t *testing.T) {
 		t.Errorf("fully paired sets reported %v, want none", got)
 	}
 }
+
+// sideI18nCounterparts maps every non-report internal/i18n file (the
+// journey_* and reqdetail_* ones) onto the production file(s) its header
+// comment names as the counterpart it renders for. AGENTS.md's module map
+// states this pairing — "i18n/journey_*.go next to internal/journey,
+// i18n/reqdetail_detail.go next to internal/reqdetail" — but journey's
+// renderers don't share one filename prefix (render_*, viewmodel_* and plain
+// *.go files all carry user copy, one i18n file can serve several, and
+// journey_compares_index.go renders a cmd/vmr page), so unlike the report
+// half the counterpart is stated explicitly per file rather than derived
+// from a glob. The test makes "each stated counterpart exists" an enforced
+// fact: a renderer renamed, moved or split without updating its i18n anchor
+// fails here instead of drifting silently.
+var sideI18nCounterparts = map[string][]string{
+	"journey_benchmarks.go":     {"internal/journey/render_benchmarks.go"},
+	"journey_compare.go":        {"internal/journey/compare.go", "internal/journey/render_compare.go"},
+	"journey_compares_index.go": {"cmd/vmr/compares_index.go"},
+	"journey_findings.go":       {"internal/journey/findings.go"},
+	"journey_index.go":          {"internal/journey/journeyindex.go"},
+	"journey_indicators.go":     {"internal/journey/viewmodel_build.go"},
+	"journey_llm.go":            {"internal/journey/llm.go"},
+	"journey_modelusage.go":     {"internal/journey/viewmodel_build.go"},
+	"journey_render.go":         {"internal/journey/journey.go", "internal/journey/viewmodel_build.go", "internal/journey/viewmodel_spine.go"},
+	"journey_spine.go":          {"internal/journey/render_spine.go", "internal/journey/viewmodel_spine.go"},
+	"reqdetail_detail.go":       {"internal/reqdetail/detail.go"},
+}
+
+// sideI18nPairingProblems reports, one message per drift: an i18n file on
+// the journey/reqdetail side that is not registered (a new file there must
+// state its anchor, or the pairing rule stops covering it), and a registered
+// counterpart that no longer exists.
+func sideI18nPairingProblems(i18nFiles map[string]bool, counterparts map[string][]string, root string) []string {
+	var problems []string
+
+	names := make([]string, 0, len(i18nFiles))
+	for name := range i18nFiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, c := range counterparts[name] {
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(c))); err != nil {
+				problems = append(problems,
+					"internal/i18n/"+name+"'s counterpart "+c+" does not exist — the renderer was renamed, moved, or split; update the pairing")
+			}
+		}
+		if len(counterparts[name]) == 0 {
+			problems = append(problems,
+				"internal/i18n/"+name+" is not registered in sideI18nCounterparts — record the file(s) it pairs with (see its header comment) or the pairing drifts silently")
+		}
+	}
+	return problems
+}
+
+// loadSideI18nFiles collects the journey_*/reqdetail_* basenames under
+// internal/i18n — the files whose pairing sideI18nCounterparts states.
+func loadSideI18nFiles(t *testing.T, root string) map[string]bool {
+	t.Helper()
+	files := map[string]bool{}
+	entries, err := os.ReadDir(filepath.Join(root, "internal", "i18n"))
+	if err != nil {
+		t.Fatalf("read internal/i18n: %v", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if strings.HasPrefix(name, "journey_") || strings.HasPrefix(name, "reqdetail_") {
+			files[name] = true
+		}
+	}
+	return files
+}
+
+// TestArchitecture_SideI18nPairing enforces the module map's pairing for the
+// journey and reqdetail sides: every i18n/journey_*.go sits next to the
+// internal/journey file(s) it renders for, and i18n/reqdetail_detail.go next
+// to internal/reqdetail/detail.go. Until now that pairing lived only in each
+// i18n file's header comment — the exact "documented tripwire nobody sees
+// trip" shape this package exists to eliminate.
+func TestArchitecture_SideI18nPairing(t *testing.T) {
+	root := repoRootDir(t)
+	for _, p := range sideI18nPairingProblems(loadSideI18nFiles(t, root), sideI18nCounterparts, root) {
+		t.Error(p)
+	}
+}
+
+// TestArchitecture_SideI18nPairing_Negative drives sideI18nPairingProblems
+// over synthetic drifted sets to prove the guard trips in each direction
+// rather than passing vacuously.
+func TestArchitecture_SideI18nPairing_Negative(t *testing.T) {
+	root := repoRootDir(t)
+	cases := []struct {
+		name         string
+		i18nFiles    map[string]bool
+		counterparts map[string][]string
+		wantFragment string
+	}{
+		{
+			name:         "i18n file without registered counterpart",
+			i18nFiles:    map[string]bool{"journey_nosuch.go": true},
+			counterparts: map[string][]string{},
+			wantFragment: "journey_nosuch.go is not registered in sideI18nCounterparts",
+		},
+		{
+			name:         "counterpart file vanished",
+			i18nFiles:    map[string]bool{"reqdetail_detail.go": true},
+			counterparts: map[string][]string{"reqdetail_detail.go": {"internal/reqdetail/nope.go"}},
+			wantFragment: "'s counterpart internal/reqdetail/nope.go does not exist",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sideI18nPairingProblems(tc.i18nFiles, tc.counterparts, root)
+			if len(got) == 0 {
+				t.Fatal("no problems reported, want at least one")
+			}
+			for _, p := range got {
+				if !strings.Contains(p, tc.wantFragment) {
+					t.Errorf("problem %q should mention %q", p, tc.wantFragment)
+				}
+			}
+		})
+	}
+
+	// The mirror image: a registered counterpart that exists must stay silent.
+	if got := sideI18nPairingProblems(
+		map[string]bool{"reqdetail_detail.go": true},
+		map[string][]string{"reqdetail_detail.go": {"internal/reqdetail/detail.go"}},
+		root,
+	); len(got) != 0 {
+		t.Errorf("existing counterpart reported %v, want none", got)
+	}
+}

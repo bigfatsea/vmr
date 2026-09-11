@@ -551,6 +551,18 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		t.Errorf("want sessions projection in index.json")
 	}
 
+	// 0600/0700 per AGENTS.md: requests/ output carries full request rows.
+	if di, err := os.Stat(requestsDir); err != nil {
+		t.Fatal(err)
+	} else if di.Mode().Perm() != 0o700 {
+		t.Errorf("requests/ dir perm = %o, want 0700", di.Mode().Perm())
+	}
+	if fi, err := os.Stat(filepath.Join(requestsDir, "index.json")); err != nil {
+		t.Fatal(err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Errorf("requests/index.json perm = %o, want 0600", fi.Mode().Perm())
+	}
+
 	// Human-readable request indexes (vmr-requests.md, per-tag siblings) are retired per D7 / §3.7.
 	for _, retired := range []string{"vmr-requests.md", "vmr-requests-alice.md", "vmr-requests-bob.md", "vmr-requests-cron-heartbeat.md"} {
 		if _, err := os.Stat(filepath.Join(dir, retired)); !os.IsNotExist(err) {
@@ -835,6 +847,22 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(requestsDir, "index.json")); err != nil {
 		t.Errorf("missing requests/index.json: %v", err)
+	}
+
+	// 0600/0700 per AGENTS.md: requests/ output carries full request rows.
+	if di, err := os.Stat(requestsDir); err != nil {
+		t.Fatal(err)
+	} else if di.Mode().Perm() != 0o700 {
+		t.Errorf("requests/ dir perm = %o, want 0700", di.Mode().Perm())
+	}
+	for name := range map[string]struct{}{"index.json": {}, "failed.md": {}, "failed.jsonl": {}} {
+		fi, err := os.Stat(filepath.Join(requestsDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode().Perm() != 0o600 {
+			t.Errorf("requests/%s perm = %o, want 0600", name, fi.Mode().Perm())
+		}
 	}
 }
 

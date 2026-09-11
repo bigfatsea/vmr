@@ -204,6 +204,9 @@ var forbiddenImports = map[string][]string{
 // in the tree.
 var zeroInternalDepPackages = []string{
 	"vmr/internal/buildinfo",
+	// dashboard's Go side is only embed + WriteSkeletons; its pages live in
+	// embedded HTML/JS assets, so it stays a zero-dep leaf like the others.
+	"vmr/internal/dashboard",
 	"vmr/internal/digest",
 	"vmr/internal/core",
 	"vmr/internal/fmtutil",

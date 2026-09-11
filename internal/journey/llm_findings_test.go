@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -599,7 +600,16 @@ data: [DONE]`},
 	})
 
 	t.Run("unreachable addr fails open without error", func(t *testing.T) {
-		opts := LLMOptions{Addr: "127.0.0.1:59999", Model: "agent"}
+		// Grab a port from the OS and immediately release it: guaranteed
+		// collision-free at allocation time, unlike a hardcoded port another
+		// process (or another package's parallel test run) may already hold.
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("allocate ephemeral port: %v", err)
+		}
+		addr := l.Addr().String()
+		l.Close()
+		opts := LLMOptions{Addr: addr, Model: "agent"}
 		res, err := ComputeLLMFindings(context.Background(), j, opts, i18n.ZH)
 		if err != nil {
 			t.Fatalf("fail-open contract violated: expected nil error, got %v", err)

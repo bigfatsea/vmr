@@ -31,6 +31,27 @@ func TestGetConcurrentWithRegister(t *testing.T) {
 	const names = 8
 	var wg sync.WaitGroup
 
+	// Register has no Unregister (production only ever registers from
+	// init()), so drop this test's entries via white-box access — without
+	// this, `go test -count=2` re-registers the same names and hits
+	// Register's duplicate-registration panic.
+	t.Cleanup(func() {
+		registerMu.Lock()
+		defer registerMu.Unlock()
+		cur := registry.Load()
+		if cur == nil {
+			return
+		}
+		next := make(map[string]Adapter, len(*cur))
+		for k, v := range *cur {
+			next[k] = v
+		}
+		for i := 0; i < names; i++ {
+			delete(next, concurrentTestName(i))
+		}
+		registry.Store(&next)
+	})
+
 	// Registration happens on its own goroutines too — in production every
 	// real Register call happens sequentially inside init(), but the
 	// registry's own correctness must not secretly depend on that; this

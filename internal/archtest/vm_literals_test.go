@@ -39,9 +39,10 @@ var viewModelLiteralAllowlist = map[string]string{
 var proseLiteral = regexp.MustCompile(`([A-Z][a-z]+(?:\s+[a-z][a-zA-Z0-9'’,\-.]*)+)|([a-z]{3,}\s+[a-z]{3,}\s+[a-z]{3,})`)
 
 // TestArchitecture_ViewModelNoBareLiterals guards D4 (all copy lives in the
-// ViewModel's paired i18n tables, the renderer expresses only structure):
-// viewmodel builder files must not carry user-facing English prose as string
-// literals. §9 of the analyze architecture redesign lists this guard.
+// renderer's paired i18n tables, the renderer expresses only structure):
+// report's viewmodel builder files and journey's render_*.go files must not
+// carry user-facing English prose as string literals. §9 of the analyze
+// architecture redesign lists this guard.
 func TestArchitecture_ViewModelNoBareLiterals(t *testing.T) {
 	root := repoRootDir(t)
 	targets := []string{
@@ -55,7 +56,9 @@ func TestArchitecture_ViewModelNoBareLiterals(t *testing.T) {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasPrefix(name, "viewmodel") || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			// journey's renderers are named render_*.go, not viewmodel_*.go —
+			// both prefixes carry user-facing copy and are guarded alike.
+			if e.IsDir() || !(strings.HasPrefix(name, "viewmodel") || strings.HasPrefix(name, "render_")) || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				continue
 			}
 			f := filepath.Join(dir, name)

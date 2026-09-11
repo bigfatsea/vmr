@@ -218,6 +218,9 @@ func TestCacheRecord_SaveAndLoad(t *testing.T) {
 	if !dirInfo.IsDir() {
 		t.Fatalf("Expected %s to be directory", cacheDir)
 	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("Expected 0700 permissions on cache dir, got %o", dirInfo.Mode().Perm())
+	}
 
 	// Verify file permissions (0600)
 	filePath := CachePath(dir)

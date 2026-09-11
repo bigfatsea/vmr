@@ -4,6 +4,7 @@ package journey
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -701,7 +703,12 @@ func TestBuildStructure_TruncationLimits(t *testing.T) {
 // the Journey's From/To — must serialize with a DisplayZone-formatted
 // companion so the frontend does no timezone math (§5.6, §11.1 #4).
 func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
-	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, time.UTC) }
+	// Fixtures are written at a non-UTC offset on purpose: TestMain pins
+	// DisplayZone to UTC, so a display form that forgot the .In(DisplayZone)
+	// conversion (or rendered the raw write-time offset) produces different
+	// digits and the assertions below can tell.
+	writeZone := time.FixedZone("write", 8*3600)
+	at := func(min int) time.Time { return time.Date(2026, 7, 9, 10, min, 0, 0, writeZone) }
 	sys := msg("system", "sys")
 	u1 := msg("user", "start")
 	r1 := mkRecWithUsage(at(0), []any{sys, u1}, "ok", 100, 10)
@@ -722,17 +729,41 @@ func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
 	if err := json.Unmarshal(raw, &top); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"from_display", "to_display"} {
-		var s string
-		if err := json.Unmarshal(top[k], &s); err != nil || s == "" {
-			t.Errorf("JourneySummary.%s missing or empty (%s)", k, top[k])
-		}
-	}
-
 	var parsed JourneySummary
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatal(err)
 	}
+
+	// A display companion must be exactly the instant rendered through
+	// fmtutil.DisplayZone with the fixed layout, and must parse back (in
+	// DisplayZone) to the very instant it accompanies — format validity
+	// and timezone correctness together, not just non-emptiness.
+	const layout = "2006-01-02 15:04:05"
+	checkDisplay := func(field, got string, instant time.Time) {
+		t.Helper()
+		if want := instant.In(fmtutil.DisplayZone).Format(layout); got != want {
+			t.Errorf("%s = %q, want the instant rendered in fmtutil.DisplayZone (%q)", field, got, want)
+		}
+		p, err := time.ParseInLocation(layout, got, fmtutil.DisplayZone)
+		if err != nil {
+			t.Errorf("%s = %q does not parse as a %q timestamp: %v", field, got, layout, err)
+		} else if !p.Equal(instant) {
+			t.Errorf("%s = %q renders a different instant than %v", field, got, instant)
+		}
+	}
+	for _, k := range []string{"from_display", "to_display"} {
+		var s string
+		if err := json.Unmarshal(top[k], &s); err != nil || s == "" {
+			t.Errorf("JourneySummary.%s missing or empty (%s)", k, top[k])
+			continue
+		}
+		if k == "from_display" {
+			checkDisplay(k, s, parsed.From)
+		} else {
+			checkDisplay(k, s, parsed.To)
+		}
+	}
+
 	stepsSeen := 0
 	for _, task := range parsed.Structure.Tasks {
 		for _, s := range task.Steps {
@@ -742,7 +773,9 @@ func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
 			}
 			if s.TSDisplay == "" {
 				t.Errorf("step seq %d has a TS but no ts_display", s.Seq)
+				continue
 			}
+			checkDisplay(fmt.Sprintf("step seq %d ts_display", s.Seq), s.TSDisplay, s.TS)
 		}
 	}
 	if stepsSeen == 0 {

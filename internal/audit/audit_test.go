@@ -197,6 +197,13 @@ func TestDailyRotation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// AGENTS.md invariant: audit files are 0600 — the rotated archive carries
+	// full conversation bodies and must not loosen that on compression.
+	if fi, err := f.Stat(); err != nil {
+		t.Fatal(err)
+	} else if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("compressed .zst archive perm = %04o, want 0600", perm)
+	}
 	dec, err := zstd.NewReader(f)
 	if err != nil {
 		t.Fatal(err)
@@ -209,9 +216,17 @@ func TestDailyRotation(t *testing.T) {
 	}
 
 	// day2 is still "today": it must stay plain and untouched.
-	day2Data, err := os.ReadFile(filepath.Join(dir, "vmr-audit-2026-07-08.jsonl"))
+	day2Path := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
+	day2Data, err := os.ReadFile(day2Path)
 	if err != nil {
 		t.Fatalf("2026-07-08: %v", err)
+	}
+	// AGENTS.md invariant: audit files are 0600 — the active day's JSONL is
+	// where raw client/upstream bodies land first.
+	if fi, err := os.Stat(day2Path); err != nil {
+		t.Fatal(err)
+	} else if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf("active .jsonl perm = %04o, want 0600", perm)
 	}
 
 	for date, dm := range map[string]struct {

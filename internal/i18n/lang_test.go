@@ -89,9 +89,11 @@ var bundleConstructors = map[string]func(Lang) any{
 
 func TestBundlesHaveNoEmptyStrings(t *testing.T) {
 	for name, ctor := range bundleConstructors {
-		for _, lang := range []Lang{EN, ZH} {
-			checkNoEmpty(t, name+"("+lang.String()+")", reflect.ValueOf(ctor(lang)))
-		}
+		en := reflect.ValueOf(ctor(EN))
+		zh := reflect.ValueOf(ctor(ZH))
+		checkNoEmpty(t, name+"("+EN.String()+")", en)
+		checkNoEmpty(t, name+"("+ZH.String()+")", zh)
+		checkLangSymmetry(t, name, en, zh)
 	}
 }
 
@@ -184,6 +186,51 @@ func checkNoEmpty(t *testing.T, path string, v reflect.Value) {
 		}
 		for _, k := range v.MapKeys() {
 			checkNoEmpty(t, path+"["+k.String()+"]", v.MapIndex(k))
+		}
+	}
+}
+
+// checkLangSymmetry walks two language variants of the same bundle type in
+// lockstep, failing wherever a map's key sets differ between EN and ZH. The
+// empty-string tripwire above walks each language independently, so a key
+// present in one language but missing from (or misspelled in) the other
+// passes it — the lookup on the losing side silently renders nothing.
+func checkLangSymmetry(t *testing.T, path string, en, zh reflect.Value) {
+	t.Helper()
+	switch en.Kind() {
+	case reflect.Struct:
+		for i := 0; i < en.NumField(); i++ {
+			checkLangSymmetry(t, path+"."+en.Type().Field(i).Name, en.Field(i), zh.Field(i))
+		}
+	case reflect.Array, reflect.Slice:
+		if en.Len() != zh.Len() {
+			t.Errorf("%s: length mismatch: EN has %d elements, ZH has %d", path, en.Len(), zh.Len())
+		}
+		n := en.Len()
+		if zh.Len() < n {
+			n = zh.Len()
+		}
+		for i := 0; i < n; i++ {
+			checkLangSymmetry(t, path+"[]", en.Index(i), zh.Index(i))
+		}
+	case reflect.Map:
+		enKeys := make(map[string]bool, en.Len())
+		for _, k := range en.MapKeys() {
+			enKeys[k.String()] = true
+		}
+		zhKeys := make(map[string]bool, zh.Len())
+		for _, k := range zh.MapKeys() {
+			zhKeys[k.String()] = true
+		}
+		for k := range enKeys {
+			if !zhKeys[k] {
+				t.Errorf("%s: map key %q exists in EN but not in ZH", path, k)
+			}
+		}
+		for k := range zhKeys {
+			if !enKeys[k] {
+				t.Errorf("%s: map key %q exists in ZH but not in EN", path, k)
+			}
 		}
 	}
 }

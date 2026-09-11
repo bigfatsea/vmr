@@ -56,17 +56,17 @@ var fileLineExemptions = map[string]int{
 	// rather than kept as pre-authorized headroom. When it does cross 700,
 	// split it by concern (e.g. provider/model validation into its own file)
 	// — do not re-add an exemption.
-	"internal/report/detail.go":  350,
-	"internal/report/session.go": 1100,
+	"internal/report/detail.go":  335,
+	"internal/report/session.go": 1000,
 
 	"internal/journey/journey.go":             850,
-	"internal/journey/render_md.go":           350,
-	"internal/journey/render_spine.go":        380,
-	"internal/journey/render_spine_args.go":   200,
+	"internal/journey/render_md.go":           60,
+	"internal/journey/render_spine.go":        70,
+	"internal/journey/render_spine_args.go":   70,
 	"internal/journey/findings.go":            580,
 	"internal/journey/findings_toolresult.go": 320,
 	"internal/journey/compare.go":             820,
-	"internal/journey/metrics.go":             470,
+	"internal/journey/metrics.go":             435,
 	"internal/journey/benchmarks.go":          380,
 	"internal/journey/render_benchmarks.go":   150,
 
@@ -77,9 +77,9 @@ var fileLineExemptions = map[string]int{
 	// module map), so a subcommand crossing its budget means logic belongs in
 	// an internal package, not that the number should go up.
 	"cmd/vmr/cmd_journey.go": 850,
-	"cmd/vmr/cmd_check.go":   610,
+	"cmd/vmr/cmd_check.go":   550,
 	"cmd/vmr/cmd_report.go":  500,
-	"cmd/vmr/cmd_status.go":  370,
+	"cmd/vmr/cmd_status.go":  310,
 
 	// classify.go's budget keeps it a thin error-classification file: the
 	// generic JSON scanning it used to hold lives in internal/jsonscan now, and
@@ -89,14 +89,14 @@ var fileLineExemptions = map[string]int{
 	"internal/jsonscan/walk.go":    200,
 	"internal/jsonscan/rewrite.go": 300,
 
-	"internal/taskseg/taskseg.go":  70,
+	"internal/taskseg/taskseg.go":  35,
 	"internal/taskseg/openclaw.go": 150,
 	"internal/taskseg/segment.go":  200,
 
 	// P2 dashboard skeleton pages: the Go side is only embed + WriteSkeletons;
 	// the bulk of the dashboard lives in embedded HTML/JS assets that are not
 	// line-counted here.
-	"internal/dashboard/dashboard.go": 400,
+	"internal/dashboard/dashboard.go": 120,
 }
 
 // TestArchitecture_CoreFileSizes counts newlines, exactly what `wc -l`

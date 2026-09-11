@@ -34,7 +34,9 @@ func recWithSysAndTools(sys string, toolNames ...string) *audit.Record {
 }
 
 func TestEnsureSysPromptEvidence_WritesAndDedupes(t *testing.T) {
-	dir := t.TempDir()
+	// Nested under t.TempDir so the 0700 assertion below exercises this
+	// package's own MkdirAll, not t.TempDir's incidental 0700.
+	dir := filepath.Join(t.TempDir(), "evidence")
 	rec1 := recWithSysAndTools("you are a helpful assistant")
 	rec2 := recWithSysAndTools("you are a helpful assistant") // same text, different record
 
@@ -48,6 +50,18 @@ func TestEnsureSysPromptEvidence_WritesAndDedupes(t *testing.T) {
 	fi1, err := os.Stat(filepath.Join(dir, name1))
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// 0600/0700 per AGENTS.md: evidence files carry full conversation bodies.
+	if fi1.Mode().Perm() != 0o600 {
+		t.Errorf("evidence file perm = %o, want 0600", fi1.Mode().Perm())
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("evidence dir perm = %o, want 0700", dirInfo.Mode().Perm())
 	}
 
 	name2, err := EnsureSysPromptEvidence(dir, rec2)
@@ -127,7 +141,9 @@ func TestSysPromptEvidenceFileName_MatchesEnsureSysPromptEvidence(t *testing.T) 
 }
 
 func TestEnsureToolsEvidence_WritesAndDedupes(t *testing.T) {
-	dir := t.TempDir()
+	// Nested under t.TempDir so the 0700 assertion below exercises this
+	// package's own MkdirAll, not t.TempDir's incidental 0700.
+	dir := filepath.Join(t.TempDir(), "evidence")
 	rec1 := recWithSysAndTools("", "exec", "write")
 	rec2 := recWithSysAndTools("", "exec", "write")
 
@@ -144,6 +160,22 @@ func TestEnsureToolsEvidence_WritesAndDedupes(t *testing.T) {
 	}
 	if name2 != name1 {
 		t.Errorf("two records with the same tool set got different evidence files: %q vs %q", name1, name2)
+	}
+
+	// 0600/0700 per AGENTS.md: evidence files carry full conversation bodies.
+	fi, err := os.Stat(filepath.Join(dir, name1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("evidence file perm = %o, want 0600", fi.Mode().Perm())
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirInfo.Mode().Perm() != 0o700 {
+		t.Errorf("evidence dir perm = %o, want 0700", dirInfo.Mode().Perm())
 	}
 }
 
