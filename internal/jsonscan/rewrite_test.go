@@ -696,3 +696,60 @@ func TestRewriteModel_NoGoLiteralEscapes(t *testing.T) {
 		})
 	}
 }
+
+// TestRewriteRoles_MalformedElementFailsOpen pins the §2.119 behavior: a
+// malformed region inside an element must NOT leak the scan past the
+// element's bounds and mis-rewrite nested content — the whole rewrite is
+// abandoned and the body returned byte-for-byte (fail-open), matching what
+// byte-faithful passthrough would send upstream.
+func TestRewriteRoles_MalformedElementFailsOpen(t *testing.T) {
+	t.Parallel()
+	roleMap := map[string]string{"developer": "system"}
+
+	// Element 2 is truncated mid-key ("role\"dev" has no closing quote).
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"dev` + `"` + `}]}`)
+	// 上面的拼接为了表达"键未闭合"——直接构造确定性畸形：
+	raw = []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},{"role":"developer","content":"unterminated`)
+
+	out, err := RewriteRoles(raw, roleMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Errorf("malformed body must be returned unchanged (fail-open), got a rewrite:\nraw=%s\nout=%s", raw, out)
+	}
+}
+
+// TestRewriteRoles_MalformedNonObjectElementFailsOpen: a non-object element
+// that SkipJSONValue cannot bound (truncated value) also aborts the rewrite
+// wholesale rather than rewriting whatever comes before it.
+func TestRewriteRoles_MalformedNonObjectElementFailsOpen(t *testing.T) {
+	t.Parallel()
+	roleMap := map[string]string{"developer": "system"}
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"be helpful"},1,2,`)
+
+	out, err := RewriteRoles(raw, roleMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Errorf("malformed body must be returned unchanged (fail-open):\nraw=%s\nout=%s", raw, out)
+	}
+}
+
+// TestRewriteRoles_MalformedTopLevelFailsOpen: when the body isn't valid
+// JSON far enough for TopLevelValues to locate the array (trailing garbage
+// after the last key), the rewrite declines before the array is ever
+// walked — body returned byte-for-byte. Same pre-Walk behavior; pinned so
+// the TopLevelValues→WalkArrayElements hand-off stays fail-open.
+func TestRewriteRoles_MalformedTopLevelFailsOpen(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"model":"vm","messages":[{"role":"developer","content":"a"}],"junk":`)
+	out, err := RewriteRoles(raw, map[string]string{"developer": "system"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != string(raw) {
+		t.Errorf("TopLevelValues-unlocatable body must be returned unchanged:\nraw=%s\nout=%s", raw, out)
+	}
+}

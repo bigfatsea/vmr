@@ -135,8 +135,8 @@ func RewriteRoles(raw json.RawMessage, roleMap map[string]string) ([]byte, error
 // byte-splice rewrite, applied to the top-level "input" array instead of
 // "messages". Responses' input can also be a bare string (no messages array
 // at all, e.g. input: "hello") — TopLevelValues still locates the "input"
-// key's value range in that case, but the array-open check inside the
-// shared scan (raw[i] != '[') declines it, so a string input is correctly
+// key's value range in that case, but WalkArrayElements' array-open check
+// inside the shared scan declines it, so a string input is correctly
 // left untouched rather than misread as an empty array.
 func RewriteInputRoles(raw json.RawMessage, roleMap map[string]string) ([]byte, error) {
 	return rewriteRolesInTopLevelArray(raw, roleMap, inputKeyLiteral)
@@ -167,71 +167,59 @@ func rewriteRolesInTopLevelArray(raw json.RawMessage, roleMap map[string]string,
 	if !ok || len(msgRanges) == 0 {
 		return raw, nil // not a JSON object or no such key
 	}
-
 	arrStart, arrEnd := msgRanges[0][0], msgRanges[0][1]
-	i := SkipJSONWS(raw, arrStart)
-	if i >= arrEnd || raw[i] != '[' {
-		return raw, nil // messages value is not an array
-	}
-	i++ // skip '['
 
 	type replacement struct {
 		start, end int
 		newVal     []byte
 	}
 	var reps []replacement
+	malformed := false
 
-	for i < arrEnd {
-		i = SkipJSONWS(raw, i)
-		if i >= arrEnd || raw[i] == ']' {
-			break
+	// WalkArrayElements gives each element a strict SkipJSONValue-delimited
+	// [start,end) range, and the role scan is bounded by that range — an
+	// element-internal malformed region cannot leak the scan past the
+	// element's bounds the way the pre-Walk hand-rolled loop could.
+	_, walkOK := WalkArrayElements(raw, arrStart, arrEnd, func(elemStart, elemEnd int) bool {
+		if raw[elemStart] != '{' {
+			return false // not an object (string/number/array Item): nothing to rewrite
 		}
-		if raw[i] == ',' {
-			i++
-			continue
-		}
-		// Each element should be a JSON object; skip anything else.
-		if raw[i] != '{' {
-			i, ok = SkipJSONValue(raw, i)
-			if !ok {
-				break
-			}
-			continue
-		}
-
-		// Scan the message object for a "role" key.
-		i++ // skip '{'
-		for i < arrEnd {
+		i := elemStart + 1 // skip '{'
+		for i < elemEnd {
 			i = SkipJSONWS(raw, i)
-			if i >= arrEnd {
+			if i >= elemEnd {
 				break
 			}
 			if raw[i] == '}' {
-				i++
-				break
+				return false // done with this element
 			}
 			if raw[i] == ',' {
 				i++
 				continue
 			}
 			if raw[i] != '"' {
-				break // malformed
+				malformed = true
+				return true
 			}
 			keyStart := i
-			i, ok = SkipJSONString(raw, i)
-			if !ok {
-				break
+			var sok bool
+			i, sok = SkipJSONString(raw, i)
+			if !sok {
+				malformed = true
+				return true
 			}
 			isRole := bytes.Equal(raw[keyStart:i], roleKeyLiteral)
 			i = SkipJSONWS(raw, i)
-			if i >= arrEnd || raw[i] != ':' {
-				break
+			if i >= elemEnd || raw[i] != ':' {
+				malformed = true
+				return true
 			}
 			i = SkipJSONWS(raw, i+1)
 			valStart := i
-			i, ok = SkipJSONValue(raw, i)
-			if !ok {
-				break
+			i, sok = SkipJSONValue(raw, i)
+			if !sok {
+				malformed = true
+				return true
 			}
 			if isRole {
 				// The value should be a JSON string; unquote and look up.
@@ -246,6 +234,13 @@ func rewriteRolesInTopLevelArray(raw json.RawMessage, roleMap map[string]string,
 				}
 			}
 		}
+		return false // next element
+	})
+	if malformed || !walkOK {
+		// Fail-open: any doubt → the body goes upstream byte-for-byte
+		// unchanged (the same outcome as byte-faithful passthrough of a
+		// body the upstream will reject anyway).
+		return raw, nil
 	}
 
 	if len(reps) == 0 {

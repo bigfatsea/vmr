@@ -337,6 +337,9 @@ func FuzzRewriteRoles(f *testing.F) {
 		`[]`,
 		``,
 		`{"messages":[{"role":"developer" `, // truncated element
+		`{"messages":[{"role":"user"},{"role" x}]}`,                      // malformed key region in second element
+		`{"messages":[{"role":"user"},{"content":"unterminated`,          // truncated non-object region after a valid element
+		`{"messages":[{"role":"user"},{"nested":{"role":"developer"}}]}`, // nested object must not be scanned
 		`{"messages":[{"role": "developer" , "content" : "spaced"  }]}`,
 		`{"messages":[{"role":"developer","content":"trail\ud83d"}]}`, // truncated UTF-16 escape in content
 	}

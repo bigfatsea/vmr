@@ -588,15 +588,25 @@ gantt
 
 ## A.4 遗留问题分批清单
 
-> 批次 = 现在做有多划算（ROI），与「严重度」正交。每条已在 KNOWN_ISSUES 有稳定编号。**批次 1 已全部落地（见 A.3b）。**
+> 批次 = 现在做有多划算（ROI），与「严重度」正交。每条已在 KNOWN_ISSUES 有稳定编号。**批次 1 已全部落地（见 A.3b）。批次 2 已全部落地（见 A.3c）。**
 
-### 批次 2 — 中 ROI，需较完整测试 / 校准配套
+## A.3c 已解决 · 第三阶段（批次 2，3 项）
+
+| # | 文件 | 改动 | 测试 |
+|---|---|---|---|
+| 5-3 §2.115 | `internal/journey/findings.go` | `detectExactRepeatToolCall` 全局计数改为按 run 触发：同 key 相邻两次出现间隔 ≤ `maxRepeatGap`（2 步）才计入同一次循环 run，各自独立触发；散布在长会话各处的同参数调用不再误报，紧邻/交替循环照常命中 | 5 个新 subtest（散布不触发 / gap 3 断 run / 双 run 两 finding / 交替循环触发 / 既有阈值用例）；Analytics 设计文档 Findings 行同步 |
+| 3-4 §2.109 | `internal/server/facts.go` | `attachmentSpans` 返回带类型的 span（marker 证明 + `"data":"` 歧义 marker 由 `resolveAmbiguousKind` 向前回嗅 64 字节内的 `"image/`，fail-open 到 document——绝不少计）；`estimateDocumentTokens` 只累加 document 类 span | 4 用例矩阵（混合图+文档 / 正文提及 PDF / 文档仍被计 / 歧义 fail-open）；quota parity 不受影响（fixture 直接构造 estimated_tokens）；新发现 §2.125（pretty-printed body 不匹配紧凑 marker）登记待触发 |
+| 6-2 §2.119 | `internal/jsonscan/rewrite.go` | `rewriteRolesInTopLevelArray` 改用 `WalkArrayElements` 划定元素边界，role 扫描以元素尾为界；任何畸形元素整体放弃改写、body 逐字节原样返回（fail-open）；fuzz 种子补 3 个畸形形态 | 3 个新测试（畸形元素 fail-open ×2、TopLevelValues 不可定位 fail-open）；fuzz 20s 915 万 execs 无崩溃；benchmark：200KB 真实形态无回退（~860ns vs 基线 ~905ns，1 alloc 持平），仅 500-元素合成用例 +11%（绝对值 ~14µs，可忽略） |
+
+同步更新：Analytics 设计文档（Findings 行）、KNOWN_ISSUES（移除三条 + 新登记 §2.125 + §0/§3）、CHANGELOG。
+
+### 批次 2 — 中 ROI，需较完整测试 / 校准配套（已全部落地，见 A.3c）
 
 | # | KI | 问题 | 方案要点 |
 |---|---|---|---|
-| 3-4 | §2.109 | 图片 span 计入文档计费 | `attachmentSpans` 给每个 span 标类型（`"url":"data:` / `"image_url":"data:` = 图片，`"file_data":"` = 文档，`"data":"` 保守留文档候选）；`estimateDocumentTokens` 只累加文档类。需 facts 测试 + quota parity 复核 |
-| 5-3 | §2.115 | 重复调用检测无时空局部性 | 全局累计改局部滑窗（如 5 步内 ≥3 次）；同步 Analytics 设计文档 Findings 校准注 + 差分测试 |
-| 6-2 | §2.119 | jsonscan 畸形元素偏移未对齐 | `rewriteRolesInTopLevelArray` 用 `WalkArrayElements` 划定元素边界，畸形即整体返回原字节（byte-faithful）；改前补 fuzz 用例 |
+| 3-4 | §2.109 | 图片 span 计入文档计费 | `attachmentSpans` 给每个 span 标类型（`"url":"data:` / `"image_url":"data:` = 图片，`"file_data":"` = 文档，`"data":"` 由 media_type 回嗅消歧，失败保守留文档）；`estimateDocumentTokens` 只累加文档类。需 facts 测试 + quota parity 复核 |
+| 5-3 | §2.115 | 重复调用检测无时空局部性 | ✅ 已落地：相邻间隔 ≤2 步的 run 判定（见 A.3c） |
+| 6-2 | §2.119 | jsonscan 畸形元素偏移未对齐 | ✅ 已落地：WalkArrayElements 重构 + 畸形 fail-open + fuzz 种子（见 A.3c） |
 
 ### 批次 3 — 需先设计 / 待触发（价值高、易做错，禁止仓促）
 
