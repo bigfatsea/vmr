@@ -10,7 +10,7 @@ package server
 // try/catch, so a thrown error aborts every render call after the one that
 // threw and is then silently swallowed (just a toast + a paused pill), not
 // surfaced as an uncaught exception. The regression this guards against:
-// renderModels() in overview.html referenced a `const fullTitle` several
+// renderModels() in status.html referenced a `const fullTitle` several
 // lines before its declaration (a temporal-dead-zone ReferenceError),
 // which fired on every real deployment (every endpoint carries
 // capabilities/max_context_tokens) and silently broke Virtual Models &
@@ -381,7 +381,7 @@ func formattingSliceJS(t *testing.T) string {
 }
 
 // TestConsoleRender_OverviewNoRuntimeError actually runs refreshAll() from
-// overview.html against a realistic /status+/stats fixture and asserts
+// status.html against a realistic /status+/stats fixture and asserts
 // every section it is supposed to populate actually did. Regression guard
 // for the fullTitle TDZ crash (see file doc comment): before the fix,
 // renderModels() threw, refreshAll()'s try/catch swallowed it, and
@@ -391,7 +391,7 @@ func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
 	node := requireNode(t)
 	now := time.Now()
 
-	pageJS := extractScriptBody(t, readSourceFile(t, "overview.html"))
+	pageJS := extractScriptBody(t, readSourceFile(t, "status.html"))
 	tail := `
 (async () => {
   await refreshAll();

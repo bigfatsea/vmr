@@ -292,7 +292,7 @@ models:
 
 // TestAdaptivePoller_UnauthenticatedServer verifies that an unauthenticated VMR instance
 // (no api_keys configured) successfully responds to GET /stats without an Authorization header,
-// ensuring overview.html's adaptive poller functions out of the box in keyless mode.
+// ensuring status.html's adaptive poller functions out of the box in keyless mode.
 func TestAdaptivePoller_UnauthenticatedServer(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

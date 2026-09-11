@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-//go:embed overview.html
+//go:embed status.html
 var overviewHTMLPage []byte
 
 var (
