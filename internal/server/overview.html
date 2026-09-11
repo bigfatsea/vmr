@@ -317,6 +317,12 @@ function endpointHealthInfo(ep, nowMs) {
   };
 }
 
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+         d1.getMonth() === d2.getMonth() &&
+         d1.getDate() === d2.getDate();
+}
+
 function formatReset(endsAtStr) {
   if (!endsAtStr) return '<span class="dim" title="No reset time configured">—</span>';
   const d = new Date(endsAtStr);
@@ -690,6 +696,9 @@ function renderModels(modelsList, statsData) {
       ? '<span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
       : `<span class="pri ${ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n')}">P${ep.priority}</span>`;
 
+    const fullTitle = `${ep.provider} : ${ep.model}`;
+    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
+
     // Per-endpoint facts — context window and capabilities are resolved per
     // (provider, upstream model) against model_defaults, so endpoints under
     // one virtual model can legitimately differ here. Displayed as one
@@ -705,9 +714,6 @@ function renderModels(modelsList, statsData) {
     const hrCls = headroomClass(hr);
     const hrTitle = headroomTitle(hr);
     const hrVal = fmtHeadroom(hr);
-
-    const fullTitle = `${ep.provider} : ${ep.model}`;
-    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
 
     let modelCell = '';
     if (r.isFirst) {
