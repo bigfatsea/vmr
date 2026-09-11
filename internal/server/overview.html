@@ -37,6 +37,9 @@
 .chip.on{color:var(--red);background:var(--red-bg);border-color:rgba(248,81,73,.4)}
 .chip.on[data-cls=canceled]{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.4)}
 .chip .n{opacity:.75;margin-left:4px}
+
+/* Upstream model dot */
+.model-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -49,17 +52,17 @@
       <div class="vseg">
         <div class="v-label">Concurrency <span class="win">· now</span></div>
         <div class="v-main" id="v-conc"><span class="dim" title="Awaiting data">—</span></div>
-        <div class="v-sub"><span id="v-queued-wrap"><span class="t-accent" id="v-queued">0</span> queued</span><span class="help" id="v-limit-help" title="max_concurrency from config — requests beyond it wait at the gate">limit —</span></div>
+        <div class="v-sub"><span id="v-queued-wrap"><span class="t-accent" id="v-queued">0</span> queued</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">Requests <span class="win">· since start</span></div>
+        <div class="v-label">Requests <span class="win">· today</span></div>
         <div class="v-main" id="v-req"><span class="dim" title="Awaiting data">—</span></div>
-        <div class="v-sub"><span class="t-ok" id="v-ok">— ok</span><span class="t-warn" id="v-cancel">— cancel</span><span class="t-err" id="v-err" title="errored requests / all requests since process start">— err · 0%</span></div>
+        <div class="v-sub"><span class="t-ok" id="v-ok">— ok</span><span class="t-warn" id="v-cancel">— cancel</span><span class="t-err" id="v-err" title="errored requests / all requests today">— err · 0%</span></div>
       </div>
       <div class="vseg">
-        <div class="v-label">Tokens <span class="win">· since start</span></div>
+        <div class="v-label">Tokens <span class="win">· today</span></div>
         <div class="v-main" id="v-tok"><span class="dim" title="Awaiting data">—</span></div>
-        <div class="v-sub"><span id="v-tok-in">in —</span><span id="v-tok-out">out —</span><span class="t-ok help" id="v-tok-cache" title="cache_read / (fresh + cache_write + cache_read) — share of prompt tokens served from the upstream prompt cache">cache —</span></div>
+        <div class="v-sub" id="v-tok-sub"><span id="v-tok-detail">tok in — · 0%, out —</span></div>
       </div>
       <div class="vseg">
         <div class="v-label">Endpoints <span class="win">· now</span></div>
@@ -127,7 +130,7 @@
   <!-- ============ recent failures ============ -->
   <div class="section-head" id="failures">Recent Failures
     <span class="badge b-err" id="fail-count">0</span>
-    <span class="count">in memory only — cleared on restart, never contains request bodies</span>
+    <span class="count">in memory only — cleared on restart, retains errors within the last 24h</span>
     <span class="spacer"></span>
     <span class="chips" id="fail-chips"></span>
   </div>
@@ -147,7 +150,7 @@
 
   <!-- ============ performance ============ -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">one row per endpoint × mode; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
+    <span class="count">one row per endpoint; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
     <span class="spacer"></span>
     <span class="seg">
       <span class="seg-label">window</span>
@@ -159,7 +162,6 @@
     <table class="c">
       <thead><tr>
         <th>Provider : Model</th>
-        <th title="Transport mode — streaming and non-streaming samples are separate rows and never share a percentile">Mode</th>
         <th class="num" title="Successful requests in the window. Fewer than the window size simply means this row has not served that many yet — the ring only keeps ok samples.">Requests</th>
         <th class="num" title="Input side over the window: fresh + cache_write, then cache_read">Tok in+cw / cr</th>
         <th class="num" title="Output tokens over the window">Tok out</th>
@@ -247,6 +249,81 @@ const LIVE_CAP = 10;
 const STALL_S = 10;
 const RANGE_BTNS = ['24h', '3d', '7d'];
 
+let modelColorMap = new Map();
+
+function updateModelPalette(statusData, statsData) {
+  const models = new Set();
+  (statusData && statusData.models || []).forEach(m => {
+    (m.endpoints || []).forEach(ep => { if (ep.model) models.add(ep.model); });
+  });
+  (statsData && statsData.by_provider_model || []).forEach(r => { if (r.model) models.add(r.model); });
+  (statsData && statsData.recent_errors || []).forEach(f => { if (f.model) models.add(f.model); });
+  (statsData && statsData.inflight || []).forEach(e => { if (e.model) models.add(e.model); });
+  (statusData && statusData.quota || []).forEach(q => {
+    (q.models || []).forEach(m => { if (m) models.add(m); });
+  });
+
+  const sorted = Array.from(models).sort((a, b) => a.localeCompare(b));
+  modelColorMap.clear();
+  const total = sorted.length;
+  sorted.forEach((m, idx) => {
+    const hue = total > 0 ? Math.round((idx / total) * 360) : 0;
+    modelColorMap.set(m, `hsl(${hue}, 70%, 62%)`);
+  });
+}
+
+function modelColor(model) {
+  if (!model) return '';
+  if (modelColorMap.has(model)) return modelColorMap.get(model);
+  let hash = 0;
+  for (let i = 0; i < model.length; i++) {
+    hash = (hash * 31 + model.charCodeAt(i)) & 0xffffffff;
+  }
+  const hue = Math.abs(hash) % 360;
+  const col = `hsl(${hue}, 70%, 62%)`;
+  modelColorMap.set(model, col);
+  return col;
+}
+
+function modelDot(model) {
+  if (!model) return '';
+  const c = modelColor(model);
+  return `<span class="model-dot" style="background:${c}" title="${esc(model)}"></span>`;
+}
+
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() &&
+         d1.getMonth() === d2.getMonth() &&
+         d1.getDate() === d2.getDate();
+}
+
+function getTodayStats(statsData, nowTs) {
+  const target = nowTs ? new Date(nowTs) : new Date();
+  const res = {
+    reqTotal: 0, ok: 0, cancel: 0, err: 0,
+    in: 0, cw: 0, cr: 0, out: 0, tokTotal: 0,
+    hasData: false
+  };
+  (statsData && statsData.daily || []).forEach(row => {
+    const d = new Date(row.hour);
+    if (isSameDay(d, target)) {
+      res.hasData = true;
+      const c = row.counters || {};
+      const tok = c.tokens || {};
+      res.ok += c.ok || 0;
+      res.cancel += c.canceled || 0;
+      res.err += c.error || 0;
+      res.in += tok.in || 0;
+      res.cw += tok.cache_write || 0;
+      res.cr += tok.cache_read || 0;
+      res.out += tok.out || 0;
+    }
+  });
+  res.reqTotal = res.ok + res.cancel + res.err;
+  res.tokTotal = res.in + res.cw + res.cr + res.out;
+  return res;
+}
+
 async function authFetch(url) {
   return VMRAuth.guard(async () => {
     const headers = {};
@@ -281,19 +358,32 @@ function endpointHealthInfo(ep, nowMs) {
 
 function formatReset(endsAtStr) {
   if (!endsAtStr) return '<span class="dim" title="No reset time configured">—</span>';
-  // Time-until-reset only — no wall-clock timestamp. fmtDur renders days as "5d8h30m".
-  const diffSec = Math.max(0, Math.floor((new Date(endsAtStr).getTime() - Date.now()) / 1000));
-  return `in ${fmtDur(diffSec)}`;
+  const d = new Date(endsAtStr);
+  const now = new Date();
+  const diffSec = Math.max(0, Math.floor((d.getTime() - now.getTime()) / 1000));
+  const title = `in ${fmtDur(diffSec)}`;
+  const timeStr = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (isSameDay(d, now)) {
+    return `<span title="${esc(title)}">${timeStr}</span>`;
+  }
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  return `<span title="${esc(title)}">${month}-${day} ${timeStr}</span>`;
 }
 
 function formatWhen(ts) {
   if (!ts) return '<span class="dim" title="No timestamp">—</span>';
   const d = new Date(ts);
-  const diffSec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+  const now = new Date();
   const timeStr = String(d.getHours()).padStart(2, '0') + ':' +
                   String(d.getMinutes()).padStart(2, '0') + ':' +
                   String(d.getSeconds()).padStart(2, '0');
-  return `${timeStr} <span class="dim">· ${fmtDur(diffSec)}</span>`;
+  if (isSameDay(d, now)) {
+    return timeStr;
+  }
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day} ${timeStr}`;
 }
 
 function fmtTTFT(ms) {
@@ -330,7 +420,6 @@ function renderConcurrencyVitals(conc) {
     : `${fmtInt(inFlight)}<small> / ∞</small>`;
   document.getElementById('v-queued').textContent = fmtInt(waiting);
   document.getElementById('v-queued-wrap').className = waiting > 0 ? 't-warn' : '';
-  document.getElementById('v-limit-help').textContent = limit > 0 ? `limit ${limit}` : 'unlimited';
 }
 
 // ============ Render Vitals & Sysline ============
@@ -345,25 +434,32 @@ function renderVitalsAndSysline(statusData, statsData) {
   renderConcurrencyVitals(inst.concurrency || (statsData && statsData.concurrency) || {});
 
   // 2. Requests
-  const reqTotal = reqs.total || 0;
-  const byStat = reqs.by_status || {};
-  const okTotal = byStat.ok || 0;
-  const cancelTotal = byStat.canceled || 0;
-  const errTotal = byStat.error || 0;
-  const errPct = reqTotal > 0 ? (errTotal / reqTotal * 100) : 0;
-  document.getElementById('v-req').textContent = fmtInt(reqTotal);
-  document.getElementById('v-ok').textContent = `${fmtInt(okTotal)} ok`;
-  document.getElementById('v-cancel').textContent = `${fmtInt(cancelTotal)} cancel`;
-  document.getElementById('v-err').textContent = `${fmtInt(errTotal)} err · ${fmtPct(errPct)}`;
+  const reqTotalSinceStart = reqs.total || 0;
+  const today = getTodayStats(statsData, statusData.current_time);
+  const todayReqTotal = today.hasData ? today.reqTotal : reqTotalSinceStart;
+  const todayOk = today.hasData ? today.ok : ((reqs.by_status && reqs.by_status.ok) || 0);
+  const todayCancel = today.hasData ? today.cancel : ((reqs.by_status && reqs.by_status.canceled) || 0);
+  const todayErr = today.hasData ? today.err : ((reqs.by_status && reqs.by_status.error) || 0);
+  const todayErrPct = todayReqTotal > 0 ? (todayErr / todayReqTotal * 100) : 0;
+
+  document.getElementById('v-req').innerHTML = `${fmtInt(todayReqTotal)}<small> / ${fmtKMG(reqTotalSinceStart)} total</small>`;
+  document.getElementById('v-ok').textContent = `${fmtInt(todayOk)} ok`;
+  document.getElementById('v-cancel').textContent = `${fmtInt(todayCancel)} cancel`;
+  document.getElementById('v-err').textContent = `${fmtInt(todayErr)} err · ${fmtPct(todayErrPct)}`;
 
   // 3. Tokens
-  const totalTok = (toks.in || 0) + (toks.out || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0);
-  const promptTotal = (toks.in || 0) + (toks.cache_write || 0) + (toks.cache_read || 0);
-  const cacheHitPct = promptTotal > 0 ? ((toks.cache_read || 0) / promptTotal * 100) : 0;
-  document.getElementById('v-tok').textContent = fmtKMG(totalTok);
-  document.getElementById('v-tok-in').textContent = `in ${fmtKMG(toks.in || 0)}`;
-  document.getElementById('v-tok-out').textContent = `out ${fmtKMG(toks.out || 0)}`;
-  document.getElementById('v-tok-cache').textContent = promptTotal > 0 ? `cache ${dec2(cacheHitPct)}%` : 'cache —';
+  const totalTokSinceStart = (toks.in || 0) + (toks.out || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0);
+  const todayPromptTotal = today.in + today.cw + today.cr;
+  const todayCacheHitPct = todayPromptTotal > 0 ? (today.cr / todayPromptTotal * 100) : 0;
+
+  const displayTokTotal = today.hasData ? today.tokTotal : totalTokSinceStart;
+  const displayPromptTotal = today.hasData ? todayPromptTotal : ((toks.in || 0) + (toks.cache_write || 0) + (toks.cache_read || 0));
+  const displayOut = today.hasData ? today.out : (toks.out || 0);
+  const displayHitPct = today.hasData ? todayCacheHitPct : (displayPromptTotal > 0 ? ((toks.cache_read || 0) / displayPromptTotal * 100) : 0);
+
+  document.getElementById('v-tok').innerHTML = `${fmtKMG(displayTokTotal)}<small> / ${fmtKMG(totalTokSinceStart)} total</small>`;
+  document.getElementById('v-tok-sub').innerHTML =
+    `<span id="v-tok-detail">tok in ${fmtKMG(displayPromptTotal)} · ${dec2(displayHitPct)}%, out ${fmtKMG(displayOut)}</span>`;
 
   // 4. Endpoints
   const models = statusData.models || [];
@@ -500,7 +596,10 @@ function renderQuota(quotaList, models, statsData) {
       : 'gate — a shorter-period rate cap. Near-saturation lowers routing priority; it never raises it.';
     const limitBadge = `<span class="badge ${isBucket ? 'b-cyan' : 'b-purple'}" title="${limitTitle}">${esc(q.role)} · ${esc(q.metric)} / ${esc(q.every)}</span>`;
 
-    const modelsText = (q.models && q.models.length > 0) ? q.models.map(esc).join(', ') : 'all models';
+    const modelsText = (q.models && q.models.length > 0) ? q.models.join(', ') : 'all models';
+    const modelsHtml = (q.models && q.models.length > 0)
+      ? q.models.map(m => `${modelDot(m)}${esc(m)}`).join(', ')
+      : 'all models';
 
     const fmtVal = q.metric === 'requests' ? fmtInt : fmtKMG;
     const amountStr = fmtVal(q.amount || 0);
@@ -540,7 +639,7 @@ function renderQuota(quotaList, models, statsData) {
     return `<tr>
       <td>${provCell}</td>
       <td>${limitBadge}</td>
-      <td class="t-dim"><span class="ep" title="${esc(modelsText)}">${esc(modelsText)}</span></td>
+      <td class="t-dim"><span class="ep" title="${esc(modelsText)}">${modelsHtml}</span></td>
       <td class="num">${amountStr}</td>
       <td class="num">${usedStr}</td>
       <td>
@@ -649,7 +748,7 @@ function renderModels(modelsList, statsData) {
     const hrVal = fmtHeadroom(hr);
 
     const fullTitle = `${ep.provider} : ${ep.model}`;
-    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${esc(ep.model)}</span>`;
+    const epCell = `<span class="ep" title="${esc(fullTitle)}">${modelDot(ep.model)}${esc(ep.provider)} : ${esc(ep.model)}</span>`;
 
     let modelCell = '';
     if (r.isFirst) {
@@ -719,7 +818,8 @@ function renderLive(inflightList) {
   function endpointCell(e) {
     if (!e.provider) return '<span class="dim" title="Request waiting for upstream selection">— routing</span>';
     const full = `${e.provider} : ${e.model || ''}`;
-    return `<span class="ep" title="${esc(full)}">${esc(e.provider)} : ${esc(e.model || '—')}</span>`;
+    const dot = e.model ? modelDot(e.model) : '';
+    return `<span class="ep" title="${esc(full)}">${dot}${esc(e.provider)} : ${esc(e.model || '—')}</span>`;
   }
 
   body.innerHTML = es.map(e => `<tr>
@@ -769,7 +869,7 @@ function renderFailures(failuresList) {
   if (!filtered.length) {
     body.innerHTML = `<tr><td colspan="7" class="empty-cell">
       <div class="t-dim">No failed request in the current buffer.</div>
-      <div class="hint">The buffer holds the last 50 failures and is cleared on restart.</div>
+      <div class="hint">The buffer holds errors from the last 24 hours (up to 100) and is cleared on restart.</div>
     </td></tr>`;
     return;
   }
@@ -777,7 +877,8 @@ function renderFailures(failuresList) {
   function endpointFailCell(f) {
     if (!f.provider) return '<span class="dim" title="Request aborted before forwarding">— never forwarded</span>';
     const full = `${f.provider} : ${f.model || ''}`;
-    return `<span class="ep" title="${esc(full)}">${esc(f.provider)} : ${esc(f.model || '—')}</span>`;
+    const dot = f.model ? modelDot(f.model) : '';
+    return `<span class="ep" title="${esc(full)}">${dot}${esc(f.provider)} : ${esc(f.model || '—')}</span>`;
   }
 
   body.innerHTML = filtered.map(f => {
@@ -808,23 +909,21 @@ function renderPerf(byProviderModel, basis) {
   const cap = Number(basis);
 
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-cell">
+    body.innerHTML = `<tr><td colspan="6" class="empty-cell">
       <div class="t-dim">No provider models recorded.</div>
       <div class="hint">Performance metrics are computed from completed successful requests.</div>
     </td></tr>`;
     return;
   }
 
-  body.innerHTML = rows.map((r, i) => {
+  body.innerHTML = rows.map(r => {
     const wb = basis === '10' ? r.last_10 : r.last_100;
     const n = wb ? (wb.n || 0) : 0;
     const none = n === 0;
 
-    const isFirstOfGroup = i === 0 || rows[i - 1].provider !== r.provider || rows[i - 1].model !== r.model;
-
     const pk = `${r.provider} : ${r.model}`;
-    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : ${esc(r.model)}</span>` +
-      (none ? ' <span class="badge b-dim tight" title="This endpoint has not completed a request in this mode within the window">no samples</span>' : '');
+    const epCell = `<span class="ep" title="${esc(pk)}">${modelDot(r.model)}${esc(r.provider)} : ${esc(r.model)}</span>` +
+      (none ? ' <span class="badge b-dim tight" title="This endpoint has not completed a request within the window">no samples</span>' : '');
 
     const nCell = none
       ? '<span class="dim">0</span>'
@@ -848,13 +947,8 @@ function renderPerf(byProviderModel, basis) {
         : '<span class="dim" title="No throughput measurement">—</span>';
     }
 
-    const modeCell = r.stream
-      ? '<span class="mode m-stream" title="streaming response (SSE)">stream</span>'
-      : '<span class="mode m-json" title="non-streaming response (single JSON body)">json</span>';
-
-    return `<tr class="${none ? 'zero ' : ''}${isFirstOfGroup ? 'grp' : ''}">
+    return `<tr class="${none ? 'zero ' : ''}">
       <td>${epCell}</td>
-      <td>${modeCell}</td>
       <td class="num">${nCell}</td>
       <td class="num">${incwCell}</td>
       <td class="num">${outCell}</td>
@@ -882,7 +976,7 @@ function plotGroupW(cfg) {
 function bucketRange(i, cfg, nowMs) {
   const end = new Date(nowMs - (cfg.n - 1 - i) * cfg.bh * 3600 * 1000);
   const start = new Date(end.getTime() - cfg.bh * 3600 * 1000);
-  const f = d => cfg.bh === 1
+  const f = d => cfg.n <= 24
     ? String(d.getHours()).padStart(2, '0') + ':00'
     : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':00';
   return f(start) + ' – ' + f(end);
@@ -890,15 +984,16 @@ function bucketRange(i, cfg, nowMs) {
 
 function bucketLabel(i, cfg, nowMs) {
   const d = new Date(nowMs - (cfg.n - 1 - i) * cfg.bh * 3600 * 1000);
-  if (cfg.bh === 1) return String(d.getHours()).padStart(2, '0') + ':00';
-  return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0');
+  const timeStr = String(d.getHours()).padStart(2, '0') + ':00';
+  if (cfg.n <= 24) return timeStr;
+  return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + timeStr;
 }
 
 function renderChart(rangeKey, hourlyRows) {
   const cfg = {
     '24h': { n: 24, bh: 1 },
-    '3d': { n: 24, bh: 3 },
-    '7d': { n: 28, bh: 6 },
+    '3d':  { n: 72, bh: 1 },
+    '7d':  { n: 168, bh: 1 },
   }[rangeKey] || { n: 24, bh: 1 };
 
   const now = Date.now();
@@ -935,7 +1030,7 @@ function renderChart(rangeKey, hourlyRows) {
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxTok = Math.max(1000, ...data.map(d => d.fresh + d.cw + d.cr + d.out)) * 1.12;
   const maxReq = Math.max(10, ...data.map(d => d.req)) * 1.15;
-  const groupW = plotW / cfg.n, barW = Math.min(16, groupW * 0.26);
+  const groupW = plotW / cfg.n, barW = Math.max(1, Math.min(16, groupW * 0.35));
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="font-family:var(--font-mono)">`;
   s += `<text x="${padL}" y="11" fill="#6e7681" font-size="10">tokens</text>`;
@@ -952,30 +1047,33 @@ function renderChart(rangeKey, hourlyRows) {
   const x = i => padL + groupW * i + groupW / 2;
 
   data.forEach((d, i) => {
-    const gx = x(i) - barW - 2;
+    const gx = x(i) - barW - 1;
     const hFresh = plotH * d.fresh / maxTok;
     const hCw = plotH * d.cw / maxTok;
     const hCr = plotH * d.cr / maxTok;
     const hOut = plotH * d.out / maxTok;
 
-    if (hFresh > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1.5"/>`;
-    if (hCw > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1.5"/>`;
-    if (hCr > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw - hCr}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1.5"/>`;
-    if (hOut > 0) s += `<rect x="${x(i) + 2}" y="${padT + plotH - hOut}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1.5"/>`;
+    if (hFresh > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1"/>`;
+    if (hCw > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1"/>`;
+    if (hCr > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw - hCr}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1"/>`;
+    if (hOut > 0) s += `<rect x="${x(i) + 1}" y="${padT + plotH - hOut}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1"/>`;
   });
 
   const pts = data.map((d, i) => `${x(i)},${padT + plotH - plotH * d.req / maxReq}`).join(' ');
   s += `<polyline points="${pts}" fill="none" stroke="#d29922" stroke-width="2" stroke-linejoin="round"/>`;
 
+  const dotR = cfg.n > 48 ? 1.8 : 2.6;
+  const errR = cfg.n > 48 ? 2.5 : 4;
   data.forEach((d, i) => {
     const cy = padT + plotH - plotH * d.req / maxReq;
     s += d.err > 0
-      ? `<circle cx="${x(i)}" cy="${cy}" r="4" fill="#f85149" stroke="#0d1117" stroke-width="1"/>`
-      : `<circle cx="${x(i)}" cy="${cy}" r="2.6" fill="#d29922"/>`;
+      ? `<circle cx="${x(i)}" cy="${cy}" r="${errR}" fill="#f85149" stroke="#0d1117" stroke-width="1"/>`
+      : `<circle cx="${x(i)}" cy="${cy}" r="${dotR}" fill="#d29922"/>`;
   });
 
+  const labelStep = cfg.n <= 24 ? 3 : (cfg.n <= 72 ? 12 : 24);
   data.forEach((d, i) => {
-    if (i % Math.ceil(cfg.n / 8) === 0 || i === cfg.n - 1) {
+    if (i % labelStep === 0 || i === cfg.n - 1) {
       s += `<text x="${x(i)}" y="${H - 8}" fill="#8b949e" font-size="10" text-anchor="middle">${bucketLabel(i, cfg, now)}</text>`;
     }
   });
@@ -1008,6 +1106,7 @@ function renderChart(rangeKey, hourlyRows) {
     const d = data[i];
     if (!d) return;
     const tin = d.fresh + d.cw + d.cr;
+    const ttotal = tin + d.out;
     if (guide) {
       guide.setAttribute('x', chartState.padL + gw * i);
       guide.setAttribute('width', gw);
@@ -1017,6 +1116,7 @@ function renderChart(rangeKey, hourlyRows) {
       `<b>${bucketRange(i, cfg, chartState.now)}</b><br>` +
       `requests: <b>${fmtInt(d.req)}</b>` +
       (d.err > 0 ? ` <span class="t-err">· ${fmtInt(d.err)} err (${fmtPct(d.req > 0 ? d.err / d.req * 100 : 0)})</span>` : ' <span class="tr">· 0 err</span>') + '<br>' +
+      `tok total: <b>${fmtM(ttotal)}</b><br>` +
       `tok in: <b>${fmtM(tin)}</b> <span class="tr">(fresh ${fmtM(d.fresh)} · cw ${fmtM(d.cw)} · cr ${fmtM(d.cr)})</span><br>` +
       `tok out: <b>${fmtM(d.out)}</b>`;
     tip.style.display = 'block';
@@ -1230,6 +1330,9 @@ async function refreshAll() {
     const inst = statusData.instance || {};
     consoleApi.setUptime('up ' + (inst.uptime || fmtDur(inst.uptime_seconds || 0)));
     consoleApi.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
+
+    // Palette
+    updateModelPalette(statusData, statsData);
 
     // Render sections
     renderVitalsAndSysline(statusData, statsData);

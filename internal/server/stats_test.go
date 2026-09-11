@@ -335,7 +335,7 @@ func TestStatsJSONContract(t *testing.T) {
 		ErrorClass: "upstream_5xx", Status: 502, DurMS: 4100,
 	}}
 	resp.ByProviderModel = []livestats.ProviderRow{{
-		Provider: "p1", KeyLabel: "main", Model: "m1", Stream: true, OK: 5,
+		Provider: "p1", KeyLabel: "main", Model: "m1", OK: 5,
 		Tokens: livestats.TokenCounts{In: 100, Out: 60}, Last10: wb, Last100: wb,
 	}}
 	resp.ByKeyLabel = []livestats.DimensionRow{{Value: "main", OK: 5, Count: 5}}

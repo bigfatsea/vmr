@@ -288,11 +288,19 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 }
 
 // bookRecentError appends one non-ok sample to the recent_errors ring
-// (§8.1): newest first, capped at recentErrCap, error and canceled both
-// in, error_class/status/attempt passed through verbatim.
+// (§8.1): newest first, capped at recentErrCap (100) and within 24 hours,
+// error and canceled both in, error_class/status/attempt passed through verbatim.
 func bookRecentError(ring []Sample, s Sample) []Sample {
 	if s.Outcome == OutcomeOK {
 		return ring
+	}
+	cutoff := s.TS.Add(-24 * time.Hour)
+	idx := 0
+	for idx < len(ring) && ring[idx].TS.Before(cutoff) {
+		idx++
+	}
+	if idx > 0 {
+		ring = ring[idx:]
 	}
 	ring = append(ring, s)
 	if len(ring) > recentErrCap {
@@ -302,12 +310,12 @@ func bookRecentError(ring []Sample, s Sample) []Sample {
 }
 
 // addRing applies the ring admission rule (§4.2): ok + forwarded + measured
-// TTFT only.
+// TTFT only. Stream and non-stream samples share the same ring.
 func addRing(rings map[ringKey]*ring, s Sample) {
 	if s.Outcome != OutcomeOK || s.Provider == "" || s.TTFTMS == 0 {
 		return
 	}
-	k := ringKey{s.Provider, s.KeyLabel, s.Model, s.Stream}
+	k := ringKey{s.Provider, s.KeyLabel, s.Model}
 	r := rings[k]
 	if r == nil {
 		r = &ring{}

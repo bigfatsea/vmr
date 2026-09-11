@@ -57,9 +57,9 @@ func TestRecentErrors_NewestFirstAndAdmission(t *testing.T) {
 	}
 }
 
-// TestRecentErrors_CapFifty pins the capacity: the ring keeps the newest
+// TestRecentErrors_CapHundred pins the capacity: the ring keeps the newest
 // recentErrCap entries; older ones fall off the old end.
-func TestRecentErrors_CapFifty(t *testing.T) {
+func TestRecentErrors_CapHundred(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 7, 14, 0, 0, 0, time.Local)
 	agg, err := NewAt(dir, func() time.Time { return now })
@@ -88,6 +88,46 @@ func TestRecentErrors_CapFifty(t *testing.T) {
 	}
 	if rows[len(rows)-1].TS != now.Add(time.Duration(total-recentErrCap)*time.Second) {
 		t.Errorf("tail = %v, want the oldest survivor", rows[len(rows)-1].TS)
+	}
+}
+
+// TestRecentErrors_EvictOlderThan24Hours verifies that samples older than 24 hours
+// are dropped even when the total is well below 100.
+func TestRecentErrors_EvictOlderThan24Hours(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.Local)
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	// 1 error 25 hours ago, 1 error 23 hours ago, 1 error 1 hour ago
+	agg.Record(Sample{
+		TS:         now.Add(-25 * time.Hour),
+		VModel:     "coding",
+		Outcome:    OutcomeError,
+		ErrorClass: "upstream_5xx",
+	})
+	agg.Record(Sample{
+		TS:         now.Add(-23 * time.Hour),
+		VModel:     "coding",
+		Outcome:    OutcomeError,
+		ErrorClass: "upstream_5xx",
+	})
+	agg.Record(Sample{
+		TS:         now.Add(-1 * time.Hour),
+		VModel:     "coding",
+		Outcome:    OutcomeError,
+		ErrorClass: "upstream_5xx",
+	})
+
+	rows := agg.Snapshot(HourlyTailDefault).RecentErrors
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2 (the 25h-old error must be evicted)", len(rows))
+	}
+	if rows[0].TS != now.Add(-1*time.Hour) || rows[1].TS != now.Add(-23*time.Hour) {
+		t.Errorf("unexpected rows TS: %+v", rows)
 	}
 }
 

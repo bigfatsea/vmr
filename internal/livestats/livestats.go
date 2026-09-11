@@ -13,8 +13,9 @@ const (
 	OutcomeCanceled = "canceled"
 )
 
-// ringCap is the per-(provider, key_label, model, stream) latency-window
-// capacity: last_100 with no room to spare (design §3.4).
+// ringCap is the per-(provider, key_label, model) latency-window
+// capacity: last_100 with no room to spare (design §3.4). Stream and
+// non-stream samples share this one ring.
 const ringCap = 100
 
 // rollupRetentionDays is the in-memory rollup window (design §8): the last
@@ -37,7 +38,8 @@ const (
 )
 
 // recentErrCap bounds the in-memory recent_errors ring (design §8.1).
-const recentErrCap = 50
+// Keeps at most 100 errors within the last 24 hours.
+const recentErrCap = 100
 
 // snapCacheTTL bounds how stale CachedSnapshot may be. The console Overview
 // poller drives /stats every ~2s while requests are in flight (plus the

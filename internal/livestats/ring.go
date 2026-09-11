@@ -8,7 +8,6 @@ import (
 
 type ringKey struct {
 	provider, keyLabel, model string
-	stream                    bool
 }
 
 // ring is a fixed-capacity circular buffer of raw per-request tuples

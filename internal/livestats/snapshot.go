@@ -50,14 +50,13 @@ type RecentErrorRow struct {
 	DurMS        int64     `json:"dur_ms"`
 }
 
-// ProviderRow is the per-(provider, key_label, model, stream) cumulative +
-// mean profile with the ring's recent window blocks. Stream is part of the
-// identity so the two request shapes never share a percentile pool.
+// ProviderRow is the per-(provider, key_label, model) cumulative +
+// mean profile with the ring's recent window blocks. Stream and
+// non-stream samples merge into this single profile and share the ring.
 type ProviderRow struct {
 	Provider   string       `json:"provider"`
 	KeyLabel   string       `json:"key_label"`
 	Model      string       `json:"model"`
-	Stream     bool         `json:"stream"`
 	OK         int64        `json:"ok"`
 	Error      int64        `json:"error"`
 	Canceled   int64        `json:"canceled"`
@@ -128,7 +127,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 			bookAxis(byTag, k.clientKeyTag, c)
 			bookAxis(byLabel, k.keyLabel, c)
 			if k.provider != "" {
-				kk := ringKey{k.provider, k.keyLabel, k.model, k.stream}
+				kk := ringKey{k.provider, k.keyLabel, k.model}
 				p := prov[kk]
 				if p == nil {
 					p = &Counters{}
@@ -144,7 +143,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	}
 	fold(a.cur, a.hour)
 
-	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.recentErrs, hourlyTail)
+	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.recentErrs, hourlyTail, a.now())
 }
 
 // bookAxis adds a group's request-face outcome counts and tokens to a
@@ -167,7 +166,7 @@ func bookAxis(m map[string]*Counters, v string, c Counters) {
 // assembleSnapshot folds the hour rows into hourly/daily slices, builds the
 // provider rows with their recent window blocks, the overall block over the
 // union of all ring samples (contracts §1.3), and the recent_errors rows.
-func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, recentErrs []Sample, hourlyTail int) Snapshot {
+func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, recentErrs []Sample, hourlyTail int, now time.Time) Snapshot {
 	// hourly[] keeps the most recent hourlyTail hours with data; daily[] the
 	// most recent dailyTail local-calendar-days. Both windows are derived from
 	// the full observed-hour set before either is truncated.
@@ -236,7 +235,7 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 	}
 	snap.Daily = sortedDaily(daily)
 	snap.Overall = overallBlock(rings)
-	snap.RecentErrors = recentErrorRows(recentErrs)
+	snap.RecentErrors = recentErrorRows(recentErrs, now.Add(-24*time.Hour))
 	snap.ByProviderModel = buildProviderRows(prov, rings)
 	snap.ByClientKeyTag = buildAxisRows(byTag)
 	snap.ByKeyLabel = buildAxisRows(byLabel)
@@ -300,11 +299,15 @@ func overallBlock(rings map[ringKey]*ring) *WindowBlock {
 }
 
 // recentErrorRows maps the in-memory ring (append order, oldest last) to
-// its wire shape, newest first (contracts §1.4).
-func recentErrorRows(recentErrs []Sample) []RecentErrorRow {
+// its wire shape, newest first (contracts §1.4), filtering out any samples
+// older than cutoff.
+func recentErrorRows(recentErrs []Sample, cutoff time.Time) []RecentErrorRow {
 	rows := make([]RecentErrorRow, 0, len(recentErrs))
 	for i := len(recentErrs) - 1; i >= 0; i-- {
 		s := recentErrs[i]
+		if !cutoff.IsZero() && s.TS.Before(cutoff) {
+			continue
+		}
 		rows = append(rows, RecentErrorRow{
 			TS: s.TS, VModel: s.VModel, Protocol: s.Protocol, Stream: s.Stream,
 			ClientKeyTag: s.ClientKeyTag, Provider: s.Provider, KeyLabel: s.KeyLabel,
@@ -336,14 +339,11 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 		if c := strings.Compare(x.keyLabel, y.keyLabel); c != 0 {
 			return c
 		}
-		if c := strings.Compare(x.model, y.model); c != 0 {
-			return c
-		}
-		return boolInt(x.stream) - boolInt(y.stream)
+		return strings.Compare(x.model, y.model)
 	})
 	rows := make([]ProviderRow, 0, len(keys))
 	for _, k := range keys {
-		row := ProviderRow{Provider: k.provider, KeyLabel: k.keyLabel, Model: k.model, Stream: k.stream}
+		row := ProviderRow{Provider: k.provider, KeyLabel: k.keyLabel, Model: k.model}
 		if c := prov[k]; c != nil {
 			row.OK, row.Error, row.Canceled = c.OK, c.Error, c.Canceled
 			row.Tokens, row.DurMS, row.TTFTMS = c.Tokens, c.DurMS, c.TTFTMS
