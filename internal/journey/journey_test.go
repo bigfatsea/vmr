@@ -310,7 +310,10 @@ func TestDeriveID_KeepsWriteTimeOffsetNotDisplayZone(t *testing.T) {
 			}
 		}
 		// A globally switched DisplayZone must not leak into the id either.
+		// Note: modifies package-global fmtutil.DisplayZone; this test must remain
+		// strictly sequential and must never call t.Parallel().
 		saved := fmtutil.DisplayZone
+		t.Cleanup(func() { fmtutil.DisplayZone = saved })
 		fmtutil.DisplayZone = time.FixedZone("elsewhere", 13*3600)
 		switched := deriveID([]*ctxgraph.Lineage{l})
 		fmtutil.DisplayZone = saved

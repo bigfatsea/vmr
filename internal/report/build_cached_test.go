@@ -245,6 +245,9 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	if _, ok := cache2.Files[newKey]; !ok {
 		t.Fatalf("no cache2 entry for the appended content (key %s) — the changed file was not rescanned", newKey)
 	}
+	if _, ok := cache1.Files[oldKey]; !ok {
+		t.Fatalf("no cache1 entry for initial content (key %s) — cold build failed to index", oldKey)
+	}
 	if cache2.Files[newKey].Hash == cache1.Files[oldKey].Hash {
 		t.Error("hash should differ after appending")
 	}

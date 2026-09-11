@@ -460,7 +460,10 @@ const mockMacro = {
     throw new Error('request-browser pagination meta mismatch: ' +
       rbEls.get('filter-meta').textContent + ' / ' + rbEls.get('page-info').textContent);
   }
-})();
+})().catch((err) => {
+  console.error('Unhandled async error in test script:', err);
+  process.exit(1);
+});
 `
 
 	cmd := exec.Command(nodePath, "-e", testScript)
