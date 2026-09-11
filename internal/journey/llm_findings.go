@@ -18,6 +18,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
@@ -584,8 +586,16 @@ func searchableTranscript(j *Journey) (string, error) {
 	return b.String(), err
 }
 
+// minEvidenceAnchorRunes is the shortest trimmed EvidenceAnchor that carries
+// enough signal for the anti-hallucination check to mean anything. A model
+// that returns "error" or "404" trivially "matches" any transcript, so a
+// sub-threshold anchor is treated as no anchor at all.
+const minEvidenceAnchorRunes = 12
+
 // anchoredInTranscript reports whether f cites an EvidenceAnchor that appears
-// verbatim in pool. It is an anti-hallucination check and nothing more: it
+// verbatim in pool AND is long/specific enough (minEvidenceAnchorRunes, and
+// at least one letter or digit) to be evidence rather than a common word. It
+// is an anti-hallucination check and nothing more: it
 // proves the model quoted the transcript instead of inventing a plausible
 // quote. It is NOT an injection defense and must not be relied on as one —
 // the transcript's own author can plant the quoted text, so a verifying
@@ -602,7 +612,16 @@ func searchableTranscript(j *Journey) (string, error) {
 // model-output/tool-result spans would require role-aware re-parsing of
 // those records and is not done — a documented limitation, not a guarantee.
 func anchoredInTranscript(f Finding, pool string) bool {
-	return f.EvidenceAnchor != "" && strings.Contains(pool, f.EvidenceAnchor)
+	if f.EvidenceAnchor == "" || !strings.Contains(pool, f.EvidenceAnchor) {
+		return false
+	}
+	trimmed := strings.TrimSpace(f.EvidenceAnchor)
+	if utf8.RuneCountInString(trimmed) < minEvidenceAnchorRunes {
+		return false
+	}
+	return strings.IndexFunc(trimmed, func(r rune) bool {
+		return unicode.IsLetter(r) || unicode.IsDigit(r)
+	}) >= 0
 }
 
 // ComputeLLMFindings runs all Phase 1b LLM semantic detectors against j.

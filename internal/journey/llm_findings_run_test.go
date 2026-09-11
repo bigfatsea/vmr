@@ -28,7 +28,7 @@ func llmRunTestJourney(t *testing.T) *Journey {
 			Request: audit.Message{Method: "POST", Path: "/v1/chat/completions", Body: map[string]any{
 				"model": "agent", "messages": []any{msg("user", "test")},
 			}},
-			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"reply"}}]}
+			Response: &audit.Message{Status: 200, Body: `data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"an unexpected reply from the service"}}]}
 data: [DONE]`},
 		},
 	}
@@ -70,10 +70,10 @@ func TestComputeLLMFindings_ConcurrentMerge(t *testing.T) {
 	j := llmRunTestJourney(t)
 	withFakeDetectors(t,
 		llmDetector{"fake_b", func(context.Context, *Journey, LLMOptions, i18n.Lang) []Finding {
-			return []Finding{fakeFinding(1, "reply")}
+			return []Finding{fakeFinding(1, "unexpected reply from the service")}
 		}},
 		llmDetector{"fake_a", func(context.Context, *Journey, LLMOptions, i18n.Lang) []Finding {
-			return []Finding{fakeFinding(1, "test")}
+			return []Finding{fakeFinding(1, "an unexpected reply from")}
 		}},
 		llmDetector{"fake_empty", func(context.Context, *Journey, LLMOptions, i18n.Lang) []Finding {
 			return nil
@@ -87,11 +87,11 @@ func TestComputeLLMFindings_ConcurrentMerge(t *testing.T) {
 	if len(res) != 2 {
 		t.Fatalf("merged %d findings, want 2 (one from each non-empty fake): %+v", len(res), res)
 	}
-	// Both fakes' anchors are real transcript substrings ("reply" and
-	// "test"), so both survive verification. Same (StepSeq, Code) on both,
-	// so the final order is the merge order — assert set, not order.
+	// Both fakes' anchors are real transcript substrings (long enough to pass
+	// minEvidenceAnchorRunes), so both survive verification. Same (StepSeq,
+	// Code) on both, so the final order is the merge order — assert set, not order.
 	got := map[string]bool{res[0].EvidenceAnchor: true, res[1].EvidenceAnchor: true}
-	if !got["reply"] || !got["test"] {
+	if !got["unexpected reply from the service"] || !got["an unexpected reply from"] {
 		t.Errorf("merged findings missing an anchor: %+v", res)
 	}
 }
@@ -110,7 +110,7 @@ func TestComputeLLMFindings_BudgetCutsSlowDetector(t *testing.T) {
 			return nil
 		}},
 		llmDetector{"fake_fast", func(context.Context, *Journey, LLMOptions, i18n.Lang) []Finding {
-			return []Finding{fakeFinding(1, "reply")}
+			return []Finding{fakeFinding(1, "an unexpected reply from")}
 		}},
 	)
 
@@ -123,7 +123,7 @@ func TestComputeLLMFindings_BudgetCutsSlowDetector(t *testing.T) {
 	if elapsed > 5*time.Second {
 		t.Fatalf("call took %v — the budget did not cut the slow detector loose", elapsed)
 	}
-	if len(res) != 1 || res[0].EvidenceAnchor != "reply" {
+	if len(res) != 1 || res[0].EvidenceAnchor != "an unexpected reply from" {
 		t.Fatalf("fast detector's finding lost under the budget: %+v", res)
 	}
 }

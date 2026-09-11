@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-31, by pi -->
+<!-- Ver 2026-09-11 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危 3（`2.2` / `2.17` / `2.18`）+ 1 项发版前必做（`2.97`），其余均为低危。
+- **§2 分布**：高危 0；中危路由/配额半区 `2.2` / `2.17`、LLM 校准 `2.18`、2026-09-11 Review 剩余的分析半区准确性项 `2.115` / `2.119`（非稳定性）+ 1 项发版前必做（`2.97`）；其余均为低危。
 
 ---
 
@@ -479,11 +479,67 @@
 - **可能方案**：键改「文件:接收者类型.函数名」（`ast.FuncDecl.Recv` 已有类型信息）。
 - **为什么待定**：需真的出现一个必须豁免的重名方法才有意义。
 
+### H. 2026-09-11 全系统 Review 新增（来源：`PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 阶段二/三，源码已核实）
+
+> 本条组由全系统 Review 的 6 路 subagent 发现、主控源码交叉核实后登记。凡与既有 §2 条目重复的（如 §2.86 respnorm 保活帧、§2.57 computeTimeSplit、§2.69 searchableTranscript、§2.100 token 双路径、§2.77 NaN 防御、§2.49 imgprep 溢出）不再重复登记，仅复核一致性后维持原编号。
+>
+> **2026-09-11 复核后续**（详见 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）：11 项已修并从本清单移除（编号不再复用）——顺手批 `2.106`（/log 写超时）、`2.108`（zstd 限并发）、`2.112`（buildGraph tie-breaker）、`2.113`（明细索引原子落盘）、`2.117`（tailPrev 死字段）、`2.118`（replay 前导空白）、`2.123`（rt.ctx 同步）；批次 1 `2.107`（/reports 热重载联动）、`2.110`（tailSlack 修正）、`2.114`（LLM 锚点长度门槛）、`2.116`（linkCompactions needle 门槛）。`2.111` 复核结论改为**明确不补**（见其条目）。
+
+#### 2.109 [低] `estimateDocumentTokens` 将图片附件 Span 计入文档计费
+
+- **现状**：`internal/server/facts.go` 的 `attachmentSpans` 无差别收集图片与文档 span，`estimateDocumentTokens` 在存在文档标记时遍历全量 spans（含图片）——代码注释自认 “over-estimate, safe direction”，但虚高配额扣费对用户是真实损耗。
+- **可能方案**：区分 span 类型（图片 vs 文档），仅累加文档类。
+- **ROI**：Return=配额口径准确；Investment=小改动。
+
+#### 2.111 [低，潜在路径，决定不补] `taskseg.Generic` 缺失 Anthropic tool_result 过滤
+
+- **现状**：`internal/taskseg/generic.go` 的 `RealUserText` 对非空文本直接返回 true；Anthropic 协议将 tool_result 置于 user 角色消息，通用 Profile 下工具轮次会被误切为新任务。
+- **裁决（2026-09-11 复核，不补）**：**现有组装根（`resolveTaskProfile`/`report.Build`）一律硬编码 `OpenClawAware`，`Generic` 生产完全不可达**——给一条零执行可能的路径加防御代码 + 测试正是 YAGNI 反对的过度设计。且真到启用 Detect-based profile 调度那一步，必然要系统性重审 `Generic` 的全部启发式（不止 tool_result 一处），届时一并处理更合理。§1.3「尤其不做 `prof == nil` 就回退到 `Generic` 这类静默兜底」的裁决同源。
+- **触发条件**：启用 Detect-based profile 调度（届时重审 `Generic` 全部启发式）。
+
+#### 2.115 [中] `detectExactRepeatToolCall` 全局累计调用缺乏时空局部性
+
+- **现状**：`internal/journey/findings.go` 跨整个 Journey 累计同参数调用，长任务中开头/中间/结尾各一次 `git status` 即触发“重复死循环”误报。
+- **可能方案**：局部滑窗（如 5 步内重复 3 次）判定。
+- **ROI**：Return=告警噪音显著下降；Investment=中等。
+
+#### 2.119 [中] `jsonscan.rewriteRolesInTopLevelArray` 畸形元素中断时扫描偏移未对齐
+
+- **现状**：`internal/jsonscan/rewrite.go` 内层扫描遇非引号 key/异常结构 `break` 后未快进到消息对象结束符，外层循环可能把嵌套 JSON 误识别为新顶层消息并误改写 role 键。
+- **可能方案**：复用 `WalkArrayElements` + `SkipJSONValue` 划定严格元素边界。
+- **ROI**：Return=原地改写防御性（jsonscan 是路由热路径依赖）；Investment=需 fuzz 覆盖。
+
+#### 2.120 [低] `core.PricingSpec/Rate/PricingOverride` 职责漂移
+
+- **现状**：实时路由已完全剔除定价，但定价契约仍滞留 `core` 叶子包（与 `internal/pricing.Rate` 双重定义并存），违反 core 包文档的“最小充分集”准入声明。
+- **可能方案**：下沉到 `internal/pricing` 包，消除类型冗余。
+- **ROI**：Return=core 准入纯度；Investment=跨包移动——架构演进期做，不单独立项。
+
+#### 2.121 [低] `cmd_diff.go` 450+ 行领域逻辑滞留 CLI 组装根
+
+- **现状**：diff 计算/渲染（`computeDiff`, `diffReport` 等）全部在 `cmd/vmr/cmd_diff.go`，并借用 `cmd_replay.go` 的私有函数 `loadAuditRecord`，违反“CLI 薄组装根”原则。
+- **可能方案**：下沉到一个新的 `auditdiff` 叶子包，或并入 `internal/reqdetail`。
+- **ROI**：Return=组装根纯净度 + 可测试性；Investment=移动重构。
+
+#### 2.122 [低] `sticky` 满容量驱逐为持锁 O(N) 线性扫描
+
+- **现状**：`internal/sticky/sticky.go` 满容量时在 `mu` 下 for-range 找最老条目（maxEntries=10000 时每次 O(10000)）。
+- **可能方案**：map + doubly-linked list 实现 O(1) LRU。
+- **触发条件**：并发活跃会话接近 maxEntries 时（当前 μs 级非瓶颈）。
+
+#### 2.124 [低] `expandEnv` 在 YAML flow-style 集合语法下存在逗号注入残存边界
+
+- **现状**：`internal/config/config.go` 注释已承认：`api_keys: [${VAR}]` 若环境变量含逗号可能分割出额外元素；生产与推荐配置一律使用 block 语法，当前拦截已满足安全边界。
+- **可能方案**：YAML Node 树反序列化后再做标量展开。
+- **ROI**：低——可暂不处理，登记防回归。
+
+
 ---
 
 ## 3. 跨组排期结论
 
 - **全局结论**：待办里没有「价值高、成本低、却一直没做」的异常。值得优先投入的集中在三类：大语料规模（§2.2 看触发、§2.1 已证 5.2×）、LLM 解读层校准（§2.18，成本在人工标注）、路由配额（§2.52，用户 hold）。分析半区的产品路线（新视图 / 导出 / 达成信号）已移入 `ROADMAP`，不在此清单排期。
+- **2026-09-11 全系统 Review 剩余项（复核后）**：11 项已修（顺手 7 + 批次 1 的 4，见 H 组顶部说明与 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）。剩余排期——**批次 2（需测试配套）**：§2.109（span 分型）、§2.115（重复调用局部滑窗）、§2.119（jsonscan 畸形元素 + fuzz）；**批次 3（需设计 / 待触发）**：§2.86、§2.100、§2.57；**批次 4（架构演进期 / 待触发）**：§2.120 / §2.121 / §2.122 / §2.124。§2.111 复核后改为明确不补。
 - **多数条目不是「不值得做」，是「收益未经测量」**：§2.2 / §2.3 / §2.7 / §2.10 / §2.17 的共同点是收益尚未实测——而先做优化再测量正是这个项目一贯拒绝的顺序；触发条件到了先测再说。
 - **发版前必做**：§2.97（CHANGELOG `[Unreleased]` 归整）——唯一一条不等触发、按日程必须处理的。
 - **立即可做**（界限清楚、随时可做）：§2.59 compare 同源节选合并。

@@ -59,8 +59,8 @@ listen: 127.0.0.1:8800
 #   - X-Custom-Token            # same treatment as the built-in Authorization/X-Api-Key/Cookie/etc
 #                                # list (case-insensitive). Absent/empty (the default) changes nothing.
 # analytics:                    # opt-in /reports/ hosting for analyze output (default off) — see
-#   serve: false                 # "Dashboard skeleton pages" under Audit and reporting: true mounts
-#   serve_dir: ./reports         # /reports/*; serve_dir defaults to ./reports (same as analyze -o)
+#   serve: false                 # "Dashboard skeleton pages" under Audit and reporting: true serves
+#   serve_dir: ./reports         # /reports/* (serve/serve_dir follow hot-reload); serve_dir defaults to ./reports (same as analyze -o)
 # timeouts:                    # "how long one wait may take" — request-path upper bounds, Go duration syntax
 #   connect: 10s               # upstream dial
 #   response_header: 120s      # upstream time-to-first-byte

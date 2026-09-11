@@ -122,14 +122,13 @@ func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i1
 		Sessions:    sessions,
 		JourneyLink: journeyLink,
 	}
-	data, err := json.MarshalIndent(idx, "", "  ")
-	if err != nil {
-		return err
-	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "index.json"), data, 0o600)
+	// Atomic (CreateTemp+Rename), same as every macro/*.json slice: a crash
+	// or full disk mid-write must not leave a truncated index.json, and the
+	// /reports static server may fetch it while `vmr analyze` re-runs.
+	return writeJSONAtomic(dir, "index.json", idx)
 }
 
 // fmtDisplayFull renders an RFC3339 timestamp (CompactionRow.TS, the

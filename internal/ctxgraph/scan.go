@@ -71,7 +71,17 @@ func Scan(paths []string) (*Graph, error) {
 // cache.go). Manifest count, not source file bytes, is what this scales
 // with, so it stays cheap even when most of the corpus is cache-sourced.
 func buildGraph(all []*Manifest, noBody int) *Graph {
-	sort.SliceStable(all, func(i, j int) bool { return all[i].TS.Before(all[j].TS) })
+	// Req (CanonicalPath+":"+Line) is the total-order tie-breaker: two
+	// manifests sharing a nanosecond timestamp would otherwise keep whatever
+	// order the parallel file scan happened to assemble them in, and the
+	// Lineage.Idx assigned below (and every downstream reference to it) would
+	// drift between runs / platforms. Req is globally unique and deterministic.
+	sort.SliceStable(all, func(i, j int) bool {
+		if !all[i].TS.Equal(all[j].TS) {
+			return all[i].TS.Before(all[j].TS)
+		}
+		return all[i].Req < all[j].Req
+	})
 
 	g := &Graph{NoBody: noBody}
 	buckets := map[string][]*Manifest{}

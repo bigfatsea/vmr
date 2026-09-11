@@ -22,6 +22,13 @@ var logHTMLPage []byte
 // const, only so tests can shorten it.
 var logHeartbeat = 30 * time.Second
 
+// logWriteTimeout bounds a single write to a /log client. The global
+// http.Server WriteTimeout is 0 (a streaming endpoint cannot carry one), so
+// without this a client that stops reading — deliberately or not — parks
+// its broadcast-follower goroutine on a blocked write forever. Generous:
+// any healthy client drains a line in microseconds.
+var logWriteTimeout = 10 * time.Second
+
 // WithLogTee wires the live-log source. Only `vmr start` calls it; without
 // it /log answers 503 (tests construct Servers with no tee — same pattern
 // as WithInstance's zero-value instance).
@@ -68,13 +75,25 @@ func (s *Server) adminLog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 
+	// writeLine refreshes the per-write deadline (see logWriteTimeout) right
+	// before each write — the connection sits in select between writes, so a
+	// deadline set once would expire mid-wait and kill a healthy quiet tail.
+	// A ResponseWriter that can't set a deadline (some test recorders) just
+	// gets the pre-existing unbounded behavior.
+	rc := http.NewResponseController(w)
+	writeLine := func(s string) bool {
+		_ = rc.SetWriteDeadline(time.Now().Add(logWriteTimeout))
+		_, err := io.WriteString(w, s)
+		return err == nil
+	}
+
 	// Follow, not Recent+Subscribe: the atomic snapshot-and-register means a
 	// line written while this connection opens lands in exactly one of
 	// replay or live stream, never silently in neither.
 	replay, ch, cancel := s.logTee.Follow()
 	defer cancel()
 	for _, line := range replay {
-		if _, err := io.WriteString(w, line+"\n"); err != nil {
+		if !writeLine(line + "\n") {
 			return
 		}
 	}
@@ -86,13 +105,13 @@ func (s *Server) adminLog(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case line := <-ch:
-			if _, err := io.WriteString(w, line+"\n"); err != nil {
+			if !writeLine(line + "\n") {
 				return
 			}
 			flusher.Flush()
 			timer.Reset(logHeartbeat)
 		case <-timer.C:
-			if _, err := io.WriteString(w, "\n"); err != nil {
+			if !writeLine("\n") {
 				return
 			}
 			flusher.Flush()

@@ -268,6 +268,52 @@ func TestScan_NoBodyRecordsCounted(t *testing.T) {
 	}
 }
 
+// TestScan_SameTimestampLineageIdxIsDeterministic pins the buildGraph sort
+// tie-breaker: two records sharing an exact timestamp, spread across two
+// files, must land in the same Lineage.Idx order no matter which order the
+// files were handed to Scan (the parallel file scan assembles them in
+// whatever order the caller passed the paths).
+func TestScan_SameTimestampLineageIdxIsDeterministic(t *testing.T) {
+	t.Parallel()
+	ts := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	write := func(name string, rec audit.Record) string {
+		p := filepath.Join(dir, name)
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, append(raw, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	pathA := write("audit-a.jsonl", mkAuditRec(ts, chatBody(sysMsg("sys"), userMsg("task A"))))
+	pathB := write("audit-b.jsonl", mkAuditRec(ts, chatBody(sysMsg("sys"), userMsg("task B"))))
+
+	keyByIdx := func(paths []string) map[int]string {
+		g, err := Scan(paths)
+		if err != nil {
+			t.Fatalf("Scan(%v): %v", paths, err)
+		}
+		if len(g.Lineages) != 2 {
+			t.Fatalf("got %d lineages, want 2", len(g.Lineages))
+		}
+		m := map[int]string{}
+		for _, l := range g.Lineages {
+			m[l.Idx] = l.SessKey
+		}
+		return m
+	}
+	forward := keyByIdx([]string{pathA, pathB})
+	reversed := keyByIdx([]string{pathB, pathA})
+	for idx, key := range forward {
+		if reversed[idx] != key {
+			t.Errorf("Lineage.Idx %d: forward=%q reversed=%q — sort is not order-independent", idx, key, reversed[idx])
+		}
+	}
+}
+
 func TestScan_EmptyPaths(t *testing.T) {
 	t.Parallel()
 	g, err := Scan(nil)

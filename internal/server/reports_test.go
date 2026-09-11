@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"vmr/internal/config"
+	"vmr/internal/router"
 )
 
 // reportsFixtureYAML builds a config with analytics.serve on and serve_dir
@@ -289,5 +292,120 @@ func TestReports_LogThrottledPerDirectory(t *testing.T) {
 	w.warn(filepath.Base(dir)+"-other", warn)
 	if calls != 2 {
 		t.Errorf("warn not re-armed for a new dir: calls=%d, want 2", calls)
+	}
+}
+
+// installYAML rebuilds a routing snapshot from yaml and installs it on rt —
+// the same atomic swap a config hot-reload performs.
+func installYAML(t *testing.T, rt *router.Router, yaml string) {
+	t.Helper()
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("config.Parse: %v", err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+	rt.Install(snap)
+}
+
+// newReportsServerRT is newReportsServer's sibling that also hands back the
+// router, so a test can install a new snapshot mid-flight (hot reload).
+func newReportsServerRT(t *testing.T, yaml string) (*httptest.Server, *router.Router) {
+	t.Helper()
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	ts := httptest.NewServer(New(rt, nil).Handler())
+	t.Cleanup(ts.Close)
+	return ts, rt
+}
+
+// TestReports_HotReloadServeToggle: /reports must follow analytics.serve
+// across a config hot reload — mountReports runs once at startup, so the
+// gate has to be read from the live snapshot per request.
+func TestReports_HotReloadServeToggle(t *testing.T) {
+	dir := t.TempDir()
+	writeReportsTree(t, dir)
+	keys := fmt.Sprintf("api_keys:\n  - %s\n", reportsTestKey)
+	offYAML := fmt.Sprintf(`
+listen: 127.0.0.1:0
+%s
+analytics:
+  serve: false
+  serve_dir: %s
+providers:
+  - {name: p1, base_url: {openai-completions: https://u/v1}, api_key: k1}
+models:
+  vm: {sticky: false, endpoints: {openai-completions: [{providers: [p1], models: [m1]}]}}
+`, keys, dir)
+	onYAML := strings.Replace(offYAML, "serve: false", "serve: true", 1)
+
+	ts, rt := newReportsServerRT(t, offYAML)
+
+	resp, _ := getReports(t, ts, "/reports/macro-dashboard.html", reportsTestKey)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("serve off: status=%d, want 404", resp.StatusCode)
+	}
+
+	installYAML(t, rt, onYAML)
+	resp, _ = getReports(t, ts, "/reports/macro-dashboard.html", reportsTestKey)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("after hot-reload to serve:true: status=%d, want 200", resp.StatusCode)
+	}
+
+	installYAML(t, rt, offYAML)
+	resp, _ = getReports(t, ts, "/reports/macro-dashboard.html", reportsTestKey)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("after hot-reload back to serve:false: status=%d, want 404", resp.StatusCode)
+	}
+}
+
+// TestReports_HotReloadServeDir: changing serve_dir at hot reload must
+// redirect /reports at the new tree, not keep serving the old one.
+func TestReports_HotReloadServeDir(t *testing.T) {
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+	writeReportsTree(t, dirA)
+	writeReportsTree(t, dirB)
+	if err := os.WriteFile(filepath.Join(dirA, "only-a.json"), []byte(`{"a":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirB, "only-b.json"), []byte(`{"b":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	keys := fmt.Sprintf("api_keys:\n  - %s\n", reportsTestKey)
+	yamlFor := func(dir string) string {
+		return fmt.Sprintf(`
+listen: 127.0.0.1:0
+%s
+analytics: {serve: true, serve_dir: %s}
+providers:
+  - {name: p1, base_url: {openai-completions: https://u/v1}, api_key: k1}
+models:
+  vm: {sticky: false, endpoints: {openai-completions: [{providers: [p1], models: [m1]}]}}
+`, keys, dir)
+	}
+
+	ts, rt := newReportsServerRT(t, yamlFor(dirA))
+
+	if resp, _ := getReports(t, ts, "/reports/only-a.json", reportsTestKey); resp.StatusCode != http.StatusOK {
+		t.Fatalf("dirA/only-a.json: status=%d, want 200", resp.StatusCode)
+	}
+
+	installYAML(t, rt, yamlFor(dirB))
+	if resp, _ := getReports(t, ts, "/reports/only-b.json", reportsTestKey); resp.StatusCode != http.StatusOK {
+		t.Fatalf("after serve_dir hot-reload: dirB/only-b.json status=%d, want 200", resp.StatusCode)
+	}
+	if resp, _ := getReports(t, ts, "/reports/only-a.json", reportsTestKey); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("after serve_dir hot-reload: stale dirA/only-a.json status=%d, want 404", resp.StatusCode)
 	}
 }

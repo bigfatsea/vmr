@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -413,7 +414,9 @@ type Config struct {
 	// pricingTableCache is the merged generated+curated standard table,
 	// loaded once by resolvePricing() during validate() — PricingTable()
 	// returns this instead of re-parsing the embedded YAML on every call.
-	pricingTableCache *pricing.Table `yaml:"-"`
+	// atomic because PricingTable() is documented as safe to call before
+	// validate() has run, and two such callers must not race the lazy load.
+	pricingTableCache atomic.Pointer[pricing.Table] `yaml:"-"`
 
 	// EmptyEnvRefs is every ${NAME} the config text referenced that was unset
 	// or empty in the environment at load time, sorted. Not a yaml field —

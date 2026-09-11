@@ -702,6 +702,15 @@ func TestSearchableTranscript_CoversReconstructedAndRaw(t *testing.T) {
 	if anchoredInTranscript(Finding{EvidenceAnchor: "haystack"}, pool) {
 		t.Error("absent anchor must not be recognized")
 	}
+	// A short generic anchor that IS present verbatim still must not count —
+	// it carries no anti-hallucination signal (minEvidenceAnchorRunes).
+	if anchoredInTranscript(Finding{EvidenceAnchor: "hello"}, pool) {
+		t.Error("sub-threshold anchor must not count even when it appears verbatim")
+	}
+	// Present, long enough, but no letter/digit: reject.
+	if anchoredInTranscript(Finding{EvidenceAnchor: strings.Repeat("- ", 8)}, pool+strings.Repeat("- ", 8)) {
+		t.Error("punctuation-only anchor must not count")
+	}
 }
 
 func TestRenderSpine_InferredFindingRendering(t *testing.T) {

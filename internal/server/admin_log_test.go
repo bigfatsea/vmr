@@ -223,6 +223,49 @@ func TestAdminLog_ResponseHeaders(t *testing.T) {
 	}
 }
 
+// TestAdminLog_SlowReaderIsDisconnected: a client that stops reading its
+// half of the connection must not park the broadcast-follower goroutine
+// forever. The per-write deadline (logWriteTimeout) forces it loose.
+func TestAdminLog_SlowReaderIsDisconnected(t *testing.T) {
+	oldTO := logWriteTimeout
+	logWriteTimeout = 100 * time.Millisecond
+	defer func() { logWriteTimeout = oldTO }()
+
+	srv, tee := newTeeServer(t, oneProviderYAML("http://127.0.0.1:1"))
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/log", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	// Deliberately never read resp.Body.
+
+	// Wait for the subscriber to register, then flood enough bytes to fill
+	// both socket buffers so the handler's next write blocks.
+	deadline := time.Now().Add(2 * time.Second)
+	for tee.Subscribers() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	big := strings.Repeat("x", 32<<10)
+	for i := 0; i < 64; i++ {
+		tee.Write([]byte(big + "\n"))
+	}
+
+	// The blocked write must hit its deadline and the goroutine must exit.
+	deadline = time.Now().Add(3 * time.Second)
+	for tee.Subscribers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := tee.Subscribers(); got != 0 {
+		t.Fatalf("subscriber still attached after write deadline: %d", got)
+	}
+}
+
 func TestAdminLog_IdleHeartbeat(t *testing.T) {
 	old := logHeartbeat
 	logHeartbeat = 30 * time.Millisecond

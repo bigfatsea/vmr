@@ -52,6 +52,24 @@ func TestClassify_ReplaceTail(t *testing.T) {
 	}
 }
 
+// TestClassify_SameLengthTailReplaceIsReplaceTail: cur is the same length as
+// prev with its last 1-2 messages swapped (a retry of the final turn, an
+// ephemeral tail edit). LCP lands within tailSlack of len(prev), which used
+// to fall through to the default Append even though nothing was appended —
+// and journey/cachebreak.go then reported the resulting prefix re-encode as
+// a spurious CacheBreakUnexplained.
+func TestClassify_SameLengthTailReplaceIsReplaceTail(t *testing.T) {
+	t.Parallel()
+	for _, replaced := range []int{1, 2} {
+		prev := mkHashes(20, "s")
+		cur := append(append([]Hash{}, prev[:20-replaced]...), mkHashes(replaced, "t")...)
+		e := Classify(manifestWithKeys(prev), manifestWithKeys(cur))
+		if e.Kind != ReplaceTail {
+			t.Errorf("replaced=%d: got %v, want ReplaceTail (lcp=%d cov=%.2f)", replaced, e.Kind, e.LCP, e.Coverage)
+		}
+	}
+}
+
 // TestClassify_Splice covers Classify's split of the splice_or_tail bucket:
 // common prefix holds, new content follows, and prev's own last 3 messages
 // reappear verbatim at the end of cur — evidence the tail was spliced

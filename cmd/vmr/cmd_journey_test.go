@@ -1172,7 +1172,9 @@ func TestCmdAnalyze_JourneyWithLLM(t *testing.T) {
 		var replyContent string
 		switch {
 		case strings.Contains(bodyStr, `\"verification_commands_observed\"`): // CompletionClaimEvidencePack
-			replyContent = `{"claim_status": "CLAIM_WITHOUT_VERIFICATION", "confidence": "HIGH", "evidence_anchor": "done", "missing_verification": "no build or test executed"}`
+			// evidence_anchor must be a verbatim transcript substring AND clear
+			// minEvidenceAnchorRunes — the user instruction satisfies both.
+			replyContent = `{"claim_status": "CLAIM_WITHOUT_VERIFICATION", "confidence": "HIGH", "evidence_anchor": "调研一下 A 股新股打新收益", "missing_verification": "no build or test executed"}`
 		case strings.Contains(bodyStr, `\"root_user_intent\"`): // GoalDriftEvidencePack; goalDriftResult is a single object, not an array
 			replyContent = `{"drift_detected": false, "drift_step_seq": 0, "confidence": "LOW", "evidence_anchor": "", "drift_explanation": ""}`
 		case strings.Contains(bodyStr, `\"plan_items\"`): // PlanAuditEvidencePack; planAuditResult is a single object, not an array

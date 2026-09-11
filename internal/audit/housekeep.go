@@ -175,7 +175,11 @@ func compressFile(src, dst string) (err error) {
 			err = cerr
 		}
 	}()
-	enc, err := zstd.NewWriter(out) // library default level: fast, still a large multi-MB match window
+	// EncoderConcurrency(1): housekeeping is a background sweep and must not
+	// grab every core to compress a large history file — that starves the
+	// foreground request path (latency spikes). Library default level: fast,
+	// still a large multi-MB match window.
+	enc, err := zstd.NewWriter(out, zstd.WithEncoderConcurrency(1))
 	if err != nil {
 		return err
 	}

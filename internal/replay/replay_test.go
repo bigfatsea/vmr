@@ -397,6 +397,28 @@ func TestRun_RejectsNonObjectBody(t *testing.T) {
 	}
 }
 
+// TestRun_AcceptsBodyWithLeadingWhitespace: a JSON object body preceded by
+// whitespace/newlines is still a JSON object — the leading-brace check must
+// skip whitespace, not reject the record.
+func TestRun_AcceptsBodyWithLeadingWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := writeConfig(t, dir, "http://127.0.0.1:1/unreachable", true)
+	rec := &audit.Record{
+		Model: "vm", Protocol: "openai-completions",
+		Client: audit.Exchange{Request: audit.Message{Body: audit.EncodeBody(
+			[]byte("\n  \t{\"model\":\"vm\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))}},
+	}
+	auditPath := writeAuditLine(t, dir, "audit.jsonl", rec)
+
+	var out bytes.Buffer
+	if err := Run(context.Background(), Options{ConfigPath: cfgPath, AuditPath: auditPath, Provider: "p1", DryRun: true}, &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.String(), "DRY-RUN") {
+		t.Errorf("expected a dry-run render, got %q", out.String())
+	}
+}
+
 // TestBuildReplayEndpoint_CarriesRoleMap proves the endpoint buildReplayEndpoint
 // assembles carries the provider's role_map — the fix for a
 // real gap: ep is hand-built here (never passing through BuildSnapshot, the

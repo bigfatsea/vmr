@@ -45,9 +45,6 @@ type Server struct {
 	audit  *audit.Logger // nil = auditing disabled
 	inst   instance      // zero value outside `vmr start` (tests, embedding)
 	logTee *logtee.Tee   // nil = live-log streaming unavailable (/log answers 503)
-	// reports is non-nil only when analytics.serve is on at Handler() mount
-	// time — see mountReports in reports.go.
-	reports *reportsState
 	// liveStats holds the completed-request aggregator (nil = live stats
 	// persistence disabled, e.g. lightweight tests).
 	liveStats *livestats.Aggregator

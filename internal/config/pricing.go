@@ -214,7 +214,7 @@ func (c *Config) resolvePricing() error {
 	if err != nil {
 		return fmt.Errorf("embedded standard pricing table: %w", err)
 	}
-	c.pricingTableCache = standard
+	c.pricingTableCache.Store(standard)
 
 	effectiveRates, err := pricing.EffectiveExchangeRate(c.ExchangeRate)
 	if err != nil {
@@ -277,13 +277,17 @@ func (c *Config) resolvePricing() error {
 // returns the cached value once validate() has (the common case, once per
 // config load/reload).
 func (c *Config) PricingTable() (*pricing.Table, error) {
-	if c.pricingTableCache != nil {
-		return c.pricingTableCache, nil
+	if t := c.pricingTableCache.Load(); t != nil {
+		return t, nil
 	}
 	standard, err := pricing.LoadStandard()
 	if err != nil {
 		return nil, err
 	}
-	c.pricingTableCache = standard
+	// CompareAndSwap so a concurrent caller that already stored one wins and
+	// both return the same table (LoadStandard is pure — either is correct).
+	if !c.pricingTableCache.CompareAndSwap(nil, standard) {
+		return c.pricingTableCache.Load(), nil
+	}
 	return standard, nil
 }

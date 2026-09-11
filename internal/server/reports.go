@@ -69,46 +69,31 @@ func isReportsSkeleton(name string) bool {
 	return strings.HasSuffix(name, ".html")
 }
 
-// mountReports registers /reports and /reports/ when analytics.serve is on.
-// Route NOT registered otherwise — a request to /reports/* then hits the
-// mux's plain 404, which is the documented opt-out shape ("no route" must
-// be indistinguishable from "not a vmr feature").
+// mountReports registers /reports and /reports/ unconditionally. Whether
+// they serve anything is decided per-request from the LIVE routing snapshot
+// (analytics.serve and serve_dir are both hot-reloadable) — see
+// reportsHandler. When analytics.serve is off the handler answers the exact
+// bare 404 the mux's own no-route path produces, so "disabled" stays
+// indistinguishable from "not a vmr feature".
 func (s *Server) mountReports(mux *http.ServeMux) {
-	snap := s.rt.Snapshot()
-	if snap == nil || !snap.Cfg.Analytics.Serve {
-		return
-	}
-	s.reports = &reportsState{dir: snap.Cfg.Analytics.ServeDir}
 	mux.HandleFunc("GET /reports", s.reportsHandler)
 	mux.HandleFunc("GET /reports/", s.reportsHandler)
 }
 
-// reportsState captures the serve-time directory resolution once per mount,
-// not per request. dir is the config value as written (possibly relative);
-// abs resolves it against the process working directory at mount time —
-// `vmr start` has exactly one meaningful cwd, and re-stat'ing a relative
-// path on every request would silently follow a chdir the process never
-// promised not to do. A hot reload that changes serve_dir replaces this
-// whole state via the next mountReports call.
-type reportsState struct {
-	dir string
-	abs string
-}
-
-func (rs *reportsState) resolve() string {
-	if filepath.IsAbs(rs.dir) {
-		return filepath.Clean(rs.dir)
-	}
-	if rs.abs != "" {
-		return rs.abs
+// resolveReportsDir turns a configured serve_dir (possibly relative) into an
+// absolute path, anchoring a relative value against the process working
+// directory — `vmr start` has exactly one meaningful cwd. Resolved per
+// request rather than cached: serve_dir hot-reloads, os.Getwd is a cheap
+// syscall, and /reports is dashboard traffic, not a hot path.
+func resolveReportsDir(dir string) string {
+	if filepath.IsAbs(dir) {
+		return filepath.Clean(dir)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		// No cwd to anchor to: fall back to the literal relative path and
-		// let the OS resolve it the same way it would have anyway.
-		return filepath.Clean(rs.dir)
+		return filepath.Clean(dir)
 	}
-	return filepath.Join(cwd, rs.dir)
+	return filepath.Join(cwd, dir)
 }
 
 // reportsHandler serves one file under serve_dir.
@@ -139,24 +124,27 @@ func (s *Server) reportsHandler(w http.ResponseWriter, r *http.Request) {
 		router.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
 		return
 	}
+	// analytics.serve off (never on, or hot-reloaded off): the route must
+	// behave as if it were never registered — a bare 404, no handler-shaped
+	// error body.
+	if !snap.Cfg.Analytics.Serve {
+		http.NotFound(w, r)
+		return
+	}
 	if len(snap.Cfg.APIKeys) == 0 {
 		router.WriteError(w, http.StatusForbidden, "permission_error",
 			"/reports/ requires api_keys to be configured — reports carry full conversation bodies and are never served without auth")
 		return
 	}
-	rs := s.reports
-	if rs == nil {
-		http.NotFound(w, r)
-		return
-	}
-	root := rs.resolve()
+	serveDir := snap.Cfg.Analytics.ServeDir
+	root := resolveReportsDir(serveDir)
 
 	// Directory-missing fast path, BEFORE auth: the products being absent
 	// is a global state, and answering 404 for it (instead of 401) keeps
 	// "not generated yet" distinguishable from "wrong key" for the
 	// dashboard's own error handling.
 	if st, err := os.Stat(root); err != nil || !st.IsDir() {
-		reportsMissing.warn(rs.dir, s.rt.Logf)
+		reportsMissing.warn(serveDir, s.rt.Logf)
 		http.NotFound(w, r)
 		return
 	}

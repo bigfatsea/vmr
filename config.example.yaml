@@ -111,8 +111,8 @@ listen: 127.0.0.1:8800
 # log_dir: ~/.vmr/logs           # audit JSONL directory; used exactly as given (~/ expands); absent = ~/.vmr/logs. Changing it needs a restart
 # image_cache_dir: ~/.vmr/image_cache  # downscale-result cache directory; same rule; absent = ~/.vmr/image_cache; follows hot reload
 # analytics:                      # /reports/ static hosting for analyze reports and dashboard (default disabled)
-#   serve: false                 # true = mount /reports/*; false = route not registered (404)
-#   serve_dir: ./reports         # root directory to serve; relative paths resolved against vmr start workdir
+#   serve: false                 # true = serve /reports/*; false = bare 404 (same as no route). Follows hot-reload.
+#   serve_dir: ./reports         # root directory to serve; relative paths resolved against vmr start workdir. Follows hot-reload.
 # timeouts:                       # "how long one wait may take" — request-path upper bounds, Go duration syntax
 #   connect: 10s
 #   response_header: 120s        # time to first byte from upstream

@@ -48,7 +48,10 @@ type Router struct {
 
 	snap atomic.Pointer[Snapshot]
 
-	ctx context.Context
+	// ctx is the root lifecycle context, written once at startup
+	// (WithContext) and read from background probe goroutines — atomic so
+	// -race stays clean regardless of when a caller sets it.
+	ctx atomic.Pointer[context.Context]
 
 	installMu sync.Mutex              // guards Install (see Install's doc comment)
 	limiter   atomic.Pointer[limiter] // nil = unlimited
@@ -61,7 +64,9 @@ type Router struct {
 }
 
 func New(logger *log.Logger) *Router {
-	return &Router{Health: health.New(), Sticky: sticky.New(), Inflight: NewInflightRegistry(), Logger: logger, ctx: context.Background()}
+	rt := &Router{Health: health.New(), Sticky: sticky.New(), Inflight: NewInflightRegistry(), Logger: logger}
+	rt.SetContext(context.Background())
+	return rt
 }
 
 // WithContext returns the router with the given root context set for graceful shutdown.
@@ -75,13 +80,13 @@ func (rt *Router) SetContext(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rt.ctx = ctx
+	rt.ctx.Store(&ctx)
 }
 
 // Context returns the router's root context, defaulting to context.Background().
 func (rt *Router) Context() context.Context {
-	if rt.ctx != nil {
-		return rt.ctx
+	if p := rt.ctx.Load(); p != nil {
+		return *p
 	}
 	return context.Background()
 }

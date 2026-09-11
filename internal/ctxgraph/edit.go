@@ -87,9 +87,13 @@ const (
 	// forkCoverage: cur is a Fork if less than this fraction of its own
 	// messages were already present somewhere in prev.
 	forkCoverage = 0.5
-	// tailSlack: an LCP within this many messages of len(prev) still
-	// counts as a plain Append (guards against off-by-one/duplicate-final-
-	// message noise being classified as ReplaceTail for no useful reason).
+	// tailSlack: when cur GREW past prev, an LCP within this many messages of
+	// len(prev) still counts as a plain Append (guards against off-by-one/
+	// duplicate-final-message noise being classified as ReplaceTail for no
+	// useful reason). It deliberately does NOT apply when cur did not grow:
+	// there, a short LCP deficit is a real trailing-message replacement, not
+	// noise, and swallowing it as Append makes journey/cachebreak.go report a
+	// genuine cache break as CacheBreakUnexplained.
 	tailSlack = 2
 	// spliceMinTailMatch: within a ReplaceTail-shaped edit, reclassify as
 	// Splice when at least this many of prev's tail messages reappear
@@ -126,7 +130,9 @@ func Classify(prev, cur *Manifest) Edit {
 		e.Kind = Contract
 	case cov < forkCoverage:
 		e.Kind = Fork
-	case l < len(prev.Keys)-tailSlack:
+	case l < len(prev.Keys)-tailSlack || (len(cur.Keys) <= len(prev.Keys) && l < len(prev.Keys)):
+		// tailSlack only absorbs a tail wobble when cur grew; when cur did
+		// not grow, any LCP short of len(prev) is a real tail replacement.
 		e.Kind = ReplaceTail
 		if commonSuffixLen(prev.Keys[l:], cur.Keys[l:]) >= spliceMinTailMatch {
 			e.Kind = Splice

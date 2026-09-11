@@ -171,7 +171,7 @@ internal/archtest          可执行的架构不变式（import 边界、核心�
 | `GET /status.html` | 自包含单页可视化看板（CSR）：免鉴权直出静态外壳（不含任何数据），前端 JS 拉 `GET /status` 渲染并弹窗鉴权；零外部 CDN 依赖，`//go:embed` 进二进制 |
 | `GET /log` | 进程实时控制台日志，永不关闭的 `text/plain` 流——先回放 tee 环形缓冲（固定 512 行）再持续跟随新行，逐字节等于 stderr，是浏览器里的 `tail -f`（access log 视角，非 audit JSONL）。受 `api_keys` 鉴权保护；**无查询参数**（回放窗口就是缓冲大小）。空闲连接每 30s 收一个裸换行保活，防中间层掐断。数据源是 `internal/logtee`——`cmd/vmr` 里包在 `stampWriter{io.MultiWriter(os.Stderr, tee)}` 外层、与 stderr 同一次盖戳的进程内 tee（非落盘文件，抓到的就是 logger 写出的每一行；仅漏收直写 stderr 的启动 banner 与 panic）。慢消费者永不阻塞 log 热路径：订阅 channel 满则丢行并插 `... dropped N lines ...` 标记；未接线 tee（非 `vmr start`）时返回 503 |
 | `GET /log.html` | 自包含单页实时日志查看器（CSR，`//go:embed`）：免鉴权直出静态外壳，JS 拉 `GET /log` 并以同一把 key 弹窗鉴权；与 `/status.html` 共用 `localStorage['vmr_status_key']`，两页互相链接 |
-| `GET /reports/*` | `vmr analyze` 产物与看板骨架页的静态托管（`internal/server/reports.go`）。**默认关闭**：`analytics.serve: true` 才挂载路由；`analytics.serve_dir` 指定目录（默认 `./reports`，与 `analyze -o` 同一个默认值——跑一次 analyze 再 start 就能直接看）。安全模型四条硬约束：①开启托管但未配置 `api_keys` 时数据请求**硬性拒绝（403）**，不复用会放行的通用鉴权包装器——承载对话正文的报表不允许无鉴权裸奔；②分层鉴权对齐 `/status.html`：骨架页免鉴权直出（零业务数据），所有 `.json`/`.jsonl`/`.md` 数据请求必须带 Bearer key（key 存 localStorage，不进 URL、不进服务端日志）；③路径校验：`filepath.Clean` + 输出目录前缀比对 + 逐级 Lstat 拒绝符号链接 + **禁用目录列表**（`requests/details/` 单目录可达数千文件，列表响应本身就是一次拒绝服务）；④目录不存在不是启动错误——`/reports/*` 一律 404，日志提示尚未生成产物。只按路径读文件目录，不 import 任何分析半区包（两半区契约不破；`serve_dir` 是一个字符串配置项，不是分析半区传来的对象） |
+| `GET /reports/*` | `vmr analyze` 产物与看板骨架页的静态托管（`internal/server/reports.go`）。**默认关闭**：路由恒注册，但 handler 每次请求从**实时快照**读 `analytics.serve` 与 `analytics.serve_dir`——`serve` 为假时回与「路由未注册」逐字节相同的裸 404（`serve` 与 `serve_dir` 因此都随配置热重载即时生效，无需重启）。`serve_dir` 默认 `./reports`，与 `analyze -o` 同一个默认值——跑一次 analyze 再 start 就能直接看。安全模型四条硬约束：①开启托管但未配置 `api_keys` 时数据请求**硬性拒绝（403）**，不复用会放行的通用鉴权包装器——承载对话正文的报表不允许无鉴权裸奔；②分层鉴权对齐 `/status.html`：骨架页免鉴权直出（零业务数据），所有 `.json`/`.jsonl`/`.md` 数据请求必须带 Bearer key（key 存 localStorage，不进 URL、不进服务端日志）；③路径校验：`filepath.Clean` + 输出目录前缀比对 + 逐级 Lstat 拒绝符号链接 + **禁用目录列表**（`requests/details/` 单目录可达数千文件，列表响应本身就是一次拒绝服务）；④目录不存在不是启动错误——`/reports/*` 一律 404，日志提示尚未生成产物。只按路径读文件目录，不 import 任何分析半区包（两半区契约不破；`serve_dir` 是一个字符串配置项，不是分析半区传来的对象） |
 
 **`instance` 块**（`pid` / `listen` / `models` 数 / `version` / `go_version` / `os_arch` / `cwd` / `executable` / `started_at` / `uptime_seconds` + 人类可读 `uptime`，以及嵌套的 `config`（`path` 绝对路径 / `mtime` / `stale` / `reload` / `issues`）与 `concurrency`）回答"接到这个端口的人，怎么知道应答的是哪一个 vmr"。本机跑多个实例时外部只有端口号可依据，而**监听地址只存在于那个进程的 config 里、不在命令行上**，进程表回答不了。`config.path` 取绝对路径（`WithInstance` 里 `filepath.Abs`，那是进程还知道自己原始工作目录的唯一时刻）；未调用 `WithInstance` 时（测试、嵌入）`config` 整块省略而非输出零值。
 
@@ -676,8 +676,8 @@ image_cache_dir: ~/.vmr/image_cache  # 可选：降采样缓存目录。规则�
 image_downscale: 0            # 请求内联图片长边像素上限；缺省 0 = 关闭；模型自身的 image_downscale（下方）优先于这个全局值
 
 analytics:                    # 可选：/reports/ 静态托管（见端点表 `GET /reports/*` 行）；缺省整块不写 = 不挂载
-  serve: false                # true = 挂载 /reports/*；false = 路由不注册（404）
-  serve_dir: ./reports        # 托管根目录；相对路径按 vmr start 进程的工作目录解析
+  serve: false                # true = 对外服务 /reports/*；false = 裸 404（与未挂载无区别）。随热重载生效
+  serve_dir: ./reports        # 托管根目录；相对路径按 vmr start 进程的工作目录解析。随热重载生效
 
 timeouts:                     # 等多久——请求路径上的各类超时上限，Go Duration 文法（10s/2m/1h）
   connect: 10s                # 连接上游（缺省 10s）

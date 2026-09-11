@@ -58,7 +58,7 @@ listen: 127.0.0.1:8800
 #   - X-Custom-Token            # Authorization/X-Api-Key/Cookie 等列表一致（大小写不敏感）。
 #                                # 缺省/留空不改变任何行为。
 # analytics:                    # 可选的 /reports/ 托管（承载 analyze 产物，默认关闭）——
-#   serve: false                # true = 挂载 /reports/*；serve_dir 默认 ./reports（与 analyze -o 同源），
+#   serve: false                # true = 对外服务 /reports/*（serve/serve_dir 随热重载生效）；serve_dir 默认 ./reports（与 analyze -o 同源），
 #   serve_dir: ./reports        # 详见「审计与报表」下的「看板骨架页」一节
 # timeouts:                    # "等多久"——请求路径上的等待上限，Go duration 语法
 #   connect: 10s               # 连接上游

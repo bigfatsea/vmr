@@ -193,7 +193,11 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 		return err
 	}
 	replayOf := fmt.Sprintf("%s:%d", path, line)
-	if len(rv.Client.Request.Body) == 0 || rv.Client.Request.Body[0] != '{' {
+	// Skip leading JSON whitespace before the object check: a body is legal
+	// JSON with spaces/newlines ahead of the opening brace, and rejecting it
+	// would dead-end a replay of otherwise-fine traffic.
+	body := rv.Client.Request.Body
+	if i := jsonscan.SkipJSONWS(body, 0); i >= len(body) || body[i] != '{' {
 		return fmt.Errorf("%s: client request body is not a JSON object; only JSON chat/messages requests can be replayed", replayOf)
 	}
 

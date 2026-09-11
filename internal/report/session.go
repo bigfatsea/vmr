@@ -34,6 +34,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
@@ -42,11 +43,6 @@ import (
 	"vmr/internal/reqdetail"
 	"vmr/internal/taskseg"
 )
-
-// tailPrevKeep is how many trailing message previews each request retains,
-// for rendering the parent's replaced tail. Replaced tails observed in real
-// logs are 1-2 messages; beyond this window only counts are reported.
-const tailPrevKeep = 8
 
 // ReqInfo is the analysis result for one audit record: grouping coordinates
 // plus rule-extracted features. Fields are best-effort — absent signals stay
@@ -126,7 +122,6 @@ type ReqInfo struct {
 	// the attached-record chain: a compaction-tagged record excluded from
 	// s.Recs still counts here, exactly as it does on journey's side.
 	prevManifest *ctxgraph.Manifest
-	tailPrev     []string // previews of the last tailPrevKeep messages
 	// realUsers: absolute msg idx → previewed real user instruction. Held for
 	// every record in the corpus (SessionAnalysis keeps all ReqInfo), which is
 	// why taskseg stores the preview rather than the raw text — see
@@ -484,9 +479,6 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	// (per performance requirements) is that this regex only runs
 	// once per user message, not that it shares a loop with leadSys/firstText.
 	r.realUsers = taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
-	for i := max(0, len(msgs)-tailPrevKeep); i < len(msgs); i++ {
-		r.tailPrev = append(r.tailPrev, msgs[i].Role+": "+taskseg.Preview(msgs[i].Text))
-	}
 
 	r.ChatID = prof.ChatID(msgs)
 
@@ -771,10 +763,19 @@ func hasTag(r *ReqInfo, tag string) bool {
 
 // ---- compaction linking ----
 
+// minPredNeedleRunes is the shortest first-instruction that can serve as
+// evidence a compaction summarized a given session. A first instruction like
+// "ok" or "continue" is a near-certain substring of any tens-of-KB
+// compaction prompt, so anything shorter is treated as no needle at all
+// (the "predecessor needle not found" log line still fires).
+const minPredNeedleRunes = 12
+
 // linkCompactions ties each compaction call to the session it summarized
 // (its input quotes that session's first instruction) and to the session
 // continuing from it (whose anchor embeds its output). Both are exact
-// substring checks — no guessing; unmatched sides stay empty.
+// substring checks — no guessing; unmatched sides stay empty. The
+// predecessor side additionally requires the quoted instruction to clear
+// minPredNeedleRunes (see that const).
 //
 // Deliberately still a text-needle match, not a ctxgraph.Stitch lookup: a
 // standalone compaction LLM call's own
@@ -800,7 +801,7 @@ func linkCompactions(a *SessionAnalysis) {
 				(successor == nil || first.TS.Before(successor.Recs[0].TS)) {
 				successor = s
 			}
-			if fn := needle(strings.TrimSpace(stripBracketPrefix(first.firstText))); fn != "" &&
+			if fn := needle(strings.TrimSpace(stripBracketPrefix(first.firstText))); utf8.RuneCountInString(fn) >= minPredNeedleRunes &&
 				strings.Contains(in, fn) && first.TS.Before(c.TS) &&
 				(predecessor == nil || first.TS.After(predecessor.Recs[0].TS)) {
 				predecessor = s

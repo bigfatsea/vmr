@@ -344,6 +344,44 @@ func TestLinkCompactionsLogsMiss(t *testing.T) {
 	}
 }
 
+// TestLinkCompactionsRejectsShortNeedle: a predecessor session whose first
+// instruction is a stock short phrase ("continue") must NOT be linked as the
+// summarized session just because that phrase happens to appear somewhere in
+// the tens-of-KB compaction prompt. A specific first instruction still links.
+func TestLinkCompactionsRejectsShortNeedle(t *testing.T) {
+	var buf bytes.Buffer
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(orig)
+
+	t0 := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	compactionIn := "You are summarizing a prior conversation. The user asked: continue " +
+		"the authentication refactor and add refresh-token rotation. [30KB more...]"
+
+	shortSess := &SessionInfo{ID: "s-short", Recs: []*ReqInfo{{firstText: "continue", TS: t0.Add(-2 * time.Minute)}}}
+	specificSess := &SessionInfo{ID: "s-specific", Recs: []*ReqInfo{{
+		firstText: "continue the authentication refactor and add refresh-token rotation",
+		TS:        t0.Add(-time.Minute),
+	}}}
+	compaction := &ReqInfo{
+		Path: "test.jsonl", TS: t0,
+		respText:  "summary text that no session opens with",
+		firstText: compactionIn,
+	}
+	a := &SessionAnalysis{
+		Sessions:    []*SessionInfo{shortSess, specificSess},
+		Compactions: []*ReqInfo{compaction},
+	}
+	linkCompactions(a)
+
+	if compaction.Summarizes != "s-specific" {
+		t.Errorf("Summarizes = %q, want s-specific (the specific first instruction is real evidence)", compaction.Summarizes)
+	}
+	if compaction.Summarizes == "s-short" {
+		t.Error("a 8-rune stock needle must not establish a summarized-by link")
+	}
+}
+
 func TestToolShapesAggregation(t *testing.T) {
 	path, _ := fixture(t)
 	a, err := AnalyzeSessions([]string{path})
