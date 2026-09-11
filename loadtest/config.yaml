@@ -40,6 +40,16 @@ providers:
   - name: mock_ok
     base_url: {openai-completions: http://127.0.0.1:9900/ok/v1}      # succeeds — the failover scenario's third, winning endpoint
     api_key: sk-loadtest-mock-key
+  - name: mock_quota
+    # Same upstream as mock, distinct provider name so vmr opens a separate
+    # quota bucket for it. The limit is orders of magnitude above what a
+    # sweep can spend — the point is running metering + headroom reorder for
+    # real, never actually starving the endpoint mid-run.
+    base_url: {openai-completions: http://127.0.0.1:9900/v1}
+    api_key: sk-loadtest-mock-key
+    quota:
+      limits:
+        - {metric: requests, every: 1mo, amount: 1000000}
 
 # One virtual model per scenario in docs/VirtualModelRouter_Design_v4_Core.md §12 —
 # doubles as the scenario label in `vmr analyze`'s per-model breakdown.
@@ -48,6 +58,8 @@ models:
     endpoints: {openai-completions: [{providers: [mock], models: ["scenario:baseline"]}]}
   stream_normal:
     endpoints: {openai-completions: [{providers: [mock], models: ["scenario:stream_normal"]}]}
+  drip_stream:
+    endpoints: {openai-completions: [{providers: [mock], models: ["scenario:drip_stream"]}]}
   thinking_leak:
     endpoints: {openai-completions: [{providers: [mock], models: ["scenario:thinking_leak"]}]}
   think_tag:
@@ -71,7 +83,19 @@ models:
         - {providers: [mock_fail1], models: ["scenario:baseline"], priority: 1}
         - {providers: [mock_fail2], models: ["scenario:baseline"], priority: 2}
         - {providers: [mock_ok], models: ["scenario:baseline"], priority: 3}
+  quota:
+    endpoints: {openai-completions: [{providers: [mock_quota], models: ["scenario:quota"]}]}
+  sticky:
+    sticky: true    # nil would default to true anyway — spelled out because proving sticky is this scenario's whole point
+    endpoints:
+      openai-completions:
+        - {providers: [mock], models: ["scenario:sticky"]}
+        - {providers: [mock_ok], models: ["scenario:sticky"]}   # equal-priority second candidate; sticky must pin every success to whichever wins the first request
   anthropic_baseline:
     endpoints: {anthropic-messages: [{providers: [mock], models: ["scenario:baseline"]}]}
+  anthropic_stream:
+    endpoints: {anthropic-messages: [{providers: [mock], models: ["scenario:anthropic_stream"]}]}
   responses_baseline:
     endpoints: {openai-responses: [{providers: [mock], models: ["scenario:baseline"]}]}
+  responses_stream:
+    endpoints: {openai-responses: [{providers: [mock], models: ["scenario:responses_stream"]}]}
