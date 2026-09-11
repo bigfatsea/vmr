@@ -139,6 +139,10 @@ func main() {
 			Model: "stream_normal", Stream: true,
 			Messages: []message{{Role: "user", Content: "tell me a short story"}},
 		}},
+		"drip_stream": {"/v1/chat/completions", reqBody{
+			Model: "drip_stream", Stream: true,
+			Messages: []message{{Role: "user", Content: "tell me a short story"}},
+		}},
 		"thinking_leak": {"/v1/chat/completions", reqBody{
 			Model: "thinking_leak", Stream: true,
 			Messages: []message{{Role: "user", Content: "think step by step, then answer"}},
@@ -166,13 +170,33 @@ func main() {
 			Model: "failover", Stream: false,
 			Messages: []message{{Role: "user", Content: "hi"}},
 		}},
+		// quota/sticky request bodies must stay byte-identical across every
+		// hit — sticky's session fingerprint is a hash of the system prompt +
+		// first message, and any per-request variation would shard the
+		// scenario across sticky buckets instead of pinning one endpoint.
+		"quota": {"/v1/chat/completions", reqBody{
+			Model: "quota", Stream: false,
+			Messages: []message{{Role: "user", Content: "hi"}},
+		}},
+		"sticky": {"/v1/chat/completions", reqBody{
+			Model: "sticky", Stream: false,
+			Messages: []message{{Role: "user", Content: "hi"}},
+		}},
 		"anthropic_baseline": {"/v1/messages", reqBody{
 			Model: "anthropic_baseline", Stream: false, MaxTokens: 64,
 			Messages: []message{{Role: "user", Content: "hi"}},
 		}},
+		"anthropic_stream": {"/v1/messages", reqBody{
+			Model: "anthropic_stream", Stream: true, MaxTokens: 64,
+			Messages: []message{{Role: "user", Content: "tell me a short story"}},
+		}},
 		"responses_baseline": {"/v1/responses", reqBody{
 			Model: "responses_baseline", Stream: false,
 			Input: "hi",
+		}},
+		"responses_stream": {"/v1/responses", reqBody{
+			Model: "responses_stream", Stream: true,
+			Input: "tell me a short story",
 		}},
 	}
 
@@ -244,9 +268,9 @@ func main() {
 
 	// Deterministic order so a diff of two generated files is meaningful.
 	order := []string{
-		"baseline", "stream_normal", "thinking_leak", "think_tag", "big_response",
-		"big_image", "multi_image", "gif", "long_history", "failover", "anthropic_baseline",
-		"responses_baseline",
+		"baseline", "stream_normal", "drip_stream", "thinking_leak", "think_tag", "big_response",
+		"big_image", "multi_image", "gif", "long_history", "failover", "quota", "sticky",
+		"anthropic_baseline", "anthropic_stream", "responses_baseline", "responses_stream",
 	}
 	var plainCount, imageCount, totalLines int
 	for _, name := range order {

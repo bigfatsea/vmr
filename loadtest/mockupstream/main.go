@@ -20,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -62,20 +63,30 @@ func handleScenario(w http.ResponseWriter, r *http.Request) {
 		serveThinkingLeak(w)
 	case "stream_normal":
 		serveStreamNormal(w)
+	case "drip_stream":
+		serveDripStream(w)
 	case "think_tag":
 		serveThinkTag(w)
 	case "big_response":
 		serveBigResponse(w)
-	default: // "baseline" and anything else (big_image/long_history/multi_image/gif reuse it — only the request side matters there)
+	case "quota":
+		serveQuota(w)
+	default: // "baseline" and anything else (big_image/long_history/multi_image/gif/sticky reuse it — only the request side matters there)
 		serveBaseline(w, req.Stream)
 	}
 }
 
 // handleAnthropicScenario is the /messages counterpart of handleScenario —
-// only the anthropic_baseline scenario uses it, so it doesn't need the same
-// dispatch table, just the one Anthropic-shaped response.
+// anthropic_baseline (non-streaming JSON) and anthropic_stream (SSE) both
+// dispatch here on the request's model field.
 func handleAnthropicScenario(w http.ResponseWriter, r *http.Request) {
-	io.Copy(io.Discard, r.Body)
+	body, _ := io.ReadAll(r.Body)
+	var req inboundReq
+	json.Unmarshal(body, &req) // best-effort: malformed body just falls through to baseline
+	if strings.TrimPrefix(req.Model, "scenario:") == "anthropic_stream" {
+		serveAnthropicStream(w)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"id": "mock-anthropic-baseline", "type": "message", "role": "assistant",
@@ -87,11 +98,16 @@ func handleAnthropicScenario(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleResponsesScenario is the /v1/responses counterpart of
-// handleAnthropicScenario — only the responses_baseline scenario uses it,
-// so it doesn't need the same dispatch table, just the one Responses-shaped
-// (top-level "output", no "choices") response.
+// handleAnthropicScenario — responses_baseline (non-streaming JSON) and
+// responses_stream (SSE) both dispatch here on the request's model field.
 func handleResponsesScenario(w http.ResponseWriter, r *http.Request) {
-	io.Copy(io.Discard, r.Body)
+	body, _ := io.ReadAll(r.Body)
+	var req inboundReq
+	json.Unmarshal(body, &req) // best-effort: malformed body just falls through to baseline
+	if strings.TrimPrefix(req.Model, "scenario:") == "responses_stream" {
+		serveResponsesStream(w)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"id": "mock-responses-baseline", "object": "response",
@@ -179,6 +195,130 @@ func serveStreamNormal(w http.ResponseWriter) {
 	}
 	writeSSE(w, fl, sseChunk{ID: "mock-stream", Object: "chat.completion.chunk", Choices: []sseChoice{{FinishReason: finishReason("stop")}}})
 	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// serveDripStream is drip_stream: true streaming at ~100ms/chunk for
+// ~dripChunks chunks (~5s per response) — the one deliberately slow shape,
+// so moderate/heavy rounds keep dozens of concurrent SSE connections open
+// through vmr at once (passthrough, InflightRegistry, the stream-idle
+// watchdog, concurrent audit writes). The role chunk goes out immediately
+// so ttft stays small and only dur shows the drip. stream_normal remains
+// the "streaming floor": true streaming, instant completion.
+const (
+	dripChunks   = 50
+	dripInterval = 100 * time.Millisecond
+)
+
+func serveDripStream(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fl := w.(http.Flusher)
+	writeSSE(w, fl, sseChunk{ID: "mock-drip", Object: "chat.completion.chunk", Choices: []sseChoice{{Delta: delta{Role: "assistant"}}}})
+	tick := time.NewTicker(dripInterval)
+	defer tick.Stop()
+	for i := 0; i < dripChunks; i++ {
+		<-tick.C
+		writeSSE(w, fl, sseChunk{ID: "mock-drip", Object: "chat.completion.chunk", Choices: []sseChoice{{Delta: delta{Content: fmt.Sprintf(" drip %d", i)}}}})
+	}
+	writeSSE(w, fl, sseChunk{ID: "mock-drip", Object: "chat.completion.chunk", Choices: []sseChoice{{FinishReason: finishReason("stop")}}})
+	fmt.Fprint(w, "data: [DONE]\n\n")
+}
+
+// serveQuota is baseline plus a tiny explicit usage block — the quota
+// scenario exists to exercise vmr's metering/headroom path against real
+// (not estimated) token counts, against a limit no sweep can exhaust.
+func serveQuota(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"id": "mock-quota", "object": "chat.completion",
+		"choices": []map[string]any{{
+			"index":         0,
+			"message":       map[string]string{"role": "assistant", "content": "ok"},
+			"finish_reason": "stop",
+		}},
+		"usage": map[string]int{"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6},
+	})
+}
+
+// writeNamedSSE writes one SSE event with an explicit "event:" line — the
+// framing the Anthropic and openai-responses protocols use (openai-
+// completions chunks carry no event name, hence writeSSE's bare "data:").
+func writeNamedSSE(w http.ResponseWriter, fl http.Flusher, event string, v any) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.Encode(v)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, bytes.TrimSuffix(buf.Bytes(), []byte("\n")))
+	fl.Flush()
+}
+
+// serveAnthropicStream answers with an Anthropic Messages SSE sequence —
+// message_start / content_block_* / message_delta / message_stop, the event
+// names internal/chatmsg's parser keys on (message_start carries the input
+// usage, message_delta the cumulative output count and stop_reason).
+// anthropic_baseline stays the protocol's non-streaming floor.
+func serveAnthropicStream(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fl := w.(http.Flusher)
+	writeNamedSSE(w, fl, "message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id": "mock-anthropic-stream", "type": "message", "role": "assistant",
+			"model": "scenario:anthropic_stream", "content": []any{},
+			"usage": map[string]int{"input_tokens": 5, "output_tokens": 1},
+		},
+	})
+	writeNamedSSE(w, fl, "content_block_start", map[string]any{
+		"type": "content_block_start", "index": 0,
+		"content_block": map[string]any{"type": "text", "text": ""},
+	})
+	for _, word := range []string{"The", " quick", " brown", " fox", " jumps", " over", " the", " lazy", " dog", "."} {
+		writeNamedSSE(w, fl, "content_block_delta", map[string]any{
+			"type": "content_block_delta", "index": 0,
+			"delta": map[string]string{"type": "text_delta", "text": word},
+		})
+	}
+	writeNamedSSE(w, fl, "content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})
+	writeNamedSSE(w, fl, "message_delta", map[string]any{
+		"type":  "message_delta",
+		"delta": map[string]string{"stop_reason": "end_turn"},
+		"usage": map[string]int{"output_tokens": 1},
+	})
+	writeNamedSSE(w, fl, "message_stop", map[string]any{"type": "message_stop"})
+}
+
+// serveResponsesStream answers with an openai-responses SSE sequence —
+// response.created / response.output_text.delta / response.completed. Only
+// the terminal response.completed needs to be self-contained (it carries the
+// full final Response object vmr parses — internal/chatmsg/sse.go), the
+// delta events exercise the passthrough path. responses_baseline stays the
+// protocol's non-streaming floor.
+func serveResponsesStream(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fl := w.(http.Flusher)
+	writeNamedSSE(w, fl, "response.created", map[string]any{
+		"type": "response.created",
+		"response": map[string]any{
+			"id": "mock-responses-stream", "object": "response",
+			"model": "scenario:responses_stream", "status": "in_progress", "output": []any{},
+		},
+	})
+	for _, word := range []string{"The", " quick", " brown", " fox", " jumps", " over", " the", " lazy", " dog", "."} {
+		writeNamedSSE(w, fl, "response.output_text.delta", map[string]any{
+			"type": "response.output_text.delta", "delta": word,
+		})
+	}
+	writeNamedSSE(w, fl, "response.completed", map[string]any{
+		"type": "response.completed",
+		"response": map[string]any{
+			"id": "mock-responses-stream", "object": "response",
+			"model": "scenario:responses_stream", "status": "completed",
+			"output": []map[string]any{{
+				"type": "message", "role": "assistant",
+				"content": []map[string]string{{"type": "output_text", "text": "The quick brown fox jumps over the lazy dog."}},
+			}},
+			"usage": map[string]int{"input_tokens": 5, "output_tokens": 10},
+		},
+	})
 }
 
 // serveThinkingLeak reproduces MiniMax M3's thinking=medium shape (see
