@@ -1,5 +1,3 @@
-// Ver 2026-07-24 13:30, by Sonnet 5
-
 // runner is the one-command version of the manual steps in loadtest/README.md:
 // starts loadtest/mockupstream and vmr, generates targets.json (and its two
 // cost-regime subsets, see gentargets), fires each load profile in profiles
@@ -34,14 +32,19 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"debug/buildinfo"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"vmr/loadtest/addr"
@@ -64,23 +67,16 @@ type loadProfile struct {
 }
 
 const (
-	vmrAddr       = addr.VMR
-	mockAddr      = addr.Mock
-	vmrBinary     = "./vmr"
-	configPath    = "loadtest/config.yaml"
-	logDir        = "logs/loadtest" // must match loadtest/config.yaml's log_dir
-	reportsDir    = "reports"
-	reportOutPath = "reports/loadtest-report.md"
-
-	// gentargets splits its 12 scenarios into two Vegeta targets files by
-	// cost regime — image decode/scale/encode (big_image/multi_image/gif)
-	// vs everything else — plus the combined file (kept for manual poking,
-	// see loadtest/README.md; unused by this runner).
+	vmrAddr          = addr.VMR
+	mockAddr         = addr.Mock
+	vmrBinary        = "./vmr"
+	configPath       = "loadtest/config.yaml"
+	logDir           = "logs/loadtest" // must match loadtest/config.yaml's log_dir
+	reportsDir       = "reports"
+	reportOutPath    = "reports/loadtest-report.md"
 	targetsPath      = "loadtest/targets.json"
 	targetsPlainPath = "loadtest/targets-plain.json"
 	targetsImagePath = "loadtest/targets-image.json"
-	plainScenarios   = 9 // must match gentargets' non-image scenario count
-	imageScenarios   = 3 // must match gentargets' image scenario count
 )
 
 func main() {
@@ -98,6 +94,8 @@ func run() error {
 	if _, err := os.Stat(vmrBinary); err != nil {
 		return fmt.Errorf("%s not found — go build -o vmr ./cmd/vmr first: %w", vmrBinary, err)
 	}
+
+	vcsRevision := getVCSRevision(vmrBinary)
 
 	fmt.Println("== building mockupstream ==")
 	mockBinary := filepath.Join(os.TempDir(), "vmr-loadtest-mockupstream")
@@ -138,6 +136,10 @@ func run() error {
 		return fmt.Errorf("start vmr: %w", err)
 	}
 	defer vmr.Process.Kill()
+
+	sampler := startResourceSampler(vmr.Process.Pid, 500*time.Millisecond)
+	defer sampler.stop()
+
 	if err := waitReady(vmrAddr, 10*time.Second); err != nil {
 		return fmt.Errorf("vmr never came up: %w", err)
 	}
@@ -157,16 +159,45 @@ func run() error {
 		os.Remove(targetsImagePath)
 	}()
 
+	plainTargets, err := parseTargets(targetsPlainPath)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", targetsPlainPath, err)
+	}
+	imageTargets, err := parseTargets(targetsImagePath)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", targetsImagePath, err)
+	}
+	totalScenarios := plainTargets.ScenarioCount() + imageTargets.ScenarioCount()
+
+	// Warmup round: exercises both target sets at low rate to absorb lazy-init
+	// and initial state machine costs before formal measurements start.
+	// Server-side audit records with timestamps prior to round 1 are excluded.
+	fmt.Println("== warmup (2s low-rate) ==")
+	warmupPlainRate := (plainTargets.ScenarioCount() + 1) / 2
+	if warmupPlainRate < 2 {
+		warmupPlainRate = 2
+	}
+	warmupImageRate := (imageTargets.ScenarioCount() + 1) / 2
+	if warmupImageRate < 2 {
+		warmupImageRate = 2
+	}
+	if _, err := attack(targetsPlainPath, warmupPlainRate, 2*time.Second); err != nil {
+		return fmt.Errorf("warmup (plain): %w", err)
+	}
+	if _, err := attack(targetsImagePath, warmupImageRate, 2*time.Second); err != nil {
+		return fmt.Errorf("warmup (image): %w", err)
+	}
+
 	var results []roundResult
 	for _, p := range profiles {
 		// Two separate attacks, not one against the combined file: each
 		// scenario's own share of the round's rate is kept the same as a
-		// single 11-way attack would give it (scaleRate), so splitting the
-		// report doesn't also silently change how hard this round hits
-		// vmr — only which bucket each result's percentiles land in.
-		plainRate := scaleRate(p.rate, plainScenarios)
-		imageRate := scaleRate(p.rate, imageScenarios)
+		// combined attack would give it (scaleRate), so splitting the
+		// report doesn't silently change how hard this round hits vmr.
+		plainRate := scaleRate(p.rate, plainTargets.ScenarioCount(), totalScenarios)
+		imageRate := scaleRate(p.rate, imageTargets.ScenarioCount(), totalScenarios)
 		fmt.Printf("== round %q: plain=%d/s image=%d/s duration=%s ==\n", p.name, plainRate, imageRate, p.duration)
+		roundStart := time.Now()
 		plainRep, err := attack(targetsPlainPath, plainRate, p.duration)
 		if err != nil {
 			return fmt.Errorf("round %s (plain): %w", p.name, err)
@@ -175,10 +206,18 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("round %s (image): %w", p.name, err)
 		}
-		results = append(results, roundResult{profile: p, plain: plainRep, image: imageRep})
+		roundEnd := time.Now()
+		results = append(results, roundResult{
+			profile:   p,
+			startTime: roundStart,
+			endTime:   roundEnd,
+			plain:     plainRep,
+			image:     imageRep,
+		})
 	}
 
 	fmt.Println("== stopping vmr and mockupstream ==")
+	resReport := sampler.stop()
 	vmr.Process.Signal(os.Interrupt)
 	vmr.Wait()
 	mock.Process.Kill()
@@ -189,14 +228,21 @@ func run() error {
 	if err != nil || len(logFiles) == 0 {
 		return fmt.Errorf("no audit log files under %s (err=%v)", logDir, err)
 	}
-	byModel, endpoints, err := computeServerStats(logFiles)
+	byModel, endpoints, roundModels, err := computeServerStats(logFiles, results)
 	if err != nil {
 		return err
 	}
+
+	// Consistency assertion: verify actual bucketed audit requests against
+	// target line shares and total Vegeta requests within ±20% tolerance.
+	if err := assertScenarioConsistency(plainTargets, imageTargets, results, roundModels); err != nil {
+		return err
+	}
+
 	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", reportsDir, err)
 	}
-	return writeReport(results, byModel, endpoints)
+	return writeReport(results, byModel, endpoints, plainTargets, imageTargets, vcsRevision, resReport)
 }
 
 func waitReady(addr string, timeout time.Duration) error {
@@ -213,25 +259,97 @@ func waitReady(addr string, timeout time.Duration) error {
 }
 
 type roundResult struct {
-	profile loadProfile
-	plain   vegetaReport // baseline/stream_normal/.../failover/anthropic_baseline/responses_baseline — no image processing
-	image   vegetaReport // big_image/multi_image/gif — the one genuinely expensive code path
+	profile   loadProfile
+	startTime time.Time
+	endTime   time.Time
+	plain     vegetaReport
+	image     vegetaReport
 }
 
-const totalScenarios = plainScenarios + imageScenarios
-
 // scaleRate gives a group of groupScenarios (out of totalScenarios) the same
-// per-scenario request rate a single combined attack across all 12 would
-// have given it — round's nominal rate * groupScenarios/totalScenarios,
-// rounded to nearest. Keeps the two-attacks split from silently changing how
-// hard a round actually hits vmr; only the reporting is split, not the load
-// itself. Minimum 1 so a light round never rounds a group down to zero.
-func scaleRate(roundRate, groupScenarios int) int {
+// per-scenario request rate a single combined attack would have given it —
+// round's nominal rate * groupScenarios/totalScenarios, rounded to nearest.
+// Minimum 1 so a light round never rounds a group down to zero.
+func scaleRate(roundRate, groupScenarios, totalScenarios int) int {
+	if totalScenarios <= 0 {
+		return roundRate
+	}
 	r := (roundRate*groupScenarios + totalScenarios/2) / totalScenarios
 	if r < 1 {
 		r = 1
 	}
 	return r
+}
+
+// targetsInfo holds dynamically parsed metadata from a Vegeta targets file.
+type targetsInfo struct {
+	path       string
+	totalLines int
+	models     []string           // distinct models in encounter order
+	modelLines map[string]int     // model -> target line count
+	shares     map[string]float64 // model -> line count / totalLines
+}
+
+func (t *targetsInfo) ScenarioCount() int {
+	return len(t.models)
+}
+
+// parseTargets reads a Vegeta JSON-lines targets file and computes scenario shares.
+func parseTargets(path string) (*targetsInfo, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	info := &targetsInfo{
+		path:       path,
+		modelLines: make(map[string]int),
+		shares:     make(map[string]float64),
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64<<10), 32<<20)
+
+	type targetLine struct {
+		Body string `json:"body"`
+	}
+	type bodyModel struct {
+		Model string `json:"model"`
+	}
+
+	for scanner.Scan() {
+		info.totalLines++
+		var line targetLine
+		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
+			return nil, fmt.Errorf("unmarshal target line %d in %s: %w", info.totalLines, path, err)
+		}
+		rawBody, err := base64.StdEncoding.DecodeString(line.Body)
+		if err != nil {
+			return nil, fmt.Errorf("decode target body at line %d in %s: %w", info.totalLines, path, err)
+		}
+		var bm bodyModel
+		if err := json.Unmarshal(rawBody, &bm); err != nil {
+			return nil, fmt.Errorf("unmarshal target body JSON at line %d in %s: %w", info.totalLines, path, err)
+		}
+		if bm.Model == "" {
+			return nil, fmt.Errorf("target body at line %d in %s missing model field", info.totalLines, path)
+		}
+		if info.modelLines[bm.Model] == 0 {
+			info.models = append(info.models, bm.Model)
+		}
+		info.modelLines[bm.Model]++
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan %s: %w", path, err)
+	}
+	if info.totalLines == 0 {
+		return nil, fmt.Errorf("targets file %s is empty", path)
+	}
+	for _, m := range info.models {
+		info.shares[m] = float64(info.modelLines[m]) / float64(info.totalLines)
+	}
+	return info, nil
 }
 
 // vegetaReport mirrors the subset of `vegeta report -type=json`'s schema we
@@ -281,16 +399,12 @@ func attack(targetsPath string, rate int, duration time.Duration) (vegetaReport,
 // auditRecord is the minimal subset of one audit JSONL line's fields this
 // tool needs (see docs/VirtualModelRouter_Design_v4_Core.md §9.2 for the
 // full schema). Deliberately hand-rolled here instead of importing
-// vmr/internal/audit.Record: this load test computes its own numbers
-// straight from the raw audit log its own vmr instance just wrote, with
-// zero dependency on any vmr-internal package for this step — the same
-// on-disk JSONL format an external tool (jq, DuckDB, a human) would read
-// directly. A malformed or missing field just zero-values here rather than
-// failing to compile; that trade is deliberate, see the package doc above.
+// vmr/internal/audit.Record to remain completely self-contained.
 type auditRecord struct {
-	Model    string `json:"model"`
-	DurMS    int64  `json:"dur_ms"`
-	TTFTMS   int64  `json:"ttft_ms"`
+	TS       time.Time `json:"ts"`
+	Model    string    `json:"model"`
+	DurMS    int64     `json:"dur_ms"`
+	TTFTMS   int64     `json:"ttft_ms"`
 	Attempts []struct {
 		Endpoint   string `json:"endpoint"`
 		ErrorClass string `json:"error_class"` // "" = this attempt succeeded
@@ -308,27 +422,30 @@ type endpointStats struct {
 	attempts, ok int
 }
 
-// computeServerStats reads the audit JSONL files this load test run's own
-// vmr instance just wrote (logFiles, under logDir) and computes the two
-// tables loadtest-report.md's "server-side view" shows: per-model
-// (=scenario) latency and per-endpoint availability — a scanner over plain
-// JSON lines, nothing more. See the package doc for why this replaced an
-// earlier version that shelled out to `vmr analyze` and parsed its output.
-func computeServerStats(logFiles []string) (byModel, endpoints string, err error) {
-	models := map[string]*modelStats{}
-	eps := map[string]*endpointStats{}
+// computeServerStats reads the audit JSONL files, buckets records by profile
+// round using request arrival ts (excluding warmup), and generates markdown tables.
+func computeServerStats(logFiles []string, results []roundResult) (byModel, endpoints string, roundModels []map[string]*modelStats, err error) {
+	roundModels = make([]map[string]*modelStats, len(results))
+	for i := range roundModels {
+		roundModels[i] = make(map[string]*modelStats)
+	}
+	eps := make(map[string]*endpointStats)
 	for _, path := range logFiles {
-		if err := scanAuditFile(path, models, eps); err != nil {
-			return "", "", err
+		if err := scanAuditFile(path, results, roundModels, eps); err != nil {
+			return "", "", nil, err
 		}
 	}
-	if len(models) == 0 || len(eps) == 0 {
-		return "", "", fmt.Errorf("no records with model/attempts found across %d audit file(s) under %s", len(logFiles), logDir)
+	var totalRecords int
+	for _, rm := range roundModels {
+		totalRecords += len(rm)
 	}
-	return renderModelStats(models), renderEndpointStats(eps), nil
+	if totalRecords == 0 || len(eps) == 0 {
+		return "", "", nil, fmt.Errorf("no formal records with model/attempts found across %d audit file(s) under %s", len(logFiles), logDir)
+	}
+	return renderModelStats(results, roundModels), renderEndpointStats(eps), roundModels, nil
 }
 
-func scanAuditFile(path string, models map[string]*modelStats, eps map[string]*endpointStats) error {
+func scanAuditFile(path string, results []roundResult, roundModels []map[string]*modelStats, eps map[string]*endpointStats) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
@@ -345,16 +462,33 @@ func scanAuditFile(path string, models map[string]*modelStats, eps map[string]*e
 		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
 			continue // a malformed line shouldn't sink the whole load test summary
 		}
-		ms, ok := models[rec.Model]
+		if len(results) == 0 || rec.TS.Before(results[0].startTime) {
+			continue // exclude warmup requests prior to round 1
+		}
+		roundIdx := -1
+		for i := 0; i < len(results); i++ {
+			if !rec.TS.Before(results[i].startTime) {
+				if i == len(results)-1 || rec.TS.Before(results[i+1].startTime) {
+					roundIdx = i
+					break
+				}
+			}
+		}
+		if roundIdx < 0 {
+			continue
+		}
+
+		ms, ok := roundModels[roundIdx][rec.Model]
 		if !ok {
 			ms = &modelStats{}
-			models[rec.Model] = ms
+			roundModels[roundIdx][rec.Model] = ms
 		}
 		ms.requests++
-		if rec.DurMS > 0 {
+		// 0ms is sub-ms (<=1ms left-censored), included rather than dropped.
+		if rec.DurMS >= 0 {
 			ms.dur = append(ms.dur, rec.DurMS)
 		}
-		if rec.TTFTMS > 0 {
+		if rec.TTFTMS >= 0 {
 			ms.ttft = append(ms.ttft, rec.TTFTMS)
 		}
 		for _, a := range rec.Attempts {
@@ -375,11 +509,11 @@ func scanAuditFile(path string, models map[string]*modelStats, eps map[string]*e
 	return scanner.Err()
 }
 
-// percentile returns sorted's p-th percentile (nearest-rank, p in [0,1]) —
-// a self-contained implementation, not internal/report's: this tool
-// doesn't need to match internal/report's exact percentile method, only to
-// report a stable, documented one of its own. sorted must already be sorted
-// ascending.
+// percentile returns sorted's p-th percentile using floor(p*(n-1))
+// (PERCENTILE.INC without interpolation, p in [0,1]). A self-contained
+// implementation, not internal/report's: this tool deliberately does not
+// import internal/report to avoid coupling to its rendering pipeline.
+// sorted must already be sorted ascending.
 func percentile(sorted []int64, p float64) int64 {
 	if len(sorted) == 0 {
 		return 0
@@ -388,41 +522,49 @@ func percentile(sorted []int64, p float64) int64 {
 	return sorted[idx]
 }
 
-// renderModelStats is a deliberately minimal stand-in for vmr-report.md's
-// own per-model table (internal/report/aggregate_render.go) — just the
-// columns this report's readers actually look at (see loadtest/README.md's
-// "reading the numbers" section). Sorted by model name for run-to-run
-// stability — this tool's own map iteration would otherwise be
-// non-deterministic across runs.
-func renderModelStats(models map[string]*modelStats) string {
-	names := make([]string, 0, len(models))
-	for name := range models {
+// renderModelStats renders per-model latency broken down by load round,
+// allowing degradation across escalating load profiles to be seen at a glance.
+func renderModelStats(results []roundResult, roundModels []map[string]*modelStats) string {
+	allModels := make(map[string]bool)
+	for _, rm := range roundModels {
+		for name := range rm {
+			allModels[name] = true
+		}
+	}
+	names := make([]string, 0, len(allModels))
+	for name := range allModels {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+
 	var b strings.Builder
-	b.WriteString("**按模型**（本次运行自己的审计日志现算，不经过 `vmr analyze`）\n\n")
-	b.WriteString("| 模型 | 请求 | dur p50/p95/max | ttft p50/p95 |\n|---|---|---|---|\n")
+	b.WriteString("**按模型 · 按负载轮**（本次运行自己的审计日志现算，按请求 ts 分桶进各轮，不经过 `vmr analyze`；首轮前预热已排除）\n\n")
+	b.WriteString("| 模型 | 轮次 | 请求 | dur p50/p95/max (0ms = sub-ms, included) | ttft p50/p95 (0ms = sub-ms, included) |\n|---|---|---|---|---|\n")
 	for _, name := range names {
-		m := models[name]
-		dur := append([]int64(nil), m.dur...)
-		sort.Slice(dur, func(i, j int) bool { return dur[i] < dur[j] })
-		ttft := append([]int64(nil), m.ttft...)
-		sort.Slice(ttft, func(i, j int) bool { return ttft[i] < ttft[j] })
-		var maxDur int64
-		if len(dur) > 0 {
-			maxDur = dur[len(dur)-1]
+		for i, r := range results {
+			rm := roundModels[i]
+			m := rm[name]
+			if m == nil || m.requests == 0 {
+				fmt.Fprintf(&b, "| %s | %s | 0 | - | - |\n", name, r.profile.name)
+				continue
+			}
+			dur := append([]int64(nil), m.dur...)
+			sort.Slice(dur, func(i, j int) bool { return dur[i] < dur[j] })
+			ttft := append([]int64(nil), m.ttft...)
+			sort.Slice(ttft, func(i, j int) bool { return ttft[i] < ttft[j] })
+			var maxDur int64
+			if len(dur) > 0 {
+				maxDur = dur[len(dur)-1]
+			}
+			durStr := fmt.Sprintf("%dms/%dms/%dms", percentile(dur, 0.5), percentile(dur, 0.95), maxDur)
+			ttftStr := fmt.Sprintf("%dms/%dms", percentile(ttft, 0.5), percentile(ttft, 0.95))
+			fmt.Fprintf(&b, "| %s | %s | %d | %s | %s |\n", name, r.profile.name, m.requests, durStr, ttftStr)
 		}
-		fmt.Fprintf(&b, "| %s | %d | %dms/%dms/%dms | %dms/%dms |\n",
-			name, m.requests,
-			percentile(dur, 0.5), percentile(dur, 0.95), maxDur,
-			percentile(ttft, 0.5), percentile(ttft, 0.95))
 	}
 	return b.String()
 }
 
-// renderEndpointStats mirrors renderModelStats' rationale for the
-// per-endpoint availability table.
+// renderEndpointStats renders per-endpoint availability across all formal rounds.
 func renderEndpointStats(eps map[string]*endpointStats) string {
 	names := make([]string, 0, len(eps))
 	for name := range eps {
@@ -430,7 +572,7 @@ func renderEndpointStats(eps map[string]*endpointStats) string {
 	}
 	sort.Strings(names)
 	var b strings.Builder
-	b.WriteString("**端点可用度**（本次运行自己的审计日志现算——确认没有端点被 failover 卡住或悄悄绕过）\n\n")
+	b.WriteString("**端点可用度**（本次运行自己的审计日志现算——确认没有端点被 failover 卡住或悄悄绕过；首轮前预热已排除）\n\n")
 	b.WriteString("| 端点 | 尝试 | 成功 | 可用度 |\n|---|---|---|---|\n")
 	for _, name := range names {
 		e := eps[name]
@@ -443,21 +585,214 @@ func renderEndpointStats(eps map[string]*endpointStats) string {
 	return b.String()
 }
 
-func writeReport(results []roundResult, byModel, endpoints string) error {
+// assertScenarioConsistency asserts that actual request counts for every scenario
+// match expected counts computed from target line shares within ±20% tolerance.
+func assertScenarioConsistency(
+	plainTargets, imageTargets *targetsInfo,
+	results []roundResult,
+	roundModels []map[string]*modelStats,
+) error {
+	var totalPlainReq, totalImageReq int64
+	for _, r := range results {
+		totalPlainReq += r.plain.Requests
+		totalImageReq += r.image.Requests
+	}
+
+	actualRequests := make(map[string]int64)
+	for _, rm := range roundModels {
+		for model, stats := range rm {
+			actualRequests[model] += int64(stats.requests)
+		}
+	}
+
+	checkGroup := func(groupName string, targets *targetsInfo, totalReq int64) error {
+		for _, model := range targets.models {
+			share := targets.shares[model]
+			expected := float64(totalReq) * share
+			actual := actualRequests[model]
+			if actual == 0 {
+				return fmt.Errorf("consistency assertion failed: scenario %q in %s group missing from audit records (expected ~%.1f requests)",
+					model, groupName, expected)
+			}
+			if expected <= 0 {
+				return fmt.Errorf("consistency assertion failed: scenario %q in %s group has invalid expected count (%.1f)",
+					model, groupName, expected)
+			}
+			diffRatio := (float64(actual) - expected) / expected
+			if math.Abs(diffRatio) > 0.20 {
+				return fmt.Errorf("consistency assertion failed: scenario %q in %s group request count mismatch: expected ~%.1f, got %d (diff: %+.1f%%, tolerance: ±20%%)",
+					model, groupName, expected, actual, diffRatio*100)
+			}
+		}
+		return nil
+	}
+
+	if err := checkGroup("plain", plainTargets, totalPlainReq); err != nil {
+		return err
+	}
+	if err := checkGroup("image", imageTargets, totalImageReq); err != nil {
+		return err
+	}
+
+	allKnown := make(map[string]bool)
+	for _, m := range plainTargets.models {
+		allKnown[m] = true
+	}
+	for _, m := range imageTargets.models {
+		allKnown[m] = true
+	}
+	for model := range actualRequests {
+		if !allKnown[model] {
+			return fmt.Errorf("consistency assertion failed: unexpected scenario %q in audit log", model)
+		}
+	}
+	return nil
+}
+
+func getVCSRevision(binaryPath string) string {
+	bi, err := buildinfo.ReadFile(binaryPath)
+	if err != nil {
+		return "unknown"
+	}
+	for _, s := range bi.Settings {
+		if s.Key == "vcs.revision" {
+			return s.Value
+		}
+	}
+	return "unknown"
+}
+
+type resourceStats struct {
+	PeakRSSKB   int64
+	LastCPURaw  string
+	LastCPUTime time.Duration
+	Samples     int
+}
+
+type resourceSampler struct {
+	pid      int
+	ticker   *time.Ticker
+	stopCh   chan struct{}
+	doneCh   chan struct{}
+	mu       sync.Mutex
+	stopOnce sync.Once
+	stats    resourceStats
+}
+
+func startResourceSampler(pid int, interval time.Duration) *resourceSampler {
+	s := &resourceSampler{
+		pid:    pid,
+		ticker: time.NewTicker(interval),
+		stopCh: make(chan struct{}),
+		doneCh: make(chan struct{}),
+	}
+	s.sample()
+	go func() {
+		defer close(s.doneCh)
+		for {
+			select {
+			case <-s.ticker.C:
+				s.sample()
+			case <-s.stopCh:
+				s.ticker.Stop()
+				s.sample()
+				return
+			}
+		}
+	}()
+	return s
+}
+
+func (s *resourceSampler) stop() resourceStats {
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		<-s.doneCh
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stats
+}
+
+func (s *resourceSampler) sample() {
+	cmd := exec.Command("ps", "-o", "rss=,time=", "-p", strconv.Itoa(s.pid))
+	out, err := cmd.Output()
+	if err != nil {
+		return
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) < 2 {
+		return
+	}
+	rssKB, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return
+	}
+	cpuRaw := fields[1]
+	cpuDur, _ := parseCPUTime(cpuRaw)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stats.Samples++
+	if rssKB > s.stats.PeakRSSKB {
+		s.stats.PeakRSSKB = rssKB
+	}
+	s.stats.LastCPURaw = cpuRaw
+	s.stats.LastCPUTime = cpuDur
+}
+
+func parseCPUTime(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty cpu time")
+	}
+	var days int
+	if idx := strings.Index(s, "-"); idx != -1 {
+		fmt.Sscanf(s[:idx], "%d", &days)
+		s = s[idx+1:]
+	}
+	parts := strings.Split(s, ":")
+	var hours, mins int
+	var secs float64
+	switch len(parts) {
+	case 2:
+		fmt.Sscanf(parts[0], "%d", &mins)
+		fmt.Sscanf(parts[1], "%f", &secs)
+	case 3:
+		fmt.Sscanf(parts[0], "%d", &hours)
+		fmt.Sscanf(parts[1], "%d", &mins)
+		fmt.Sscanf(parts[2], "%f", &secs)
+	default:
+		return 0, fmt.Errorf("unrecognized time format: %q", s)
+	}
+	totalSecs := float64(days*86400+hours*3600+mins*60) + secs
+	return time.Duration(totalSecs * float64(time.Second)), nil
+}
+
+func writeReport(
+	results []roundResult,
+	byModel, endpoints string,
+	plainTargets, imageTargets *targetsInfo,
+	vcsRevision string,
+	resReport resourceStats,
+) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- generated by `go run ./loadtest/runner` on %s -->\n\n", time.Now().Format(time.RFC3339))
 	fmt.Fprint(&b, "# vmr load test report\n\n")
-	fmt.Fprintf(&b, "Design and how to read this: [`docs/VirtualModelRouter_Design_v4_Core.md`](../docs/VirtualModelRouter_Design_v4_Core.md) §12, [`loadtest/README.md`](../loadtest/README.md). %d load rounds against the same %d scenarios.\n\n", len(results), totalScenarios)
+	totalScenarios := plainTargets.ScenarioCount() + imageTargets.ScenarioCount()
+	fmt.Fprintf(&b, "Design and how to read this: [`docs/VirtualModelRouter_Design_v4_Core.md`](../docs/VirtualModelRouter_Design_v4_Core.md) §12, [`loadtest/README.md`](../loadtest/README.md). %d load rounds against the same %d scenarios (binary revision: `%s`).\n\n",
+		len(results), totalScenarios, vcsRevision)
 
 	fmt.Fprint(&b, "## Client-side view (Vegeta), by load round\n\n")
-	fmt.Fprintf(&b, "Fired as two separate attacks per round — **plain** (%d scenarios: everything except image processing) and **image** (%d scenarios: big_image/multi_image/gif, the only code path that actually decodes/scales/encodes) — each at its proportional share of the round's nominal rate, so this split changes nothing about how hard vmr is hit, only how the results are bucketed. Blending them into one number would let image processing's real cost quietly drag up the \"plain\" p95/p99 for everything else.\n\n", plainScenarios, imageScenarios)
+	imageScenariosDesc := strings.Join(imageTargets.models, "/")
+	fmt.Fprintf(&b, "Fired as two separate attacks per round — **plain** (%d scenarios: everything except image processing) and **image** (%d scenarios: %s, the only code path that actually decodes/scales/encodes) — each at its proportional share of the round's nominal rate, so this split changes nothing about how hard vmr is hit, only how the results are bucketed. Blending them into one number would let image processing's real cost quietly drag up the \"plain\" p95/p99 for everything else.\n\n",
+		plainTargets.ScenarioCount(), imageTargets.ScenarioCount(), imageScenariosDesc)
 	fmt.Fprint(&b, "| Round | Group | Rate | Duration | Requests | Success | p50 | p95 | p99 | Max |\n")
 	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
-		writeClientRow(&b, r.profile, "plain", scaleRate(r.profile.rate, plainScenarios), r.plain)
-		writeClientRow(&b, r.profile, "image", scaleRate(r.profile.rate, imageScenarios), r.image)
+		writeClientRow(&b, r.profile, "plain", scaleRate(r.profile.rate, plainTargets.ScenarioCount(), totalScenarios), r.plain)
+		writeClientRow(&b, r.profile, "image", scaleRate(r.profile.rate, imageTargets.ScenarioCount(), totalScenarios), r.image)
 	}
-	b.WriteString("\n")
+	b.WriteString("\n*Note: `~` prefix on p99 indicates sample size < 200 requests (statistically noisy).*\n\n")
 	for _, r := range results {
 		for _, g := range []struct {
 			name string
@@ -469,14 +804,24 @@ func writeReport(results []roundResult, byModel, endpoints string) error {
 		}
 	}
 
-	fmt.Fprint(&b, "## Server-side view (vmr's own audit log), per scenario, all rounds combined\n\n")
-	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) — this is where the per-scenario cost breakdown comes from, computed directly from this run's own audit JSONL (computeServerStats), not from `vmr analyze` — this tool never runs it.\n\n")
+	fmt.Fprint(&b, "## Server-side view (vmr's own audit log), per scenario, by load round\n\n")
+	fmt.Fprint(&b, "vmr's own `ttft_ms`/`dur_ms` instrumentation, grouped by virtual model (= scenario) and bucketed into load rounds by request timestamp (warmup before round 1 excluded; 0ms = sub-ms, included) — this is where the per-scenario cost breakdown comes from, computed directly from this run's own audit JSONL (computeServerStats), not from `vmr analyze` — this tool never runs it.\n\n")
 	b.WriteString(byModel)
 	b.WriteString("\n\n")
 	b.WriteString(endpoints)
-	b.WriteString("\n")
+	b.WriteString("\n\n")
 
-	return os.WriteFile(reportOutPath, []byte(b.String()), 0o644)
+	fmt.Fprint(&b, "## Resource usage (vmr process)\n\n")
+	fmt.Fprintf(&b, "Sampled every 500ms over the full sweep (%d samples):\n", resReport.Samples)
+	peakMB := float64(resReport.PeakRSSKB) / 1024.0
+	cpuDurStr := fmt.Sprintf("%.2fs", resReport.LastCPUTime.Seconds())
+	if resReport.LastCPURaw != "" {
+		cpuDurStr += fmt.Sprintf(" (ps: %s)", resReport.LastCPURaw)
+	}
+	fmt.Fprintf(&b, "- **Peak RSS**: %.1f MB (%d KB)\n", peakMB, resReport.PeakRSSKB)
+	fmt.Fprintf(&b, "- **Total CPU time**: %s\n", cpuDurStr)
+
+	return os.WriteFile(reportOutPath, []byte(b.String()), 0o600)
 }
 
 func fmtMS(ns int64) string {
@@ -484,9 +829,13 @@ func fmtMS(ns int64) string {
 }
 
 func writeClientRow(b *strings.Builder, p loadProfile, group string, rate int, rep vegetaReport) {
+	p99 := fmtMS(rep.Latencies.P99)
+	if rep.Requests < 200 {
+		p99 = "~" + p99
+	}
 	fmt.Fprintf(b, "| %s | %s | %d/s | %s | %d | %.1f%% | %s | %s | %s | %s |\n",
 		p.name, group, rate, p.duration,
 		rep.Requests, rep.Success*100,
 		fmtMS(rep.Latencies.P50), fmtMS(rep.Latencies.P95),
-		fmtMS(rep.Latencies.P99), fmtMS(rep.Latencies.Max))
+		p99, fmtMS(rep.Latencies.Max))
 }
