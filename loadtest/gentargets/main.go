@@ -1,15 +1,14 @@
-// Ver 2026-07-24 13:15, by Sonnet 5
+// Ver 2026-09-12 12:00, by Gemini 4.5
 
 // gentargets writes loadtest/targets.json — one Vegeta attack target per
-// scenario (see docs/VirtualModelRouter_Design_v4_Core.md §12) — plus two
-// subset files, targets-plain.json and targets-image.json, split by
-// whether the scenario exercises image downscaling. Image decode/scale/
-// encode is by far the most expensive code path vmr has;
-// mixed into one combined percentile figure it silently drags up the
-// p95/p99/max for every *other*, genuinely-cheap scenario. runner.go fires
-// the two subsets as separate Vegeta attacks so the client-side report
-// shows "plain request" and "image request" latency as what they actually
-// are — two different cost regimes — instead of one blended number. Not
+// scenario (see docs/VirtualModelRouter_Design_v4_Core.md §12) — plus three
+// cost-regime subsets: targets-plain.json, targets-stream.json, and
+// targets-image.json. Percentiles are only comparable within a regime: a 5s
+// drip stream or a 100ms image decode/scale/encode mixed into cheap routing
+// requests silently drags up the p95/p99 for everyone else. runner.go fires
+// the subsets as separate Vegeta attacks so the client-side report shows
+// plain, long-stream, and image latency as what they actually are — three
+// genuinely different cost regimes — instead of one blended number. Not
 // checked in (embeds several generated images, sized to be real payloads
 // rather than repo-bloating fixtures) — regenerate on demand:
 //
@@ -63,15 +62,19 @@ type scenario struct {
 	body reqBody
 }
 
-// imageScenarios marks the scenarios that go in the "image" bucket rather
-// than "plain" — the split is by cost regime (image processing vs not),
-// not by request size, so large-but-non-image payloads like long_history/
-// big_response stay in "plain". big_image/multi_image are handled as their
-// own switch cases below (they need cacheBustVariants copies each, not one
-// line) and never consult this map; only gif reaches it, one fixed line
-// (see cacheBustVariants' doc comment for why gif doesn't need variants).
-var imageScenarios = map[string]bool{
-	"gif": true,
+// scenarioBucket assigns the cost regime each special scenario is reported
+// under — the split is by cost regime, not by request size, so large-but-
+// non-image payloads like long_history/big_response stay in "plain".
+// drip_stream gets its own bucket because a ~5s SSE response blended into
+// cheap-routing requests drags the group's p95 up for everyone — exactly the
+// distortion the plain/image split exists to prevent (see runner's
+// targetGroup). big_image/multi_image are handled as their own switch cases
+// below (they need cacheBustVariants copies each, not one line) and never
+// consult this map; only gif reaches it, one fixed line (see
+// cacheBustVariants' doc comment for why gif doesn't need variants).
+var scenarioBucket = map[string]string{
+	"gif":         "image",
+	"drip_stream": "stream",
 }
 
 // cacheBustVariants is how many distinct copies of the over-cap image
@@ -242,6 +245,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer image.Close()
+	stream, err := os.Create("loadtest/targets-stream.json")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gentargets:", err)
+		os.Exit(1)
+	}
+	defer stream.Close()
 
 	// writeLine marshals one target line and appends it to every dst file —
 	// computed once, written to as many destinations as apply (the combined
@@ -272,51 +281,51 @@ func main() {
 		"big_image", "multi_image", "gif", "long_history", "failover", "quota", "sticky",
 		"anthropic_baseline", "anthropic_stream", "responses_baseline", "responses_stream",
 	}
-	var plainCount, imageCount, totalLines int
+	// Interleave image variants across scenarios: big_image[0], multi_image[0],
+	// gif[0], big_image[1], ...
+	// Vegeta sequentially round-robins the targets file by line. If each
+	// scenario's 50 lines were written in contiguous blocks, a short run
+	// (like the light round with only 20 requests) would only ever hit the
+	// first block (big_image), starving multi_image and gif completely.
+	// Interleaving guarantees balanced distribution regardless of attack duration.
+	var interleavedImageBodies []reqBody
+	for i := 0; i < cacheBustVariants; i++ {
+		interleavedImageBodies = append(interleavedImageBodies,
+			bigImageVariants[i],
+			multiImageVariants[i],
+			scenarios["gif"].body,
+		)
+	}
+
+	var totalLines int
+	var bucketCounts = map[string]int{"plain": 0, "stream": 0, "image": 0}
 	for _, name := range order {
 		switch name {
-		case "big_image":
-			for _, body := range bigImageVariants {
-				writeLine("/v1/chat/completions", body, all, image)
-			}
-			imageCount++
-			totalLines += len(bigImageVariants)
-		case "multi_image":
-			for _, body := range multiImageVariants {
-				writeLine("/v1/chat/completions", body, all, image)
-			}
-			imageCount++
-			totalLines += len(multiImageVariants)
+		case "big_image", "multi_image", "gif":
+			// Handled together in the interleaved image block below.
+			continue
 		default:
 			s := scenarios[name]
-			if imageScenarios[name] { // gif
-				// Vegeta round-robins through a targets file by LINE, not by
-				// scenario identity — confirmed empirically, not assumed: an
-				// earlier version of this file gave gif only 1 line against
-				// big_image/multi_image's cacheBustVariants each, and a real
-				// run showed gif getting ~1% of the image group's traffic
-				// instead of its intended 1/3 share (big_image/multi_image
-				// drowned it out purely by line count). gif doesn't need
-				// distinct images — imgprep never rescales GIFs, so there's
-				// no cache to defeat, and repeating the exact same one
-				// cacheBustVariants times changes nothing about what this
-				// scenario measures — but it does need the same LINE COUNT
-				// as its two siblings to get its fair share of the "image"
-				// attack's rate again.
-				for i := 0; i < cacheBustVariants; i++ {
-					writeLine(s.path, s.body, all, image)
-				}
-				imageCount++
-				totalLines += cacheBustVariants
-			} else {
-				writeLine(s.path, s.body, all, plain)
-				plainCount++
-				totalLines++
+			bucket := scenarioBucket[name]
+			if bucket == "" {
+				bucket = "plain"
 			}
+			dst := plain
+			if bucket == "stream" {
+				dst = stream
+			}
+			writeLine(s.path, s.body, all, dst)
+			bucketCounts[bucket]++
+			totalLines++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "wrote loadtest/targets.json (%d scenarios, %d target lines — big_image/multi_image expand to %d cache-busting variants each), targets-plain.json (%d), targets-image.json (%d scenarios)\n",
-		len(order), totalLines, cacheBustVariants, plainCount, imageCount)
+	for _, body := range interleavedImageBodies {
+		writeLine("/v1/chat/completions", body, all, image)
+	}
+	bucketCounts["image"] = 3
+	totalLines += len(interleavedImageBodies)
+	fmt.Fprintf(os.Stderr, "wrote loadtest/targets.json (%d scenarios, %d target lines — big_image/multi_image expand to %d cache-busting variants each), targets-plain.json (%d), targets-stream.json (%d), targets-image.json (%d scenarios)\n",
+		len(order), totalLines, cacheBustVariants, bucketCounts["plain"], bucketCounts["stream"], bucketCounts["image"])
 }
 
 // solidJPEGDataURI synthesizes a wxh JPEG. Used at 3000x2000 (well over any

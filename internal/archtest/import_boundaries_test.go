@@ -216,6 +216,30 @@ var zeroInternalDepPackages = []string{
 	"vmr/internal/tokenutil",
 }
 
+// loadtestNoInternalDeps pins the boundary stated in the design doc's
+// performance-validation section: loadtest/runner computes its server-side
+// numbers straight from the raw audit JSONL its own vmr instance wrote and
+// must never import a vmr/internal package — a load test measures vmr's
+// HTTP surface, it has no business depending on the analysis half's
+// rendering pipeline. The design doc claims this is "guaranteed" by
+// `go list -deps`; this test is what actually makes that true.
+//
+// loadtest/mockupstream and loadtest/gentargets are excluded on purpose:
+// mockupstream speaks vmr's adapter semantics but implements them from
+// scratch (it's a fake provider, not a consumer), and gentargets is a
+// payload generator. Only runner consumes vmr-internal-shaped data.
+func TestArchitecture_LoadtestRunnerNoInternalDeps(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", "vmr/loadtest/runner").Output()
+	if err != nil {
+		t.Fatalf("go list -deps vmr/loadtest/runner: %v", err)
+	}
+	for _, d := range strings.Fields(string(out)) {
+		if strings.HasPrefix(d, "vmr/internal/") {
+			t.Errorf("loadtest/runner must have zero vmr/internal dependencies, but depends on %s", d)
+		}
+	}
+}
+
 // TestArchitecture_ZeroInternalDepPackages guards the leaf packages every
 // other package in this project is free to import without a boundary
 // concern — that promise only holds if they never grow an internal

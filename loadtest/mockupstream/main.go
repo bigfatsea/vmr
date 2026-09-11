@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-09-12 12:00, by Gemini 4.5
 
 // mockupstream stands in for a real LLM provider during vmr load testing
 // (see docs/VirtualModelRouter_Design_v4_Core.md §12). It never talks to a real

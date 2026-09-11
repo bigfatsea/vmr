@@ -1,3 +1,5 @@
+// Ver 2026-09-12 12:00, by Gemini 4.5
+
 // runner is the one-command version of the manual steps in loadtest/README.md:
 // starts loadtest/mockupstream and vmr, generates targets.json (and its two
 // cost-regime subsets, see gentargets), fires each load profile in profiles
@@ -67,17 +69,31 @@ type loadProfile struct {
 }
 
 const (
-	vmrAddr          = addr.VMR
-	mockAddr         = addr.Mock
-	vmrBinary        = "./vmr"
-	configPath       = "loadtest/config.yaml"
-	logDir           = "logs/loadtest" // must match loadtest/config.yaml's log_dir
-	reportsDir       = "reports"
-	reportOutPath    = "reports/loadtest-report.md"
-	targetsPath      = "loadtest/targets.json"
-	targetsPlainPath = "loadtest/targets-plain.json"
-	targetsImagePath = "loadtest/targets-image.json"
+	vmrAddr           = addr.VMR
+	mockAddr          = addr.Mock
+	vmrBinary         = "./vmr"
+	configPath        = "loadtest/config.yaml"
+	logDir            = "logs/loadtest" // must match loadtest/config.yaml's log_dir
+	reportsDir        = "reports"
+	reportOutPath     = "reports/loadtest-report.md"
+	targetsPath       = "loadtest/targets.json"
+	targetsPlainPath  = "loadtest/targets-plain.json"
+	targetsImagePath  = "loadtest/targets-image.json"
+	targetsStreamPath = "loadtest/targets-stream.json"
 )
+
+// targetGroup is one Vegeta targets file = one cost regime. Percentiles are
+// only comparable within a regime: a 5s drip stream or a 100ms image decode
+// blended into cheap-routing requests would drag the group's p95 up for
+// everyone (the same distortion the plain/image split was created to
+// prevent, see gentargets). Adding a scenario with a new cost profile means
+// adding a bucket here and in gentargets — never blending it into an
+// existing one.
+type targetGroup struct {
+	name string
+	path string
+	info *targetsInfo
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -152,67 +168,69 @@ func run() error {
 	// multi_image each as a pool of distinct variants, see gentargets'
 	// cacheBustVariants doc comment for why one fixed image would hide the
 	// decode/scale/encode cost these two scenarios exist to measure) —
-	// never leave any of the three behind in the source directory.
+	// never leave any of them behind in the source directory.
 	defer func() {
 		os.Remove(targetsPath)
 		os.Remove(targetsPlainPath)
 		os.Remove(targetsImagePath)
+		os.Remove(targetsStreamPath)
 	}()
 
-	plainTargets, err := parseTargets(targetsPlainPath)
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", targetsPlainPath, err)
+	groups := []targetGroup{
+		{"plain", targetsPlainPath, nil},
+		{"stream", targetsStreamPath, nil},
+		{"image", targetsImagePath, nil},
 	}
-	imageTargets, err := parseTargets(targetsImagePath)
-	if err != nil {
-		return fmt.Errorf("parse %s: %w", targetsImagePath, err)
+	totalScenarios := 0
+	for i := range groups {
+		info, err := parseTargets(groups[i].path)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", groups[i].path, err)
+		}
+		groups[i].info = info
+		totalScenarios += info.ScenarioCount()
 	}
-	totalScenarios := plainTargets.ScenarioCount() + imageTargets.ScenarioCount()
 
-	// Warmup round: exercises both target sets at low rate to absorb lazy-init
+	// Warmup round: exercises every target set at low rate to absorb lazy-init
 	// and initial state machine costs before formal measurements start.
 	// Server-side audit records with timestamps prior to round 1 are excluded.
 	fmt.Println("== warmup (2s low-rate) ==")
-	warmupPlainRate := (plainTargets.ScenarioCount() + 1) / 2
-	if warmupPlainRate < 2 {
-		warmupPlainRate = 2
-	}
-	warmupImageRate := (imageTargets.ScenarioCount() + 1) / 2
-	if warmupImageRate < 2 {
-		warmupImageRate = 2
-	}
-	if _, err := attack(targetsPlainPath, warmupPlainRate, 2*time.Second); err != nil {
-		return fmt.Errorf("warmup (plain): %w", err)
-	}
-	if _, err := attack(targetsImagePath, warmupImageRate, 2*time.Second); err != nil {
-		return fmt.Errorf("warmup (image): %w", err)
+	for _, g := range groups {
+		rate := (g.info.ScenarioCount() + 1) / 2
+		if rate < 2 {
+			rate = 2
+		}
+		if _, err := attack(g.path, rate, 2*time.Second); err != nil {
+			return fmt.Errorf("warmup (%s): %w", g.name, err)
+		}
 	}
 
 	var results []roundResult
 	for _, p := range profiles {
-		// Two separate attacks, not one against the combined file: each
-		// scenario's own share of the round's rate is kept the same as a
+		// One separate attack per group, not one against the combined file:
+		// each scenario's own share of the round's rate is kept the same as a
 		// combined attack would give it (scaleRate), so splitting the
 		// report doesn't silently change how hard this round hits vmr.
-		plainRate := scaleRate(p.rate, plainTargets.ScenarioCount(), totalScenarios)
-		imageRate := scaleRate(p.rate, imageTargets.ScenarioCount(), totalScenarios)
-		fmt.Printf("== round %q: plain=%d/s image=%d/s duration=%s ==\n", p.name, plainRate, imageRate, p.duration)
-		roundStart := time.Now()
-		plainRep, err := attack(targetsPlainPath, plainRate, p.duration)
-		if err != nil {
-			return fmt.Errorf("round %s (plain): %w", p.name, err)
+		var rates []string
+		for _, g := range groups {
+			rates = append(rates, fmt.Sprintf("%s=%d/s", g.name, scaleRate(p.rate, g.info.ScenarioCount(), totalScenarios)))
 		}
-		imageRep, err := attack(targetsImagePath, imageRate, p.duration)
-		if err != nil {
-			return fmt.Errorf("round %s (image): %w", p.name, err)
+		fmt.Printf("== round %q: %s duration=%s ==\n", p.name, strings.Join(rates, " "), p.duration)
+		reports := make(map[string]vegetaReport, len(groups))
+		roundStart := time.Now()
+		for _, g := range groups {
+			rep, err := attack(g.path, scaleRate(p.rate, g.info.ScenarioCount(), totalScenarios), p.duration)
+			if err != nil {
+				return fmt.Errorf("round %s (%s): %w", p.name, g.name, err)
+			}
+			reports[g.name] = rep
 		}
 		roundEnd := time.Now()
 		results = append(results, roundResult{
 			profile:   p,
 			startTime: roundStart,
 			endTime:   roundEnd,
-			plain:     plainRep,
-			image:     imageRep,
+			reports:   reports,
 		})
 	}
 
@@ -235,14 +253,14 @@ func run() error {
 
 	// Consistency assertion: verify actual bucketed audit requests against
 	// target line shares and total Vegeta requests within ±20% tolerance.
-	if err := assertScenarioConsistency(plainTargets, imageTargets, results, roundModels); err != nil {
+	if err := assertScenarioConsistency(groups, results, roundModels); err != nil {
 		return err
 	}
 
 	if err := os.MkdirAll(reportsDir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", reportsDir, err)
 	}
-	return writeReport(results, byModel, endpoints, plainTargets, imageTargets, vcsRevision, resReport)
+	return writeReport(results, byModel, endpoints, groups, vcsRevision, resReport)
 }
 
 func waitReady(addr string, timeout time.Duration) error {
@@ -262,8 +280,7 @@ type roundResult struct {
 	profile   loadProfile
 	startTime time.Time
 	endTime   time.Time
-	plain     vegetaReport
-	image     vegetaReport
+	reports   map[string]vegetaReport // by target group name (plain/stream/image)
 }
 
 // scaleRate gives a group of groupScenarios (out of totalScenarios) the same
@@ -484,13 +501,11 @@ func scanAuditFile(path string, results []roundResult, roundModels []map[string]
 			roundModels[roundIdx][rec.Model] = ms
 		}
 		ms.requests++
-		// 0ms is sub-ms (<=1ms left-censored), included rather than dropped.
-		if rec.DurMS >= 0 {
-			ms.dur = append(ms.dur, rec.DurMS)
-		}
-		if rec.TTFTMS >= 0 {
-			ms.ttft = append(ms.ttft, rec.TTFTMS)
-		}
+		// 0ms is a real sub-ms observation (DurMS truncates via Milliseconds());
+		// including it beats dropping it — the dropped set is the fast subset,
+		// so filtering upward-biases every percentile.
+		ms.dur = append(ms.dur, rec.DurMS)
+		ms.ttft = append(ms.ttft, rec.TTFTMS)
 		for _, a := range rec.Attempts {
 			if a.Endpoint == "" {
 				continue
@@ -588,16 +603,10 @@ func renderEndpointStats(eps map[string]*endpointStats) string {
 // assertScenarioConsistency asserts that actual request counts for every scenario
 // match expected counts computed from target line shares within ±20% tolerance.
 func assertScenarioConsistency(
-	plainTargets, imageTargets *targetsInfo,
+	groups []targetGroup,
 	results []roundResult,
 	roundModels []map[string]*modelStats,
 ) error {
-	var totalPlainReq, totalImageReq int64
-	for _, r := range results {
-		totalPlainReq += r.plain.Requests
-		totalImageReq += r.image.Requests
-	}
-
 	actualRequests := make(map[string]int64)
 	for _, rm := range roundModels {
 		for model, stats := range rm {
@@ -627,19 +636,18 @@ func assertScenarioConsistency(
 		return nil
 	}
 
-	if err := checkGroup("plain", plainTargets, totalPlainReq); err != nil {
-		return err
-	}
-	if err := checkGroup("image", imageTargets, totalImageReq); err != nil {
-		return err
-	}
-
 	allKnown := make(map[string]bool)
-	for _, m := range plainTargets.models {
-		allKnown[m] = true
-	}
-	for _, m := range imageTargets.models {
-		allKnown[m] = true
+	for _, g := range groups {
+		var totalReq int64
+		for _, r := range results {
+			totalReq += int64(r.reports[g.name].Requests)
+		}
+		if err := checkGroup(g.name, g.info, totalReq); err != nil {
+			return err
+		}
+		for _, m := range g.info.models {
+			allKnown[m] = true
+		}
 	}
 	for model := range actualRequests {
 		if !allKnown[model] {
@@ -768,38 +776,49 @@ func parseCPUTime(s string) (time.Duration, error) {
 	return time.Duration(totalSecs * float64(time.Second)), nil
 }
 
+// groupDescList renders the per-bucket description line for the report's
+// client-side section: "**plain** (13 scenarios: ...), **stream** (1), **image** (3: ...)".
+func groupDescList(groups []targetGroup) string {
+	parts := make([]string, 0, len(groups))
+	for _, g := range groups {
+		parts = append(parts, fmt.Sprintf("**%s** (%d scenarios: %s)", g.name, g.info.ScenarioCount(), strings.Join(g.info.models, "/")))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func writeReport(
 	results []roundResult,
 	byModel, endpoints string,
-	plainTargets, imageTargets *targetsInfo,
+	groups []targetGroup,
 	vcsRevision string,
 	resReport resourceStats,
 ) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<!-- generated by `go run ./loadtest/runner` on %s -->\n\n", time.Now().Format(time.RFC3339))
 	fmt.Fprint(&b, "# vmr load test report\n\n")
-	totalScenarios := plainTargets.ScenarioCount() + imageTargets.ScenarioCount()
+	totalScenarios := 0
+	for _, g := range groups {
+		totalScenarios += g.info.ScenarioCount()
+	}
 	fmt.Fprintf(&b, "Design and how to read this: [`docs/VirtualModelRouter_Design_v4_Core.md`](../docs/VirtualModelRouter_Design_v4_Core.md) §12, [`loadtest/README.md`](../loadtest/README.md). %d load rounds against the same %d scenarios (binary revision: `%s`).\n\n",
 		len(results), totalScenarios, vcsRevision)
 
 	fmt.Fprint(&b, "## Client-side view (Vegeta), by load round\n\n")
-	imageScenariosDesc := strings.Join(imageTargets.models, "/")
-	fmt.Fprintf(&b, "Fired as two separate attacks per round — **plain** (%d scenarios: everything except image processing) and **image** (%d scenarios: %s, the only code path that actually decodes/scales/encodes) — each at its proportional share of the round's nominal rate, so this split changes nothing about how hard vmr is hit, only how the results are bucketed. Blending them into one number would let image processing's real cost quietly drag up the \"plain\" p95/p99 for everything else.\n\n",
-		plainTargets.ScenarioCount(), imageTargets.ScenarioCount(), imageScenariosDesc)
+	fmt.Fprintf(&b, "Fired as one separate attack per cost-regime bucket per round — %s — each at its proportional share of the round's nominal rate, so the split changes nothing about how hard vmr is hit, only how the results are bucketed. Blending cost regimes into one number lets the expensive path quietly drag up everyone else's p95/p99.\n\n",
+		groupDescList(groups))
 	fmt.Fprint(&b, "| Round | Group | Rate | Duration | Requests | Success | p50 | p95 | p99 | Max |\n")
 	fmt.Fprint(&b, "|---|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range results {
-		writeClientRow(&b, r.profile, "plain", scaleRate(r.profile.rate, plainTargets.ScenarioCount(), totalScenarios), r.plain)
-		writeClientRow(&b, r.profile, "image", scaleRate(r.profile.rate, imageTargets.ScenarioCount(), totalScenarios), r.image)
+		for _, g := range groups {
+			writeClientRow(&b, r.profile, g.name, scaleRate(r.profile.rate, g.info.ScenarioCount(), totalScenarios), r.reports[g.name])
+		}
 	}
 	b.WriteString("\n*Note: `~` prefix on p99 indicates sample size < 200 requests (statistically noisy).*\n\n")
 	for _, r := range results {
-		for _, g := range []struct {
-			name string
-			rep  vegetaReport
-		}{{"plain", r.plain}, {"image", r.image}} {
-			if g.rep.Success < 1.0 {
-				fmt.Fprintf(&b, "⚠️ round %q (%s) had non-100%% success — status codes: %v, errors: %v\n\n", r.profile.name, g.name, g.rep.StatusCodes, g.rep.Errors)
+		for _, g := range groups {
+			rep := r.reports[g.name]
+			if rep.Success < 1.0 {
+				fmt.Fprintf(&b, "⚠️ round %q (%s) had non-100%% success — status codes: %v, errors: %v\n\n", r.profile.name, g.name, rep.StatusCodes, rep.Errors)
 			}
 		}
 	}

@@ -61,7 +61,7 @@ cmd_show() {
 cmd_clean() {
   # Scoped to exactly what this tool writes — never `rm -rf reports/` or
   # `rm -rf logs/`, both hold real, non-loadtest data too.
-  rm -rf logs/loadtest loadtest/targets.json loadtest/targets-plain.json loadtest/targets-image.json
+  rm -rf logs/loadtest loadtest/targets.json loadtest/targets-plain.json loadtest/targets-image.json loadtest/targets-stream.json
   rm -f "$REPORT"
   echo "cleaned loadtest artifacts"
 }
