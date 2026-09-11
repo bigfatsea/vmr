@@ -447,18 +447,28 @@ func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
 		t.Errorf("log.html refreshStatus missing auth headers: %q", wantHeader)
 	}
 
-	// log.html adaptive poller and moved sections
+	// log.html adaptive poller and moved sections. The layout order is
+	// pinned: Live Requests / Recent Failures above, then the terminal
+	// toolbar, then the log area (which wraps by default).
 	for _, want := range []string{
 		`id="live"`,
 		`id="failures-head"`,
 		`id="failures-body-wrap" hidden`,
+		`id="term-toolbar"`,
 		"const LIVE_POLL_FAST_MS = 2000;",
 		"const LIVE_POLL_IDLE_MS = 15000;",
 		"renderLive(",
 		"renderFailures(",
+		"white-space:pre-wrap",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("log.html missing element %q", want)
 		}
+	}
+	liveIdx := strings.Index(body, `id="live"`)
+	toolbarIdx := strings.Index(body, `id="term-toolbar"`)
+	logIdx := strings.Index(body, `<pre id="log">`)
+	if liveIdx == -1 || toolbarIdx == -1 || logIdx == -1 || liveIdx > toolbarIdx || toolbarIdx > logIdx {
+		t.Errorf("log.html layout order wrong: want live (%d) < toolbar (%d) < log area (%d)", liveIdx, toolbarIdx, logIdx)
 	}
 }

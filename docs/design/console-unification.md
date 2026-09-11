@@ -153,7 +153,7 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 | --- | --- | --- |
 | Overview | `max-width:1280px` 居中 | 宽表（拓扑/Live/Perf）在 1280 下列宽充裕；超宽可读性反降 |
 | Help | `max-width:1280px` 居中 | 长文阅读行宽 |
-| Log | **1280px 居中对齐** | 顶部为不折行终端，下方承载活动的 Live Requests 与可折叠 Recent Failures 表，与 Overview / Help 页面宽度统一 |
+| Log | **1280px 居中对齐** | 上方承载活动的 Live Requests 与可折叠 Recent Failures 表，下方为工具条与自动换行终端，与 Overview / Help 页面宽度统一 |
 
 Header/Footer 通栏，内部 `.hd-inner/.rail-inner/.ft-inner` 按所在页对齐。
 

@@ -13,9 +13,14 @@
 /* ===== Log-page private styles (terminal chrome; not shared with other pages) ===== */
 .w230{width:230px}
 
-/* Width parity with Overview/Help: the header rows, footer, terminal and the
-   live/failures sections all align to the shared 1280px page column. */
+/* Width parity with Overview/Help: the header rows, footer, live/failures
+   sections, toolbar and terminal all align to the shared 1280px column. */
 .hd-inner.full,.rail-inner.full,.ft-inner.full{max-width:var(--page-max)}
+
+/* Toolbar moved out of the header rail into the page body (it belongs to
+   the terminal, which now sits at the bottom); the header rail row is
+   unused here, so drop it. */
+.hd-rail{display:none}
 
 /* The Log page owns its own scrolling: body is a flex column, header and
    footer are fixed-size, main fills the rest and scrolls internally. */
@@ -34,12 +39,12 @@ body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 #conn-banner .spacer{flex:1}
 
 /* terminal viewport */
-main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;
+main.term{position:relative;flex:1;min-height:240px;display:flex;flex-direction:column;
   max-width:var(--page-max);width:100%;margin:0 auto;padding:0 16px;box-sizing:border-box}
 pre#log{
-  flex:1;overflow-y:auto;overflow-x:auto;margin:0;padding:6px 12px 14px;
+  flex:1;overflow-y:auto;margin:0;padding:6px 12px 14px;
   font-family:var(--font-mono);font-size:11.5px;line-height:1.1;
-  white-space:pre;
+  white-space:pre-wrap;word-break:break-all;
 }
 
 /* log line structural classes */
@@ -78,8 +83,15 @@ pre#log{
 .lvl[data-lvl=OK].on{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.4)}
 .lvl[data-lvl=INF].on{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.4)}
 
-/* ===== Live Requests / Recent Failures sections (moved from Overview) ===== */
-.below-log{max-width:var(--page-max);margin:0 auto;width:100%;padding:6px 16px 14px;box-sizing:border-box;flex-shrink:0;overflow-y:auto}
+/* ===== Live Requests / Recent Failures sections (above the terminal) ===== */
+.live-block{max-width:var(--page-max);margin:0 auto;width:100%;padding:6px 16px 2px;box-sizing:border-box;
+  flex:0 1 auto;min-height:0;overflow-y:auto}
+
+/* terminal toolbar — the level chips / filter / pause / copy controls,
+   relocated from the header rail to sit directly above the log area */
+.term-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  max-width:var(--page-max);width:100%;margin:0 auto;padding:6px 16px;box-sizing:border-box;
+  border-top:1px solid var(--border);flex-shrink:0}
 .chips{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}
 .chip{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;font-weight:400}
 .chip:hover{color:var(--text-bright)}
@@ -96,8 +108,8 @@ pre#log{
 </head>
 <body>
 
-<!-- mountConsole injects header (rows 1+2), footer, and shared modals.
-     The rail content below is appended by the page script after mount. -->
+<!-- mountConsole injects header (row 1 — the rail row is unused here), footer,
+     and shared modals. -->
 
 <!-- disconnection banner: stands alone, separate from the jump chip -->
 <div id="conn-banner">
@@ -106,14 +118,10 @@ pre#log{
   <button class="btn sm" id="btn-retry">⟳ Reconnect</button>
 </div>
 
-<main class="term">
-  <pre id="log"></pre>
-  <button id="jump">↓ <span id="jump-n">0</span> new</button>
-</main>
-
-<!-- Live Requests / Recent Failures — moved here from the Overview page.
-     Both tables size to their content; Recent Failures starts collapsed. -->
-<div class="below-log">
+<!-- Live Requests / Recent Failures sit above the terminal — the live
+     activity is the first thing you see; both tables size to their content
+     and Recent Failures starts collapsed. -->
+<div class="live-block">
   <!-- ============ live requests ============ -->
   <div class="section-head" id="live">Live Requests
     <span class="badge b-cyan" id="live-running">0 running</span>
@@ -161,6 +169,15 @@ pre#log{
   </div>
 </div>
 
+<!-- terminal toolbar — level chips / filter / pause / copy; relocated from
+     the header rail to sit directly above the log area -->
+<div class="term-toolbar" id="term-toolbar"></div>
+
+<main class="term">
+  <pre id="log"></pre>
+  <button id="jump">↓ <span id="jump-n">0</span> new</button>
+</main>
+
 <script>
 /*{{CONSOLE_JS}}*/
 
@@ -206,11 +223,11 @@ const con = mountConsole({
   refresh: 'stream',
 });
 
-/* Build the page toolbar (rail row 2) inline.
-   mountConsole leaves the #hd-rail-inner element; we populate it here.
-   The spacer is already appended by mountConsole for full-bleed pages. */
-const railEl = document.getElementById('hd-rail-inner');
-railEl.insertAdjacentHTML('afterbegin', `
+/* Build the page toolbar inline — it lives in the page body, directly above
+   the log area (relocated from the header rail; the header rail row is
+   hidden on this page). */
+const toolbarEl = document.getElementById('term-toolbar');
+toolbarEl.innerHTML = `
   <span class="lvl-group">
     <span class="lvl-label">Level:</span>
     <button class="lvl on" data-lvl="ERR">ERR</button>
