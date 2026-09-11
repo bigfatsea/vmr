@@ -99,48 +99,104 @@ var documentMarkers = [][]byte{
 }
 
 // dataFieldMarkers are the field names / value prefixes whose value holds
-// an attachment's raw (still base64-encoded) bytes: "data" for Anthropic's
-// source.* payloads, "file_data" for Responses' input_file blocks (see the
+// an attachment's raw (still base64-encoded) bytes, each tagged with the
+// attachment kind the marker proves: "data" for Anthropic's source.*
+// payloads, "file_data" for Responses' input_file blocks (see the
 // openai-python SDK's ResponseInputFileParam — the field is genuinely named
 // differently, not just a different nesting of the same key), and the two
 // OpenAI image shapes, whose payload is a data URI — nested in image_url.url
 // for Chat Completions, a flat image_url for Responses.
-var dataFieldMarkers = [][]byte{
-	[]byte(`"data":"`),
-	[]byte(`"file_data":"`),
-	[]byte(`"url":"data:`),
-	[]byte(`"image_url":"data:`),
+//
+// "data":" is spanAmbiguous on purpose: Anthropic's image source.data and
+// document source.data share the field name, so the marker alone cannot
+// classify the span — resolveAmbiguousKind sniffs the source object's
+// media_type (which always precedes data) instead. The sniff applies ONLY
+// to ambiguous spans; unambiguous markers are never re-classified.
+var dataFieldMarkers = []struct {
+	marker []byte
+	kind   spanKind
+}{
+	{[]byte(`"data":"`), spanAmbiguous},
+	{[]byte(`"file_data":"`), spanDocument},
+	{[]byte(`"url":"data:`), spanImage},
+	{[]byte(`"image_url":"data:`), spanImage},
 }
 
-// attachmentSpans returns the byte ranges of every attachment payload value
-// in body as [start,end) pairs — ordered, non-overlapping (the scan resumes
-// after each value, so a marker inside an already-captured payload can't
-// produce a second span). Unterminated trailing values (truncated request
-// body) are spanned to end-of-body: the tail is still payload bytes, not
-// text.
-func attachmentSpans(body []byte) [][2]int {
-	var spans [][2]int
+// mediaTypeSniffWindow is how far back from a `"data":"` value's start the
+// source object's media_type field can sit — every integrated shape puts it
+// immediately before data ("media_type":"image/png","data":" ≈ 35 bytes);
+// 64 leaves room for pretty-printed spacing. The sniff looks for `"image/`
+// (quote-anchored, so base64 payload bytes — which never contain quotes —
+// cannot false-positive), and anything else fails open to document: the
+// same classification today's untyped spans get, never an under-count.
+const mediaTypeSniffWindow = 64
+
+type spanKind uint8
+
+const (
+	spanDocument spanKind = iota
+	spanImage
+	// spanAmbiguous is only a dataFieldMarkers-table value: by the time a
+	// span is built it has been resolved to spanDocument or spanImage.
+	spanAmbiguous
+)
+
+// attachmentSpan is one attachment payload's byte range plus the kind the
+// producing marker (or media_type sniff) proved. The span bytes are excluded
+// from the text estimate and accounted by imageCount*imageTokenEstimate
+// (image) or estimateDocumentTokens (document) — which one depends on kind.
+type attachmentSpan struct {
+	start, end int // [start,end) in body; unterminated trailing values span to end-of-body
+	kind       spanKind
+}
+
+// attachmentSpans returns every attachment payload value in body as ordered,
+// non-overlapping typed spans (the scan resumes after each value, so a
+// marker inside an already-captured payload can't produce a second span).
+// Unterminated trailing values (truncated request body) are spanned to
+// end-of-body: the tail is still payload bytes, not text.
+func attachmentSpans(body []byte) []attachmentSpan {
+	var spans []attachmentSpan
 	pos := 0
 	for pos < len(body) {
 		best, bestLen := -1, 0
+		kind := spanDocument
 		for _, m := range dataFieldMarkers {
-			if i := bytes.Index(body[pos:], m); i >= 0 && (best < 0 || pos+i < best) {
-				best, bestLen = pos+i, len(m)
+			if i := bytes.Index(body[pos:], m.marker); i >= 0 && (best < 0 || pos+i < best) {
+				best, bestLen = pos+i, len(m.marker)
+				kind = m.kind
 			}
 		}
 		if best < 0 {
 			break
 		}
 		start := best + bestLen
+		if kind == spanAmbiguous {
+			kind = resolveAmbiguousKind(body, start)
+		}
 		if end := jsonscan.IndexUnescapedQuote(body[start:]); end < 0 {
-			spans = append(spans, [2]int{start, len(body)})
+			spans = append(spans, attachmentSpan{start, len(body), kind})
 			break
 		} else {
-			spans = append(spans, [2]int{start, start + end})
+			spans = append(spans, attachmentSpan{start, start + end, kind})
 			pos = start + end + 1
 		}
 	}
 	return spans
+}
+
+// resolveAmbiguousKind classifies an Anthropic-shape `"data":"` span via the
+// source object's media_type field, which every integrated shape puts just
+// before the data value.
+func resolveAmbiguousKind(body []byte, start int) spanKind {
+	lo := start - mediaTypeSniffWindow
+	if lo < 0 {
+		lo = 0
+	}
+	if bytes.Contains(body[lo:start], []byte(`"image/`)) {
+		return spanImage
+	}
+	return spanDocument // fail-open: today's classification for anything unrecognizable
 }
 
 // estimateTextTokens estimates the token count of body's NON-attachment
@@ -152,26 +208,29 @@ func attachmentSpans(body []byte) [][2]int {
 // charge a 500KB inline image as ~100K phantom text tokens on top of its
 // own (correct) image estimate, and that inflated total is what quota
 // metering's degraded In-side charge would write to the ledger.
-func estimateTextTokens(body []byte, spans [][2]int) int64 {
+func estimateTextTokens(body []byte, spans []attachmentSpan) int64 {
 	var stats tokenutil.CharStats
 	prev := 0
 	for _, s := range spans {
-		stats.Add(tokenutil.Analyze(body[prev:s[0]]))
-		prev = s[1]
+		stats.Add(tokenutil.Analyze(body[prev:s.start]))
+		prev = s.end
 	}
 	stats.Add(tokenutil.Analyze(body[prev:]))
 	return tokenutil.EstimateFromStats(stats)
 }
 
-// estimateDocumentTokens converts the attachment spans' raw (still
+// estimateDocumentTokens converts the document spans' raw (still
 // base64-encoded) byte length into an estimated document token count via
 // documentBytesPerToken, but only once some documentMarker confirms an
 // attachment is actually present — a pure-text or pure-image request with
 // no document marker contributes zero here regardless of what "data" fields
-// it might contain for unrelated reasons. Known imprecision: a request
-// carrying both an image and a document sums both spans — an over-estimate,
-// the safe direction, not a correctness bug.
-func estimateDocumentTokens(body []byte, spans [][2]int) int64 {
+// it might contain for unrelated reasons. Spans the producing marker (or
+// media_type sniff) typed as images are skipped: an image's bytes are
+// already accounted by imageCount*imageTokenEstimate, and summing them here
+// too charged a 500KB inline image ~25K phantom document tokens on top of
+// its own (correct) image estimate whenever a document marker appeared
+// anywhere in the body — including mere mentions of PDFs in message text.
+func estimateDocumentTokens(body []byte, spans []attachmentSpan) int64 {
 	// No attachment payload spans → no document bytes to size, whatever
 	// markers the body text might mention. Skip the 4 whole-body Contains
 	// scans below on the ~95% of requests that carry no attachment at all.
@@ -190,7 +249,10 @@ func estimateDocumentTokens(body []byte, spans [][2]int) int64 {
 	}
 	var total int64
 	for _, s := range spans {
-		total += int64(s[1] - s[0])
+		if s.kind != spanDocument {
+			continue
+		}
+		total += int64(s.end - s.start)
 	}
 	return total / documentBytesPerToken
 }

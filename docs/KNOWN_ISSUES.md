@@ -485,12 +485,6 @@
 >
 > **2026-09-11 复核后续**（详见 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）：11 项已修并从本清单移除（编号不再复用）——顺手批 `2.106`（/log 写超时）、`2.108`（zstd 限并发）、`2.112`（buildGraph tie-breaker）、`2.113`（明细索引原子落盘）、`2.117`（tailPrev 死字段）、`2.118`（replay 前导空白）、`2.123`（rt.ctx 同步）；批次 1 `2.107`（/reports 热重载联动）、`2.110`（tailSlack 修正）、`2.114`（LLM 锚点长度门槛）、`2.116`（linkCompactions needle 门槛）。`2.111` 复核结论改为**明确不补**（见其条目）。
 
-#### 2.109 [低] `estimateDocumentTokens` 将图片附件 Span 计入文档计费
-
-- **现状**：`internal/server/facts.go` 的 `attachmentSpans` 无差别收集图片与文档 span，`estimateDocumentTokens` 在存在文档标记时遍历全量 spans（含图片）——代码注释自认 “over-estimate, safe direction”，但虚高配额扣费对用户是真实损耗。
-- **可能方案**：区分 span 类型（图片 vs 文档），仅累加文档类。
-- **ROI**：Return=配额口径准确；Investment=小改动。
-
 #### 2.111 [低，潜在路径，决定不补] `taskseg.Generic` 缺失 Anthropic tool_result 过滤
 
 - **现状**：`internal/taskseg/generic.go` 的 `RealUserText` 对非空文本直接返回 true；Anthropic 协议将 tool_result 置于 user 角色消息，通用 Profile 下工具轮次会被误切为新任务。
@@ -528,12 +522,18 @@
 - **ROI**：低——可暂不处理，登记防回归。
 
 
+#### 2.125 [低，登记待触发] `dataFieldMarkers` 只匹配紧凑 JSON，pretty-printed 请求体的附件 payload 会被整段当文本估算
+
+- **现状**：`internal/server/facts.go` 的四个 data-field marker（`"data":"` / `"file_data":"` / `"url":"data:` / `"image_url":"data:`）都假设冒号后无空格的紧凑序列化。pretty-printed 请求体（`"data": "<base64>"`）一个 marker 都匹配不上 → span 不建立 → 整段 base64 payload 落进 `estimateTextTokens` 按文本计权（400KB 图 ≈ 85K 幻影文本 token，比 §2.109 修掉的双重计费更差）。§2.109 修复的分型嗅探本身不受影响——紧凑 body 里 media_type 的值引号始终紧贴 `image/`。
+- **为什么待定**：主流 SDK 一律发送紧凑 JSON（带内联附件还做 pretty-print 的形态至今为零）；marker 改为空白容忍匹配要动热路径扫描循环的字节匹配结构，复杂度不小。Span 建立失败的后果也只落在 degraded 扣费估算与 `WithinContext` 软重排，方向保守。
+- **触发条件**：`vmr analyze` 的 `requests/index.json` 出现"请求体含缩进/换行的附件 payload"的记录（即真实流量中出现 pretty-printed 附件请求），或 profile 显示 facts 提取对真实负载失真。
+
 ---
 
 ## 3. 跨组排期结论
 
 - **全局结论**：待办里没有「价值高、成本低、却一直没做」的异常。值得优先投入的集中在三类：大语料规模（§2.2 看触发、§2.1 已证 5.2×）、LLM 解读层校准（§2.18，成本在人工标注）、路由配额（§2.52，用户 hold）。分析半区的产品路线（新视图 / 导出 / 达成信号）已移入 `ROADMAP`，不在此清单排期。
-- **2026-09-11 全系统 Review 剩余项（复核后）**：11 项已修（顺手 7 + 批次 1 的 4，见 H 组顶部说明与 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）。剩余排期——**批次 2（需测试配套）**：§2.109（span 分型）、§2.119（jsonscan 畸形元素 + fuzz）；**批次 3（需设计 / 待触发）**：§2.86、§2.100、§2.57；**批次 4（架构演进期 / 待触发）**：§2.120 / §2.121 / §2.122 / §2.124。§2.111 复核后改为明确不补。
+- **2026-09-11 全系统 Review 剩余项（复核后）**：11 项已修（顺手 7 + 批次 1 的 4，见 H 组顶部说明与 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）。剩余排期——**批次 2（需测试配套）**：§2.119（jsonscan 畸形元素 + fuzz）；**批次 3（需设计 / 待触发）**：§2.86、§2.100、§2.57；**批次 4（架构演进期 / 待触发）**：§2.120 / §2.121 / §2.122 / §2.124。§2.111 复核后改为明确不补；§2.125 为修复 §2.109 时新发现的登记待触发项。
 - **多数条目不是「不值得做」，是「收益未经测量」**：§2.2 / §2.3 / §2.7 / §2.10 / §2.17 的共同点是收益尚未实测——而先做优化再测量正是这个项目一贯拒绝的顺序；触发条件到了先测再说。
 - **发版前必做**：§2.97（CHANGELOG `[Unreleased]` 归整）——唯一一条不等触发、按日程必须处理的。
 - **立即可做**（界限清楚、随时可做）：§2.59 compare 同源节选合并。

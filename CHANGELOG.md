@@ -44,6 +44,7 @@ commits and design docs hold the full reasoning.
 - **Breaking**: `vmr report` and `vmr story` subcommand aliases are removed (`vmr analyze` is the single entry point), and the zoom flags are renamed without aliases: `-corpus` → `-benchmark`, `-story-only` → `-journey-only`
 
 ### Fixed
+- the degraded quota estimate no longer charges an inline image's base64 bytes a second time as document tokens: attachment spans are typed by the producing field (with the source object's media_type disambiguating Anthropic's shared `"data":"` field), so `estimateDocumentTokens` counts document payloads only — image-only requests whose text merely mentions `application/pdf` also stop opening the document estimate
 - `ctxgraph` edit classification: a same-length turn whose last 1–2 messages were replaced is now classified `ReplaceTail`, not `Append` — the full-prefix re-encode it causes was being reported as a spurious `unexplained` prompt-cache break in journey analysis
 - compaction→session linking no longer accepts a sub-12-rune first instruction (`ok`, `continue`, …) as evidence: such a needle matches by coincidence inside any tens-of-KB compaction prompt and produced bogus "summarizes" / "continued-from" edges in session topology
 - `/log` streaming sets a per-write deadline (10s): a client that stops reading is disconnected instead of parking its broadcast-follower goroutine indefinitely

@@ -198,3 +198,89 @@ func TestComputeRequestFacts_UnterminatedPayloadNotCountedAsText(t *testing.T) {
 			facts.EstimatedTokens, 100_000/documentBytesPerToken, tokenutil.Estimate(truncated))
 	}
 }
+
+// TestComputeRequestFacts_ImageSpanNotChargedAsDocument pins the typed-span
+// split (§2.109): an image payload's bytes are accounted ONLY by
+// imageCount*imageTokenEstimate. estimateDocumentTokens must skip image
+// spans, so "image + document marker anywhere" no longer charges the image
+// bytes a second time at the bytes/documentBytesPerToken scale.
+func TestComputeRequestFacts_ImageSpanNotChargedAsDocument(t *testing.T) {
+	// An Anthropic image (data field with an image media_type) plus a
+	// document marker elsewhere in the body — the old untyped-span behavior
+	// summed the image's bytes into the document estimate.
+	img := b64Payload(400_000)
+	anthropicImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
+		`{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + string(img) + `"}},` +
+		`{"type":"text","text":"now also read the attached PDF: application/pdf"}]}]}`)
+	facts := computeRequestFacts(anthropicImg, 1, false)
+
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"now also read the attached PDF: application/pdf"}]}`), 0, false)
+	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
+	// The delta must sit at the flat per-image scale. At the old behavior
+	// the 400KB payload would add 400_000/20 = 20K phantom document tokens
+	// on top of the image estimate.
+	if diff <= 0 || diff > 2*imageTokenEstimate {
+		t.Errorf("image delta with a document marker present = %d, want within (0, %d] — larger means image bytes leaked into the document estimate", diff, 2*imageTokenEstimate)
+	}
+}
+
+// TestComputeRequestFacts_DocumentMarkerInTextDoesNotChargeImages covers the
+// wider trigger the §2.109 review surfaced: documentMarkers is a whole-body
+// Contains, so an IMAGE-ONLY request whose message text merely mentions
+// "application/pdf" opens the document gate. With typed spans the image
+// span is skipped and the estimate stays at the image scale.
+func TestComputeRequestFacts_DocumentMarkerInTextDoesNotChargeImages(t *testing.T) {
+	img := b64Payload(400_000)
+	openAIImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
+		`{"type":"text","text":"convert this screenshot to PDF, output format application/pdf"},` +
+		`{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` + string(img) + `"}}]}]}`)
+	facts := computeRequestFacts(openAIImg, 1, false)
+
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"convert this screenshot to PDF, output format application/pdf"}]}`), 0, false)
+	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
+	if diff <= 0 || diff > 2*imageTokenEstimate {
+		t.Errorf("image delta when text mentions PDF = %d, want within (0, %d] — larger means the text-level document marker opened the gate for image bytes", diff, 2*imageTokenEstimate)
+	}
+}
+
+// TestComputeRequestFacts_AnthropicDocumentStillCounted is the flip side:
+// the media_type sniff must not under-count real documents — an Anthropic
+// document source.data (media_type application/pdf, no "image/ in the
+// sniff window) stays a document span and its bytes are estimated.
+func TestComputeRequestFacts_AnthropicDocumentStillCounted(t *testing.T) {
+	doc := b64Payload(300_000)
+	body := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
+		`{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + string(b64Payload(1000)) + `"}},` +
+		`{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(doc) + `"}}]}]}`)
+	facts := computeRequestFacts(body, 1, false)
+
+	// Expected: 1 flat image estimate + 300_000/20 document tokens, plus
+	// small text-estimate noise. A value far below the document scale means
+	// the sniff mis-typed the document span as an image (under-count).
+	wantDoc := int64(300_000 / documentBytesPerToken)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"x"}]}`), 0, false)
+	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
+	if diff < wantDoc/2 {
+		t.Errorf("mixed image+document delta = %d, want >= %d (the document scale) — the document span was mis-classified as an image", diff, wantDoc/2)
+	}
+}
+
+// TestComputeRequestFacts_AmbiguousDataWithoutMediaTypeFailsOpenToDocument
+// locks in the sniff's fail-open default: an ambiguous `"data":"` span with
+// no media_type in the sniff window (e.g. an input_audio block, or a
+// truncated source object) classifies as document — the same call today's
+// untyped spans make — never an under-count.
+func TestComputeRequestFacts_AmbiguousDataWithoutMediaTypeFailsOpenToDocument(t *testing.T) {
+	audio := b64Payload(300_000)
+	body := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
+		`{"type":"input_audio","data":"` + string(audio) + `","format":"wav"},` +
+		`{"type":"text","text":"see the attached application/pdf"}]}]}`)
+	facts := computeRequestFacts(body, 0, false)
+
+	wantDoc := int64(300_000 / documentBytesPerToken)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"see the attached application/pdf"}]}`), 0, false)
+	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
+	if diff < wantDoc/2 {
+		t.Errorf("audio-payload delta = %d, want >= %d (the document scale) — the sniff's fail-open default to document was lost", diff, wantDoc/2)
+	}
+}
