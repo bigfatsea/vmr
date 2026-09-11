@@ -89,3 +89,6 @@ _subtasks
 
 # Agent Forge 运行时产物（spawn.sh 自动追加）
 .forge/
+
+# Agent Forge 资产定位（个人本机路径，不入库；协作者自建）
+.agent-forge.yml
