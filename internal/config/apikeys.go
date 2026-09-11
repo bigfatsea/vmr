@@ -2,7 +2,11 @@
 
 package config
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+)
 
 // expandProviderAPIKeys desugars every Provider.APIKeys into that many
 // independent Provider entries — named "<name>-<label>", sharing
@@ -132,13 +136,19 @@ func rewriteProviderRefs(refs []string, rename map[string][]string) ([]string, b
 }
 
 // keyTailLabel derives a Provider.KeyLabel for a provider written the plain
-// api_key way (no api_keys labels): the key's last 6 characters, or the
-// whole key when it's shorter. 6 (vs the client-side audit.KeyTag's 8-char
-// window) is deliberate — a different concept with a different derivation;
-// see the LiveStats design doc's decision table, do not unify them.
+// api_key way (no api_keys labels): the key's last 6 characters. 6 (vs the
+// client-side audit.KeyTag's 8-char window) is deliberate — a different
+// concept with a different derivation; see the LiveStats design doc's
+// decision table, do not unify them.
 func keyTailLabel(key string) string {
 	if len(key) <= 6 {
-		return key
+		// A key this short has no safe 6-character tail to reveal — the
+		// "tail" would be the whole key, and this label lands verbatim in
+		// logs, audit records, and the console. Hash it instead: still
+		// distinct per key (so two different short keys don't collide into
+		// one label), never reversible back to the plaintext.
+		sum := sha256.Sum256([]byte(key))
+		return "#" + hex.EncodeToString(sum[:2])
 	}
 	return key[len(key)-6:]
 }

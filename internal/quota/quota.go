@@ -4,6 +4,7 @@ package quota
 
 import (
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -212,6 +213,15 @@ type Registry struct {
 	// every Charge/Used hits resetIfStaleLocked, and a persistent rollback
 	// must not spam the log — one line per process lifetime covers it.
 	rollbackWarned bool
+
+	// lock/lockErr guard the advisory .vmr-quota.lock (store.go's
+	// ensureDirLock/Close): a second process pointing at the same log_dir
+	// must never read-modify-write the same vmr-quota.json — see
+	// internal/livestats' identical .vmr-stats.lock for the reasoning this
+	// mirrors. Acquired lazily by Flush; while held (lock != nil),
+	// subsequent Flushes reuse it until Close().
+	lock    *os.File
+	lockErr error
 }
 
 // NewRegistry creates a Registry that persists to path (see store.go).

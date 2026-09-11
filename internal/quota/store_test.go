@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,13 @@ func TestStore_RoundTrip(t *testing.T) {
 		t.Fatalf("file perm = %o, want 0600", perm)
 	}
 
+	// Release r's dir lock before a second Registry opens the same path —
+	// flock is per-open-file-description, not per-process, so r2 would
+	// otherwise contend with r's still-open fd even within this one test
+	// process.
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
 	r2 := NewRegistry(path)
 	if err := r2.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -164,6 +172,9 @@ func TestStore_Flusher_PeriodicAndFinalFlush(t *testing.T) {
 	stop()
 	if err := r.Flush(); err != nil {
 		t.Fatalf("final Flush after stop: %v", err)
+	}
+	if err := r.Close(); err != nil { // release r's dir lock before r2 opens the same path
+		t.Fatalf("Close: %v", err)
 	}
 
 	r2 := NewRegistry(path)
@@ -394,6 +405,9 @@ func TestStore_PruneOrphanKeys(t *testing.T) {
 	if err := r.Flush(); err != nil {
 		t.Fatalf("Flush after prune: %v", err)
 	}
+	if err := r.Close(); err != nil { // release r's dir lock before r2 opens the same path
+		t.Fatalf("Close: %v", err)
+	}
 
 	// Reload in fresh registry and verify
 	r2 := NewRegistry(path)
@@ -479,6 +493,9 @@ func TestStore_ConcurrentChargeAndFlush(t *testing.T) {
 	if err := r.Flush(); err != nil {
 		t.Fatalf("final Flush: %v", err)
 	}
+	if err := r.Close(); err != nil { // release r's dir lock before r2 opens the same path
+		t.Fatalf("Close: %v", err)
+	}
 
 	r2 := NewRegistry(path)
 	if err := r2.Load(); err != nil {
@@ -496,4 +513,59 @@ func TestStore_ConcurrentChargeAndFlush(t *testing.T) {
 		t.Fatalf("counters mismatch after concurrent charge/flush: got Fresh=%v CacheRead=%v Out=%v Requests=%v est=%v; want Fresh=%v CacheRead=%v Out=%v Requests=%v est=%v",
 			c.Fresh, c.CacheRead, c.Out, c.Requests, est, wantFresh, wantCacheRead, wantOut, wantRequests, wantEst)
 	}
+}
+
+// TestStore_DirLock_LoadUnlockedAndFlushExclusive pins that Load is unlocked
+// (allowing vmr replay or a second instance to read state while the router daemon runs),
+// while Flush takes an exclusive lock.
+func TestStore_DirLock_LoadUnlockedAndFlushExclusive(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vmr-quota.json")
+	ps := time.Now().Truncate(time.Hour)
+
+	r1 := NewRegistry(path)
+	r1.Charge("p1", "tokens/1mo", ps, Counters{Fresh: 100}, 1)
+	if err := r1.Flush(); err != nil {
+		t.Fatalf("r1 Flush: %v", err)
+	}
+
+	// r2 must be able to Load() even though r1 is holding .vmr-quota.lock
+	r2 := NewRegistry(path)
+	if err := r2.Load(); err != nil {
+		t.Fatalf("r2 Load failed while r1 holds lock: %v", err)
+	}
+	c, _ := r2.Used("p1", "tokens/1mo", ps)
+	if c.Fresh != 100 {
+		t.Fatalf("r2 Loaded Fresh=%v, want 100", c.Fresh)
+	}
+
+	// But r2 Flush must fail due to lock contention while r1 holds it (non-windows)
+	r2.Charge("p1", "tokens/1mo", ps, Counters{Fresh: 50}, 0)
+	if runtime.GOOS != "windows" {
+		if err := r2.Flush(); err == nil {
+			t.Fatal("r2 Flush succeeded while r1 holds lock, want error")
+		}
+	}
+
+	// Releasing r1's lock must allow r2 to Flush
+	if err := r1.Close(); err != nil {
+		t.Fatalf("r1 Close: %v", err)
+	}
+	if err := r2.Flush(); err != nil {
+		t.Fatalf("r2 Flush after r1 Close: %v", err)
+	}
+	if err := r2.Close(); err != nil {
+		t.Fatalf("r2 Close: %v", err)
+	}
+
+	// r3 reloads and sees r2's updated count (150)
+	r3 := NewRegistry(path)
+	if err := r3.Load(); err != nil {
+		t.Fatalf("r3 Load: %v", err)
+	}
+	c3, _ := r3.Used("p1", "tokens/1mo", ps)
+	if c3.Fresh != 150 {
+		t.Fatalf("r3 Fresh=%v, want 150", c3.Fresh)
+	}
+	_ = r3.Close()
 }

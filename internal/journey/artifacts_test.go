@@ -123,3 +123,26 @@ func TestBuildVMArtifacts_Render(t *testing.T) {
 		t.Errorf("renderedEN missing expected elements: %s", renderedEN)
 	}
 }
+
+func TestLooksLikeFilePath(t *testing.T) {
+	valid := []string{
+		"a.out", "build.bin", "main.o", "program.exe",
+		"src/main.go", "output.txt", "config.yaml", "README.md",
+		"Makefile", "Dockerfile", "dist/binary",
+	}
+	for _, p := range valid {
+		if !looksLikeFilePath(p) {
+			t.Errorf("looksLikeFilePath(%q) = false, want true", p)
+		}
+	}
+
+	invalid := []string{
+		"", "1", "42", "None", "document.getElementById",
+		"obj.field", "func()", "calc(x)",
+	}
+	for _, p := range invalid {
+		if looksLikeFilePath(p) {
+			t.Errorf("looksLikeFilePath(%q) = true, want false", p)
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"vmr/internal/ctxgraph"
 	"vmr/internal/digest"
@@ -176,6 +177,18 @@ func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 		digest.EncodeString(p.From),
 		digest.EncodeString(p.To),
 	)
+
+	// The daily-summary/activity-distribution sections bucket by calendar
+	// day in fmtutil.DisplayZone (production value: time.Local) — an L2 hit
+	// that skips re-aggregation must not hand back another timezone's day
+	// buckets. time.Location.String() is NOT usable here: production's
+	// time.Local.String() is the literal "Local" on every machine
+	// regardless of its actual offset, so it folds every timezone into one
+	// identical, useless fingerprint component. The numeric UTC offset (in
+	// seconds, DST-aware at the moment this runs) is what actually
+	// distinguishes one calendar-day bucketing from another.
+	_, offsetSec := time.Now().In(fmtutil.DisplayZone).Zone()
+	components = append(components, digest.EncodeInt64(int64(offsetSec)))
 
 	d := digest.Digest(components...)
 	return d[:]

@@ -169,7 +169,7 @@ model_defaults:
     capabilities: [text]
     max_context_tokens: 128000
   m2:
-    capabilities: [vision]
+    capabilities: [image]
     max_context_tokens: 200000
 providers:
   - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k}
@@ -189,8 +189,8 @@ models:
 	for _, c := range caps {
 		capStrs = append(capStrs, c.(string))
 	}
-	if strings.Join(capStrs, ",") != "text,vision" {
-		t.Errorf("capabilities = %v, want union [text vision] sorted", capStrs)
+	if strings.Join(capStrs, ",") != "image,text" {
+		t.Errorf("capabilities = %v, want union [image text] sorted", capStrs)
 	}
 	if ctx, _ := m["max_context_tokens"].(float64); ctx != 200000 {
 		t.Errorf("max_context_tokens = %v, want 200000 (max across endpoints)", ctx)

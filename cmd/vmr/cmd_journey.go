@@ -116,7 +116,7 @@ func saveJourneyIndex(idx *journey.JourneyIndex, outDir string, lang i18n.Lang) 
 	}
 	diskIdx := journey.LoadJourneyIndex(indexPath)
 	md := journey.RenderJourneyIndexMarkdown(diskIdx, lang)
-	if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
+	if err := writeAtomic(journeysDir, "index.md", []byte(md)); err != nil {
 		return err
 	}
 	return ctxgraph.SaveCacheDir(filepath.Join(outDir, ".cache", "parse"), idx.Cache)

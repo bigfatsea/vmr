@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危路由/配额半区 `2.2` / `2.17`、LLM 校准 `2.18` + 1 项发版前必做（`2.97`）；其余均为低危。
+- **§2 分布**：高危 0；中危路由/配额半区 `2.2` / `2.17` / `2.127`、LLM 校准 `2.18`、分析口径 `2.128` / `2.129` + 1 项发版前必做（`2.97`）；其余均为低危。
 
 ---
 
@@ -41,7 +41,7 @@
 - **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→5s 冷却→探针成功→满额流量→429 的循环成因。由 `TestFlappingEndpointKeepsBackoff` 钉死的保证是「探针成功与真实失败交替时，深度永不回落到最浅档」；`fails>0` 期间对真实流量恒 `available=false`（last-resort 释放是唯一例外，见 §2.85）。**已知残留**：连续探针成功可把 `fails` 衰减到 0 并把端点放回常规池原优先级，对「慢而未死」的灰区上游构成池级振荡循环（transient 首档 5s 只降频）；根除方案登记在 §2.99，待触发。
 - **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
 - **后台探针按 requests 口径计 1，对 token 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
-- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/livestats` 自带一把**独立**的同机制 flock（`.vmr-stats.lock`），因为它不寄生 audit：`-audit=false` 时 audit 锁根本不存在，而"不留正文仍要监控"是一等场景——第二个实例的 livestats 拿不到锁就降级为纯内存（不写 slim/rollup），不污染首个实例的归档。
+- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/livestats` 自带一把**独立**的同机制 flock（`.vmr-stats.lock`），因为它不寄生 audit：`-audit=false` 时 audit 锁根本不存在，而"不留正文仍要监控"是一等场景——第二个实例的 livestats 拿不到锁就降级为纯内存（不写 slim/rollup），不污染首个实例的归档。`internal/quota` 同理自带独立的 `.vmr-quota.lock`——由 `Flush` 惰性获取；只读加载 `Load()` 不受锁阻碍，确保 `vmr replay` 或第二个实例可在服务在线时正常读取配额初始账本并内存化运行；拿不到锁（另一进程持有）时 `Flush` 直接返回该错误（`dirty` 因此保持置位，`StartFlusher` 的去重日志会照常报出），Charge/Used 仍纯内存工作。三把锁（audit/livestats/quota）各自独立生效，互不代理，`-audit=false` 时也都不受影响。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
 - **健康状态机的退避冷却参数硬编码**：坚持「零调参」，不暴露难以科学校准的旋钮。
 - **`copyFlush` 的 goroutine + channel 流水线**：避免在底层连接层设全局 Deadline 破坏 TLS/Header 超时语义。
@@ -120,7 +120,7 @@
 - **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：Finding 文本同时进 Markdown 产物与机读 JSON，而 Markdown 的**结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`、主题分隔线 `---`）——在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`imgprep` 的 `map[string]json.RawMessage` 不与 `jsonscan` 的字节扫描统一**：图片降采样要重算尺寸并重编码，是深度结构化重写，字节 splice 做不到。这是三个 sanctioned deviation 里最大的一个。
 - **`imgprep.HasImageMarker` 的宽松预检维持「宁误报不漏报」，不收窄**：宽松的 `bytes.Contains` 预检会让正文里 `"image_path"` 之类的代码文本误触整套降采样反序列化——但误报只多付一次 JSON 解析成本，解析后结构化 dispatch 找不到真实图片块即原样放行，无正确性后果（`TestDownscaleTextMentioningMarkerIsNotAnImage` 钉死「误报≠误判」）。收窄需枚举全部已知图片引用形态 token，新增形态（如 Anthropic `tool_result` 子块 `type:"image"`）会重引漏报；漏报是硬路由 `HasImage` Condition 的正确性 bug，误报只是性能小税。
-- **不对 OpenAI 工具返回做 `error:` 关键字模糊嗅探**：实测全量生产语料近 50 万条 OpenAI 工具调用结果，结构化 JSON 错误字段 0 条，全部是自由文本 stdout/stderr。子串模糊嗅探会引入海量代码输出/测试用例的假阳性。只对协议原生结构化错误标记（如 Anthropic `is_error`）做确定性统计。
+- **不对 OpenAI 工具返回做 `error:` 关键字模糊嗅探**：实测全量生产语料近 50 万条 OpenAI 工具调用结果，结构化 JSON 错误字段 0 条，全部是自由文本 stdout/stderr。子串模糊嗅探会引入海量代码输出/测试用例的假阳性。只对协议原生结构化错误标记（如 Anthropic `is_error`）做确定性统计。**已量化的代价**：这直接导致 `error_recovery_count`、Context Rot 区间错误率、N-gram 尾步错误率这三个行为指标在纯 OpenAI 协议流量下结构性恒为 0/n-a——2026-09-11 review 用真实语料验证过，占比越高的部署这个盲区越大。曾提案的"结构化字段优先 + 受控 bash 错误锚点文本匹配"两层方案经复核认定：第一层就是已被证明的空集（同一批语料 0 命中），第二层换个说法就是被否决的子串嗅探本身，均未提供绕开假阳性风险的新路径，故维持不做；这不是没考虑过，是考虑过两次都没有找到出路。
 - **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `fmtutil.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
 - **`i18n` 的一批微文件不合并**：与 `internal/report/viewmodel_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿全局行预算，且改一节文案从打开小文件变成在大文件里找。
 - **`i18n` 的 `type XxxText` + `if lang == ZH` 样板不改写成 `map[Lang]T` + 泛型 `pick`**：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉，还新引入泛型 helper 与「key 缺失怎么办」。收益为负。
@@ -253,6 +253,7 @@
 - **当前缓解**：`-benchmark` 指标分布表已加脚注「time 类指标的 Mean 被少数长命 journey 严重拉偏，看 Median/P90」。只是免责，没动根因。
 - **可能方案**：对单间隙设上限（如 > 1h 归 idle/unknown 而非 agent 执行）。需改指标语义 + 更新 Analytics 设计文档的时间拆分定义 + 差分测试。
 - **触发条件**：脚注被证明不够（读者仍据 Mean 下结论），或要把 `NetWorkingMS` / `ModelToToolRatio` 当硬指标用。
+- **第二处表现（2026-09-11 review）**：`ModelToToolRatio`（`metrics.go`）= `ModelMS / AgentExecMS`，分母无下限、比值无 clamp——单次瞬时工具调用（如 `echo`，个位数 ms）配合正常模型推理耗时即可把单样本比值推到万倍量级，`-benchmark` 的「模型/工具时间比」均值被单个离群样本从十余倍拉高到近 400 倍。与本条同一根因族（时间类指标缺防御性上下限），可能方案同样是分母保底阈值（如 < 500ms 记 `n/a`）或对比值做上限 clamp，与本条一并评估、一并改。
 
 #### 2.58 [低] 定价覆盖与溯源的四个已知边界
 
@@ -261,7 +262,7 @@
 - **(a) 定价表覆盖不到的模型，其成本永远不进任何合计**：合计只含解析出费率的行，表下注明「合计不含 N/M 天（个模型/端点/客户端）」；未定价行仍渲染、成本列写 `-`（不是 0，也不是整行消失）。这是数据缺口不是呈现缺口——三张表都查不到的模型，其流量成本就是未知。**缓解**：厂商优先级消歧 + curated 别名把标准表覆盖面拉满；带 org/路径前缀的聚合商模型名经 `pricing.ModelBasename` 兜底与裸名同解析（见 §1.2）；剩余缺口由用户在对应 provider 的 `pricing.rates`/`pricing.aliases` 自补，或贡献进 `standard_price_curated.yaml`。`vmr check` 在表龄超 60 天时提示刷新。**框架只保证查得到就用得上、查不到就说不知道**，无代码方案。
 - **(b) 费率缺分量时按 0 计价，只在汇总层披露，不逐行标注**：`pricing.Rate.Cost` 把 nil 分量按 0 计价（防御性下限），`EndpointRow.CostRateIncomplete` + `IncompleteRateNote` 汇总提示「有 N 个端点的单价缺分量」，但具体哪几行、缺哪一项、少算多少，行上看不出。**触发条件**：主力模型的厂商长期不公布缓存价，而账号缓存命中率又高。
 - **(c) 费率溯源只到聚合级，单行看不出走的是哪一层**：`report.Pricing` 摘要只给「本次用了哪些定价来源」的总数；单行 `$` 看不出它走的是标准表、账号覆盖，还是**厂商优先级替代**（一个转售 provider 用了第一方刊例价）。**缓解**：该章免责声明写明整章是「按量计费等价成本、按第一方刊例价」；`vmr check` 的 `pricing_table` 行显示别名条数。**触发条件**：读者需要逐行判断某个金额可不可信。
-- **(d) 按客户端表的合计略低于其它三张表**：按日期/模型/端点三张覆盖全部记录，按客户端那张只覆盖解析出 `client_key` 的记录（auth 关闭或没匹配上任何 key 时为空），这些记录压根不成行。实测差额在 0.002% 量级；四个合计都是各自表内行的诚实求和，没有哪个假装是「全局总额」。**可能方案**：加一行 `(no client_key)`（更好，但要动 `ByClient` 的分桶键语义），或表下注明。**触发条件**：读者拿按客户端合计和总额对账，发现对不上。
+- **(d) 按客户端表的合计低于其它三张表，差额随「无 client_key 流量占比」漂移**：按日期/模型/端点三张覆盖全部记录，按客户端那张只覆盖解析出 `client_key` 的记录（`internal/report/cost.go` 的 `accumulateCost` 对 `rc.clientKey == ""` 直接跳过 `byClient` 累加）——auth 关闭、未鉴权、本地直连等场景产生的记录压根不成行。这不是一个可以钉死的常量：差额占比就是「无 client_key 记录成本 / 总成本」，早期小规模/单一鉴权来源语料测得约 0.002%，2026-09-11 review 用 44 份真实生产日志（含未鉴权/本地调用流量）测得 7.26%（$14.90/2158 条）——两者都真实，只是语料的鉴权来源构成不同，不代表旧数字错了或新数字更权威。四个合计都是各自表内行的诚实求和，没有哪个假装是「全局总额」。**可能方案（batch-1，需动 golden fixture）**：`accumulateCost` 不再对空 `client_key` 直接跳过，而是聚入一个固定的 `(no client_key)` 伪 `ClientRow` 桶，使四表相加自然一致。**触发条件**：已触发（真实语料已实测到两位数百分比缺口），排入批次 1。
 
 #### 2.64 [低] 「上下文有效利用率」在语料级呈现双峰退化
 
@@ -294,12 +295,6 @@
 - **为什么待定**：黄金样本挑选与人工标注是需实际投入时间的判断性工作，无法自动化；当前抽样规模下无需立即处理的误报模式，不构成阻塞。`_eval/calibrate_p1b.go` 已是可直接复用的校准工具，扩大 `-input`/`-limit` 即可推进——**成本在人力时间，不在代码**。
 
 ### D. 分析半区 · 展示与产出契约
-
-#### 2.59 [低] `vmr analyze -compare` 两侧 system prompt / 初始指令逐字一致时未合并
-
-- **现状**：`internal/journey/render_compare.go` 的 `renderSysPrompt` / `renderInitialInstruction` 无条件各渲 A、B 两份节选。两侧同源（`Changes` 均为 0、节选逐字相同）时，同一段 system prompt 正文在 compare 产物里贴两遍，实测占单份 compare 全文约 65%。
-- **可能方案**：只做精确相等合并（`sp.A.Excerpt == sp.B.Excerpt` / `f.A.Text == f.B.Text`）——渲一份，标注「两侧此节选一致（截断前缀，不代表完整文本逐字相同）」，A/B 的 tokens+Changes 对比行保留。相似度阈值合并不做（阈值主观）。
-- **触发条件**：界限清楚、随时可做；改动会给两个函数各加一个分支，注意 `archtest` per-function 行预算。
 
 #### 2.6 [低] 报表账户消耗表的标记符号已达四个
 
@@ -335,10 +330,15 @@
 - **现状**：Markdown 口径提示脚注已闭环。进一步的结构化透传要给 `Row`/`ClientRow` 补 `CostEstimateEst`、改 `rows.go`/`accumulateCost`/渲染层三处，并再次改 macro 切片的形状。
 - **为什么待定**：无明确外部程序消费需求前遵循 YAGNI。
 
-#### 2.22 [低，决定不做] `chatmsg.ToolResultList`/`ToolCallList` 未覆盖 Responses API 的 `function_call` 形状
+#### 2.22 [低，决定不做] `chatmsg.ToolCallList` 未覆盖 Responses API 的 `function_call` 形状
 
-- **现状**：`chatmsg.Messages` 已能把 `function_call_output` 渲染成人读文本，但结构化提取层只覆盖 OpenAI Chat Completions 与 Anthropic 两种形状。纯 Responses API 流量下脊柱不展示工具结果、三个 Finding 检测器无证据、`j-<id>.json` 的 `tool_calls` 会静默报告「这一步没有工具调用」。
+- **现状**：结果侧（`ToolResultList`）**已经覆盖** Responses 的 `function_call_output`（显式 `m["type"] == "function_call_output"` 分支，`chatmsg.Messages` 也能把它渲染成人读文本）；仍未覆盖的只是调用侧——`ToolCallList` 的注释自称只解析 `openai-completions` 的 `assistant-message tool_calls` 数组一种形状，Responses 的 `function_call` Item 未被任何结构化提取覆盖。纯 Responses API 流量下脊柱不展示工具调用、三个 Finding 检测器无证据、`j-<id>.json` 的 `tool_calls` 会静默报告「这一步没有工具调用」。
 - **决定不做**：真实语料按 `protocol` 统计 `openai-responses` **0 条 / 0.0%**——一次都没触发过。**触发条件（量化）**：任意一次 `vmr analyze` 的 `requests/index.json` 出现 `protocol == "openai-responses"` 的记录，即重新排期。
+
+#### 2.126 [低，决定不做] 遗留的 OpenAI `function_call`/`role:function` 形状被静默忽略
+
+- **现状**：`internal/chatmsg/messages.go` 的 `Messages()` 只读现行 `tool_calls`/`role:"tool"` 两种当前形状；2023 年被 Chat Completions 弃用的旧式顶层 `function_call` 字段与 `role:"function"` 消息未被识别——后者仍会被当普通消息渲染（不丢消息），但其配对的旧式调用侧完全不识别，工具配对检查覆盖不到。
+- **决定不做**：与 §2.22 同型的量化证据——44 份、15,946 条真实生产语料全量 grep `"function_call"` 与 `"role":"function"` **均命中 0 条**。**触发条件（量化）**：语料出现一条裸 `function_call` 字段或 `role:"function"` 消息，即重新排期。
 
 ### E. 路由半区 · 配额与请求路径
 
@@ -522,15 +522,64 @@
 - **为什么待定**：主流 SDK 一律发送紧凑 JSON（带内联附件还做 pretty-print 的形态至今为零）；marker 改为空白容忍匹配要动热路径扫描循环的字节匹配结构，复杂度不小。Span 建立失败的后果也只落在 degraded 扣费估算与 `WithinContext` 软重排，方向保守。
 - **触发条件**：`vmr analyze` 的 `requests/index.json` 出现"请求体含缩进/换行的附件 payload"的记录（即真实流量中出现 pretty-printed 附件请求），或 profile 显示 facts 提取对真实负载失真。
 
+### I. 2026-09-11 第二轮 Review 新增（来源：`PROJECT_FULL_REVIEW_REPORT`/`ROUTING_ARCHITECTURE_REVIEW`/`ANALYZE_REVIEW_REPORT` 三份独立报告，逐条源码核实与裁决后登记）
+
+> 三份报告合计约 45 条 finding，经源码核实：3 条是报告自身的事实性错误（对 Go regex 行为理解有误、误判 recover 机制不存在、误判"探针成功即放行"的方案是新提案而非早已被 §1.1/§2.85 否决的方案）、约 20 条属实且方案无争议已直接修复（含本节以下未直接列出的：D1-F03 probe.go 读取错误处理、D2-F02 capabilities 白名单校验、D2-F03 协议空端点组校验、D2-F04 health.go 文档注释、D2-F05 短 key 脱敏、D2-F06 Responses 探针输出上限、D2-F09 负数请求体上限校验、D3-F01 quota 独立 flock、D3-F04 livestats 死变量、D4-F01 ReqCoord 数值排序、D4-F03 详单页 UsageSides、D4-F04/D4-F05 chatmsg 两处、D5-F01/D5-F02/D5-F04/D5-F05/D5-F06 journey/report 五处、GAP-02 资产路径守卫、GAP-08 compare 初始指令合并——详见对应 commit），其余按 ROI 排入下表或链接到既有条目。**不成立、已被既有 §1 裁决覆盖、或改动会制造回归的 finding 均未采纳**，不在此重复列出理由（结论已写回对应 §1 条目或本文件之外的 review 记录）。
+
+#### 2.127 [中，需先设计] 裸时钟 `since` 的周期锚点未持久化，命中非整除 24h 的窗口（如 Claude 套餐 5h 滚动）时跨重启漂移
+
+- **现状**：`internal/config/quota.go` 的 `parseSince` 对裸时钟（`since: "08:00"`，无日期）以当前系统日期构造锚点；月度/日度锚点因强制要求完整日期（`YYYY-MM-DD`/RFC3339）不受影响。真正受影响的是 `every` 不能整除 24h/1440min 的窗口——**恰好是 Anthropic Claude Code Pro/Max 的真实 5 小时滚动套餐**（`internal/quota/period.go` 的 `PeriodStart`）。服务在窗口中途重启，裸时钟按当前日期重新解析出的锚点会把 `PeriodStart` 判定为已前进（`ps > PeriodStart`），导致 `resetIfStaleLocked` 把这一窗口的已用量清零，实际额度被欠记。
+- **可能方案**：无日期裸时钟首次运行时把绝对锚点（含年/月/日）固化进 `vmr-quota.json`；重启加载时若账本已有该 limit 的 anchor 则沿用，不随当前自然日重算。
+- **为什么需要先设计**：改动涉及 `vmr-quota.json` 结构演进（新增 per-limit anchor 字段）与 `resetIfStaleLocked` 判定逻辑，需要一套新的 cold/warm 一致性测试，不是局部改动。
+- **触发条件**：已触发（配置 `every: 5h` 一类非整除窗口 + 服务重启即可复现），排入批次 1。
+
+#### 2.128 [中] journey 与 report 两半区对同一请求的 ErrorClass 取值口径不一致
+
+- **现状**：`internal/journey/journey_stepfacts.go` 取一个请求多次 attempt 中第一个非空的 ErrorClass；`internal/report/recextract.go` 经 `reqdetail.AttemptErrorClass` 取最后一个 attempt，且带有 `ErrorClass` 为空时按 `Error` 前缀解析的 fallback，journey 侧没有这层 fallback。取最后一个 attempt 更能反映请求的终态退出原因。
+- **可能方案**：journey 侧改为调用同一个 `reqdetail.AttemptErrorClass`（对最后一个 forwarded/非空 attempt），两侧共用同一函数，补一条 journey vs report 的差分测试锁死一致性——与「一个分析数字复现一个路由数字必须差分测试锁定」的既有纪律同型。
+- **为什么待定**：journey 侧改动会牵动 Context Rot / N-gram / benchmark 等下游指标口径，需同步更新 golden fixture，不是两行改动。
+- **触发条件**：已触发（两侧口径已确认不一致），排入批次 1。
+
+#### 2.129 [中] 宏观报表头部的自流量排除说明位置过深，顶部记录数与摘要请求数出现无声断层
+
+- **现状**：`internal/report`（`viewmodel_doc.go`）报表头部 meta 行只打印原始记录数（如 15946），自流量排除的说明（`AppendixSelfTrafficExcluded`）被安排在报表最后一节——一份长报表里，读者要翻到全文最底部才能看到「为什么第二行的请求数比第一行少了 545」。`macro/summary.json` 的 `meta.self_traffic_excluded` 字段本身完整，纯粹是呈现位置问题。
+- **可能方案**：把排除计数就近内联到头部 meta 行（如「15946 条记录（含 545 条分析自流量已自动排除，有效请求 15401 条）」），不需要新逻辑，只是渲染位置调整。
+- **为什么待定**：会牵动头部 meta 行与末尾附录两处的 golden fixture。
+- **触发条件**：已触发（真实报表已复现「看起来漏算」的误读），排入批次 1。
+
+#### 2.130 [低，登记待办] `journey-viewer.html` 超长任务缺 Task 级折叠大纲，长文本硬截断无展开入口
+
+- **现状**：看板对 251 步一类的长任务从头到尾平铺全部 Step 卡片，翻阅困难；`why.slice(0, 600)`/`(0, 1500)` 硬截断推理过程与长回复，页面上没有任何"展开全文"按钮或 modal，只能退出网页去翻底层 JSON。这是现有能力的可用性缺陷（不是从未做过的新交互），与 §2.94/§2.95 同属看板体验债。
+- **可能方案**：左侧 Task 大纲（sticky nav）+ 右侧时序主窗格，截断处加 `[+ 展开全文]`；需要把骨架页数据加载/渲染重构为显式函数（与 §2.94 的 `wireHashReload` 重构可能共享一部分工作量）。
+- **触发条件**：作为看板体验专项排期处理，与 §2.94/§2.95 一起评估。
+
+#### 2.131 [低，非活跃] `ctxgraph.fastRawDigest` 的 default 分支把未知类型折叠为同一常量键，但该分支当前不可达
+
+- **现状**：`internal/ctxgraph/manifest.go` 的 `fastRawDigest` 对非 string/map/[]any/float64/bool/nil 类型统一返回 `0xdeadbeef` 常量指纹。核实其唯一输入源（`BuildManifest` 经标准 `encoding/json.Unmarshal`，未启用 `UseNumber`）只产生前述已处理的类型集合，default 分支目前是死代码。
+- **为什么非活跃**：给一条当前零执行可能的路径加防御代码正是 YAGNI 反对的过度设计（同型于 §2.111 的裁决逻辑）。
+- **触发条件**：解析链路引入 `json.UseNumber` 或新的第三方反序列化器，使 default 分支变为可达路径时，改用类型名+反射字符串做动态哈希。
+
+#### 2.132 [低，登记待办] livestats 崩溃恢复的 catch-up 重滚存在旧数据反向覆盖，根因是 `deleteSlim` 失败被静默吞掉
+
+- **现状**：`internal/livestats/aggregator.go` 的 `deleteSlim(a.dir, name)` 返回值被直接丢弃（两处调用点）。真实触发需要两个条件同时成立：① 某小时 slim 文件已卷入 rollup 但 `deleteSlim` 失败（文件永久滞留、无任何告警）；② 之后又发生跨小时边界的迟到样本追加。此时重启会用遗留 slim 重新生成一条更旧更小的聚合行，last-wins 语义下覆盖更新的累计值。
+- **可能方案**：先给 `deleteSlim` 失败补一条 WARN（当前完全不可观测），完整修复（避免覆盖）需要更谨慎的设计（取较大值或落一个"已 roll"标记）——livestats 是零依赖叶子包，目前没有任何日志钩子，加一条 WARN 本身需要先决定要不要为此引入一个可选 logger 字段，不是一行改动。
+- **触发条件**：作为 `/stats` 展示准确性专项排期；影响面仅限统计展示，不触达计费/路由。
+
+#### 2.133 [低] `attachmentSpans` 的 marker 可能匹配非附件字段中的同名 key
+
+- **现状**：`internal/server/facts.go` 的 `attachmentSpans` 在整个请求体扫描 `"data":"` 等标志，不检查 JSON 结构层级；一段普通业务文本或自定义 metadata 若恰好包含 `"data":"..."`，会被误标记为附件 span。核实影响面：只喂给 token 估算（`estimateTextTokens`/`estimateDocumentTokens`），不触达路由决策或安全边界，最坏后果是把一段文本从"按文本计权"错分到"按文档计权"。
+- **性质**：与 §1.4 `imgprep.HasImageMarker`"宁误报不漏报"的既有取舍同源——本项目已接受这类启发式扫描的边缘误判。
+- **触发条件**：`vmr analyze` 的估算精度专项排期时一并评估，不单独立项。
+
 ---
 
 ## 3. 跨组排期结论
 
 - **全局结论**：待办里没有「价值高、成本低、却一直没做」的异常。值得优先投入的集中在三类：大语料规模（§2.2 看触发、§2.1 已证 5.2×）、LLM 解读层校准（§2.18，成本在人工标注）、路由配额（§2.52，用户 hold）。分析半区的产品路线（新视图 / 导出 / 达成信号）已移入 `ROADMAP`，不在此清单排期。
 - **2026-09-11 全系统 Review 剩余项（复核后）**：11 项已修（顺手 7 + 批次 1 的 4，见 H 组顶部说明与 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）。剩余排期——批次 2 已全部落地（§2.109 / §2.115 / §2.119 移除）；**批次 3（需设计 / 待触发）**：§2.86、§2.100、§2.57；**批次 4（架构演进期 / 待触发）**：§2.120 / §2.121 / §2.122 / §2.124。§2.111 复核后改为明确不补；§2.125 为修复 §2.109 时新发现的登记待触发项。
+- **2026-09-11 第二轮 Review（I 组）**：三份独立报告（路由半区架构、全系统 D1-D6、analyze 套件真实语料体验）逐条核实后，约 20 项事实清楚、方案无争议、改动可控的问题已在本轮直接修复并从待办移除（quota 独立 flock、ReqCoord 数值排序、详单页 UsageSides、capabilities 白名单校验等，见提交记录）；3 项核实为报告自身的事实性错误未采纳；剩余排入**批次 1（建议尽快，已触发）**：§2.127（quota 裸时钟锚点持久化）、§2.128（journey/report ErrorClass 口径统一）、§2.129（自流量排除说明前移）、§2.58(d)（客户端成本表补 `(no client_key)` 行）；**批次 2（登记待办）**：§2.130（journey-viewer 折叠/展开）、§2.132（livestats deleteSlim 告警）、§2.57 第二处表现（ModelToToolRatio clamp）；**非活跃/低优**：§2.131、§2.133、§2.126。
 - **多数条目不是「不值得做」，是「收益未经测量」**：§2.2 / §2.3 / §2.7 / §2.10 / §2.17 的共同点是收益尚未实测——而先做优化再测量正是这个项目一贯拒绝的顺序；触发条件到了先测再说。
 - **发版前必做**：§2.97（CHANGELOG `[Unreleased]` 归整）——唯一一条不等触发、按日程必须处理的。
-- **立即可做**（界限清楚、随时可做）：§2.59 compare 同源节选合并。
 - **触发即做**（成本主要等触发，触发条件写在条目里）：§2.2（上限 3 万条 / RSS 4GB，留两成提前量即约 2.5 万条 / 3.3GB 起排期）、§2.55（语料再涨约 5 倍）、§2.56（时间成首要痛点）、§2.48（词表互相干扰 / sticky 往返可观测）、§2.57（脚注不够用）、§2.58（主力上游长期无价）、§2.18（黄金样本窗口）、§2.99（灰区振荡在 5s 首档下仍规律复现，触发条件写在条目里）。
 - **需要先设计**（价值高、易做错，禁止仓促）：§2.86 保活帧旁路。
-- **明确不做**（各有量化触发条件，触发即重估）：§2.3 / §2.22 / §2.49 / §2.50 / §2.91。
+- **明确不做**（各有量化触发条件，触发即重估）：§2.3 / §2.22 / §2.49 / §2.50 / §2.91 / §2.126 / §2.131。

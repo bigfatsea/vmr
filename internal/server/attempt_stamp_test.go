@@ -21,15 +21,16 @@ import (
 )
 
 // TestAttemptKeyLabelTailAndExclusion walks a failover (p1 500s → p2 wins)
-// and asserts: (a) the winning attempt of a plain api_key provider carries
-// the key's last-6 tail as key_label; (b) the failed attempt carries no
-// key_label and no Tokens (stamping is Forwarded-gated — same point as
-// SetForwarded).
+// and asserts: (a) the winning attempt of a plain api_key provider shorter
+// than 6 characters carries a hashed (never plaintext) key_label; (b) the
+// failed attempt carries no key_label and no Tokens (stamping is
+// Forwarded-gated — same point as SetForwarded).
 func TestAttemptKeyLabelTailAndExclusion(t *testing.T) {
 	u1, u2 := newUpstream(t), newUpstream(t)
 	u1.status.Store(500)
-	// twoEndpointYAML's p1/p2 use api_key k1/k2 (tail = "k1"/"k2" whole,
-	// being shorter than 6); the failover asserts exclusion + tail at once.
+	// twoEndpointYAML's p1/p2 use api_key k1/k2, both shorter than 6 —
+	// keyTailLabel hashes rather than echoing them (see its doc comment);
+	// the failover asserts exclusion + the hashed label at once.
 	ts, al := newAuditedServer(t, twoEndpointYAML(u1.srv.URL, u2.srv.URL, ""))
 	if _, body := chat(t, ts, simpleReq, nil); body == "" {
 		t.Fatal("empty response")
@@ -49,8 +50,8 @@ func TestAttemptKeyLabelTailAndExclusion(t *testing.T) {
 	if !atts[1].IsForwarded() {
 		t.Fatalf("winning attempt not forwarded")
 	}
-	if got, want := atts[1].KeyLabel, "k2"; got != want {
-		t.Errorf("key_label = %q, want %q (plain api_key shorter than 6 stays whole)", got, want)
+	if got, want := atts[1].KeyLabel, "#015f"; got != want {
+		t.Errorf("key_label = %q, want %q (sha256(\"k2\")[:2] hex — a plain api_key shorter than 6 is hashed, never echoed)", got, want)
 	}
 	if atts[1].Tokens == nil {
 		t.Fatal("winning attempt has no Tokens stamp")

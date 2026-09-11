@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -38,6 +39,60 @@ var (
 	bashApplyRe    = regexp.MustCompile(`\b(?:patch|git\s+apply)\b.*?([a-zA-Z0-9_\-\./]+)`)
 )
 
+// knownFileExtensions gates a bare dotted token's plausibility as a real
+// file path (see looksLikeFilePath) — deliberately not exhaustive, just the
+// common shapes actually seen in coding-agent workspaces.
+var knownFileExtensions = map[string]bool{
+	"go": true, "py": true, "js": true, "ts": true, "tsx": true, "jsx": true,
+	"json": true, "yaml": true, "yml": true, "md": true, "txt": true,
+	"sh": true, "bash": true, "zsh": true, "toml": true, "ini": true,
+	"cfg": true, "conf": true, "log": true, "csv": true, "html": true,
+	"css": true, "scss": true, "sql": true, "xml": true, "env": true,
+	"lock": true, "c": true, "h": true, "cpp": true, "hpp": true,
+	"java": true, "rb": true, "rs": true, "php": true, "vue": true,
+	"svelte": true, "proto": true, "pyc": true, "tmp": true, "bak": true,
+	"out": true, "bin": true, "o": true, "exe": true,
+}
+
+// bareFileNameAllowlist covers real files that conventionally carry no
+// extension — without this, looksLikeFilePath's dot/slash requirement would
+// reject them outright.
+var bareFileNameAllowlist = map[string]bool{
+	"makefile": true, "dockerfile": true, "license": true, "readme": true,
+	"procfile": true, "gemfile": true, "rakefile": true, "changelog": true,
+}
+
+// looksLikeFilePath filters a heuristic bash-redirect match down to tokens
+// that plausibly name a real file. bashRedirectRe's loose grammar (needed to
+// catch "> some/output.txt" inside an arbitrary shell one-liner) equally
+// matches a ">" comparison operator sitting inside an inlined Python/JS
+// snippet ("if x > 1", "val > document.getElementById(id).value") — those
+// aren't redirects at all, just adjacent tokens the regex can't tell from
+// one. Only applied to heuristic=true matches (record's structured-tool
+// path, heuristic=false, comes from an actual path-shaped tool argument and
+// is never second-guessed here).
+func looksLikeFilePath(s string) bool {
+	if s == "" || strings.ContainsAny(s, "()") {
+		return false // a call expression fragment, never a bare path
+	}
+	if strings.Contains(s, "/") {
+		return true // path-separator-qualified — a directory reference
+	}
+	if _, err := strconv.Atoi(s); err == nil {
+		return false // pure integer literal (a comparison operand, not a path)
+	}
+	if i := strings.LastIndexByte(s, '.'); i >= 0 && i < len(s)-1 {
+		if knownFileExtensions[strings.ToLower(s[i+1:])] {
+			return true
+		}
+		// A dot with no recognized extension (document.getElementById,
+		// obj.attr) is a property-access chain, not a file — reject rather
+		// than fall through to the bare-name allowlist below.
+		return false
+	}
+	return bareFileNameAllowlist[strings.ToLower(s)]
+}
+
 // ExtractArtifacts scans all steps of a Journey and extracts touched files.
 func ExtractArtifacts(j *Journey) []Artifact {
 	if j == nil {
@@ -54,6 +109,9 @@ func ExtractArtifacts(j *Journey) []Artifact {
 	record := func(rawPath string, op ArtifactOp, stepSeq int, heuristic bool) {
 		clean := filepath.Clean(strings.TrimSpace(rawPath))
 		if clean == "" || clean == "." || clean == "/" || strings.HasPrefix(clean, "/dev/") {
+			return
+		}
+		if heuristic && !looksLikeFilePath(clean) {
 			return
 		}
 		e, ok := byPath[clean]

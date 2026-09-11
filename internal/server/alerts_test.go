@@ -235,10 +235,10 @@ listen: 0.0.0.0:18816
 providers:
   - name: p1
     base_url: {openai-completions: http://127.0.0.1:1}
-    api_key: k1
+    api_key: key-001
     quota:
       limits: [{metric: requests, every: 30d, since: 2026-01-01, amount: 100}]
-  - {name: p2, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k2}
+  - {name: p2, base_url: {openai-completions: http://127.0.0.1:1}, api_key: key-002}
 models:
   vm:
     endpoints: {openai-completions: [{providers: [p1], models: [m1]}, {providers: [p2], models: [m1]}]}
@@ -261,8 +261,8 @@ models:
 	for i, w := range []struct{ sev, kind, ref string }{
 		{alertSeverityError, alertKindQuota, "p1"},  // errors first
 		{alertSeverityWarning, alertKindConfig, ""}, // then warnings by kind: config
-		{alertSeverityWarning, alertKindEndpoint, "p1:k1:m1"},
-		{alertSeverityWarning, alertKindEndpoint, "p2:k2:m1"},
+		{alertSeverityWarning, alertKindEndpoint, "p1:ey-001:m1"},
+		{alertSeverityWarning, alertKindEndpoint, "p2:ey-002:m1"},
 	} {
 		if got[i].Severity != w.sev || got[i].Kind != w.kind || got[i].Ref != w.ref {
 			t.Fatalf("alerts[%d] = %q/%q ref %q, want %q/%q ref %q (full: %v)", i, got[i].Severity, got[i].Kind, got[i].Ref, w.sev, w.kind, w.ref, got)

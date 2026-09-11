@@ -44,6 +44,12 @@ func (r *Registry) Load() error {
 	if r.path == "" {
 		return nil
 	}
+	// Load is deliberately unlocked (no ensureDirLock): reading the file
+	// is read-only and never corrupts on-disk state (writers atomically
+	// rename a temp file). Keeping Load unlocked allows offline tools like
+	// `vmr replay` — or a second in-memory instance — to load the live
+	// ledger even while a daemon holds .vmr-quota.lock. Exclusive locking
+	// is deferred to Flush, where write-write races actually happen.
 	data, err := os.ReadFile(r.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -165,6 +171,15 @@ func (r *Registry) Flush() (err error) {
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	if err = r.ensureDirLock(dir); err != nil {
+		// Another process holds the dir lock — persisting here would race
+		// its own load-then-rewrite of the same vmr-quota.json and one
+		// side's counters would silently disappear. Returning the error
+		// (rather than swallowing it) re-arms dirty via the defer above,
+		// so StartFlusher's dedup logger surfaces this instead of the
+		// ledger just quietly never reaching disk.
+		return err
+	}
 	tmp, err := os.CreateTemp(dir, ".vmr-quota-*.tmp")
 	if err != nil {
 		return err
@@ -199,6 +214,42 @@ func (r *Registry) Flush() (err error) {
 		return err
 	}
 	return nil
+}
+
+// ensureDirLock acquires the advisory .vmr-quota.lock for dir if not already
+// held (lock != nil) — so Flush serializes against any other process writing
+// to the same log_dir. Once acquired, the open file descriptor is reused for
+// all subsequent Flushes until Close(). dir must already exist by the time
+// this runs: flock's O_CREATE can't create a missing directory, so Flush runs
+// this after its own os.MkdirAll.
+func (r *Registry) ensureDirLock(dir string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lock != nil {
+		return nil
+	}
+	r.lock, r.lockErr = acquireDirLock(dir)
+	return r.lockErr
+}
+
+// Close releases the advisory dir lock, if this Registry ever acquired one
+// (a Registry with an empty path, or one that never reached a successful
+// Flush, holds none — a no-op). Also fully resets the lock state machine
+// (lock/lockErr), so subsequent operations can re-acquire if needed.
+// Not required for correctness on process exit (the kernel drops the flock
+// when the last fd closes), but lets a long-lived process — or a test
+// constructing a second Registry against the same path — release the lock
+// deterministically instead of waiting on GC finalization.
+func (r *Registry) Close() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.lock == nil {
+		return nil
+	}
+	err := r.lock.Close()
+	r.lock = nil
+	r.lockErr = nil
+	return err
 }
 
 // Bucket represents a snapshot of quota state exported for offline consumers (vmr analyze's

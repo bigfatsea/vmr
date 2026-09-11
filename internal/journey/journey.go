@@ -15,6 +15,8 @@
 package journey
 
 import (
+	"fmt"
+	"os"
 	"regexp"
 	"runtime"
 	"sort"
@@ -402,6 +404,14 @@ func stepContinuation(l *ctxgraph.Lineage, i int, m *ctxgraph.Manifest, ru tasks
 // at a stitch boundary — the first manifest of chain[c] for c>0 — using
 // that Lineage's own Stitch.Edge as the evidence (guaranteed non-nil:
 // ChainFrom only walks through Stitched outcomes).
+// warnRecordUnreadable reports FetchRecords silently dropping a line it
+// couldn't parse a second time — surfaced here (not there) because only
+// here does the caller know which Journey/step it would have become.
+func warnRecordUnreadable(journeyID string, m *ctxgraph.Manifest) {
+	fmt.Fprintf(os.Stderr, "warning: journey %s: record %s:%d unreadable on second pass, step skipped\n",
+		journeyID, ctxgraph.CanonicalPath(m.Path), m.Line)
+}
+
 func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgraph.Loc]*audit.Record, lang i18n.Lang) (*Journey, error) {
 	head, tail := chain[0], chain[len(chain)-1]
 	j := &Journey{
@@ -428,7 +438,8 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 		for i, m := range l.Manifests {
 			rec := recs[ctxgraph.Loc{Path: m.Path, Line: m.Line}]
 			if rec == nil {
-				continue // defensive: FetchRecords silently drops a line it couldn't parse a second time
+				warnRecordUnreadable(j.ID, m)
+				continue
 			}
 			atStitchBoundary := ci > 0 && i == 0
 			deltaStart := 0

@@ -99,9 +99,19 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		return
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, probeBodyCap))
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, probeBodyCap))
 
 	if resp.StatusCode >= 400 {
+		if readErr != nil {
+			// Mirrors tryOne's handleErrorResponse: a body read failure means
+			// respBody is a fragment, not a classifiable error body — running
+			// it through ClassifyError risks a wrong verdict from missing
+			// vendor phrasing (e.g. reading a truncated 401 body as a lesser
+			// class). Treat it as the network failure it actually is.
+			cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+			rt.logf("%s, status=%d, error=network:%v, dur=%s, cooldown=%s", logPrefix, resp.StatusCode, readErr, fmtDur(dur), cd)
+			return
+		}
 		class := ad.ClassifyError(resp.StatusCode, respBody)
 		if class == core.ErrContent || class == core.ErrClient || class == core.ErrContextLimit || class == core.ErrQuirk {
 			// Request-specific outcomes — the probe prompt itself got

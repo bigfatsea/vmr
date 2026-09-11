@@ -251,6 +251,10 @@ func responsesItemMessage(m map[string]any) Message {
 	case "reasoning":
 		return Message{Role: "assistant", Text: "🤔 [reasoning]\n" + reasoningSummaryText(m)}
 	default:
+		// Unrecognized Responses Item type — counted for the same reason
+		// RenderPart's default branch above is (S-2): an unknown shape must
+		// surface to an operator, not render silently as "?" and disappear.
+		unrecognizedPartTypes.Add(1)
 		return Message{Role: "?", Text: jsonIndent(m)}
 	}
 }

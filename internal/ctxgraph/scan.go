@@ -75,12 +75,14 @@ func buildGraph(all []*Manifest, noBody int) *Graph {
 	// manifests sharing a nanosecond timestamp would otherwise keep whatever
 	// order the parallel file scan happened to assemble them in, and the
 	// Lineage.Idx assigned below (and every downstream reference to it) would
-	// drift between runs / platforms. Req is globally unique and deterministic.
+	// drift between runs / platforms. Req is globally unique and deterministic
+	// — compared numerically by line via LessReqCoord, not as a raw string
+	// (a raw compare puts "f:10" before "f:9" and reverses within-file order).
 	sort.SliceStable(all, func(i, j int) bool {
 		if !all[i].TS.Equal(all[j].TS) {
 			return all[i].TS.Before(all[j].TS)
 		}
-		return all[i].Req < all[j].Req
+		return LessReqCoord(all[i].Req, all[j].Req)
 	})
 
 	g := &Graph{NoBody: noBody}

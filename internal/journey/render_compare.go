@@ -362,6 +362,13 @@ func renderInitialInstruction(w func(string, ...any), f InitialInstructionFact, 
 		return
 	}
 	w("%s", t.InitialInstructionTitle)
+	if f.A.Found && f.B.Found && f.A.Text == f.B.Text && f.A.Text != "" {
+		// Mirrors renderSysPrompt's exact-match merge: two full excerpts of
+		// the same instruction wastes about as much space as this whole
+		// section otherwise takes (see KNOWN_ISSUES §2.59).
+		w("%s", t.InitialInstructionIdentical)
+		return
+	}
 	renderExcerpt(w, t.InitialInstructionExcerptLabel("A"), f.A.Text, f.A.Truncated, t)
 	renderExcerpt(w, t.InitialInstructionExcerptLabel("B"), f.B.Text, f.B.Truncated, t)
 }

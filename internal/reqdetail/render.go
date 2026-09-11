@@ -218,13 +218,21 @@ func fmtN(n int64) string {
 	}
 }
 
-// tokensTriple renders the 3-tuple (In / CacheHit(share%) / Out).
-func tokensTriple(in, hit, out int64) string {
+// tokensTriple renders the 3-tuple (In / CacheHit(share%) / Out). outOK
+// false marks Out as a placeholder rather than a real usage figure — e.g.
+// Anthropic's message_start-only Out≈1 on a mid-stream truncation (see
+// chatmsg.ExtractUsageSides) — with a "≈" prefix instead of rendering it as
+// if it were exact.
+func tokensTriple(in, hit, out int64, outOK bool) string {
 	if in == 0 && out == 0 {
 		return "-"
 	}
+	outStr := fmtN(out)
+	if !outOK {
+		outStr = "≈" + outStr
+	}
 	return fmt.Sprintf("%s / %s(%s) / %s",
-		fmtN(in), fmtN(hit), pct(int(hit), int(in)), fmtN(out))
+		fmtN(in), fmtN(hit), pct(int(hit), int(in)), outStr)
 }
 
 // ms renders a millisecond duration as fixed-decimal seconds at 1000ms and

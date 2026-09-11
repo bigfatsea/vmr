@@ -397,11 +397,13 @@ func pickPredecessor(l *Lineage, b0 *Manifest, overlap map[int]int, distinct int
 		predEnd := pred.Manifests[len(pred.Manifests)-1]
 		// A predecessor must precede the break: strictly earlier in time, or
 		// equal-ts with a strictly smaller record coordinate (Req orders
-		// records within/across files) — ns-truncated or stubbed timestamps
-		// can collapse onto one instant, and a plain Before check would then
-		// falsely disqualify the true predecessor. Equal-ts + equal-Req can
-		// only be the lineage itself, so self-exclusion holds.
-		if predEnd.TS.After(b0.TS) || (predEnd.TS.Equal(b0.TS) && predEnd.Req >= b0.Req) {
+		// records within/across files, compared numerically via
+		// LessReqCoord — not as a raw string, which would put "f:10" before
+		// "f:9" and misorder the tie-break) — ns-truncated or stubbed
+		// timestamps can collapse onto one instant, and a plain Before check
+		// would then falsely disqualify the true predecessor. Equal-ts +
+		// equal-Req can only be the lineage itself, so self-exclusion holds.
+		if predEnd.TS.After(b0.TS) || (predEnd.TS.Equal(b0.TS) && !LessReqCoord(predEnd.Req, b0.Req)) {
 			continue
 		}
 		score := float64(n) / float64(distinct)
@@ -445,7 +447,7 @@ func findSameChatCandidate(l *Lineage, sessBuckets map[string][]*Lineage) *Stitc
 			continue
 		}
 		predEnd := pred.Manifests[len(pred.Manifests)-1]
-		if predEnd.TS.After(b0TS) || (predEnd.TS.Equal(b0TS) && predEnd.Req >= l.Manifests[0].Req) {
+		if predEnd.TS.After(b0TS) || (predEnd.TS.Equal(b0TS) && !LessReqCoord(predEnd.Req, l.Manifests[0].Req)) {
 			continue // same preceding rule as pickPredecessor's equal-ts tie-break
 		}
 		gap := b0TS.Sub(predEnd.TS)

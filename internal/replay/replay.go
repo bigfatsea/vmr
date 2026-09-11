@@ -183,6 +183,7 @@ func Run(ctx context.Context, opts Options, stdout io.Writer) error {
 	if err := qreg.Load(); err != nil {
 		fmt.Fprintf(stdout, "WARN quota state: %v (starting from zero)\n", err)
 	}
+	defer qreg.Close() // releases .vmr-quota.lock; runs after the Flush below (LIFO)
 	if online {
 		fmt.Fprintf(stdout, "NOTE router daemon is active in %s (pid %s); quota charged in-memory only (will not overwrite on-disk state)\n", cfg.LogDir, pid)
 	} else {

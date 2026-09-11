@@ -119,6 +119,26 @@ func logStop(logger *log.Logger, reason string, uptime time.Duration) {
 	logger.Printf("==================================================")
 }
 
+// setupQuotaLedger loads the quota registry, starts its background flusher,
+// and wires it onto rt. The returned cleanup runs its three steps in this
+// literal order — stop the flusher, one final Flush, then release the dir
+// lock — so the caller just defers the whole thing instead of getting the
+// LIFO ordering of three separate defers right by hand.
+func setupQuotaLedger(cfg *config.Config, rt *router.Router, logger *log.Logger) (cleanup func()) {
+	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
+	qreg.SetLogger(logger)
+	if err := qreg.Load(); err != nil {
+		logger.Printf("WARN quota state: %v (starting from zero)", err)
+	}
+	rt.Quota = qreg
+	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
+	return func() {
+		stopQuotaFlush()
+		qreg.Flush()
+		qreg.Close()
+	}
+}
+
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
@@ -172,15 +192,8 @@ func cmdStart(args []string) error {
 
 	rt := router.New(logger).WithContext(rootCtx)
 
-	// Quota registry lives on Router (surviving hot reloads). Load errors are non-fatal (logged).
-	qreg := quota.NewRegistry(filepath.Join(cfg.LogDir, "vmr-quota.json"))
-	qreg.SetLogger(logger)
-	if err := qreg.Load(); err != nil {
-		logger.Printf("WARN quota state: %v (starting from zero)", err)
-	}
-	rt.Quota = qreg
-	stopQuotaFlush := qreg.StartFlusher(quota.DefaultFlushInterval)
-	defer func() { stopQuotaFlush(); qreg.Flush() }()
+	// Quota registry lives on Router (surviving hot reloads).
+	defer setupQuotaLedger(cfg, rt, logger)()
 
 	// Live stats aggregator: owns slim WAL and rollup persistence in log_dir.
 	liveAgg, err := livestats.New(cfg.LogDir)

@@ -68,7 +68,7 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 	if _, err := os.Stat(indexPath); err == nil {
 		idx := journey.LoadJourneyIndex(indexPath)
 		md := journey.RenderJourneyIndexMarkdown(idx, lang)
-		if err := os.WriteFile(filepath.Join(journeysDir, "index.md"), []byte(md), 0o600); err != nil {
+		if err := writeAtomic(journeysDir, "index.md", []byte(md)); err != nil {
 			return fmt.Errorf("write journeys index md: %w", err)
 		}
 

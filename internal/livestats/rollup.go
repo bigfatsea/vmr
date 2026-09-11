@@ -190,8 +190,7 @@ func listSlimFiles(dir string, before time.Time) ([]string, error) {
 // disagrees with the file's hour is bucketed by its own ts, the same rule
 // the live path uses.
 func rollSlimFile(dir, name string) error {
-	h, ok := parseHourFileName(name)
-	if !ok {
+	if _, ok := parseHourFileName(name); !ok {
 		return errSkipLine
 	}
 	total := make(map[time.Time]map[dimsKey]Counters)
@@ -235,7 +234,6 @@ func rollSlimFile(dir, name string) error {
 			}
 		}
 	}
-	_ = h
 	return nil
 }
 

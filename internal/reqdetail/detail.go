@@ -109,7 +109,7 @@ type sessionFeatures struct {
 	finish, respText          string
 	truncated, noReply        bool
 	usage                     chatmsg.Usage
-	usageOK                   bool
+	usageInOK, usageOutOK     bool
 }
 
 func extractSessionFeatures(rec *audit.Record, prof taskseg.Profile) sessionFeatures {
@@ -133,7 +133,7 @@ func extractSessionFeatures(rec *audit.Record, prof taskseg.Profile) sessionFeat
 		f.chatID = prof.ChatID(msgs)
 	}
 	if rec.Client.Response != nil {
-		f.usage, f.usageOK = chatmsg.ExtractUsageWithProtocol(rec.Client.Response.Body, rec.Protocol)
+		f.usage, f.usageInOK, f.usageOutOK = chatmsg.ExtractUsageSides(rec.Client.Response.Body, rec.Protocol)
 		if s := taskseg.ResponseSummary(rec.Client.Response.Body); s != nil {
 			f.finish = s.Finish
 			for _, tc := range s.ToolCalls {
@@ -217,8 +217,8 @@ func Render(rec *audit.Record, path string, line int, m, prev *ctxgraph.Manifest
 		stream = t.StreamYes
 	}
 	tok := "-"
-	if f.usageOK {
-		tok = tokensTriple(f.usage.In, f.usage.CacheRead, f.usage.Out)
+	if f.usageInOK || f.usageOutOK {
+		tok = tokensTriple(f.usage.In, f.usage.CacheRead, f.usage.Out, f.usageOutOK)
 	}
 	ttft := "-"
 	if rec.TTFTMS > 0 {

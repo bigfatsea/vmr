@@ -89,20 +89,22 @@ func RoleCompatRequest(model, role string) (body json.RawMessage, nonce string) 
 
 // ResponsesRequest is Request's Responses-protocol counterpart: same
 // echo-nonce liveness check, built in the Responses shape (top-level
-// "input" instead of "messages", no "max_tokens" — Responses' analogous
-// field is named differently and unconfirmed against a real endpoint, so it
-// is deliberately omitted rather than guessed; leaving an optional field
-// out is always safe, a wrong field name is not). Used both by the runtime
-// background recovery probe (internal/router/probe.go's runProbe) and `vmr
-// diagnose` for any endpoint whose protocol is "openai-responses" — sending
-// Request's messages-shaped body to a /responses endpoint would be rejected
-// as a missing required "input" field, which is exactly the bug this
-// function exists to avoid.
+// "input" instead of "messages"). "max_output_tokens" is the confirmed
+// Responses-protocol field name for the same budget Request caps via
+// "max_tokens" — set to the same 300 for the same reason (a reasoning model
+// can otherwise spend the whole budget on hidden thinking before ever
+// reaching the echo, making a healthy endpoint look unverified). Used both
+// by the runtime background recovery probe (internal/router/probe.go's
+// runProbe) and `vmr diagnose` for any endpoint whose protocol is
+// "openai-responses" — sending Request's messages-shaped body to a
+// /responses endpoint would be rejected as a missing required "input"
+// field, which is exactly the bug this function exists to avoid.
 func ResponsesRequest(model string) (body json.RawMessage, nonce string) {
 	nonce = newNonce()
 	b, err := json.Marshal(map[string]any{
-		"model": model,
-		"input": "Reply with exactly this token and nothing else: " + nonce,
+		"model":             model,
+		"input":             "Reply with exactly this token and nothing else: " + nonce,
+		"max_output_tokens": 300,
 	})
 	if err != nil {
 		return json.RawMessage(`{}`), nonce

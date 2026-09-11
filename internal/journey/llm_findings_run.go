@@ -68,7 +68,11 @@ func runDetectorsConcurrently(ctx context.Context, j *Journey, opts LLMOptions, 
 		go func(i int, d llmDetector) {
 			defer wg.Done()
 			findings := d.run(ctx, j, opts, lang)
-			results[i] = detectorResult{findings: findings, interrupted: ctx.Err() != nil}
+			// A detector that raced the deadline and still returned findings
+			// before its own ctx check wasn't actually cut short — reporting
+			// it "skipped" here alongside real output it would be a
+			// self-contradicting log line.
+			results[i] = detectorResult{findings: findings, interrupted: ctx.Err() != nil && len(findings) == 0}
 		}(i, d)
 	}
 	wg.Wait()

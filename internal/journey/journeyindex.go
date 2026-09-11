@@ -15,6 +15,7 @@ package journey
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -150,15 +151,18 @@ func LoadJourneyIndex(path string) *JourneyIndex {
 	return &idx
 }
 
-// Save writes idx to path. 0600: same sensitivity note as every other file
-// under journeys/ — it's derived straight from the message-hash
-// content of the conversations it indexes.
+// Save writes idx to path via the same temp-file+rename pattern every other
+// cache/index writer in this repo uses (ctxgraph, reqdetail, quota, and this
+// package's own llm.go cache) — a process killed mid-write must never leave
+// a truncated journeys/index.json for the next run to load as valid. 0600:
+// same sensitivity note as every other file under journeys/ — it's derived
+// straight from the message-hash content of the conversations it indexes.
 func (idx *JourneyIndex) Save(path string) error {
 	data, err := json.MarshalIndent(idx, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	return writeCacheFileAtomic(filepath.Dir(path), path, data)
 }
 
 // BuildJourneyIndexRow derives one candidate's cheap fields from its
@@ -222,7 +226,13 @@ func MergeJourneyIndexRows(fresh []JourneyIndexRow, prior []JourneyIndexRow) []J
 	for i, r := range fresh {
 		if p, ok := priorByID[r.ID]; ok {
 			if r.Tasks == 0 && r.Steps == 0 {
+				// Same gate as the row's own doc comment: Cost/Currency/
+				// NetWorkingMS/Model are filled once, alongside Tasks/Steps,
+				// by the same full-Journey build — so an unbuilt fresh row
+				// carries all of them forward together, not just the two
+				// that happened to get checked here first.
 				r.Tasks, r.Steps = p.Tasks, p.Steps
+				r.Cost, r.Currency, r.NetWorkingMS, r.Model = p.Cost, p.Currency, p.NetWorkingMS, p.Model
 			}
 			if r.Rendered == "" {
 				r.Rendered = p.Rendered

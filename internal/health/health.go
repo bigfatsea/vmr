@@ -157,11 +157,15 @@ func (r *Registry) ReportSuccess(key string) {
 // backoff exactly where the endpoint needs it most. Fails drops by one and
 // the endpoint leaves cooldown, but it stays half-open (Classify keeps
 // dispatching probes instead of real traffic) until consecutive probes
-// decay fails to 0 and Classify re-allows real traffic. Real traffic cannot
-// arrive — and so cannot reach ReportSuccess — while fails is still >0:
-// Classify hands out no real requests on that state, so probe decay is the
-// only way out of it; ReportSuccess only runs once the endpoint is already
-// fully available again.
+// decay fails to 0 and Classify re-allows real traffic. Real traffic normally
+// cannot arrive — and so cannot reach ReportSuccess — while fails is still
+// >0: Classify hands out no real requests on that state, so probe decay is
+// the only way out of it; ReportSuccess only runs once the endpoint is
+// already fully available again. The one exception is the candidate-building
+// last-resort path (KNOWN_ISSUES §2.85): when every candidate is
+// unavailable, the least-backed-off half-open endpoint is released to a
+// single real request as a genuine trial — that request can reach
+// ReportSuccess (clearing fails to 0 outright) while fails is still >0.
 func (r *Registry) ReportProbeSuccess(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

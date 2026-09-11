@@ -501,15 +501,14 @@ func extractResponseTextFromString(s string) string {
 	if len(trimmed) == 0 {
 		return ""
 	}
-	if strings.Contains(s, "data:") {
-		if sum := ReassembleSSE(s); sum != nil {
-			return summaryText(sum)
-		}
-		if t := extractTruncatedText([]byte(s)); len(t) > 0 {
-			return t
-		}
-		return ""
-	}
+	// A complete JSON object is checked first: a full response body can
+	// legitimately contain the substring "data:" inside its content (an
+	// inlined data URL image, a tool result echoing one back) without being
+	// an SSE stream — checking '{' first routes those to the JSON decoder
+	// instead of misreading them as SSE and falling through to the
+	// truncated-text scan. A real SSE stream never starts with '{' (its
+	// first byte is always 'd' from "data: "), so this reordering doesn't
+	// change how any actual SSE body is classified.
 	if trimmed[0] == '{' {
 		var obj map[string]any
 		if json.Unmarshal([]byte(trimmed), &obj) == nil {
@@ -519,6 +518,15 @@ func extractResponseTextFromString(s string) string {
 			return ""
 		}
 		if t := extractTruncatedText([]byte(trimmed)); len(t) > 0 {
+			return t
+		}
+		return ""
+	}
+	if strings.Contains(s, "data:") {
+		if sum := ReassembleSSE(s); sum != nil {
+			return summaryText(sum)
+		}
+		if t := extractTruncatedText([]byte(s)); len(t) > 0 {
 			return t
 		}
 		return ""

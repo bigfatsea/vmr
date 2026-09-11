@@ -32,6 +32,7 @@ type CompareText struct {
 	SideBlock                      func(label, id, title, from, to, file string) string
 	InitialInstructionTitle        string
 	InitialInstructionExcerptLabel func(side string) string
+	InitialInstructionIdentical    string
 	ProfileTitle                   string
 	ProfileTableHeader             string
 	NotableFootnote                func(thresholdPct float64) string
@@ -124,6 +125,7 @@ func Compare(lang Lang) CompareText {
 			},
 			InitialInstructionTitle:        "## 初始指令\n\n",
 			InitialInstructionExcerptLabel: func(side string) string { return side + " 的初始指令" },
+			InitialInstructionIdentical:    "> 两侧初始指令逐字完全一致（节选前缀，不代表完整文本逐字相同）。\n\n",
 			ProfileTitle:                   "## 行为剖面对比\n\n",
 			ProfileTableHeader:             "| 指标 | A | B | 变化 |\n|---|---|---|---|\n",
 			DeltaNew:                       "新增",
@@ -251,6 +253,7 @@ func Compare(lang Lang) CompareText {
 		},
 		InitialInstructionTitle:        "## Initial Instruction\n\n",
 		InitialInstructionExcerptLabel: func(side string) string { return side + "'s initial instruction" },
+		InitialInstructionIdentical:    "> Both sides' initial instructions are verbatim identical (truncated prefix — not a claim that the full text matches).\n\n",
 		ProfileTitle:                   "## Behavior Profile Comparison\n\n",
 		ProfileTableHeader:             "| Metric | A | B | Change |\n|---|---|---|---|\n",
 		DeltaNew:                       "new",

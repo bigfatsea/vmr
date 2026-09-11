@@ -44,6 +44,13 @@ func parse(raw []byte) (*Config, error) {
 	if err := cfg.expandProviderAPIKeys(); err != nil {
 		return nil, err
 	}
+	// Checked here, before applyDefaults folds <=0 into the default: that
+	// fold is meant for "unset" (0), not "negative" — a negative value is a
+	// config mistake and should fail loudly like max_attempts/max_concurrency
+	// do, not get silently reinterpreted as "use the default".
+	if cfg.MaxRequestBodyMB < 0 {
+		return nil, fmt.Errorf("max_request_body_mb must be >= 0 (got %d; 0 = use default)", cfg.MaxRequestBodyMB)
+	}
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
 		return nil, err

@@ -61,6 +61,28 @@ func ParseReqCoord(req string) (basename string, line int, err error) {
 	return basename, line, nil
 }
 
+// LessReqCoord orders two "basename:line" coordinates for deterministic
+// tie-break sorting when timestamps collapse onto the same instant
+// (ns-truncated or stubbed clocks) — basename compares as a string, line
+// compares numerically. A naive full-string compare puts "file.log:10"
+// before "file.log:9" (lexicographic '1' < '9'), reversing the coordinate's
+// own within-file order; consumed as a request-order proxy, that reversal
+// reads a session as having contracted when it actually grew. Falls back to
+// a plain string compare when either side fails to parse — never happens
+// for a coordinate this package produced itself, but keeps this a total
+// order rather than a partial one that could panic a caller's sort.
+func LessReqCoord(a, b string) bool {
+	aBase, aLine, aErr := ParseReqCoord(a)
+	bBase, bLine, bErr := ParseReqCoord(b)
+	if aErr != nil || bErr != nil {
+		return a < b
+	}
+	if aBase != bBase {
+		return aBase < bBase
+	}
+	return aLine < bLine
+}
+
 // ReqHash8 is the coordinate's content-addressed short form used for
 // deterministic filenames (internal/reqdetail's detail pages): md5 of the
 // req string, first 4 bytes rendered as 8 hex characters — the same

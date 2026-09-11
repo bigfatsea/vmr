@@ -69,6 +69,32 @@ func (c *Config) validateBasic() error {
 	return nil
 }
 
+// validCapabilities is the full documented capability vocabulary (see
+// config.example.yaml and UserGuide's model_defaults/capabilities section) —
+// not the narrower set internal/strategy currently wires a Condition for.
+// "audio"/"video"/"thinking" are legitimate forward-declarations with no
+// enforcing Condition yet (see strategy/conditions.go's init comment); they
+// must validate clean today so existing documented configs keep loading.
+// "text" is the universal baseline and never gates anything. The set this
+// guards against is typos ("tool", "vision", ...) that silently and
+// permanently eliminate a model from HasTools/HasImage routing instead of
+// erroring at load time.
+var validCapabilities = map[string]bool{
+	"text": true, "tools": true, "image": true,
+	"audio": true, "video": true, "thinking": true,
+}
+
+// validateCapabilities rejects any capability string outside
+// validCapabilities. ctx names the field for the error message.
+func validateCapabilities(ctx string, caps []string) error {
+	for _, c := range caps {
+		if !validCapabilities[c] {
+			return fmt.Errorf("%s: unknown capability %q (valid: text, tools, image, audio, video, thinking)", ctx, c)
+		}
+	}
+	return nil
+}
+
 // validateIdentSegment rejects a name that would serve as the provider
 // segment of the protocol:provider:model audit label (see core.EndpointLabel):
 // a ':' turns SplitEndpointLabel's three-field split into a mis-parse (the
@@ -161,6 +187,9 @@ func (c *Config) validateModelDefaults() error {
 		if entry.MaxContextTokens < 0 {
 			return fmt.Errorf("model_defaults[%q]: max_context_tokens must be >= 0", modelKey)
 		}
+		if err := validateCapabilities(fmt.Sprintf("model_defaults[%q]: capabilities", modelKey), entry.Capabilities); err != nil {
+			return err
+		}
 		if entry.Providers != nil && len(entry.Providers) == 0 {
 			return fmt.Errorf("model_defaults[%q]: providers must not be empty when specified", modelKey)
 		}
@@ -198,12 +227,18 @@ func (c *Config) validateModels() error {
 		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
 			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)
 		}
+		if err := validateCapabilities(fmt.Sprintf("model %q: capabilities", name), m.Capabilities); err != nil {
+			return err
+		}
 		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
 			groups := m.Endpoints[protocol]
 			// Protocol lives at the map key, so one check per bucket covers
 			// every group under it — the key can't drift from the entries.
 			if _, ok := adapter.Get(protocol); !ok {
 				return fmt.Errorf("model %q: endpoints: unknown protocol %q (available: %v)%s", name, protocol, adapter.Names(), unknownProtocolHint(protocol))
+			}
+			if len(groups) == 0 {
+				return fmt.Errorf("model %q: endpoints.%s: declared with no endpoint groups (remove the key or add at least one group)", name, protocol)
 			}
 			for i, eg := range groups {
 				ctx := fmt.Sprintf("model %q endpoints.%s[#%d]", name, protocol, i+1)
@@ -223,6 +258,9 @@ func (c *Config) validateFallbackEndpoints() error {
 		groups := c.FallbackEndpoints[protocol]
 		if _, ok := adapter.Get(protocol); !ok {
 			return fmt.Errorf("fallback_endpoints: unknown protocol %q (available: %v)%s", protocol, adapter.Names(), unknownProtocolHint(protocol))
+		}
+		if len(groups) == 0 {
+			return fmt.Errorf("fallback_endpoints.%s: declared with no endpoint groups (remove the key or add at least one group)", protocol)
 		}
 		for i, fb := range groups {
 			if fb.Priority <= 0 {
