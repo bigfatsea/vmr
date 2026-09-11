@@ -281,7 +281,7 @@ function mountConsole(opts) {
       </a>
       <nav class="hd-nav">
         <a class="nav-link${active === 'overview' ? ' active' : ''}" href="/status.html">Overview</a>
-        <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Log</a>
+        <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Live &amp; Log</a>
         <a class="nav-link${active === 'help' ? ' active' : ''}" href="/help.html">Help</a>
       </nav>
       <div class="hd-right">${refreshSlot}

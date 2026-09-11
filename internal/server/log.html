@@ -1,16 +1,21 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-14, by pi — console-unification Log page (real /log stream) -->
+<!-- Ver 2026-09-14, by pi — console-unification Log page (real /log stream)
+     + Live Requests and Recent Failures sections moved here from Overview -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VMR Console — Log</title>
+<title>VMR Console — Live &amp; Log</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22><rect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%23161b22%22/><path d=%22M8 8l8 13 8-13%22 fill=%22none%22 stroke=%22%2358a6ff%22 stroke-width=%223.5%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
 <style>
 /*{{CONSOLE_CSS}}*/
 
 /* ===== Log-page private styles (terminal chrome; not shared with other pages) ===== */
 .w230{width:230px}
+
+/* Width parity with Overview/Help: the header rows, footer, terminal and the
+   live/failures sections all align to the shared 1280px page column. */
+.hd-inner.full,.rail-inner.full,.ft-inner.full{max-width:var(--page-max)}
 
 /* The Log page owns its own scrolling: body is a flex column, header and
    footer are fixed-size, main fills the rest and scrolls internally. */
@@ -29,11 +34,12 @@ body{height:100vh;display:flex;flex-direction:column;overflow:hidden}
 #conn-banner .spacer{flex:1}
 
 /* terminal viewport */
-main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column}
+main.term{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;
+  max-width:var(--page-max);width:100%;margin:0 auto;padding:0 16px;box-sizing:border-box}
 pre#log{
-  flex:1;overflow-y:auto;margin:0;padding:6px 12px 14px;
+  flex:1;overflow-y:auto;overflow-x:auto;margin:0;padding:6px 12px 14px;
   font-family:var(--font-mono);font-size:11.5px;line-height:1.1;
-  white-space:pre-wrap;word-break:break-all;
+  white-space:pre;
 }
 
 /* log line structural classes */
@@ -71,6 +77,21 @@ pre#log{
 .lvl[data-lvl=WRN].on{background:var(--yellow-bg);color:var(--yellow);border-color:rgba(210,153,34,.4)}
 .lvl[data-lvl=OK].on{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.4)}
 .lvl[data-lvl=INF].on{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.4)}
+
+/* ===== Live Requests / Recent Failures sections (moved from Overview) ===== */
+.below-log{max-width:var(--page-max);margin:0 auto;width:100%;padding:6px 16px 14px;box-sizing:border-box;flex-shrink:0;overflow-y:auto}
+.chips{display:inline-flex;gap:5px;flex-wrap:wrap;align-items:center}
+.chip{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text-muted);cursor:pointer;font-weight:400}
+.chip:hover{color:var(--text-bright)}
+.chip.on{color:var(--red);background:var(--red-bg);border-color:rgba(248,81,73,.4)}
+.chip.on[data-cls=canceled]{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.4)}
+.chip .n{opacity:.75;margin-left:4px}
+
+/* Recent Failures collapsible — collapsed by default; the chevron is the
+   affordance, the whole section head is the click target. */
+#failures-head{cursor:pointer;user-select:none}
+#failures-chev{display:inline-block;transition:transform .15s;color:var(--text-muted);font-size:11px}
+#failures-head.open #failures-chev{transform:rotate(90deg)}
 </style>
 </head>
 <body>
@@ -89,6 +110,56 @@ pre#log{
   <pre id="log"></pre>
   <button id="jump">↓ <span id="jump-n">0</span> new</button>
 </main>
+
+<!-- Live Requests / Recent Failures — moved here from the Overview page.
+     Both tables size to their content; Recent Failures starts collapsed. -->
+<div class="below-log">
+  <!-- ============ live requests ============ -->
+  <div class="section-head" id="live">Live Requests
+    <span class="badge b-cyan" id="live-running">0 running</span>
+    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
+  </div>
+  <div class="table-wrap">
+    <table class="c">
+      <thead><tr>
+        <th>State</th>
+        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
+        <th>Model</th><th>Caller</th>
+        <th>Provider : Model</th>
+        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
+        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
+        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
+        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
+      </tr></thead>
+      <tbody id="live-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ============ recent failures ============ -->
+  <div class="section-head" id="failures-head">
+    <span id="failures-chev">▸</span>
+    <span>Recent Failures</span>
+    <span class="badge b-err" id="fail-count">0</span>
+    <span class="count">in memory only — cleared on restart, retains errors within the last 24h</span>
+    <span class="spacer"></span>
+    <span class="chips" id="fail-chips"></span>
+  </div>
+  <div id="failures-body-wrap" hidden>
+    <div class="table-wrap">
+      <table class="c">
+        <thead><tr>
+          <th class="num" title="Arrival time of the request (vmr server time)">When</th>
+          <th>Model</th><th>Caller</th>
+          <th>Provider : Model</th>
+          <th class="num" title="Attempts made before the request was given up on">Att</th>
+          <th>Outcome</th>
+          <th class="num" title="Client-view total duration">Dur</th>
+        </tr></thead>
+        <tbody id="fail-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
 <script>
 /*{{CONSOLE_JS}}*/
@@ -390,6 +461,240 @@ async function refreshStatus() {
   } catch (_) {}
 }
 document.addEventListener('DOMContentLoaded', refreshStatus);
+
+/* ===== Live Requests & Recent Failures (moved from the Overview page) =====
+   Fed by their own adaptive /stats poller (~2s while requests are in flight,
+   15s idle, paused while hidden). The direct-fetch pattern is deliberate:
+   this poller must never invoke VMRAuth.guard or prompt a modal — on a
+   key-required instance without a stored key it just stays empty. */
+const LIVE_POLL_FAST_MS = 2000;
+const LIVE_POLL_IDLE_MS = 15000;
+const STALL_S = 10;
+let livePollTimer = null;
+let livePollBusy = false;
+let failFilter = null;
+let lastStatsPayload = null;
+
+let modelColorMap = new Map();
+
+function updateModelPalette(statusData, statsData) {
+  const models = new Set();
+  (statusData && statusData.models || []).forEach(m => {
+    (m.endpoints || []).forEach(ep => { if (ep.model) models.add(ep.model); });
+  });
+  (statsData && statsData.recent_errors || []).forEach(f => { if (f.model) models.add(f.model); });
+  (statsData && statsData.inflight || []).forEach(e => { if (e.model) models.add(e.model); });
+
+  const sorted = Array.from(models).sort((a, b) => a.localeCompare(b));
+  modelColorMap.clear();
+  const total = sorted.length;
+  sorted.forEach((m, idx) => {
+    const hue = total > 0 ? Math.round((idx / total) * 360) : 0;
+    modelColorMap.set(m, `hsl(${hue}, 70%, 62%)`);
+  });
+}
+
+function modelColor(model) {
+  if (!model) return '';
+  if (modelColorMap.has(model)) return modelColorMap.get(model);
+  let hash = 0;
+  for (let i = 0; i < model.length; i++) {
+    hash = (hash * 31 + model.charCodeAt(i)) & 0xffffffff;
+  }
+  const hue = Math.abs(hash) % 360;
+  const col = `hsl(${hue}, 70%, 62%)`;
+  modelColorMap.set(model, col);
+  return col;
+}
+
+function modelSpan(model) {
+  if (!model) return esc(model || '—');
+  return `<span style="color:${modelColor(model)}">${esc(model)}</span>`;
+}
+
+function formatWhen(ts) {
+  if (!ts) return '<span class="dim" title="No timestamp">—</span>';
+  const d = new Date(ts);
+  const now = new Date();
+  const timeStr = String(d.getHours()).padStart(2, '0') + ':' +
+                  String(d.getMinutes()).padStart(2, '0') + ':' +
+                  String(d.getSeconds()).padStart(2, '0');
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return timeStr;
+  }
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${month}-${day} ${timeStr}`;
+}
+
+// ============ Render Live Requests ============
+function renderLive(inflightList) {
+  const body = document.getElementById('live-body');
+  const es = (inflightList || []).filter(e => e.state === 'running');
+  document.getElementById('live-running').textContent = `${es.length} running`;
+
+  if (!es.length) {
+    body.innerHTML = `<tr><td colspan="9" class="empty-cell">
+      <div class="t-dim">No requests in flight right now.</div>
+    </td></tr>`;
+    return;
+  }
+
+  function elapsedCell(e) {
+    const s = Math.max(0, Math.floor((Date.now() - new Date(e.ts).getTime()) / 1000));
+    return fmtDur(s);
+  }
+
+  function firstLastCell(e) {
+    if (!e.first_byte_at) return '<span class="dim" title="No response byte received yet">—</span>';
+    const ft = e.sent_at ? dec2((new Date(e.first_byte_at) - new Date(e.sent_at)) / 1000) + 's' : '—';
+    const age = e.last_byte_at ? Math.max(0, Math.floor((Date.now() - new Date(e.last_byte_at).getTime()) / 1000)) : 0;
+    const last = (e.stream && age >= STALL_S)
+      ? `<span class="badge stall" title="No upstream chunk for ${age}s — this stream looks stalled">stalled ${fmtDur(age)}</span>`
+      : fmtDur(age);
+    return `${ft} <span class="dim">·</span> ${last}`;
+  }
+
+  function attemptCell(n) {
+    if (!n || n <= 0) return '<span class="dim" title="Not forwarded yet">—</span>';
+    if (n > 1) return `<span class="badge b-warn tight" title="Failover: attempt ${n}">#${n}</span>`;
+    return '<span class="dim">1</span>';
+  }
+
+  function endpointCell(e) {
+    if (!e.provider) return '<span class="dim" title="Request waiting for upstream selection">— routing</span>';
+    const full = `${e.provider} : ${e.model || ''}`;
+    return `<span class="ep" title="${esc(full)}">${esc(e.provider)} : ${e.model ? modelSpan(e.model) : '—'}</span>`;
+  }
+
+  body.innerHTML = es.map(e => `<tr>
+    <td><span class="badge b-cyan">running</span></td>
+    <td class="num">${elapsedCell(e)}</td>
+    <td><span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}</td>
+    <td><span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span></td>
+    <td>${endpointCell(e)}</td>
+    <td class="num">${attemptCell(e.attempt)}</td>
+    <td class="num">${firstLastCell(e)}</td>
+    <td class="num">${e.est_in > 0 ? fmtInt(e.est_in) : '<span class="dim" title="Input tokens not estimated">—</span>'}</td>
+    <td class="num">${e.est_out > 0 ? fmtInt(e.est_out) : '<span class="dim" title="compressed response body — output tokens cannot be counted">—</span>'}</td>
+  </tr>`).join('');
+}
+
+// ============ Render Recent Failures ============
+function renderFailures(failuresList) {
+  const body = document.getElementById('fail-body');
+  const countBadge = document.getElementById('fail-count');
+  const chipsWrap = document.getElementById('fail-chips');
+  const es = failuresList || [];
+
+  countBadge.textContent = String(es.length);
+
+  const counts = es.reduce((a, f) => {
+    const cls = f.error_class || f.outcome || 'unknown';
+    a[cls] = (a[cls] || 0) + 1;
+    return a;
+  }, {});
+  const classes = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+  chipsWrap.innerHTML = classes.map(c =>
+    `<button class="chip ${failFilter === c ? 'on' : ''}" data-cls="${esc(c)}" title="${failFilter === c ? 'Click to clear the filter' : 'Show only ' + esc(c)}">${esc(c)}<span class="n">${counts[c]}</span></button>`
+  ).join('');
+
+  chipsWrap.querySelectorAll('.chip').forEach(b => {
+    b.onclick = ev => {
+      ev.stopPropagation();   // the head toggles collapse — a chip click must not
+      failFilter = failFilter === b.dataset.cls ? null : b.dataset.cls;
+      renderFailures(lastStatsPayload && lastStatsPayload.recent_errors);
+    };
+  });
+
+  const filtered = failFilter ? es.filter(f => (f.error_class || f.outcome || 'unknown') === failFilter) : es;
+
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">
+      <div class="t-dim">No failed request in the current buffer.</div>
+      <div class="hint">The buffer holds errors from the last 24 hours (up to 100) and is cleared on restart.</div>
+    </td></tr>`;
+    return;
+  }
+
+  function endpointFailCell(f) {
+    if (!f.provider) return '<span class="dim" title="Request aborted before forwarding">— never forwarded</span>';
+    const full = `${f.provider} : ${f.model || ''}`;
+    return `<span class="ep" title="${esc(full)}">${esc(f.provider)} : ${f.model ? modelSpan(f.model) : '—'}</span>`;
+  }
+
+  body.innerHTML = filtered.map(f => {
+    const isCancelled = f.error_class === 'canceled' || f.outcome === 'canceled';
+    const clsBadge = `<span class="badge ${isCancelled ? 'b-warn' : 'b-err'}">${esc(f.error_class || f.outcome)}</span>`;
+    const code = f.status ? ` <span class="dim">${f.status}</span>` : '';
+    const att = f.attempt > 1
+      ? `<span class="badge b-warn tight" title="Attempts before failure">#${f.attempt}</span>`
+      : (f.attempt >= 1 ? '<span class="dim">1</span>'
+                        : '<span class="dim" title="No upstream attempt was made — every candidate was cooling down">—</span>');
+
+    return `<tr>
+      <td class="num">${formatWhen(f.ts)}</td>
+      <td><span class="dim">${esc(f.protocol)}:</span><b>${esc(f.vmodel)}</b>${modeTag(f.stream)}</td>
+      <td><span class="ep" title="${esc(f.client_key_tag || '—')}">${esc(f.client_key_tag || '—')}</span></td>
+      <td>${endpointFailCell(f)}</td>
+      <td class="num">${att}</td>
+      <td>${clsBadge}${code}</td>
+      <td class="num">${dec2((f.dur_ms || 0) / 1000)}s</td>
+    </tr>`;
+  }).join('');
+}
+
+/* Recent Failures collapse toggle — collapsed by default. */
+const failuresHead = document.getElementById('failures-head');
+const failuresWrap = document.getElementById('failures-body-wrap');
+failuresHead.addEventListener('click', () => {
+  const open = failuresWrap.hidden;
+  failuresWrap.hidden = !open;
+  failuresHead.classList.toggle('open', open);
+});
+
+/* ---- adaptive poller for the two live sections ---- */
+function armLivePoll(ms) {
+  clearTimeout(livePollTimer);
+  if (document.hidden) return;   // parked — visibilitychange wakes us up
+  livePollTimer = setTimeout(livePollTick, ms);
+}
+
+async function livePollTick() {
+  if (livePollBusy || document.hidden) return;
+  livePollBusy = true;
+  try {
+    const headers = {};
+    const k = VMRAuth.get();
+    if (k) headers['Authorization'] = 'Bearer ' + k;
+    const resp = await fetch('/stats', { headers });
+    if (!resp.ok) {
+      armLivePoll(LIVE_POLL_IDLE_MS);
+      return;
+    }
+    const data = await resp.json();
+    lastStatsPayload = data;
+    updateModelPalette(null, data);
+    renderLive(data.inflight || []);
+    renderFailures(data.recent_errors || []);
+    const conc = data.concurrency || {};
+    const busy = (data.inflight || []).length > 0 ||
+                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
+    armLivePoll(busy ? LIVE_POLL_FAST_MS : LIVE_POLL_IDLE_MS);
+  } catch (_) {
+    armLivePoll(LIVE_POLL_IDLE_MS);
+  } finally {
+    livePollBusy = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  clearTimeout(livePollTimer);
+  if (document.hidden) return;
+  livePollTick();
+});
+armLivePoll(LIVE_POLL_IDLE_MS);
 
 /* ---- boot ---- */
 updateStatus();

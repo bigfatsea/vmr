@@ -115,7 +115,7 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
-│ [◇] VMR          Overview Log Help          (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 三页同槽
+│ [◇] VMR          Overview Live & Log Help   (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 三页同槽
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ Overview  Live 6  Quota 3  Models 3  Failures 6  Performance  Traffic & Usage         │ 行2 · 页面自有
 ├──────────────────────────────────────────────────────────────────────────────────────┤
@@ -145,7 +145,7 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
   点击统一打开 §6 的 modal。
 - **Footer**：两栏 slim 条，左=实例完整身份，右=仓库链接。Log 页的 footer 是同构**状态条**
   （左=终端自有状态：行数 / 缓冲 / level / 过滤器；右=实例身份与仓库链接）。
-- 导航三页：**Overview / Log / Help**。
+- 导航三页：**Overview / Live & Log / Help**。
 
 ## 5. 宽度策略
 
@@ -153,7 +153,7 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 | --- | --- | --- |
 | Overview | `max-width:1280px` 居中 | 宽表（拓扑/Live/Perf）在 1280 下列宽充裕；超宽可读性反降 |
 | Help | `max-width:1280px` 居中 | 长文阅读行宽 |
-| Log | **满宽 + 100vh 终端布局** | 日志换行毁可读性；按屏高撑满、内部滚动 |
+| Log | **1280px 居中对齐** | 顶部为不折行终端，下方承载活动的 Live Requests 与可折叠 Recent Failures 表，与 Overview / Help 页面宽度统一 |
 
 Header/Footer 通栏，内部 `.hd-inner/.rail-inner/.ft-inner` 按所在页对齐。
 

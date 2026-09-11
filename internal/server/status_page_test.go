@@ -50,13 +50,12 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 		t.Errorf("body missing 'VMR Console — Overview'")
 	}
 
-	// Overview page markers: all 7 section anchors
+	// Overview page markers: 5 section anchors (Live Requests and Recent Failures
+	// moved to log.html)
 	for _, anchor := range []string{
 		`id="vitals"`,
 		`id="quota"`,
 		`id="models"`,
-		`id="live"`,
-		`id="failures"`,
 		`id="perf"`,
 		`id="traffic"`,
 	} {
@@ -396,15 +395,13 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	}
 	body := w.Body.String()
 
-	// Adaptive poller fast and idle cadences
+	// Adaptive poller fast and idle cadences (concurrency vitals)
 	for _, want := range []string{
 		"const LIVE_POLL_FAST_MS = 2000;",
 		"const LIVE_POLL_IDLE_MS = 15000;",
 		"function armLivePoll(ms)",
 		"async function livePollTick()",
 		"renderConcurrencyVitals(",
-		"renderLive(",
-		"lastConcLimit",
 		"fetch('/stats', { headers })",
 	} {
 		if !strings.Contains(body, want) {
@@ -448,5 +445,20 @@ func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
 	wantHeader := "headers: VMRAuth.has() ? { 'Authorization': 'Bearer ' + VMRAuth.get() } : {}"
 	if !strings.Contains(body, wantHeader) {
 		t.Errorf("log.html refreshStatus missing auth headers: %q", wantHeader)
+	}
+
+	// log.html adaptive poller and moved sections
+	for _, want := range []string{
+		`id="live"`,
+		`id="failures-head"`,
+		`id="failures-body-wrap" hidden`,
+		"const LIVE_POLL_FAST_MS = 2000;",
+		"const LIVE_POLL_IDLE_MS = 15000;",
+		"renderLive(",
+		"renderFailures(",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("log.html missing element %q", want)
+		}
 	}
 }

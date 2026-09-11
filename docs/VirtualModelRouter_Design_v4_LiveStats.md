@@ -228,18 +228,16 @@ GET /stats（auth-gated）+ 内嵌控制台 Overview 页（§8）
    `?range=` 最宽就是 7d，内存里正好是控制台能显示的量；要看更久跑 `vmr analyze`（它读 audit log，
    不读这个文件），`by_*` 累计也因此是"滚动近一周"的口径；
 2. **当前小时计数**：`(dims) → counters`（hour 固定为当前），由钩子实时累加；
-3. **性能 ring**：per `(provider, key_label, model, stream)` 各一个容量 100 的环形缓冲。
+3. **性能 ring**：per `(provider, key_label, model)` 各一个容量 100 的环形缓冲（流式与非流式请求合并共享此 100 条限额）。
    ring 条目存**原始元组** `(ts, dur_ms, ttft_ms, tokens{in,out,cache_read,cache_write})`，
    分位数与速率在读时算——公式若要修，历史数据不用迁移。ring 只收 `outcome=ok` 且已转发
    的样本（见 §4.2 归因规则）。容量 100 对"最近 10 / 100 条 p50/p90"刚好：最近 10 条是
    ring 的尾部切片。
 
-   两处与"只存 tokens.out"的旧形态不同，都是被读侧需求逼出来的：
+   与早期形态的关键演进：
 
-   - **key 里加 `key_label`**：展开后的 provider 名虽然内含 label（`p1-main`），但 §3.1 已经
-     判定"靠解析名字反推是脆弱的"——把这条纪律只用在写侧、却让读侧的消费者去拆
-     `p1-main`，等于自己破自己的规矩。ring key 与输出行都带上 label，下游拿到的就是
-     `(provider, key_label, model, stream)` 四元组本身。
+   - **key 带 `key_label`，去掉 `stream` 区分**：展开后的 provider 名虽然内含 label（`p1-main`），但 §3.1 已经
+     判定"靠解析名字反推是脆弱的"——ring key 与输出行都带上 label。stream 与 non-stream 请求融合计算，共用 100 条样本环容量。
    - **条目存四分量而不只是 `out`**：读侧要的是"这一个窗口内的 token 用量"与
      "单请求 token 吞吐"，两者都需要四分量。四个 int64 × 100 条 × 键数，量级可忽略——
      这是拿确定的、可忽略的内存换掉一整类"窗口内的数字对不上"的歧义。
@@ -485,7 +483,7 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 为什么失败"**——它既不在正在发生的集合里，也已经被小时聚合抹成一个计数。运维在这段空窗
 里只能去翻原始日志或跑离线的 `vmr analyze`，而这恰恰是最需要快的时刻。
 
-一个容量 50 的进程内环形缓冲补上它，与性能 ring 同族——**纯内存、瞬态、重启清空、
+一个容量 100 且只保留 24 小时内记录的进程内环形缓冲补上它，与性能 ring 同族——**纯内存、瞬态、重启清空、
 永不落盘、不含任何正文**，因此不改变 §1.2 的隐私分级。每条：
 
 ```json

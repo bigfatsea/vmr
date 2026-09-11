@@ -38,8 +38,7 @@
 .chip.on[data-cls=canceled]{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.4)}
 .chip .n{opacity:.75;margin-left:4px}
 
-/* Upstream model dot */
-.model-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px;flex-shrink:0}
+/* Upstream model name coloring — hue assigned by alphabetical rank */
 </style>
 </head>
 <body>
@@ -71,27 +70,6 @@
       </div>
     </div>
     <div class="sysline" id="sysline"></div>
-  </div>
-
-  <!-- ============ live requests ============ -->
-  <div class="section-head" id="live">Live Requests
-    <span class="badge b-cyan" id="live-running">0 running</span>
-    <span class="count">in-flight only — a request leaves this table the moment it completes</span>
-  </div>
-  <div class="table-wrap bounded">
-    <table class="c">
-      <thead><tr>
-        <th>State</th>
-        <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
-        <th>Model</th><th>Caller</th>
-        <th>Provider : Model</th>
-        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
-        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
-        <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
-        <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
-      </tr></thead>
-      <tbody id="live-body"></tbody>
-    </table>
   </div>
 
   <!-- ============ quota budgets ============ -->
@@ -127,30 +105,9 @@
     </table>
   </div>
 
-  <!-- ============ recent failures ============ -->
-  <div class="section-head" id="failures">Recent Failures
-    <span class="badge b-err" id="fail-count">0</span>
-    <span class="count">in memory only — cleared on restart, retains errors within the last 24h</span>
-    <span class="spacer"></span>
-    <span class="chips" id="fail-chips"></span>
-  </div>
-  <div class="table-wrap bounded">
-    <table class="c">
-      <thead><tr>
-        <th class="num" title="Arrival time of the request; hover a row's time for its process-local request number">When</th>
-        <th>Model</th><th>Caller</th>
-        <th>Provider : Model</th>
-        <th class="num" title="Attempts made before the request was given up on">Att</th>
-        <th>Outcome</th>
-        <th class="num" title="Client-view total duration">Dur</th>
-      </tr></thead>
-      <tbody id="fail-body"></tbody>
-    </table>
-  </div>
-
   <!-- ============ performance ============ -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">one row per endpoint; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
+    <span class="count">rows with no requests in the selected window are hidden; every column covers the same window of successful requests, and Requests shows how full that window actually is</span>
     <span class="spacer"></span>
     <span class="seg">
       <span class="seg-label">window</span>
@@ -193,12 +150,12 @@
 
   <div class="grid-2">
     <div>
-      <div class="sub-head">Usage by Upstream Key Label
-        <span class="count">which account paid for it</span>
+      <div class="sub-head">Usage by Provider &amp; Model
+        <span class="count">which upstream model served it</span>
       </div>
       <div class="table-wrap">
         <table class="c">
-          <thead><tr><th>Key Label</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
+          <thead><tr><th>Provider : Model</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num">Tok in+cw / cr</th><th class="num">Tok out</th><th class="num col-share" title="Share of total tokens (in+cw+cr+out) across all rows in this window">Tok Share</th></tr></thead>
           <tbody id="usage-key"></tbody>
           <tfoot id="usage-key-foot"></tfoot>
         </table>
@@ -227,10 +184,8 @@ const consoleApi = mountConsole({
   active: 'overview',
   rail: [
     { id: 'vitals', label: 'Overview' },
-    { id: 'live', label: 'Live' },
     { id: 'quota', label: 'Quota' },
     { id: 'models', label: 'Models' },
-    { id: 'failures', label: 'Failures' },
     { id: 'perf', label: 'Performance' },
     { id: 'traffic', label: 'Traffic & Usage' },
   ],
@@ -240,13 +195,9 @@ const consoleApi = mountConsole({
 let currentRange = '24h';
 let perfBasis = '100';
 let liveExpanded = false;
-let failFilter = null;
 let lastStatusData = null;
 let lastStatsData = null;
-let lastConcLimit = 0;
 
-const LIVE_CAP = 10;
-const STALL_S = 10;
 const RANGE_BTNS = ['24h', '3d', '7d'];
 
 let modelColorMap = new Map();
@@ -285,42 +236,52 @@ function modelColor(model) {
   return col;
 }
 
-function modelDot(model) {
-  if (!model) return '';
-  const c = modelColor(model);
-  return `<span class="model-dot" style="background:${c}" title="${esc(model)}"></span>`;
+// modelSpan renders the model name itself in its spectrum color — the same
+// name reads as the same color everywhere on the page.
+function modelSpan(model) {
+  if (!model) return esc(model || '—');
+  return `<span style="color:${modelColor(model)}">${esc(model)}</span>`;
 }
 
-function isSameDay(d1, d2) {
-  return d1.getFullYear() === d2.getFullYear() &&
-         d1.getMonth() === d2.getMonth() &&
-         d1.getDate() === d2.getDate();
+// serverDay extracts the wall-clock date prefix of an RFC3339 string. Both
+// current_time and the daily[] hour stamps carry the SERVER's offset, so
+// comparing these prefixes matches days in vmr's timezone regardless of
+// the browser's locale.
+function serverDay(dateStr) {
+  return typeof dateStr === 'string' ? dateStr.slice(0, 10) : '';
 }
 
-function getTodayStats(statsData, nowTs) {
-  const target = nowTs ? new Date(nowTs) : new Date();
+// sumDaily folds the daily[] ledger into today's and the ledger-total
+// counters. Both sides of the hero's "big / total" pair come from this one
+// durable source: process telemetry resets on restart while the ledger
+// recovers from disk, so mixing the two made the total read 0 after a
+// restart while the big number still showed the day's recovered traffic.
+function sumDaily(statsData, todayStr) {
   const res = {
-    reqTotal: 0, ok: 0, cancel: 0, err: 0,
-    in: 0, cw: 0, cr: 0, out: 0, tokTotal: 0,
-    hasData: false
+    todayReq: 0, todayOk: 0, todayCancel: 0, todayErr: 0,
+    todayIn: 0, todayCw: 0, todayCr: 0, todayOut: 0,
+    totalReq: 0, totalTok: 0,
+    hasToday: false, hasRows: false
   };
   (statsData && statsData.daily || []).forEach(row => {
-    const d = new Date(row.hour);
-    if (isSameDay(d, target)) {
-      res.hasData = true;
-      const c = row.counters || {};
-      const tok = c.tokens || {};
-      res.ok += c.ok || 0;
-      res.cancel += c.canceled || 0;
-      res.err += c.error || 0;
-      res.in += tok.in || 0;
-      res.cw += tok.cache_write || 0;
-      res.cr += tok.cache_read || 0;
-      res.out += tok.out || 0;
+    res.hasRows = true;
+    const c = row.counters || {};
+    const tok = c.tokens || {};
+    const reqs = (c.ok || 0) + (c.error || 0) + (c.canceled || 0);
+    res.totalReq += reqs;
+    res.totalTok += (tok.in || 0) + (tok.cache_write || 0) + (tok.cache_read || 0) + (tok.out || 0);
+    if (todayStr && serverDay(row.hour) === todayStr) {
+      res.hasToday = true;
+      res.todayOk += c.ok || 0;
+      res.todayCancel += c.canceled || 0;
+      res.todayErr += c.error || 0;
+      res.todayIn += tok.in || 0;
+      res.todayCw += tok.cache_write || 0;
+      res.todayCr += tok.cache_read || 0;
+      res.todayOut += tok.out || 0;
     }
   });
-  res.reqTotal = res.ok + res.cancel + res.err;
-  res.tokTotal = res.in + res.cw + res.cr + res.out;
+  res.todayReq = res.todayOk + res.todayCancel + res.todayErr;
   return res;
 }
 
@@ -371,21 +332,6 @@ function formatReset(endsAtStr) {
   return `<span title="${esc(title)}">${month}-${day} ${timeStr}</span>`;
 }
 
-function formatWhen(ts) {
-  if (!ts) return '<span class="dim" title="No timestamp">—</span>';
-  const d = new Date(ts);
-  const now = new Date();
-  const timeStr = String(d.getHours()).padStart(2, '0') + ':' +
-                  String(d.getMinutes()).padStart(2, '0') + ':' +
-                  String(d.getSeconds()).padStart(2, '0');
-  if (isSameDay(d, now)) {
-    return timeStr;
-  }
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${month}-${day} ${timeStr}`;
-}
-
 function fmtTTFT(ms) {
   if (!ms || ms <= 0) return '<span class="dim" title="Unmeasured TTFT">—</span>';
   return ms >= 1000 ? dec2(ms / 1000) + 's' : ms + 'ms';
@@ -407,14 +353,10 @@ function headroomTitle(v) {
 
 function renderConcurrencyVitals(conc) {
   // Shared by the whole-page refresh and the live poller — both render the
-  // concurrency vitals from a /stats-shaped conc object. Also records the
-  // limit for renderLive's table height (lastConcLimit, not lastStatsData:
-  // the poller must not clobber the range-scoped stats payload the chart
-  // and usage tables re-render from).
+  // concurrency vitals from a /stats-shaped conc object.
   const inFlight = conc.in_flight || 0;
   const limit = conc.limit || 0;
   const waiting = conc.waiting || 0;
-  lastConcLimit = limit;
   document.getElementById('v-conc').innerHTML = limit > 0
     ? `${fmtInt(inFlight)}<small> / ${limit}</small>`
     : `${fmtInt(inFlight)}<small> / ∞</small>`;
@@ -433,33 +375,44 @@ function renderVitalsAndSysline(statusData, statsData) {
   // 1. Concurrency
   renderConcurrencyVitals(inst.concurrency || (statsData && statsData.concurrency) || {});
 
-  // 2. Requests
+  // 2. Requests — big number and the breakdown line are TODAY's data; the
+  // small right-hand value is the ledger total. One durable source for both:
+  // process telemetry resets on restart while daily[] recovers from disk.
+  // When the ledger is completely empty (stats off, fresh install) fall back
+  // to telemetry — then since-start is all there is, and both sides agree.
+  const todayStr = serverDay(statusData.current_time) || serverDay(new Date().toISOString());
+  const led = sumDaily(statsData, todayStr);
   const reqTotalSinceStart = reqs.total || 0;
-  const today = getTodayStats(statsData, statusData.current_time);
-  const todayReqTotal = today.hasData ? today.reqTotal : reqTotalSinceStart;
-  const todayOk = today.hasData ? today.ok : ((reqs.by_status && reqs.by_status.ok) || 0);
-  const todayCancel = today.hasData ? today.cancel : ((reqs.by_status && reqs.by_status.canceled) || 0);
-  const todayErr = today.hasData ? today.err : ((reqs.by_status && reqs.by_status.error) || 0);
+  const useLedger = led.hasRows;
+  const todayReqTotal = useLedger ? led.todayReq : reqTotalSinceStart;
+  const reqGrandTotal = useLedger ? led.totalReq : reqTotalSinceStart;
+  const todayOk = useLedger ? led.todayOk : ((reqs.by_status && reqs.by_status.ok) || 0);
+  const todayCancel = useLedger ? led.todayCancel : ((reqs.by_status && reqs.by_status.canceled) || 0);
+  const todayErr = useLedger ? led.todayErr : ((reqs.by_status && reqs.by_status.error) || 0);
   const todayErrPct = todayReqTotal > 0 ? (todayErr / todayReqTotal * 100) : 0;
 
-  document.getElementById('v-req').innerHTML = `${fmtInt(todayReqTotal)}<small> / ${fmtKMG(reqTotalSinceStart)} total</small>`;
+  document.getElementById('v-req').innerHTML =
+    `${fmtInt(todayReqTotal)}<small title="requests recorded in the stats ledger (durable, ~last 8 days — survives restarts)"> / ${fmtKMG(reqGrandTotal)} total</small>`;
   document.getElementById('v-ok').textContent = `${fmtInt(todayOk)} ok`;
   document.getElementById('v-cancel').textContent = `${fmtInt(todayCancel)} cancel`;
   document.getElementById('v-err').textContent = `${fmtInt(todayErr)} err · ${fmtPct(todayErrPct)}`;
 
-  // 3. Tokens
+  // 3. Tokens — same ledger discipline as Requests. Bottom line:
+  // "tok in X (hit%), out Y" where in = fresh + cache_write + cache_read
+  // and the percentage is the cache-read share of prompt tokens.
   const totalTokSinceStart = (toks.in || 0) + (toks.out || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0);
-  const todayPromptTotal = today.in + today.cw + today.cr;
-  const todayCacheHitPct = todayPromptTotal > 0 ? (today.cr / todayPromptTotal * 100) : 0;
+  const todayPromptTotal = led.todayIn + led.todayCw + led.todayCr;
+  const todayCacheHitPct = todayPromptTotal > 0 ? (led.todayCr / todayPromptTotal * 100) : 0;
 
-  const displayTokTotal = today.hasData ? today.tokTotal : totalTokSinceStart;
-  const displayPromptTotal = today.hasData ? todayPromptTotal : ((toks.in || 0) + (toks.cache_write || 0) + (toks.cache_read || 0));
-  const displayOut = today.hasData ? today.out : (toks.out || 0);
-  const displayHitPct = today.hasData ? todayCacheHitPct : (displayPromptTotal > 0 ? ((toks.cache_read || 0) / displayPromptTotal * 100) : 0);
+  const displayTokTotal = useLedger ? led.todayIn + led.todayCw + led.todayCr + led.todayOut : totalTokSinceStart;
+  const displayPromptTotal = useLedger ? todayPromptTotal : ((toks.in || 0) + (toks.cache_write || 0) + (toks.cache_read || 0));
+  const displayOut = useLedger ? led.todayOut : (toks.out || 0);
+  const displayHitPct = useLedger ? todayCacheHitPct : (displayPromptTotal > 0 ? ((toks.cache_read || 0) / displayPromptTotal * 100) : 0);
 
-  document.getElementById('v-tok').innerHTML = `${fmtKMG(displayTokTotal)}<small> / ${fmtKMG(totalTokSinceStart)} total</small>`;
+  document.getElementById('v-tok').innerHTML =
+    `${fmtKMG(displayTokTotal)}<small title="tokens recorded in the stats ledger (durable, ~last 8 days — survives restarts)"> / ${fmtKMG(useLedger ? led.totalTok : totalTokSinceStart)} total</small>`;
   document.getElementById('v-tok-sub').innerHTML =
-    `<span id="v-tok-detail">tok in ${fmtKMG(displayPromptTotal)} · ${dec2(displayHitPct)}%, out ${fmtKMG(displayOut)}</span>`;
+    `<span id="v-tok-detail">tok in ${fmtKMG(displayPromptTotal)} (${dec2(displayHitPct)}%), out ${fmtKMG(displayOut)}</span>`;
 
   // 4. Endpoints
   const models = statusData.models || [];
@@ -598,7 +551,7 @@ function renderQuota(quotaList, models, statsData) {
 
     const modelsText = (q.models && q.models.length > 0) ? q.models.join(', ') : 'all models';
     const modelsHtml = (q.models && q.models.length > 0)
-      ? q.models.map(m => `${modelDot(m)}${esc(m)}`).join(', ')
+      ? q.models.map(m => modelSpan(m)).join(', ')
       : 'all models';
 
     const fmtVal = q.metric === 'requests' ? fmtInt : fmtKMG;
@@ -639,7 +592,7 @@ function renderQuota(quotaList, models, statsData) {
     return `<tr>
       <td>${provCell}</td>
       <td>${limitBadge}</td>
-      <td class="t-dim"><span class="ep" title="${esc(modelsText)}">${modelsHtml}</span></td>
+      <td class="t-dim">${modelsHtml}</td>
       <td class="num">${amountStr}</td>
       <td class="num">${usedStr}</td>
       <td>
@@ -648,7 +601,7 @@ function renderQuota(quotaList, models, statsData) {
       </td>
       <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
       <td class="num">${shareCell}</td>
-      <td class="t-dim">${formatReset(q.period_ends_at)}</td>
+      <td class="num t-dim">${formatReset(q.period_ends_at)}</td>
     </tr>`;
   }).join('');
 }
@@ -737,10 +690,16 @@ function renderModels(modelsList, statsData) {
       ? '<span class="pri pri-n" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
       : `<span class="pri ${ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n')}">P${ep.priority}</span>`;
 
-    const ctx = ep.max_context_tokens > 0 ? fmtKMG(ep.max_context_tokens) : '—';
-    const caps = (ep.capabilities && ep.capabilities.length > 0)
-      ? '<span class="dim">· ' + ep.capabilities.map(esc).join(' · ') + '</span>'
-      : '';
+    // Per-endpoint facts — context window and capabilities are resolved per
+    // (provider, upstream model) against model_defaults, so endpoints under
+    // one virtual model can legitimately differ here. Displayed as one
+    // slash-joined chain: "512K/text/tools/thinking".
+    const ctxParts = [];
+    if (ep.max_context_tokens > 0) ctxParts.push(fmtKMG(ep.max_context_tokens));
+    (ep.capabilities || []).forEach(c => ctxParts.push(esc(c)));
+    const ctxCell = ctxParts.length
+      ? `<span title="${esc(fullTitle)} context window / capabilities">${ctxParts.join('/')}</span>`
+      : '<span class="dim">—</span>';
 
     const hr = ep.headroom;
     const hrCls = headroomClass(hr);
@@ -748,7 +707,7 @@ function renderModels(modelsList, statsData) {
     const hrVal = fmtHeadroom(hr);
 
     const fullTitle = `${ep.provider} : ${ep.model}`;
-    const epCell = `<span class="ep" title="${esc(fullTitle)}">${modelDot(ep.model)}${esc(ep.provider)} : ${esc(ep.model)}</span>`;
+    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
 
     let modelCell = '';
     if (r.isFirst) {
@@ -762,142 +721,7 @@ function renderModels(modelsList, statsData) {
       <td>${hInfo.badge}</td>
       <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
       <td class="num">${shareCell}</td>
-      <td>${ctx} ${caps}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ============ Render Live Requests ============
-function renderLive(inflightList) {
-  const body = document.getElementById('live-body');
-  const es = (inflightList || []).filter(e => e.state === 'running');
-  const running = es.length;
-
-  document.getElementById('live-running').textContent = `${running} running`;
-  consoleApi.setRailCount('live', running);
-
-  const limit = lastConcLimit;
-  const fixedRows = limit > 0 ? limit : 5;
-  const fixedHeight = fixedRows * 38 + 36;
-  const tableWrap = document.querySelector('#live + .table-wrap');
-  if (tableWrap) {
-    tableWrap.style.height = fixedHeight + 'px';
-    tableWrap.style.maxHeight = fixedHeight + 'px';
-    tableWrap.style.overflowY = 'auto';
-  }
-
-  if (!es.length) {
-    body.innerHTML = `<tr><td colspan="9" class="empty-cell">
-      <div class="t-dim">No requests in flight right now.</div>
-      <div class="hint">Completed requests are not listed here — see Recent Failures, Performance and Traffic below.</div>
-    </td></tr>`;
-    return;
-  }
-
-  function elapsedCell(e) {
-    const s = Math.max(0, Math.floor((Date.now() - new Date(e.ts).getTime()) / 1000));
-    return fmtDur(s);
-  }
-
-  function firstLastCell(e) {
-    if (!e.first_byte_at) return '<span class="dim" title="No response byte received yet">—</span>';
-    const ft = e.sent_at ? dec2((new Date(e.first_byte_at) - new Date(e.sent_at)) / 1000) + 's' : '—';
-    const age = e.last_byte_at ? Math.max(0, Math.floor((Date.now() - new Date(e.last_byte_at).getTime()) / 1000)) : 0;
-    const last = (e.stream && age >= STALL_S)
-      ? `<span class="badge stall" title="No upstream chunk for ${age}s — this stream looks stalled">stalled ${fmtDur(age)}</span>`
-      : fmtDur(age);
-    return `${ft} <span class="dim">·</span> ${last}`;
-  }
-
-  function attemptCell(n) {
-    if (!n || n <= 0) return '<span class="dim" title="Not forwarded yet">—</span>';
-    if (n > 1) return `<span class="badge b-warn tight" title="Failover: attempt ${n}">#${n}</span>`;
-    return '<span class="dim">1</span>';
-  }
-
-  function endpointCell(e) {
-    if (!e.provider) return '<span class="dim" title="Request waiting for upstream selection">— routing</span>';
-    const full = `${e.provider} : ${e.model || ''}`;
-    const dot = e.model ? modelDot(e.model) : '';
-    return `<span class="ep" title="${esc(full)}">${dot}${esc(e.provider)} : ${esc(e.model || '—')}</span>`;
-  }
-
-  body.innerHTML = es.map(e => `<tr>
-    <td><span class="badge b-cyan">running</span></td>
-    <td class="num">${elapsedCell(e)}</td>
-    <td><span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}</td>
-    <td><span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span></td>
-    <td>${endpointCell(e)}</td>
-    <td class="num">${attemptCell(e.attempt)}</td>
-    <td class="num">${firstLastCell(e)}</td>
-    <td class="num">${e.est_in > 0 ? fmtInt(e.est_in) : '<span class="dim" title="Input tokens not estimated">—</span>'}</td>
-    <td class="num">${e.est_out > 0 ? fmtInt(e.est_out) : '<span class="dim" title="compressed response body — output tokens cannot be counted">—</span>'}</td>
-  </tr>`).join('');
-}
-
-// ============ Render Recent Failures ============
-function renderFailures(failuresList) {
-  const body = document.getElementById('fail-body');
-  const countBadge = document.getElementById('fail-count');
-  const chipsWrap = document.getElementById('fail-chips');
-  const es = failuresList || [];
-
-  countBadge.textContent = String(es.length);
-  consoleApi.setRailCount('failures', es.length);
-
-  const counts = es.reduce((a, f) => {
-    const cls = f.error_class || f.outcome || 'unknown';
-    a[cls] = (a[cls] || 0) + 1;
-    return a;
-  }, {});
-
-  const classes = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-
-  chipsWrap.innerHTML = classes.map(c =>
-    `<button class="chip ${failFilter === c ? 'on' : ''}" data-cls="${esc(c)}" title="${failFilter === c ? 'Click to clear the filter' : 'Show only ' + esc(c)}">${esc(c)}<span class="n">${counts[c]}</span></button>`
-  ).join('');
-
-  chipsWrap.querySelectorAll('.chip').forEach(b => {
-    b.onclick = () => {
-      failFilter = failFilter === b.dataset.cls ? null : b.dataset.cls;
-      renderFailures(lastStatsData && lastStatsData.recent_errors);
-    };
-  });
-
-  const filtered = failFilter ? es.filter(f => (f.error_class || f.outcome || 'unknown') === failFilter) : es;
-
-  if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="7" class="empty-cell">
-      <div class="t-dim">No failed request in the current buffer.</div>
-      <div class="hint">The buffer holds errors from the last 24 hours (up to 100) and is cleared on restart.</div>
-    </td></tr>`;
-    return;
-  }
-
-  function endpointFailCell(f) {
-    if (!f.provider) return '<span class="dim" title="Request aborted before forwarding">— never forwarded</span>';
-    const full = `${f.provider} : ${f.model || ''}`;
-    const dot = f.model ? modelDot(f.model) : '';
-    return `<span class="ep" title="${esc(full)}">${dot}${esc(f.provider)} : ${esc(f.model || '—')}</span>`;
-  }
-
-  body.innerHTML = filtered.map(f => {
-    const isCancelled = f.error_class === 'canceled' || f.outcome === 'canceled';
-    const clsBadge = `<span class="badge ${isCancelled ? 'b-warn' : 'b-err'}">${esc(f.error_class || f.outcome)}</span>`;
-    const code = f.status ? ` <span class="dim">${f.status}</span>` : '';
-    const att = f.attempt > 1
-      ? `<span class="badge b-warn tight" title="Attempts before failure">#${f.attempt}</span>`
-      : (f.attempt >= 1 ? '<span class="dim">1</span>'
-                        : '<span class="dim" title="No upstream attempt was made — every candidate was cooling down">—</span>');
-
-    return `<tr>
-      <td class="num">${formatWhen(f.ts)}</td>
-      <td><span class="dim">${esc(f.protocol)}:</span><b>${esc(f.vmodel)}</b>${modeTag(f.stream)}</td>
-      <td><span class="ep" title="${esc(f.client_key_tag || '—')}">${esc(f.client_key_tag || '—')}</span></td>
-      <td>${endpointFailCell(f)}</td>
-      <td class="num">${att}</td>
-      <td>${clsBadge}${code}</td>
-      <td class="num">${dec2((f.dur_ms || 0) / 1000)}s</td>
+      <td>${ctxCell}</td>
     </tr>`;
   }).join('');
 }
@@ -905,8 +729,13 @@ function renderFailures(failuresList) {
 // ============ Render Performance ============
 function renderPerf(byProviderModel, basis) {
   const body = document.getElementById('perf-body');
-  const rows = byProviderModel || [];
   const cap = Number(basis);
+  // Rows whose Requests count in the selected window is 0 carry no
+  // performance signal — drop them instead of rendering a "no samples" stub.
+  const rows = (byProviderModel || []).filter(r => {
+    const wb = basis === '10' ? r.last_10 : r.last_100;
+    return wb && (wb.n || 0) > 0;
+  });
 
   if (!rows.length) {
     body.innerHTML = `<tr><td colspan="6" class="empty-cell">
@@ -919,24 +748,20 @@ function renderPerf(byProviderModel, basis) {
   body.innerHTML = rows.map(r => {
     const wb = basis === '10' ? r.last_10 : r.last_100;
     const n = wb ? (wb.n || 0) : 0;
-    const none = n === 0;
 
     const pk = `${r.provider} : ${r.model}`;
-    const epCell = `<span class="ep" title="${esc(pk)}">${modelDot(r.model)}${esc(r.provider)} : ${esc(r.model)}</span>` +
-      (none ? ' <span class="badge b-dim tight" title="This endpoint has not completed a request within the window">no samples</span>' : '');
+    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : ${modelSpan(r.model)}</span>`;
 
-    const nCell = none
-      ? '<span class="dim">0</span>'
-      : (n < cap
-        ? `<span class="t-warn" title="Window not full: this row has only ${n} of ${cap} samples, so the percentiles rest on ${n} requests">${fmtInt(n)}</span>`
-        : fmtInt(n));
+    const nCell = n < cap
+      ? `<span class="t-warn" title="Window not full: this row has only ${n} of ${cap} samples, so the percentiles rest on ${n} requests">${fmtInt(n)}</span>`
+      : fmtInt(n);
 
     let incwCell = '<span class="dim" title="No samples in this window">—</span>';
     let outCell = '<span class="dim" title="No samples in this window">—</span>';
     let ttftCell = '<span class="dim" title="No samples in this window">—</span>';
     let toksCell = '<span class="dim" title="No samples in this window">—</span>';
 
-    if (!none && wb && wb.tokens) {
+    if (wb && wb.tokens) {
       const incw = (wb.tokens.in || 0) + (wb.tokens.cache_write || 0);
       const cr = wb.tokens.cache_read || 0;
       incwCell = `${fmtKMG(incw)} <span class="dim">/</span> ${fmtKMG(cr)}`;
@@ -947,7 +772,7 @@ function renderPerf(byProviderModel, basis) {
         : '<span class="dim" title="No throughput measurement">—</span>';
     }
 
-    return `<tr class="${none ? 'zero ' : ''}">
+    return `<tr>
       <td>${epCell}</td>
       <td class="num">${nCell}</td>
       <td class="num">${incwCell}</td>
@@ -1156,11 +981,13 @@ function renderUsage(hourlyRows, rangeKey) {
     const cr = tok.cache_read || 0;
     const out = tok.out || 0;
 
-    const kName = d.key_label || (d.provider ? d.provider : '—');
-    if (!keyMap.has(kName)) {
-      keyMap.set(kName, { name: kName, ok: 0, err: 0, incw: 0, cr: 0, out: 0 });
+    // Group by (provider, upstream model) — the model name carries its
+    // spectrum color so the same name reads the same across every section.
+    const pmKey = (d.provider || '—') + '\x00' + (d.model || '');
+    if (!keyMap.has(pmKey)) {
+      keyMap.set(pmKey, { name: d.provider || '—', model: d.model || '', ok: 0, err: 0, incw: 0, cr: 0, out: 0 });
     }
-    const ke = keyMap.get(kName);
+    const ke = keyMap.get(pmKey);
     ke.ok += ok; ke.err += err; ke.incw += incw; ke.cr += cr; ke.out += out;
 
     const cName = d.client_key_tag || '—';
@@ -1189,8 +1016,11 @@ function renderUsage(hourlyRows, rangeKey) {
       .sort((a, b) => total(b) - total(a))
       .map(r => {
         const share = total(r) / sum * 100;
+        const nameCell = r.model
+          ? `${esc(r.name)} : ${modelSpan(r.model)}`
+          : `<span class="ep" title="${esc(r.name)}">${esc(r.name)}</span>`;
         return `<tr>
-          <td><span class="ep" title="${esc(r.name)}">${esc(r.name)}</span></td>
+          <td>${nameCell}</td>
           <td class="num"><span class="t-ok">${fmtInt(r.ok)}</span> <span class="dim">/</span> <span class="${r.err ? 't-err' : 'dim'}">${fmtInt(r.err)}</span></td>
           <td class="num">${fmtKMG(r.incw)} <span class="dim">/</span> ${fmtKMG(r.cr)}</td>
           <td class="num">${fmtKMG(r.out)}</td>
@@ -1213,7 +1043,7 @@ function renderUsage(hourlyRows, rangeKey) {
     </tr>`;
   }
 
-  document.getElementById('usage-key').innerHTML = usageRows(keys, 'No usage recorded by key label in this window.');
+  document.getElementById('usage-key').innerHTML = usageRows(keys, 'No upstream usage recorded in this window.');
   document.getElementById('usage-key-foot').innerHTML = usageFoot(keys);
   document.getElementById('usage-caller').innerHTML = usageRows(callers, 'No caller usage recorded in this window.');
   document.getElementById('usage-caller-foot').innerHTML = usageFoot(callers);
@@ -1288,7 +1118,6 @@ async function livePollTick() {
     }
     const data = await resp.json();
     renderConcurrencyVitals(data.concurrency || {});
-    renderLive(data.inflight || []);
     const conc = data.concurrency || {};
     const busy = (data.inflight || []).length > 0 ||
                  (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
@@ -1338,8 +1167,6 @@ async function refreshAll() {
     renderVitalsAndSysline(statusData, statsData);
     renderQuota(statusData.quota || [], statusData.models || [], statsData);
     renderModels(statusData.models || [], statsData);
-    renderLive(statsData.inflight || []);
-    renderFailures(statsData.recent_errors || []);
     renderPerf(statsData.by_provider_model || [], perfBasis);
     renderChart(currentRange, statsData.hourly || []);
     renderUsage(statsData.hourly || [], currentRange);

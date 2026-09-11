@@ -318,7 +318,7 @@ func TestLogPage_ServesHTML(t *testing.T) {
 	}
 	body := w.Body.String()
 	// Feature markers that must be present in the assembled page.
-	for _, marker := range []string{"VMR Console \u2014 Log", "mountConsole", "conn-banner", "btn-retry", "btn-pause", "classifyLevel"} {
+	for _, marker := range []string{"VMR Console \u2014 Live &amp; Log", "mountConsole", "conn-banner", "btn-retry", "btn-pause", "classifyLevel", "live-body", "fail-body"} {
 		if !strings.Contains(body, marker) {
 			t.Errorf("body missing %q", marker)
 		}
