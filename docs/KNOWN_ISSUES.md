@@ -19,7 +19,7 @@
 
 - **稳定性与安全性**：无凭证泄漏、并发竞态或服务阻断级别的缺陷；单机生产环境可稳定运行。`copyFlush` 异常路径下的 `respnorm` 查询方法全部互斥锁同步，`-race` 全绿并经端到端流式断开集成测试守护。
 - **自动化基线**：`internal/archtest` 强制导入单向边界、文件/函数行数预算、文档引用完整性，全绿。`go test ./...` 全绿（`internal/...` 与 `cmd/vmr` 均含 `-race`）。
-- **§2 分布**：高危 0；中危路由/配额半区 `2.2` / `2.17` / `2.127`、LLM 校准 `2.18`、分析口径 `2.128` / `2.129` + 1 项发版前必做（`2.97`）；其余均为低危。
+- **§2 分布**：高危 0；中危路由/配额半区 `2.2` / `2.17` / `2.127` / `2.134`、前端转义 `2.135`、LLM 校准 `2.18`、分析口径 `2.128` / `2.129` + 1 项发版前必做（`2.97`）；其余均为低危。
 
 ---
 
@@ -117,6 +117,7 @@
 - **`internal/report/cost.go` 的端点标签切分不并入 `core.SplitEndpointLabel`**：后者兼容 `:` 与 `/`，前者只认 `:`。放宽 `$` 成本估算那个调用点会改变旧格式日志的历史报表金额——一次需单独评审的行为变更，不是「统一实现」的顺带产物。
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（实测可达 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
 - **用量折算（精确 vs 降级）的跨包入口刻意只有一条，没有单标志合并形式**：`quota.TokenCountersSides`（纯标量入参）是唯一权威实现，`router.TokenCountersSides` 是 `chatmsg.Usage`→`quota.TokenUsage` 的唯一翻译层（`report` 直接调 `quota` 侧，`archtest` 禁它 import `router`）。合并后的「some usage was seen」单比特信号无法区分完整账本与部分账本，把 partial 当 exact 记账正是 sides 拆分要消灭的 bug 类。**不要以「API 对称」或「给未来消费者留入口」名义复活单标志包装**——只能给单比特的调用方本就该逐侧决策。
+- **quota parity 的非整数倍率差分用例直接驱动 `quota` 导出入口，不走 `buildProviderQuotaRows` 的 YAML 管线**：`cmd/vmr/quota_parity_test.go` 的 `TestQuotaParity_RequestsMetric_NonIntegerMultiplier` 用 `quota.ApplyModelMultiplier`/`quota.BaseAmount` 重算报表侧再与 `routerCharged` 对比（fixture 的 `quotaYAML` 不声明 `model_multipliers`，倍率轴经 YAML 表达不了）。取舍：这条用例的职责是钉住「N 次独立 float64 累加 vs 一次乘法」的公式级等价，报表侧必须复现 router 公式本身才能不与其实现漂移；端到端 basis（YAML → 行 → 与 router 对账）由不带倍率的 `TestQuotaParity_RequestsMetric_ReportMatchesRouter` 覆盖。**复核时机**：`buildProviderQuotaRows` 的倍率解析或 basis 计算发生变化时，重新评估是否补一条声明 `model_multipliers` 的 YAML 管线差分用例。
 - **金额展示统一收敛在 `fmtutil` 一处**：`FmtCurrency`（恒两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（报表「端点性价比」章的成本/1M out 与成本/成功请求）。跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCost/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**；表格列的货币也可在表头标注，此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
 - **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：Finding 文本同时进 Markdown 产物与机读 JSON，而 Markdown 的**结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`、主题分隔线 `---`）——在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`imgprep` 的 `map[string]json.RawMessage` 不与 `jsonscan` 的字节扫描统一**：图片降采样要重算尺寸并重编码，是深度结构化重写，字节 splice 做不到。这是三个 sanctioned deviation 里最大的一个。
@@ -572,6 +573,52 @@
 - **性质**：与 §1.4 `imgprep.HasImageMarker`"宁误报不漏报"的既有取舍同源——本项目已接受这类启发式扫描的边缘误判。
 - **触发条件**：`vmr analyze` 的估算精度专项排期时一并评估，不单独立项。
 
+### J. 2026-09-11 第三轮 全系统深度 Review 新增（来源：full-review 6 域自底向上与跨域核实，源码已确认）
+
+> 由 full-review 6 路并行 subagent 自底向上深度审阅 + 主控横向跨域链路交叉核实后确认登记。全部条目已核实当前代码锚点，无重复登记。
+
+#### 2.134 [中，建议尽快] `runProbe` 对 200 OK 响应体读取错误未做校验，断流时误判探针成功
+
+- **现状**：`internal/router/probe.go:101-104` 中，对 `readErr != nil` 的错误校验被放置在 `if resp.StatusCode >= 400` 代码块内部。当上游探活请求返回 200 OK 状态行后立即中途断流或连接被重置，`resp.StatusCode == 200` 且 `readErr != nil`，执行流直接跳过错误处理分支，继续调用 `ChargeResponse` 与 `ReportProbeSuccess`，将一次网络断流失败误判为探针成功并衰减退避。
+- **可能方案**：将 `if readErr != nil` 提前至 `if resp.StatusCode >= 400` 之前，统一按 `ReportFailure(key, core.ErrTransient, 0, now)` 处理并提前返回。
+- **ROI**：高。改动仅数行，彻底堵住探针流式断流被误报成功的防御盲区。
+
+#### 2.135 [中，建议尽快] `internal/dashboard` 的 `macro-dashboard.html` 动态审计日志字段内联 innerHTML 缺少 `esc()` 转义
+
+- **现状**：`internal/dashboard` 的资源模板 `assets/macro-dashboard.html` 多处动态日志字段（如 `m.model`、`c.client_key`、`q.provider`、`e.endpoint`、`s.highlights` 等）未经 `common.js` 的 `esc()` 转义直接拼入 `innerHTML`。其它页面（如 `status.html`）均对动态内容做了严格 HTML 转义。恶意或异常的 upstream 模型名/客户端标识可能导致 DOM XSS。
+- **可能方案**：在 `macro-dashboard.html` 各处模板插值中补充 `esc(...)` 过滤。
+- **ROI**：高。纯前端防守，零后端依赖，消除安全隐患。
+
+#### 2.136 [低] `recorder.Write` 的 `ttftMS` 哨兵在亚毫秒首包下被后续 chunk 覆盖
+
+- **现状**：`internal/server/recorder.go:61` 中使用 `if r.ttftMS == 0 && len(p) > 0` 判定首包写入。当首包响应极快（耗时 < 1ms，`Milliseconds() == 0`）时，哨兵未能有效锁死，第二个 chunk 到达时（如 50ms）条件依然满足，导致真正的首字节时延被后续 chunk 覆盖放大。
+- **可能方案**：增加 `firstByteSeen bool` 字段并在首次 `len(p) > 0` 时置为 true，替代 `ttftMS == 0` 作为首包判定守卫。
+- **ROI**：中。改动 3 行，提升本地与微秒级响应下的 TTFT 统计准确性。
+
+#### 2.137 [低] `chatmsg.MsgOffset` 在 `system` 与 `instructions` 并存时偏移量少计 1 位
+
+- **现状**：`internal/chatmsg/messages.go:159` 的 `MsgOffset` 若同时存在 `system` 与 `instructions` 字段时返回 1；而同文件 `Messages(body)` 在两键并存时会先后 append 两条合成消息，导致 `ri := i - off` 索引对齐产生 1 位偏移。
+- **可能方案**：`MsgOffset` 改为累加形式（两键分别判定并 `off++`）。
+- **触发条件**：低优。虽然极少在单一请求体中同时混用两者，但两函数间语义应当保持绝对自洽。
+
+#### 2.138 [低] 审计坐标搜索路径在 `cmd_replay` 与 `internal/replay` 存在双重实现分叉
+
+- **现状**：`cmd/vmr/cmd_replay.go:79` 的 `resolveAuditPath` 与 `internal/replay/replay.go` 的 `resolveReqAuditPath` 是对同一坐标定位逻辑的双实现，且行为已分叉（cmd 版多搜 `logs/` 目录与 `filepath.Base` 变体），导致 `vmr diff` 与 `vmr replay -req` 对同一请求的查找结果可能不一致。
+- **可能方案**：随 §2.121（`cmd_diff` 下沉）时收敛为单一实现。
+- **ROI**：中。消除代码重复与潜在定位分叉。
+
+#### 2.139 [低] `replay -record` 写入绕过 audit log_dir 的 flock 独占写约定
+
+- **现状**：`internal/replay/replay.go:668` 对 `-record` 路径使用裸 `O_APPEND` 写入，未检查 `audit.DirLockOccupier`。当用户把 `-record` 指向当前运行实例正在写入的日志文件时，打破了 flock 独占写约定。
+- **可能方案**：写入前若检测到目标在 log_dir 内且服务在线，输出 WARN 或拒绝写入。
+- **ROI**：低。边缘运维场景加固。
+
+#### 2.140 [低] `livestats` 的 `snapshot.go` 残留未引用的 `boolInt` 死代码
+
+- **现状**：`internal/livestats/snapshot.go:366` 的 `func boolInt(b bool) int` 在全仓无任何调用方，属于早期重构残留的未导出死代码。
+- **可能方案**：删除该函数。
+- **ROI**：低。代码整洁度提升。
+
 ---
 
 ## 3. 跨组排期结论
@@ -579,6 +626,7 @@
 - **全局结论**：待办里没有「价值高、成本低、却一直没做」的异常。值得优先投入的集中在三类：大语料规模（§2.2 看触发、§2.1 已证 5.2×）、LLM 解读层校准（§2.18，成本在人工标注）、路由配额（§2.52，用户 hold）。分析半区的产品路线（新视图 / 导出 / 达成信号）已移入 `ROADMAP`，不在此清单排期。
 - **2026-09-11 全系统 Review 剩余项（复核后）**：11 项已修（顺手 7 + 批次 1 的 4，见 H 组顶部说明与 `PROJECT_REVIEW_REPORT_agent_2026-09-11.md` 附录 A）。剩余排期——批次 2 已全部落地（§2.109 / §2.115 / §2.119 移除）；**批次 3（需设计 / 待触发）**：§2.86、§2.100、§2.57；**批次 4（架构演进期 / 待触发）**：§2.120 / §2.121 / §2.122 / §2.124。§2.111 复核后改为明确不补；§2.125 为修复 §2.109 时新发现的登记待触发项。
 - **2026-09-11 第二轮 Review（I 组）**：三份独立报告（路由半区架构、全系统 D1-D6、analyze 套件真实语料体验）逐条核实后，约 20 项事实清楚、方案无争议、改动可控的问题已在本轮直接修复并从待办移除（quota 独立 flock、ReqCoord 数值排序、详单页 UsageSides、capabilities 白名单校验等，见提交记录）；3 项核实为报告自身的事实性错误未采纳；剩余排入**批次 1（建议尽快，已触发）**：§2.127（quota 裸时钟锚点持久化）、§2.128（journey/report ErrorClass 口径统一）、§2.129（自流量排除说明前移）、§2.58(d)（客户端成本表补 `(no client_key)` 行）；**批次 2（登记待办）**：§2.130（journey-viewer 折叠/展开）、§2.132（livestats deleteSlim 告警）、§2.57 第二处表现（ModelToToolRatio clamp）；**非活跃/低优**：§2.131、§2.133、§2.126。
+- **2026-09-11 第三轮 全系统 Review（J 组，本轮）**：6 路 subagent 深度只读核实 + 跨域链路拉通：**批次 1（建议尽快，T1）**：§2.134（runProbe 断流校验提前）、§2.135（macro-dashboard innerHTML esc 转义）；**批次 2（登记待办，T2）**：§2.136（recorder TTFT 首包哨兵）、§2.137（chatmsg MsgOffset 累加）、§2.138（坐标搜索路径收敛）、§2.139（replay -record flock 守卫）、§2.140（snapshot.go boolInt 死代码删除）。
 - **多数条目不是「不值得做」，是「收益未经测量」**：§2.2 / §2.3 / §2.7 / §2.10 / §2.17 的共同点是收益尚未实测——而先做优化再测量正是这个项目一贯拒绝的顺序；触发条件到了先测再说。
 - **发版前必做**：§2.97（CHANGELOG `[Unreleased]` 归整）——唯一一条不等触发、按日程必须处理的。
 - **触发即做**（成本主要等触发，触发条件写在条目里）：§2.2（上限 3 万条 / RSS 4GB，留两成提前量即约 2.5 万条 / 3.3GB 起排期）、§2.55（语料再涨约 5 倍）、§2.56（时间成首要痛点）、§2.48（词表互相干扰 / sticky 往返可观测）、§2.57（脚注不够用）、§2.58（主力上游长期无价）、§2.18（黄金样本窗口）、§2.99（灰区振荡在 5s 首档下仍规律复现，触发条件写在条目里）。

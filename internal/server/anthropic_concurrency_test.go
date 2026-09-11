@@ -9,6 +9,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"vmr/internal/config"
+	"vmr/internal/router"
 
 	_ "vmr/internal/adapter/anthropic"
 )
@@ -301,14 +303,39 @@ models:
 	}
 }
 
+// waitFor polls cond until it holds or the deadline passes.
+func waitFor(t *testing.T, label string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Errorf("timed out waiting for %s", label)
+}
+
+// TestConcurrencyWaiterCanceled isolates the gate's cancel path: a waiter
+// parked in AcquireSlot must leave the queue — and never reach the upstream —
+// when its request context is canceled, the same way a client disconnect
+// cancels it. Only the FIRST request blocks the upstream, so a gate that
+// ignores ctx.Done fails both assertions: the waiter stays queued after the
+// cancel (waiting never drops to 0) and is admitted once the slot frees
+// (second upstream hit).
 func TestConcurrencyWaiterCanceled(t *testing.T) {
 	release := make(chan struct{})
+	var hits atomic.Int32
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
 		<-release
 		fmt.Fprint(w, `{"id":"x","choices":[]}`)
 	}))
 	defer slow.Close()
-	ts := newRouterServer(t, fmt.Sprintf(`
+
+	// Built inline (not via newRouterServer) because the assertions read the
+	// gate's live state from rt.
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
 listen: 127.0.0.1:0
 max_concurrency: 1
 providers:
@@ -316,18 +343,65 @@ providers:
 models:
   vm:
     endpoints: {openai-completions: [{providers: [p], models: [m]}]}
-`, slow.URL))
+`, slow.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	ts := httptest.NewServer(New(rt, nil).Handler())
+	defer ts.Close()
 
 	// Occupy the only slot.
-	go chatQuiet(ts, simpleReq)
-	time.Sleep(150 * time.Millisecond)
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		chatQuiet(ts, simpleReq)
+	}()
+	waitFor(t, "first request in flight", func() bool {
+		_, inFlight, _ := rt.Concurrency()
+		return inFlight == 1
+	})
 
-	// Second request waits at the gate; give it a short client timeout.
-	client := &http.Client{Timeout: 300 * time.Millisecond}
-	req, _ := http.NewRequest("POST", ts.URL+"/v1/chat/completions", strings.NewReader(simpleReq))
-	req.Header.Set("Content-Type", "application/json")
-	if _, err := client.Do(req); err == nil {
-		t.Error("waiter should have timed out client-side")
+	// Second request parks at the gate; cancel it via the request context.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+"/v1/chat/completions", strings.NewReader(simpleReq))
+		req.Header.Set("Content-Type", "application/json")
+		// The handler returns without writing when the waiter is canceled,
+		// so client-side the outcome is an error or an empty 200 — neither
+		// is the property under test, so the response is discarded.
+		if resp, err := http.DefaultClient.Do(req); err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	waitFor(t, "second request waiting at the gate", func() bool {
+		_, _, waiting := rt.Concurrency()
+		return waiting == 1
+	})
+
+	cancel()
+	waitFor(t, "waiter to leave the gate after cancel", func() bool {
+		_, _, waiting := rt.Concurrency()
+		return waiting == 0
+	})
+
+	// Free the slot and let both request goroutines finish. A canceled
+	// waiter that still gets admitted (broken cancel path) necessarily hits
+	// the upstream before secondDone closes, so asserting after both are
+	// done is race-free.
+	close(release)
+	<-firstDone
+	<-secondDone
+	if n := hits.Load(); n != 1 {
+		t.Errorf("upstream hits after waiter cancel = %d, want 1 (canceled waiter must not reach upstream)", n)
 	}
-	close(release) // unblock the first request; test must not deadlock
 }

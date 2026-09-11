@@ -1335,7 +1335,7 @@ func TestCmdAnalyze_JourneyLLMDryRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outDir, "journeys", "details", journey.JourneyReportFile(idA))); err == nil {
 		t.Error("-llm-dry-run should return before writing the journey .md")
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "stories")); err == nil {
+	if _, err := os.Stat(filepath.Join(outDir, "journeys")); err == nil {
 		t.Error("-llm-dry-run should not create journeys/ at all")
 	}
 }

@@ -75,7 +75,8 @@ if (failed > 0) {
 	}
 }
 
-// TestJS_DashboardRenderSmoke verifies that all 6 dashboard HTML pages render their
+// TestJS_DashboardRenderSmoke verifies that every dashboard HTML page (macro-dashboard,
+// tool-waste, benchmarks, journey-viewer, journey-compare, request-browser) renders its
 // underlying JSON slices without NaN, undefined, or unrendered dash placeholders in
 // critical cells (§6.2, N15).
 func TestJS_DashboardRenderSmoke(t *testing.T) {
@@ -97,7 +98,7 @@ const vm = require('vm');
 const assetsDir = ` + "'" + assetsDir + "'" + `;
 const common = require(path.join(assetsDir, 'common.js'));
 
-function runPageSmoke(pageFile, sliceMap, hash) {
+function runPageSmoke(pageFile, sliceMap, hash, elInit) {
   const html = fs.readFileSync(path.join(assetsDir, pageFile), 'utf8');
   const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>/);
   if (!scriptMatch) {
@@ -108,17 +109,20 @@ function runPageSmoke(pageFile, sliceMap, hash) {
   const elements = new Map();
   function getEl(id) {
     if (!elements.has(id)) {
-      elements.set(id, {
+      const el = {
         id,
         innerHTML: '',
         textContent: '',
+        value: '',
         classList: { add(){}, remove(){} },
         dataset: {},
         style: {},
         querySelectorAll: () => [],
         querySelector: () => null,
         focus: () => {},
-      });
+      };
+      if (elInit && elInit[id]) { Object.assign(el, elInit[id]); }
+      elements.set(id, el);
     }
     return elements.get(id);
   }
@@ -155,6 +159,23 @@ function runPageSmoke(pageFile, sliceMap, hash) {
   const ctx = vm.createContext(sandbox);
   vm.runInContext(code, ctx);
   return elements;
+}
+
+// waitFor polls getter until check(value) holds, with a hard timeout. Pages load
+// their slices through an async IIFE over fetchSlice promises, so a fixed sleep
+// is both flaky (slow CI box) and slower than needed — polling the actual render
+// output is deterministic. The timeout error carries the last observed value so
+// a render regression is diagnosable from the failure output alone.
+async function waitFor(getter, check, desc) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const v = getter();
+    if (check(v)) return v;
+    if (Date.now() > deadline) {
+      throw new Error(desc + ' — last value: ' + String(v).slice(0, 800));
+    }
+    await new Promise(r => setTimeout(r, 5));
+  }
 }
 
 const mockManifest = {
@@ -209,19 +230,19 @@ const mockMacro = {
 (async () => {
   // 1. macro-dashboard.html
   const macroEls = runPageSmoke('macro-dashboard.html', mockMacro);
-  await new Promise(r => setTimeout(r, 60));
-  const summaryHTML = macroEls.get('summary-stats').innerHTML;
-  if (!summaryHTML.includes('120') || summaryHTML.includes('undefined') || summaryHTML.includes('NaN')) {
-    throw new Error('macro-dashboard verification failed: ' + summaryHTML);
-  }
+  const summaryHTML = await waitFor(
+    () => (macroEls.get('summary-stats') || {}).innerHTML || '',
+    (h) => h.includes('120') && !h.includes('undefined') && !h.includes('NaN'),
+    'macro-dashboard summary-stats did not render cleanly'
+  );
 
   // 2. tool-waste.html
   const twEls = runPageSmoke('tool-waste.html', mockMacro);
-  await new Promise(r => setTimeout(r, 60));
-  const twBody = twEls.get('tools-body').innerHTML;
-  if (!twBody.includes('tools:shape-1') || twBody.includes('undefined') || twBody.includes('NaN')) {
-    throw new Error('tool-waste verification failed: ' + twBody);
-  }
+  const twBody = await waitFor(
+    () => (twEls.get('tools-body') || {}).innerHTML || '',
+    (h) => h.includes('tools:shape-1') && !h.includes('undefined') && !h.includes('NaN'),
+    'tool-waste tools-body did not render cleanly'
+  );
 
   // 3. benchmarks.html
   const mockBenchmarks = {
@@ -235,11 +256,11 @@ const mockMacro = {
     }
   };
   const bmEls = runPageSmoke('benchmarks.html', mockBenchmarks);
-  await new Promise(r => setTimeout(r, 60));
-  const bmStats = bmEls.get('headline-stats').innerHTML;
-  if (!bmStats.includes('10') || bmStats.includes('undefined') || bmStats.includes('NaN')) {
-    throw new Error('benchmarks verification failed: ' + bmStats);
-  }
+  const bmStats = await waitFor(
+    () => (bmEls.get('headline-stats') || {}).innerHTML || '',
+    (h) => h.includes('10') && !h.includes('undefined') && !h.includes('NaN'),
+    'benchmarks headline-stats did not render cleanly'
+  );
 
   // 4. journey-viewer.html (index)
   const mockJourneyIndex = {
@@ -249,11 +270,11 @@ const mockMacro = {
     }
   };
   const jvIdxEls = runPageSmoke('journey-viewer.html', mockJourneyIndex);
-  await new Promise(r => setTimeout(r, 60));
-  const candList = jvIdxEls.get('cand-list').innerHTML;
-  if (!candList.includes('j-test-1') || candList.includes('undefined') || candList.includes('NaN')) {
-    throw new Error('journey-viewer index failed: ' + candList);
-  }
+  const candList = await waitFor(
+    () => (jvIdxEls.get('cand-list') || {}).innerHTML || '',
+    (h) => h.includes('j-test-1') && !h.includes('undefined') && !h.includes('NaN'),
+    'journey-viewer index cand-list did not render cleanly'
+  );
 
   // 5. journey-viewer.html (detail) — exercises the full behavior-indicator
   // table, the context sparkline, model usage, and tool-call args + paired
@@ -300,11 +321,11 @@ const mockMacro = {
     }
   };
   const jvDetailEls = runPageSmoke('journey-viewer.html', mockJourneyDetail, '#data=journeys/details/j-test-1.json');
-  await new Promise(r => setTimeout(r, 60));
-  const jvDetail = jvDetailEls.get('journey-view').innerHTML;
-  if (!jvDetail.includes('Test Journey 1') || jvDetail.includes('undefined') || jvDetail.includes('NaN')) {
-    throw new Error('journey-viewer detail failed: ' + jvDetail);
-  }
+  const jvDetail = await waitFor(
+    () => (jvDetailEls.get('journey-view') || {}).innerHTML || '',
+    (h) => h.includes('Test Journey 1') && !h.includes('undefined') && !h.includes('NaN'),
+    'journey-viewer detail journey-view did not render cleanly'
+  );
   for (const section of ['Behavior Indicators', 'Model Usage', 'Decision Spine', 'the tool result body', 'Final Deliverable', 'Cache: unexplained drop (95%→31%)']) {
     if (!jvDetail.includes(section)) {
       throw new Error('journey-viewer detail missing "' + section + '": ' + jvDetail);
@@ -319,11 +340,11 @@ const mockMacro = {
     }
   };
   const cmpIdxEls = runPageSmoke('journey-compare.html', mockCmpIndex);
-  await new Promise(r => setTimeout(r, 60));
-  const cmpCand = cmpIdxEls.get('cand-list').innerHTML;
-  if (!cmpCand.includes('j-a vs j-b') || cmpCand.includes('undefined') || cmpCand.includes('NaN')) {
-    throw new Error('journey-compare index failed: ' + cmpCand);
-  }
+  const cmpCand = await waitFor(
+    () => (cmpIdxEls.get('cand-list') || {}).innerHTML || '',
+    (h) => h.includes('j-a vs j-b') && !h.includes('undefined') && !h.includes('NaN'),
+    'journey-compare index cand-list did not render cleanly'
+  );
 
   // 7. journey-compare.html (detail) — rows[].kind values match
   // internal/journey/compare.go (ms/multiple/ratio/count/tokens), and the
@@ -358,11 +379,11 @@ const mockMacro = {
     }
   };
   const cmpDetailEls = runPageSmoke('journey-compare.html', mockCmpDetail, '#data=compares/compare-a-vs-b.json');
-  await new Promise(r => setTimeout(r, 60));
-  const cmpDetail = cmpDetailEls.get('compare-view').innerHTML;
-  if (cmpDetail.includes('undefined') || cmpDetail.includes('NaN')) {
-    throw new Error('journey-compare detail has undefined/NaN: ' + cmpDetail);
-  }
+  const cmpDetail = await waitFor(
+    () => (cmpDetailEls.get('compare-view') || {}).innerHTML || '',
+    (h) => h.includes('Journey A') && !h.includes('undefined') && !h.includes('NaN'),
+    'journey-compare detail compare-view did not render cleanly'
+  );
   for (const section of ['Behavior Profile Comparison', 'Divergence Point', 'Model &amp; Endpoint Check', 'Prompt Cache Hit Rate', 'Cost Estimate', 'Evidence Provenance', 'LLM Interpretation']) {
     if (!cmpDetail.includes(section)) {
       throw new Error('journey-compare detail missing section "' + section + '": ' + cmpDetail);
@@ -371,6 +392,73 @@ const mockMacro = {
   // kind: 'ms' must format as seconds, never a bare millisecond count.
   if (!cmpDetail.includes('5.0s') || cmpDetail.includes('>5000<')) {
     throw new Error('journey-compare detail did not format ms rows as seconds: ' + cmpDetail);
+  }
+
+  // 8. request-browser.html — the only page consuming requests/index.json:
+  // table rows, facet options, journey_link → journey-viewer deep link, and
+  // pagination meta. The page reads f-pagesize's value for page math, so the
+  // mock select must be pre-seeded or pagination degenerates to NaN slicing.
+  const mockRequests = {
+    'manifest.json': mockManifest,
+    'requests/index.json': {
+      requests: [
+        {
+          ts: 1787500000000,
+          ts_display: '2026-08-24 10:00:00',
+          client_key: 'agent-1',
+          model: 'claude-3-7-sonnet',
+          endpoint: 'anthropic:claude-3-7-sonnet',
+          outcome: 'ok',
+          dur_ms: 1200,
+          ttft_ms: 450,
+          tokens_in_fresh: 80000,
+          tokens_in_cached: 350000,
+          tokens_out: 20000,
+          cache_eff: 0.814,
+          fallbacks: 0,
+          session: 'sess-1',
+          detail_file: 'r-abc123def456.md'
+        },
+        {
+          ts: 1787500300000,
+          ts_display: '2026-08-24 10:05:00',
+          client_key: 'cli-2',
+          model: 'gpt-5',
+          endpoint: 'openai:gpt-5',
+          outcome: 'error',
+          error_class: 'upstream_5xx',
+          dur_ms: 300,
+          tokens_in_fresh: 1000,
+          tokens_in_cached: 0,
+          tokens_out: 0,
+          fallbacks: 2,
+          session: 'sess-2'
+        }
+      ],
+      journey_link: { 'sess-1': 'details/j-test-1.md' },
+      sessions: { 'sess-1': { title: 'Refactor the router', alias: 'router work' } }
+    }
+  };
+  const rbEls = runPageSmoke('request-browser.html', mockRequests, '', { 'f-pagesize': { value: '50' } });
+  const rbRows = await waitFor(
+    () => (rbEls.get('rows-body') || {}).innerHTML || '',
+    (h) => h.includes('agent-1') && h.includes('upstream_5xx') && !h.includes('undefined') && !h.includes('NaN'),
+    'request-browser rows-body did not render cleanly'
+  );
+  if (!rbRows.includes('r-abc123def456.md') || !rbRows.includes('journeys/details/j-test-1.json')) {
+    throw new Error('request-browser detail/journey links missing: ' + rbRows);
+  }
+  // Facet selects are rebuilt from the rows; both client values must appear.
+  const rbClientFacet = rbEls.get('f-client').innerHTML;
+  if (!rbClientFacet.includes('agent-1') || !rbClientFacet.includes('cli-2')) {
+    throw new Error('request-browser client facet missing options: ' + rbClientFacet);
+  }
+  // render() fills meta and rows in one synchronous pass, so once rows-body
+  // has content these are already settled — plain assertions, no extra wait.
+  if (!rbEls.get('filter-meta').textContent.includes('2 / 2 rows') ||
+      !rbEls.get('page-info').textContent.includes('Page 1 / 1')) {
+    throw new Error('request-browser pagination meta mismatch: ' +
+      rbEls.get('filter-meta').textContent + ' / ' + rbEls.get('page-info').textContent);
   }
 })();
 `

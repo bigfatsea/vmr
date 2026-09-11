@@ -501,11 +501,11 @@ func TestAdminStatus(t *testing.T) {
 	}
 }
 
-// P1: the auth middleware guards the non-chat endpoints and is the outermost
-// layer that dereferences the snapshot there — a nil snapshot (router.New
-// before the first Install) must 503 at this layer, not panic one frame
-// deeper in authenticateWithSnap. Mirrors chatHandler's entry defense (Q15).
-// 503, not 401: the credential isn't the problem, the router isn't up yet.
+// P1: a nil snapshot (router.New before the first Install) must 503 at the
+// outermost layer that dereferences it, not panic one frame deeper — the auth
+// middleware for the non-chat endpoints, chatHandler's entry defense (Q15)
+// for the three ingress protocol endpoints. 503, not 401: the credential
+// isn't the problem, the router isn't up yet.
 func TestAuth_NilSnapshotReturns503(t *testing.T) {
 	srv := New(router.New(nil), nil)
 	for _, path := range []string{"/v1/models", "/status", "/log"} {
@@ -514,6 +514,16 @@ func TestAuth_NilSnapshotReturns503(t *testing.T) {
 		srv.Handler().ServeHTTP(w, req)
 		if w.Code != http.StatusServiceUnavailable {
 			t.Errorf("GET %s with nil snapshot = %d, want 503", path, w.Code)
+		}
+	}
+	// The ingress endpoints take the chatHandler entry defense instead: the
+	// nil check fires before auth, body read, or the concurrency gate.
+	for _, path := range []string{"/v1/chat/completions", "/v1/messages", "/v1/responses"} {
+		req := httptest.NewRequest("POST", path, strings.NewReader(simpleReq))
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("POST %s with nil snapshot = %d, want 503", path, w.Code)
 		}
 	}
 }

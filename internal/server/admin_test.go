@@ -16,40 +16,53 @@ import (
 	_ "vmr/internal/adapter/openai"
 )
 
-// TestGetCached_ConcurrentAccess verifies that getCached double-checked caching
-// executes fetch outside metricsMu, avoids deadlocks, and coordinates concurrent callers.
+// TestGetCached_ConcurrentAccess verifies that getCached's double-checked
+// caching executes fetch outside metricsMu, avoids deadlocks, and coordinates
+// concurrent callers. The double check protects the stored entry, not the
+// fetch — on a cold key every caller can miss before the first store lands —
+// so no tight upper bound on the cold wave's fetch count is assertable. The
+// cache's real promise is the warm path: within the TTL, no caller (concurrent
+// or serial) fetches again, and that is pinned here deterministically.
 func TestGetCached_ConcurrentAccess(t *testing.T) {
 	var fetchCount atomic.Int64
 	key := fmt.Sprintf("test-key-%d", time.Now().UnixNano())
-
-	const goroutines = 20
-	var wg sync.WaitGroup
-	results := make([]uint64, goroutines)
-
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			val := getCached(key, func() uint64 {
-				fetchCount.Add(1)
-				time.Sleep(5 * time.Millisecond) // simulate disk I/O
-				return 42
-			})
-			results[idx] = val
-		}(i)
+	fetch := func() uint64 {
+		fetchCount.Add(1)
+		time.Sleep(5 * time.Millisecond) // simulate disk I/O
+		return 42
 	}
-
-	wg.Wait()
-
-	for idx, val := range results {
-		if val != 42 {
-			t.Errorf("routine %d got val %d, want 42", idx, val)
+	runWave := func(n int) {
+		var wg sync.WaitGroup
+		results := make([]uint64, n)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				results[idx] = getCached(key, fetch)
+			}(i)
+		}
+		wg.Wait()
+		for idx, val := range results {
+			if val != 42 {
+				t.Errorf("routine %d got val %d, want 42", idx, val)
+			}
 		}
 	}
 
-	// Because of double checking and caching, fetchCount should be very small (typically 1, at most a few due to initial race)
-	if count := fetchCount.Load(); count == 0 || count > goroutines {
-		t.Errorf("fetchCount = %d, expected 1..%d", count, goroutines)
+	const goroutines = 20
+	runWave(goroutines)
+	coldFetches := fetchCount.Load()
+
+	// Warm concurrent wave: pure cache hits, zero fetches.
+	runWave(goroutines)
+	if count := fetchCount.Load(); count != coldFetches {
+		t.Errorf("warm concurrent wave refetched: fetchCount %d -> %d, want unchanged", coldFetches, count)
+	}
+
+	// Serial cache hit likewise must not re-fetch.
+	getCached(key, fetch)
+	if count := fetchCount.Load(); count != coldFetches {
+		t.Errorf("serial cache hit refetched: fetchCount %d -> %d, want unchanged", coldFetches, count)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // TestIndexUnescapedQuote locks the backslash-parity rule shared by
@@ -637,36 +638,56 @@ func TestRewriteModel_ProducesValidJSON(t *testing.T) {
 		})
 	}
 
-	// (b) Each rewritten model value, decoded back from the spliced
-	// request, must equal what the caller asked for. json.Unmarshal on
-	// the per-field raw token handles Go-style \xNN escapes that came
-	// in via the old buggy code path, so we assert the value matches by
-	// re-serialising the model field through json.Marshal (which
-	// produces canonical escapes) and comparing normalised strings — the
-	// rewrite mustn't change the model in transit.
+	// (b) Value preservation: each rewritten model value, decoded back
+	// from the spliced request, must match what the caller asked for.
+	// Every case gets a real assertion — the branch is on input
+	// representability (utf8.ValidString), never on properties of the
+	// output, so no case can silently skip its check:
+	//
+	//   - UTF-8-representable inputs (every control character here, DEL
+	//     included): the decoded value must equal the input exactly.
+	//     MarshalNoEscape does NOT emit Go's \xNN escapes — that was the
+	//     P-01 bug — so the comparison is against the raw input bytes,
+	//     not a Go-literal interpretation of them.
+	//   - Raw invalid-UTF-8 inputs (\x80, \xba, ...): an RFC 8259 string
+	//     is a sequence of Unicode code points, so the input is not
+	//     representable in ANY valid JSON string and an exact-equality
+	//     roundtrip is impossible by construction. encoding/json's
+	//     documented rule replaces each invalid byte with U+FFFD, so the
+	//     assertion is that the model key survived the splice and decodes
+	//     to a non-empty, all-U+FFFD string — not arbitrary bytes, not
+	//     an absent field.
 	for _, tc := range controls {
 		t.Run("roundtrip_"+tc.name, func(t *testing.T) {
 			out, err := RewriteModel(raw, tc.in)
 			if err != nil {
 				t.Fatalf("RewriteModel: %v", err)
 			}
-			var got struct {
-				Model string `json:"model"`
-			}
+			var got map[string]json.RawMessage
 			if err := json.Unmarshal(out, &got); err != nil {
 				t.Fatalf("output is not valid JSON: %v\nraw output: %s", err, out)
 			}
-			// Go's json package rejects bare \xNN strings and lone
-			// continuation bytes via Unmarshal (those are invalid UTF-8
-			// in a string per RFC 8259) — so the input that came in
-			// must itself be representable. The point of this test is
-			// to prove RewriteModel NEVER produces a request that
-			// downstream code can't decode, not that the input is
-			// always decodable on its own.
-			if json.Valid([]byte("\"" + strings.ReplaceAll(tc.in, "\x00", "") + "\"")) {
-				if got.Model == "" && tc.in != "" {
-					t.Fatalf("output model field is empty, want non-empty for input %q", tc.in)
+			modelRaw, ok := got["model"]
+			if !ok {
+				t.Fatalf("output has no model field: %s", out)
+			}
+			var decoded string
+			if err := json.Unmarshal(modelRaw, &decoded); err != nil {
+				t.Fatalf("model field is not a decodable JSON string: %v\nraw output: %s", err, out)
+			}
+			if !utf8.ValidString(tc.in) {
+				if decoded == "" {
+					t.Fatalf("model field empty for non-representable input %q: %s", tc.in, out)
 				}
+				for _, r := range decoded {
+					if r != utf8.RuneError {
+						t.Fatalf("model field for invalid-UTF-8 input %q decoded to %q, want only U+FFFD replacements", tc.in, decoded)
+					}
+				}
+				return
+			}
+			if decoded != tc.in {
+				t.Fatalf("model value not preserved: got %q, want %q (output: %s)", decoded, tc.in, out)
 			}
 		})
 	}

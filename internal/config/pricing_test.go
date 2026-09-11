@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"vmr/internal/core"
 	"vmr/internal/pricing"
 
 	_ "vmr/internal/adapter/openai"
@@ -468,7 +469,14 @@ func TestPricing_Resolver_EndToEnd_CurrencyConversion(t *testing.T) {
 	}
 }
 
-func TestPricing_RoundTrip_QuotaSpecOnEndpoint(t *testing.T) {
+// TestQuota_ProviderBlock_SurvivesParse pins the config layer's actual quota
+// round-trip contract: a provider-level quota: block survives Parse with every
+// Limit's resolved form intact (not just a non-nil pointer). Quota is a
+// provider-level concept in the YAML config — EndpointGroup carries no quota;
+// the provider's *QuotaConfig becomes a *core.QuotaSpec and is attached to each
+// core.Endpoint later, in router/snapshot.go's BuildSnapshot (covered by the
+// internal/router quota snapshot tests).
+func TestQuota_ProviderBlock_SurvivesParse(t *testing.T) {
 	yaml := pricingCfg("", `quota:
   limits:
     - {metric: tokens, every: 1mo, amount: 1000000}
@@ -477,7 +485,24 @@ func TestPricing_RoundTrip_QuotaSpecOnEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(cfg.Providers) != 1 || cfg.Providers[0].Quota == nil {
-		t.Fatal("expected provider quota to survive validate()")
+	if len(cfg.Providers) != 1 {
+		t.Fatalf("providers = %d, want 1", len(cfg.Providers))
+	}
+	q := cfg.Providers[0].Quota
+	if q == nil || len(q.Limits) != 1 {
+		t.Fatalf("provider quota block did not survive Parse: %+v", q)
+	}
+	l := q.Limits[0].Resolved
+	if l.Metric != core.MetricTokens {
+		t.Errorf("metric = %q, want tokens", l.Metric)
+	}
+	if l.EveryText != "1mo" || l.EveryN != 1 || l.EveryUnit != "mo" {
+		t.Errorf("every = text %q n %d unit %q, want \"1mo\"/1/mo", l.EveryText, l.EveryN, l.EveryUnit)
+	}
+	if l.Amount != 1000000 {
+		t.Errorf("amount = %v, want 1000000", l.Amount)
+	}
+	if l.Since.IsZero() {
+		t.Error("since must be resolved to its default anchor at parse time, got zero")
 	}
 }

@@ -214,6 +214,12 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
 
+	// oldKey must be taken BEFORE the append: FileCache.Files keys by content
+	// hash, so after the append the same lookup is a different (new-content)
+	// key cache1 never saw — a lookup that returns the zero CachedFile and
+	// makes the comparison below vacuously true.
+	oldKey := hashKey(t, path)
+
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
@@ -232,8 +238,14 @@ func TestBuildCached_ChangedFileReparses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCached (after append): %v", err)
 	}
-	key := hashKey(t, path)
-	if cache2.Files[key].Hash == cache1.Files[key].Hash {
+	newKey := hashKey(t, path)
+	if newKey == oldKey {
+		t.Fatal("appending a record did not change the file's content hash")
+	}
+	if _, ok := cache2.Files[newKey]; !ok {
+		t.Fatalf("no cache2 entry for the appended content (key %s) — the changed file was not rescanned", newKey)
+	}
+	if cache2.Files[newKey].Hash == cache1.Files[oldKey].Hash {
 		t.Error("hash should differ after appending")
 	}
 	if rep2.Meta.Records != 3 {

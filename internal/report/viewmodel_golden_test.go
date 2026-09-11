@@ -245,8 +245,9 @@ func TestGoldenVMStructure(t *testing.T) {
 					t.Fatal(err)
 				}
 				t.Logf("wrote golden for %v to %s", lang, p)
+				continue
 			}
-			continue
+			t.Fatalf("golden for %v is empty (wiped or never committed) — refusing to pass silently; regenerate with UPDATE_VM_GOLDEN=<dir>", lang)
 		}
 		if got != want {
 			t.Errorf("golden mismatch for %v:\n%s", lang, firstDiff(want, got))

@@ -70,6 +70,7 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 	if e.SentAt == "" {
 		t.Error("sent_at must be stamped")
 	}
+	sentAt1 := e.SentAt
 	if e.Attempt != 1 || e.Provider != "provider-a" || e.Model != "model-1" || e.KeyLabel != "key-lbl-1" {
 		t.Errorf("attempt 1 triple mismatch: %+v", e)
 	}
@@ -82,6 +83,7 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 		t.Fatalf("first/last byte must be stamped: %+v", e)
 	}
 	firstByte1 := e.FirstByteAt
+	lastByte1 := e.LastByteAt
 	if e.EstOut != 15 {
 		t.Errorf("est_out = %d, want 15", e.EstOut)
 	}
@@ -93,6 +95,20 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 	e = snaps[0]
 	if e.FirstByteAt != firstByte1 {
 		t.Errorf("first_byte_at moved: %q -> %q", firstByte1, e.FirstByteAt)
+	}
+	if e.LastByteAt == lastByte1 {
+		t.Errorf("last_byte_at did not update on the second chunk: still %q", lastByte1)
+	}
+	first, errF := time.Parse(time.RFC3339Nano, e.FirstByteAt)
+	last, errL := time.Parse(time.RFC3339Nano, e.LastByteAt)
+	if errF != nil || errL != nil {
+		t.Fatalf("byte stamps not RFC3339Nano: %q %q (%v, %v)", e.FirstByteAt, e.LastByteAt, errF, errL)
+	}
+	if !last.After(first) {
+		t.Errorf("last_byte_at %v not after first_byte_at %v", last, first)
+	}
+	if e.SentAt != sentAt1 {
+		t.Errorf("chunk stamping must not touch sent_at: %q -> %q", sentAt1, e.SentAt)
 	}
 	if e.EstOut != 42 {
 		t.Errorf("est_out = %d, want 42", e.EstOut)

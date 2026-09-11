@@ -153,11 +153,37 @@ func TestComputeL2L3Digest_RendererVersionOrthogonality(t *testing.T) {
 	paramsFP := digest.Digest([]byte("params"))
 	vmFP := digest.Digest([]byte("vm_slices"))
 
-	l2V1 := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])
-	l2V2 := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])
+	base := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])
+	again := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, paramsFP[:])
 
-	if !bytes.Equal(l2V1[:], l2V2[:]) {
+	if !bytes.Equal(base[:], again[:]) {
 		t.Fatalf("L2 digest should be deterministic")
+	}
+
+	// Row 5 of the invalidation matrix (§7.4) is enforced by the API shape:
+	// rendererVersion is not an input to ComputeL2Digest, so a renderer bump
+	// cannot reach L2 by construction — there is no argument to vary. What
+	// the digest functions do let us pin is both halves of that row: L2 is
+	// fully determined by its four data inputs (each of them moves it, so a
+	// regression that drops one from the digest is caught), and L3 does move
+	// with the renderer version.
+	otherPricing := digest.Digest([]byte("other-pricing"))
+	otherParams := digest.Digest([]byte("other-params"))
+	l2DiffInputs := ComputeL2Digest([][]byte{in1[:]}, pricingFP[:], ManifestFormat, paramsFP[:])
+	if bytes.Equal(base[:], l2DiffInputs[:]) {
+		t.Fatalf("Changing input hashes must change L2 digest")
+	}
+	l2DiffPricing := ComputeL2Digest(inHashes, otherPricing[:], ManifestFormat, paramsFP[:])
+	if bytes.Equal(base[:], l2DiffPricing[:]) {
+		t.Fatalf("Changing pricing fingerprint must change L2 digest")
+	}
+	l2DiffFormat := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat+1, paramsFP[:])
+	if bytes.Equal(base[:], l2DiffFormat[:]) {
+		t.Fatalf("Changing format version must change L2 digest")
+	}
+	l2DiffParams := ComputeL2Digest(inHashes, pricingFP[:], ManifestFormat, otherParams[:])
+	if bytes.Equal(base[:], l2DiffParams[:]) {
+		t.Fatalf("Changing analysis params fingerprint must change L2 digest")
 	}
 
 	l3V1 := ComputeL3Digest(vmFP[:], 1, "en")
@@ -165,11 +191,6 @@ func TestComputeL2L3Digest_RendererVersionOrthogonality(t *testing.T) {
 
 	if bytes.Equal(l3V1[:], l3V2[:]) {
 		t.Fatalf("Bumping RendererVersion must change L3 digest")
-	}
-
-	// Crucial: L2 digest is unaffected by renderer version!
-	if !bytes.Equal(l2V1[:], l2V2[:]) {
-		t.Fatalf("L2 digest must remain identical when renderer version changes")
 	}
 }
 
