@@ -48,6 +48,9 @@ details.disc[open]>summary::before{transform:rotate(90deg)}
 details.disc .body{padding:0 16px 16px}
 details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0 8px}
 .cfg-file{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text-muted);margin-top:10px}
+/* no header rail on the help page — the Quick Reference table below is the
+   table of contents; a second anchor row under the nav adds nothing */
+.hd-rail{display:none}
 </style>
 </head>
 <body>
@@ -436,19 +439,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 const consoleAPI = mountConsole({
   active: 'help',
   refresh: 'static',
-  rail: [
-    { id: 'connect', label: '连接' },
-    { id: 'quickref', label: '速查表' },
-    { id: 'agent-claude-code', label: 'Claude Code' },
-    { id: 'agent-codex', label: 'Codex' },
-    { id: 'agent-openclaw', label: 'OpenClaw' },
-    { id: 'agent-opencode', label: 'OpenCode' },
-    { id: 'agent-cursor', label: 'Cursor' },
-    { id: 'agent-hermes', label: 'Hermes' },
-    { id: 'agent-pi', label: 'Pi Agent' },
-    { id: 'agent-workbuddy', label: 'WorkBuddy' },
-    { id: 'troubleshooting', label: '故障排查' },
-  ],
+  rail: [],           // Quick Reference card is the page's own table of contents
 });
 
 // ---- protocol metadata (badge class + URL shape per protocol) ----
