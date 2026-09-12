@@ -11,6 +11,7 @@
 package router
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -369,15 +370,29 @@ func quotaStatusRow(reg *quota.Registry, provider string, l core.Limit, model, r
 	}
 	return QuotaProviderStatus{
 		Provider: provider, Metric: string(l.Metric), Every: l.EveryText, Models: models, Role: role,
-		Amount: l.Amount, Used: used, Pct: pct, Headroom: quota.ScoreForLimit(l, used, now),
+		Amount: l.Amount, Used: roundDisplay(used), Pct: roundDisplay(pct), Headroom: quota.ScoreForLimit(l, used, now),
 		PeriodStart: periodStart, PeriodEndsAt: periodEnd, EstimatedPct: estPct,
-		Fresh: c.Fresh, CacheRead: c.CacheRead, CacheWrite: c.CacheWrite, Out: c.Out, Requests: c.Requests,
+		Fresh: roundDisplay(c.Fresh), CacheRead: roundDisplay(c.CacheRead), CacheWrite: roundDisplay(c.CacheWrite),
+		Out: roundDisplay(c.Out), Requests: roundDisplay(c.Requests),
 		TokenWeights: TokenWeightsView{
 			InFresh: l.TokenWeights.InFresh, CacheRead: l.TokenWeights.CacheRead,
 			CacheWrite: l.TokenWeights.CacheWrite, Out: l.TokenWeights.Out,
 		},
 		ModelMultipliers: l.ModelMultipliers,
 	}
+}
+
+// roundDisplay rounds a quota.Counters-derived float to 6 decimal places —
+// display-only, applied purely at this JSON-serialization boundary. It never
+// touches quota.Registry/Counters or vmr-quota.json: those must stay
+// unrounded (see quota.Counters' doc comment — rounding each charge
+// increment would introduce a systematic overcharge bias). What this does
+// clean up is IEEE754 summation noise from repeated model_multipliers
+// charges (e.g. "11479.499999999") becoming visible to anyone reading the
+// raw /status JSON — 6 decimals is far finer than any configured multiplier
+// would ever need, so no real precision is lost.
+func roundDisplay(v float64) float64 {
+	return math.Round(v*1e6) / 1e6
 }
 
 // reorderByQuota reorders cands in place: within each tier that dims'

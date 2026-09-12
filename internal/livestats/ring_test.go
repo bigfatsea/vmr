@@ -124,9 +124,11 @@ func TestWindowBlock_ExclusionRules(t *testing.T) {
 	if wb.TTFTP50 != 200 || wb.TTFTP90 != 300 {
 		t.Errorf("ttft p50/p90 = %d/%d, want 200/300", wb.TTFTP50, wb.TTFTP90)
 	}
-	// toks pool = {100, 400} sorted: p50=100, p90=400.
-	if math.Abs(wb.ToksP50-100) > 1e-6 || math.Abs(wb.ToksP90-400) > 1e-6 {
-		t.Errorf("toks p50/p90 = %f/%f, want 100/400", wb.ToksP50, wb.ToksP90)
+	// toks pool = {100, 400} sorted ascending: p50 = ceil(0.5*2)=1st = 100,
+	// p10 = ceil(0.1*2)=1st = 100 too (n=2 is too small to separate them —
+	// TestWindowBlock_ToksP10IsWorstCaseNotFastest below uses a bigger pool).
+	if math.Abs(wb.ToksP50-100) > 1e-6 || math.Abs(wb.ToksP10-100) > 1e-6 {
+		t.Errorf("toks p50/p10 = %f/%f, want 100/100", wb.ToksP50, wb.ToksP10)
 	}
 
 	// All-unmeasured ttft and all-zero tokens leave the pools empty.
@@ -134,8 +136,47 @@ func TestWindowBlock_ExclusionRules(t *testing.T) {
 		{durMS: 1000, ttftMS: 0},
 		{durMS: 1000, ttftMS: 0, tokens: TokenCounts{}},
 	})
-	if empty.TTFTP50 != 0 || empty.TTFTP90 != 0 || empty.ToksP50 != 0 || empty.ToksP90 != 0 {
+	if empty.TTFTP50 != 0 || empty.TTFTP90 != 0 || empty.ToksP50 != 0 || empty.ToksP10 != 0 {
 		t.Errorf("expected zeroed percentiles, got %+v", empty)
+	}
+}
+
+// TestWindowBlock_ToksP10IsWorstCaseNotFastest pins the P0-1 fix: toks is a
+// yield metric (bigger is better), so its tail must be the bottom decile —
+// the slow outlier — not the top decile the old p90 computation picked out.
+// Ten requests, nine fast (100 tok/s) and one slow (10 tok/s): the old
+// ascending-p90 read would have reported ~100 (the fast head of the
+// distribution) as if it were a guaranteed floor; p10 must report the one
+// genuinely slow request instead.
+func TestWindowBlock_ToksP10IsWorstCaseNotFastest(t *testing.T) {
+	entries := make([]ringEntry, 0, 10)
+	for i := 0; i < 9; i++ {
+		entries = append(entries, ringEntry{durMS: 1000, ttftMS: 100, tokens: TokenCounts{Out: 100}}) // 100 tok/s
+	}
+	entries = append(entries, ringEntry{durMS: 1000, ttftMS: 100, tokens: TokenCounts{Out: 10}}) // 10 tok/s, the slow tail
+	wb := windowBlock(entries)
+	if math.Abs(wb.ToksP50-100) > 1e-6 {
+		t.Errorf("toks p50 = %f, want 100 (median is still in the fast block)", wb.ToksP50)
+	}
+	if math.Abs(wb.ToksP10-10) > 1e-6 {
+		t.Errorf("toks p10 = %f, want 10 (the slow outlier, not the fast 90%%)", wb.ToksP10)
+	}
+}
+
+// TestToksOf_MinSpanFloorDropsImplausibleBursts pins the P0-1 fix's second
+// half: a sub-minToksSpanMS generation span (an upstream flushing its last
+// chunks back-to-back, or a network burst after a stall) produces a
+// physically implausible rate and must be excluded from the toks pool
+// entirely, the same as a zero-output or non-positive-span sample.
+func TestToksOf_MinSpanFloorDropsImplausibleBursts(t *testing.T) {
+	tiny := ringEntry{durMS: 1002, ttftMS: 1000, stream: true, tokens: TokenCounts{Out: 50}} // span = 2ms → 25000 tok/s
+	if v := toksOf(tiny); v != 0 {
+		t.Errorf("toksOf(2ms span) = %f, want 0 (below minToksSpanMS)", v)
+	}
+
+	ok := ringEntry{durMS: 1050, ttftMS: 1000, stream: true, tokens: TokenCounts{Out: 50}} // span = 50ms, at the floor
+	if v := toksOf(ok); v != 1000 {
+		t.Errorf("toksOf(50ms span) = %f, want 1000 (50 tok / 0.05s)", v)
 	}
 }
 

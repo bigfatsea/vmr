@@ -117,16 +117,23 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // sampleFromRecord maps a completed audit.Record into a livestats.Sample
-// according to design §3.2 / §4.2 attribution rules. ErrorClass/Status/
-// Attempt feed only the recent_errors ring (contracts §1.6): class and
-// status quote the terminal attempt — the winning one when the request
-// forwarded, else the last attempt — verbatim, never re-classified;
+// according to design §3.2 / §4.2 attribution rules. Provider/Model/KeyLabel
+// are the terminal attempt's service identity — the winning one when the
+// request forwarded, else the last attempt tried — whenever at least one
+// attempt was made: a failed request still names the upstream endpoint that
+// actually failed, instead of collapsing into an anonymous bucket. Forwarded
+// is the separate, authoritative gate livestats uses to decide whether
+// tokens/dur/ttft may be counted as service-quality signal (design §4.2) —
+// only the winning attempt's data ever populates s.Tokens. ErrorClass/
+// Status/Attempt feed only the recent_errors ring (contracts §1.6): class
+// and status quote the terminal attempt verbatim, never re-classified;
 // Attempt is the 1-based ordinal of the attempt that ended the request
 // (0 when there were none). When no attempt was built at all (every
 // candidate cooling down → vmr_no_candidates, or a pre-dispatch build
-// error), there is no upstream status to quote, so Status falls back to
-// the client-facing response code — the only terminal fact that exists —
-// and ErrorClass synthesizes "no_candidate" for error outcomes.
+// error), there is no upstream to name at all — Provider/Model/KeyLabel
+// stay empty, Status falls back to the client-facing response code — the
+// only terminal fact that exists — and ErrorClass synthesizes
+// "no_candidate" for error outcomes.
 func sampleFromRecord(rec *audit.Record) livestats.Sample {
 	if rec == nil {
 		return livestats.Sample{}
@@ -144,20 +151,8 @@ func sampleFromRecord(rec *audit.Record) livestats.Sample {
 	}
 	win := -1
 	for i := range rec.Attempts {
-		att := &rec.Attempts[i]
-		if att.IsForwarded() {
+		if rec.Attempts[i].IsForwarded() {
 			win = i
-			s.Provider = att.Provider
-			s.Model = att.Model
-			s.KeyLabel = att.KeyLabel
-			if att.Tokens != nil {
-				s.Tokens = livestats.TokenCounts{
-					In:         att.Tokens.In,
-					Out:        att.Tokens.Out,
-					CacheRead:  att.Tokens.CacheRead,
-					CacheWrite: att.Tokens.CacheWrite,
-				}
-			}
 			break
 		}
 	}
@@ -165,6 +160,21 @@ func sampleFromRecord(rec *audit.Record) livestats.Sample {
 		final := &rec.Attempts[len(rec.Attempts)-1]
 		if win >= 0 {
 			final = &rec.Attempts[win]
+		}
+		// Identity attaches from the terminal attempt regardless of outcome —
+		// see doc comment. Tokens only ever come from a genuinely forwarded
+		// attempt (win>=0); a failed terminal attempt has no usage to report.
+		s.Provider = final.Provider
+		s.Model = final.Model
+		s.KeyLabel = final.KeyLabel
+		s.Forwarded = win >= 0
+		if win >= 0 && final.Tokens != nil {
+			s.Tokens = livestats.TokenCounts{
+				In:         final.Tokens.In,
+				Out:        final.Tokens.Out,
+				CacheRead:  final.Tokens.CacheRead,
+				CacheWrite: final.Tokens.CacheWrite,
+			}
 		}
 		s.ErrorClass = final.ErrorClass
 		if final.Response != nil {

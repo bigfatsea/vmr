@@ -245,6 +245,7 @@ func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 			Provider:     s.Provider,
 			Model:        s.Model,
 			KeyLabel:     s.KeyLabel,
+			Forwarded:    s.Forwarded,
 			DurMS:        s.DurMS,
 			TTFTMS:       s.TTFTMS,
 			Tokens:       s.Tokens,
@@ -310,9 +311,12 @@ func bookRecentError(ring []Sample, s Sample) []Sample {
 }
 
 // addRing applies the ring admission rule (§4.2): ok + forwarded + measured
-// TTFT only. Stream and non-stream samples share the same ring.
+// TTFT only. Stream and non-stream samples share the same ring. Gates on
+// Forwarded explicitly, not on Provider=="" — a failed sample now carries
+// the terminal attempt's Provider/Model for grouping purposes, so Provider
+// alone no longer implies forwarded.
 func addRing(rings map[ringKey]*ring, s Sample) {
-	if s.Outcome != OutcomeOK || s.Provider == "" || s.TTFTMS == 0 {
+	if s.Outcome != OutcomeOK || !s.Forwarded || s.TTFTMS == 0 {
 		return
 	}
 	k := ringKey{s.Provider, s.KeyLabel, s.Model}

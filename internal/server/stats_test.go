@@ -325,7 +325,7 @@ models:
 func TestStatsJSONContract(t *testing.T) {
 	var resp statsResponse
 	resp.Concurrency.Limit, resp.Concurrency.InFlight, resp.Concurrency.Waiting = 8, 3, 1
-	wb := &livestats.WindowBlock{N: 43, Tokens: livestats.TokenCounts{In: 1200, Out: 900}, TTFTP50: 412, TTFTP90: 680, ToksP50: 41.2, ToksP90: 55.7}
+	wb := &livestats.WindowBlock{N: 43, Tokens: livestats.TokenCounts{In: 1200, Out: 900}, TTFTP50: 412, TTFTP90: 680, ToksP50: 41.2, ToksP10: 20.3}
 	resp.Inflight = []router.InflightEntry{{Seq: 1, State: "running", VModel: "coding"}}
 	resp.Overall = wb
 	resp.RecentErrors = []livestats.RecentErrorRow{{
@@ -350,7 +350,7 @@ func TestStatsJSONContract(t *testing.T) {
 	js := string(b)
 	for _, key := range []string{
 		`"in_flight":`, `"waiting":`, `"ttft_p50_ms":`, `"ttft_p90_ms":`,
-		`"toks_p50":`, `"toks_p90":`, `"n":43`, `"tokens":`,
+		`"toks_p50":`, `"toks_p10":`, `"n":43`, `"tokens":`,
 		`"key_label":`, `"overall":`, `"recent_errors":`,
 		`"attempt":2`, `"error_class":"upstream_5xx"`, `"status":502`,
 		`"value":`, `"counters":`, `"last_100":`,
@@ -451,14 +451,41 @@ func TestSampleFromRecordTerminalAttempt(t *testing.T) {
 	if s.Provider != "p1" || s.KeyLabel != "main" || s.Model != "m1" {
 		t.Errorf("service identity = %s/%s/%s, want p1/main/m1", s.Provider, s.KeyLabel, s.Model)
 	}
+	if !s.Forwarded {
+		t.Errorf("a genuinely forwarded sample must be marked Forwarded")
+	}
 	if s.Tokens.In != 10 || s.Tokens.Out != 5 {
 		t.Errorf("tokens = %+v, want in=10 out=5", s.Tokens)
 	}
 
-	// A never-forwarded failure keeps the service face empty (§4.2).
+	// A terminal attempt that never picked an endpoint (e.g. a pre-dispatch
+	// build error) still carries no service identity — there is nothing to
+	// name.
 	s = sampleFromRecord(&audit.Record{Outcome: "error", Attempts: []audit.Attempt{failed("auth", 401)}})
 	if s.Provider != "" || s.KeyLabel != "" || s.Model != "" {
-		t.Errorf("unforwarded failure must carry no service identity: %+v", s)
+		t.Errorf("identity-less failed attempt must carry no service identity: %+v", s)
+	}
+
+	// P0-5 fix: a failed request whose terminal attempt DID target a real
+	// upstream endpoint now carries THAT endpoint's identity, so it groups
+	// under its own Provider/Model instead of collapsing into the anonymous
+	// "—" bucket every other failure used to share. Forwarded stays false
+	// and no tokens attach — identity and service-quality metrics are gated
+	// independently (design §4.2): livestats.Counters.addSample/addRing key
+	// off Forwarded, not off Provider being non-empty.
+	attemptedButFailed := audit.Attempt{
+		Provider: "p2", KeyLabel: "sec", Model: "m2",
+		ErrorClass: "upstream_5xx", Response: &audit.Message{Status: 502},
+	}
+	s = sampleFromRecord(&audit.Record{Outcome: "error", Attempts: []audit.Attempt{attemptedButFailed}})
+	if s.Provider != "p2" || s.KeyLabel != "sec" || s.Model != "m2" {
+		t.Errorf("attempted-but-failed request must carry the terminal attempt's identity: %+v", s)
+	}
+	if s.Forwarded {
+		t.Errorf("attempted-but-failed request must not be marked Forwarded")
+	}
+	if s.Tokens != (livestats.TokenCounts{}) {
+		t.Errorf("attempted-but-failed request must carry no token usage: %+v", s.Tokens)
 	}
 
 	// No attempt at all (every candidate cooling down → vmr_no_candidates):

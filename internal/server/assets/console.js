@@ -281,7 +281,8 @@ function mountConsole(opts) {
       </a>
       <nav class="hd-nav">
         <a class="nav-link${active === 'overview' ? ' active' : ''}" href="/status.html">Overview</a>
-        <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Live &amp; Log</a>
+        <a class="nav-link${active === 'models' ? ' active' : ''}" href="/models.html">Models</a>
+        <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Log</a>
         <a class="nav-link${active === 'help' ? ' active' : ''}" href="/help.html">Help</a>
       </nav>
       <div class="hd-right">${refreshSlot}
@@ -292,8 +293,13 @@ function mountConsole(opts) {
         </button>
       </div>
     </div>
-    <div class="hd-rail"><div class="rail-inner${full ? ' full' : ''}" id="hd-rail-inner"></div></div>`;
+    ${rail.length ? `<div class="hd-rail"><div class="rail-inner${full ? ' full' : ''}" id="hd-rail-inner"></div></div>` : ''}`;
   document.body.prepend(header);
+  // Anchor offset (scroll-margin-top / sticky height): a rail-less page's
+  // header is one row tall, not two — pages with no rail (Overview, Models,
+  // Log, Help) collapse this from 88px to 48px instead of reserving space
+  // for a row that no longer renders.
+  document.documentElement.style.setProperty('--hd-h', rail.length ? '88px' : '48px');
 
   const railInner = header.querySelector('#hd-rail-inner');
   rail.forEach((item, i) => {
@@ -376,6 +382,7 @@ function mountConsole(opts) {
       if (el) el.textContent = text;
     },
     setRailCount(id, n) {
+      if (!railInner) return;   // rail-less page — nothing to update
       const el = railInner.querySelector('[data-rail-n="' + id + '"]');
       if (el) el.textContent = String(n);
     },

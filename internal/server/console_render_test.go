@@ -1,7 +1,7 @@
 // Ver 2026-09-11, by Sonnet 5
 package server
 
-// This file actually EXECUTES the Overview/Live & Log pages' embedded JS
+// This file actually EXECUTES the Overview/Models pages' embedded JS
 // (via a subprocess `node`) against realistic /status + /stats fixtures,
 // instead of only pattern-matching the HTML source like the rest of this
 // package's tests do. It exists because a whole class of bug — a runtime
@@ -331,7 +331,7 @@ func statsFixture(now time.Time) map[string]any {
 		"n":           45,
 		"tokens":      counters["tokens"],
 		"ttft_p50_ms": 320, "ttft_p90_ms": 900,
-		"toks_p50": 55.5, "toks_p90": 90.2,
+		"toks_p50": 55.5, "toks_p10": 30.2,
 	}
 	return map[string]any{
 		"concurrency": map[string]any{"limit": 8, "in_flight": 1, "waiting": 0},
@@ -346,7 +346,14 @@ func statsFixture(now time.Time) map[string]any {
 				"est_in":        800, "est_out": 120,
 			},
 		},
-		"hourly":  []map[string]any{{"hour": hour.Format(time.RFC3339), "dims": dims, "counters": counters}},
+		"hourly": []map[string]any{
+			{"hour": hour.Format(time.RFC3339), "dims": dims, "counters": counters},
+			{
+				"hour":     hour.Format(time.RFC3339),
+				"dims":     map[string]any{"provider": "", "model": "", "vmodel": "agent", "protocol": "anthropic"},
+				"counters": map[string]any{"ok": 0, "error": 3, "canceled": 0, "tokens": map[string]any{}},
+			},
+		},
 		"daily":   []map[string]any{{"hour": today.Format(time.RFC3339), "dims": map[string]any{}, "counters": counters}},
 		"overall": windowBlock,
 		"recent_errors": []map[string]any{
@@ -385,8 +392,10 @@ func formattingSliceJS(t *testing.T) string {
 // every section it is supposed to populate actually did. Regression guard
 // for the fullTitle TDZ crash (see file doc comment): before the fix,
 // renderModels() threw, refreshAll()'s try/catch swallowed it, and
-// models-body/perf-body/chart/usage-key/usage-caller all stayed empty
-// forever — this test fails loudly on that exact shape of bug.
+// perf-body/chart/usage-key/usage-caller all stayed empty forever — this
+// test fails loudly on that exact shape of bug. Quota/Models moved to
+// models.html (see TestConsoleRender_ModelsPageNoRuntimeError); Live
+// Requests/Recent Failures moved back here from log.html.
 func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
 	node := requireNode(t)
 	now := time.Now()
@@ -397,14 +406,60 @@ func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
   await refreshAll();
   await new Promise(res => setTimeout(res, 80));
   process.stdout.write(JSON.stringify({
-    modelsBody: document.getElementById('models-body').innerHTML,
+    liveBody: document.getElementById('live-body').innerHTML,
+    failBody: document.getElementById('fail-body').innerHTML,
     perfBody: document.getElementById('perf-body').innerHTML,
     chart: document.getElementById('chart').innerHTML,
     usageKey: document.getElementById('usage-key').innerHTML,
     usageCaller: document.getElementById('usage-caller').innerHTML,
-    quotaBody: document.getElementById('quota-body').innerHTML,
     vReq: document.getElementById('v-req').innerHTML,
     vTok: document.getElementById('v-tok').innerHTML,
+  }));
+  process.exit(0);
+})().catch(e => { console.error('HARNESS_ERROR: ' + (e && e.stack || e)); process.exit(1); });
+`
+	src := buildHarness(t, statusFixture(now), statsFixture(now), formattingSliceJS(t), pageJS, tail)
+	out := runNode(t, node, src)
+
+	var res map[string]string
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("harness stdout not JSON: %v\nraw: %s", err, out)
+	}
+
+	checks := []struct{ field, want string }{
+		{"liveBody", "glm-5.3-flash"},
+		{"failBody", "upstream_5xx"},
+		{"perfBody", "glm-5.3-flash"},
+		{"chart", "<svg"},
+		{"usageKey", "glm-5.3-flash"},
+		{"usageKey", "gateway / unrouted"},
+		{"usageCaller", "cli-default"},
+		{"vReq", "7d"},
+		{"vTok", "7d"},
+	}
+	for _, c := range checks {
+		if !strings.Contains(res[c.field], c.want) {
+			t.Errorf("%s: missing %q\ngot: %s", c.field, c.want, res[c.field])
+		}
+	}
+}
+
+// TestConsoleRender_ModelsPageNoRuntimeError runs refreshAll() from
+// models.html (Quota Budgets + Virtual Models & Endpoint Topology, moved
+// there from Overview) against the same fixture shape and asserts both
+// tables populate — same TDZ-class regression guard as the Overview test.
+func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
+	node := requireNode(t)
+	now := time.Now()
+
+	pageJS := extractScriptBody(t, readSourceFile(t, "models.html"))
+	tail := `
+(async () => {
+  await refreshAll();
+  await new Promise(res => setTimeout(res, 80));
+  process.stdout.write(JSON.stringify({
+    modelsBody: document.getElementById('models-body').innerHTML,
+    quotaBody: document.getElementById('quota-body').innerHTML,
   }));
   process.exit(0);
 })().catch(e => { console.error('HARNESS_ERROR: ' + (e && e.stack || e)); process.exit(1); });
@@ -421,53 +476,11 @@ func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
 		{"modelsBody", "glm-5.3-flash"},
 		{"modelsBody", "512K"},
 		{"modelsBody", "text"},
-		{"perfBody", "glm-5.3-flash"},
-		{"chart", "<svg"},
-		{"usageKey", "glm-5.3-flash"},
-		{"usageCaller", "cli-default"},
 		{"quotaBody", "volc_token_plan"},
-		{"vReq", "total"},
-		{"vTok", "total"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(res[c.field], c.want) {
 			t.Errorf("%s: missing %q\ngot: %s", c.field, c.want, res[c.field])
 		}
-	}
-}
-
-// TestConsoleRender_LogPageLiveAndFailuresNoRuntimeError runs livePollTick()
-// from log.html (the function driving the Live Requests / Recent Failures
-// sections moved there from Overview) against the same fixture shape and
-// asserts both tables populate.
-func TestConsoleRender_LogPageLiveAndFailuresNoRuntimeError(t *testing.T) {
-	node := requireNode(t)
-	now := time.Now()
-
-	pageJS := extractScriptBody(t, readSourceFile(t, "log.html"))
-	tail := `
-(async () => {
-  await livePollTick();
-  await new Promise(r => setTimeout(r, 50));
-  process.stdout.write(JSON.stringify({
-    liveBody: document.getElementById('live-body').innerHTML,
-    failBody: document.getElementById('fail-body').innerHTML,
-  }));
-  process.exit(0);
-})().catch(e => { console.error('HARNESS_ERROR: ' + (e && e.stack || e)); process.exit(1); });
-`
-	src := buildHarness(t, statusFixture(now), statsFixture(now), formattingSliceJS(t), pageJS, tail)
-	out := runNode(t, node, src)
-
-	var res map[string]string
-	if err := json.Unmarshal(out, &res); err != nil {
-		t.Fatalf("harness stdout not JSON: %v\nraw: %s", err, out)
-	}
-
-	if !strings.Contains(res["liveBody"], "glm-5.3-flash") {
-		t.Errorf("liveBody: missing running request row\ngot: %s", res["liveBody"])
-	}
-	if !strings.Contains(res["failBody"], "upstream_5xx") {
-		t.Errorf("failBody: missing recent-failure row\ngot: %s", res["failBody"])
 	}
 }

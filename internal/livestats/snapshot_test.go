@@ -30,6 +30,7 @@ func TestSnapshot_HourlyDailyAndDimensions(t *testing.T) {
 		Provider:     "p1",
 		Model:        "gpt-4o",
 		KeyLabel:     "key-X",
+		Forwarded:    true,
 		DurMS:        2000,
 		TTFTMS:       500,
 		Tokens:       TokenCounts{In: 100, Out: 60},
@@ -47,6 +48,7 @@ func TestSnapshot_HourlyDailyAndDimensions(t *testing.T) {
 		Provider:     "p1",
 		Model:        "gpt-4o",
 		KeyLabel:     "key-Y",
+		Forwarded:    true,
 		DurMS:        1500,
 		TTFTMS:       300,
 		Tokens:       TokenCounts{In: 200, Out: 40},
@@ -122,26 +124,28 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 	// share the same ring and merge into 1 row.
 	for i := 0; i < 10; i++ {
 		agg.Record(Sample{
-			TS:       now.Add(time.Duration(i) * time.Second),
-			VModel:   "coding",
-			Stream:   true,
-			Outcome:  OutcomeOK,
-			Provider: "p1",
-			Model:    "m1",
-			DurMS:    4000,
-			TTFTMS:   1000,
-			Tokens:   TokenCounts{In: 100, Out: 50},
+			TS:        now.Add(time.Duration(i) * time.Second),
+			VModel:    "coding",
+			Stream:    true,
+			Outcome:   OutcomeOK,
+			Provider:  "p1",
+			Model:     "m1",
+			Forwarded: true,
+			DurMS:     4000,
+			TTFTMS:    1000,
+			Tokens:    TokenCounts{In: 100, Out: 50},
 		})
 		agg.Record(Sample{
-			TS:       now.Add(time.Duration(20+i) * time.Second),
-			VModel:   "coding",
-			Stream:   false,
-			Outcome:  OutcomeOK,
-			Provider: "p1",
-			Model:    "m1",
-			DurMS:    4000,
-			TTFTMS:   1000,
-			Tokens:   TokenCounts{In: 100, Out: 50},
+			TS:        now.Add(time.Duration(20+i) * time.Second),
+			VModel:    "coding",
+			Stream:    false,
+			Outcome:   OutcomeOK,
+			Provider:  "p1",
+			Model:     "m1",
+			Forwarded: true,
+			DurMS:     4000,
+			TTFTMS:    1000,
+			Tokens:    TokenCounts{In: 100, Out: 50},
 		})
 	}
 
@@ -196,16 +200,17 @@ func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
 	// the block is non-trivial.
 	for i := 0; i < 12; i++ {
 		agg.Record(Sample{
-			TS:       now.Add(time.Duration(i) * time.Second),
-			VModel:   "coding",
-			Stream:   true,
-			Outcome:  OutcomeOK,
-			Provider: "p1",
-			KeyLabel: "main",
-			Model:    "m1",
-			DurMS:    int64(1000 + i*100),
-			TTFTMS:   int64(100 + i*10),
-			Tokens:   TokenCounts{In: int64(100 + i), Out: int64(i)},
+			TS:        now.Add(time.Duration(i) * time.Second),
+			VModel:    "coding",
+			Stream:    true,
+			Outcome:   OutcomeOK,
+			Provider:  "p1",
+			KeyLabel:  "main",
+			Model:     "m1",
+			Forwarded: true,
+			DurMS:     int64(1000 + i*100),
+			TTFTMS:    int64(100 + i*10),
+			Tokens:    TokenCounts{In: int64(100 + i), Out: int64(i)},
 		})
 	}
 
@@ -230,9 +235,9 @@ func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
 		t.Errorf("overall ttft p50/p90 = %d/%d, want %d/%d",
 			snap.Overall.TTFTP50, snap.Overall.TTFTP90, last100.TTFTP50, last100.TTFTP90)
 	}
-	if snap.Overall.ToksP50 != last100.ToksP50 || snap.Overall.ToksP90 != last100.ToksP90 {
-		t.Errorf("overall toks p50/p90 = %f/%f, want %f/%f",
-			snap.Overall.ToksP50, snap.Overall.ToksP90, last100.ToksP50, last100.ToksP90)
+	if snap.Overall.ToksP50 != last100.ToksP50 || snap.Overall.ToksP10 != last100.ToksP10 {
+		t.Errorf("overall toks p50/p10 = %f/%f, want %f/%f",
+			snap.Overall.ToksP50, snap.Overall.ToksP10, last100.ToksP50, last100.ToksP10)
 	}
 }
 

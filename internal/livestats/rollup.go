@@ -25,6 +25,11 @@ const (
 // audit's names, vmodel is the one deliberately renamed field (the flat row
 // carries both the virtual and the upstream name, so the virtual one needs
 // its own key). The zone offset in ts is write-time, preserved as-is.
+// Forwarded is the explicit service-quality gate (design §4.2) — Provider
+// can be set from a failed request's terminal attempt too, so it alone no
+// longer implies forwarded; a pre-upgrade slim row without this field reads
+// back as false (bounded, self-healing: only the still-open current hour at
+// upgrade time can be affected, and it corrects itself once that hour rolls).
 type slimRow struct {
 	TS           string      `json:"ts"`
 	VModel       string      `json:"vmodel"`
@@ -35,6 +40,7 @@ type slimRow struct {
 	Provider     string      `json:"provider"`
 	Model        string      `json:"model"`
 	KeyLabel     string      `json:"key_label"`
+	Forwarded    bool        `json:"forwarded"`
 	DurMS        int64       `json:"dur_ms"`
 	TTFTMS       int64       `json:"ttft_ms"`
 	Tokens       TokenCounts `json:"tokens"`
@@ -245,7 +251,7 @@ func rowSample(r slimRow, ts time.Time) Sample {
 	return Sample{
 		TS: ts, VModel: r.VModel, Protocol: r.Protocol, Stream: r.Stream,
 		Outcome: r.Outcome, ClientKeyTag: r.ClientKeyTag,
-		Provider: r.Provider, Model: r.Model, KeyLabel: r.KeyLabel,
+		Provider: r.Provider, Model: r.Model, KeyLabel: r.KeyLabel, Forwarded: r.Forwarded,
 		DurMS: r.DurMS, TTFTMS: r.TTFTMS, Tokens: r.Tokens,
 	}
 }

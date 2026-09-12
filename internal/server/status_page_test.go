@@ -50,18 +50,22 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 		t.Errorf("body missing 'VMR Console — Overview'")
 	}
 
-	// Overview page markers: 5 section anchors (Live Requests and Recent Failures
-	// moved to log.html)
+	// Overview page markers: Quota Budgets and Virtual Models & Endpoint
+	// Topology live on /models.html; Overview keeps vitals, Live Requests,
+	// Performance, Traffic & Usage, and Recent Failures.
 	for _, anchor := range []string{
 		`id="vitals"`,
-		`id="quota"`,
-		`id="models"`,
+		`id="live"`,
 		`id="perf"`,
 		`id="traffic"`,
+		`id="failures-head"`,
 	} {
 		if !strings.Contains(body, anchor) {
 			t.Errorf("body missing overview section anchor %q", anchor)
 		}
+	}
+	if strings.Contains(body, `id="quota"`) || strings.Contains(body, `id="models-body"`) {
+		t.Errorf("body still contains Quota/Models markup — that moved to /models.html")
 	}
 
 	if !strings.Contains(body, "mountConsole") {
@@ -85,6 +89,64 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	srv.Handler().ServeHTTP(wStats, reqStats)
 	if wStats.Code != http.StatusNotFound {
 		t.Fatalf("/stats.html status = %d, want %d", wStats.Code, http.StatusNotFound)
+	}
+}
+
+func TestModelsPage_ServesHTML(t *testing.T) {
+	cfg, err := config.Parse([]byte(instanceYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+	srv := New(rt, nil)
+
+	req := httptest.NewRequest("GET", "/models.html", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+
+	cc := w.Header().Get("Cache-Control")
+	if cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "VMR Console — Models") {
+		t.Errorf("body missing 'VMR Console — Models'")
+	}
+
+	for _, anchor := range []string{`id="quota"`, `id="models"`} {
+		if !strings.Contains(body, anchor) {
+			t.Errorf("body missing models page section anchor %q", anchor)
+		}
+	}
+
+	if !strings.Contains(body, "mountConsole") {
+		t.Errorf("body missing 'mountConsole'")
+	}
+	if !strings.Contains(body, "active: 'models'") {
+		t.Errorf("body missing mountConsole active: 'models'")
+	}
+
+	// Shared console assets injection
+	if !strings.Contains(body, "console-header") {
+		t.Errorf("body missing injected console-header class from console.css")
+	}
+	if !strings.Contains(body, "VMRAuth") {
+		t.Errorf("body missing injected VMRAuth from console.js")
 	}
 }
 
@@ -378,14 +440,20 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	}
 	body := w.Body.String()
 
-	// Adaptive poller fast and idle cadences (concurrency vitals)
+	// Adaptive poller fast and idle cadences — drives concurrency vitals,
+	// Live Requests, and Recent Failures (moved back from log.html).
 	for _, want := range []string{
 		"const LIVE_POLL_FAST_MS = 2000;",
 		"const LIVE_POLL_IDLE_MS = 15000;",
 		"function armLivePoll(ms)",
 		"async function livePollTick()",
 		"renderConcurrencyVitals(",
+		"renderLive(",
+		"renderFailures(",
 		"fetch('/stats', { headers })",
+		`id="live"`,
+		`id="failures-head"`,
+		`id="failures-body-wrap" hidden`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("status.html missing poller element %q", want)
@@ -400,6 +468,20 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	// Tab visibility pausing: armLivePoll must drop timer when hidden
 	if !strings.Contains(body, "if (document.hidden) return;   // parked — visibilitychange wakes us up") {
 		t.Errorf("status.html armLivePoll missing document.hidden check")
+	}
+
+	// Layout order: vitals -> Live Requests -> Performance -> Traffic & Usage
+	// -> Recent Failures (report §6.7's reordering, minus Quota/Models which
+	// moved to /models.html).
+	vitalsIdx := strings.Index(body, `id="vitals"`)
+	liveIdx := strings.Index(body, `id="live"`)
+	perfIdx := strings.Index(body, `id="perf"`)
+	trafficIdx := strings.Index(body, `id="traffic"`)
+	failuresIdx := strings.Index(body, `id="failures-head"`)
+	if vitalsIdx == -1 || liveIdx == -1 || perfIdx == -1 || trafficIdx == -1 || failuresIdx == -1 ||
+		!(vitalsIdx < liveIdx && liveIdx < perfIdx && perfIdx < trafficIdx && trafficIdx < failuresIdx) {
+		t.Errorf("status.html section order wrong: want vitals(%d) < live(%d) < perf(%d) < traffic(%d) < failures(%d)",
+			vitalsIdx, liveIdx, perfIdx, trafficIdx, failuresIdx)
 	}
 }
 
@@ -430,28 +512,25 @@ func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
 		t.Errorf("log.html refreshStatus missing auth headers: %q", wantHeader)
 	}
 
-	// log.html adaptive poller and moved sections. The layout order is
-	// pinned: Live Requests / Recent Failures above, then the terminal
-	// toolbar, then the log area (which wraps by default).
+	// log.html is a pure terminal page again (Live Requests / Recent Failures
+	// moved back to Overview): full-width, no Live/Failures markup, toolbar
+	// directly above the wrapping log area.
 	for _, want := range []string{
-		`id="live"`,
-		`id="failures-head"`,
-		`id="failures-body-wrap" hidden`,
 		`id="term-toolbar"`,
-		"const LIVE_POLL_FAST_MS = 2000;",
-		"const LIVE_POLL_IDLE_MS = 15000;",
-		"renderLive(",
-		"renderFailures(",
 		"white-space:pre-wrap",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("log.html missing element %q", want)
 		}
 	}
-	liveIdx := strings.Index(body, `id="live"`)
+	for _, absent := range []string{`id="live"`, `id="failures-head"`, "renderLive(", "renderFailures(", "LIVE_POLL_FAST_MS"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("log.html still contains %q — Live Requests/Recent Failures moved to status.html", absent)
+		}
+	}
 	toolbarIdx := strings.Index(body, `id="term-toolbar"`)
 	logIdx := strings.Index(body, `<pre id="log">`)
-	if liveIdx == -1 || toolbarIdx == -1 || logIdx == -1 || liveIdx > toolbarIdx || toolbarIdx > logIdx {
-		t.Errorf("log.html layout order wrong: want live (%d) < toolbar (%d) < log area (%d)", liveIdx, toolbarIdx, logIdx)
+	if toolbarIdx == -1 || logIdx == -1 || toolbarIdx > logIdx {
+		t.Errorf("log.html layout order wrong: want toolbar (%d) < log area (%d)", toolbarIdx, logIdx)
 	}
 }

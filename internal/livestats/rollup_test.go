@@ -44,6 +44,7 @@ func TestSlimFile_JSONSchemaAndPermissions(t *testing.T) {
 		Provider:     "p1",
 		Model:        "claude-sonnet-4",
 		KeyLabel:     "main",
+		Forwarded:    true,
 		DurMS:        12340,
 		TTFTMS:       412,
 		Tokens: TokenCounts{
@@ -68,7 +69,7 @@ func TestSlimFile_JSONSchemaAndPermissions(t *testing.T) {
 	}
 	expectedKeys := []string{
 		"ts", "vmodel", "protocol", "stream", "outcome", "client_key_tag",
-		"provider", "model", "key_label", "dur_ms", "ttft_ms", "tokens",
+		"provider", "model", "key_label", "forwarded", "dur_ms", "ttft_ms", "tokens",
 	}
 	for _, k := range expectedKeys {
 		if _, ok := parsed[k]; !ok {
@@ -210,6 +211,7 @@ func TestRollSlimFile_Idempotent(t *testing.T) {
 		Provider:     "p2",
 		Model:        "gpt-5",
 		KeyLabel:     "sec",
+		Forwarded:    true,
 		DurMS:        500,
 		TTFTMS:       100,
 		Tokens:       TokenCounts{In: 50, Out: 20},

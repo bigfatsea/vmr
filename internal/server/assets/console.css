@@ -183,6 +183,7 @@ table.c{width:100%;border-collapse:separate;border-spacing:0;font-size:var(--fs-
 
 /* priority tiers + live-table states */
 .pri{font-family:var(--font-mono);font-size:10px;padding:1px 7px;border-radius:var(--r-pill);border:1px solid}
+.pri-0{background:var(--purple-bg);color:var(--purple);border-color:rgba(188,140,255,.35)}
 .pri-1{background:var(--accent-bg);color:var(--accent);border-color:rgba(88,166,255,.35)}
 .pri-2{background:var(--green-bg);color:var(--green);border-color:rgba(63,185,80,.35)}
 .pri-n{background:var(--surface-2);color:var(--text-muted);border-color:var(--border)}

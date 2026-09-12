@@ -111,15 +111,16 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 
 数字列一律 `font-variant-numeric: tabular-nums`。字号基准 13px。
 
-## 4. 统一骨架：Header（两行）/ Footer
+## 4. 统一骨架：Header（一或两行）/ Footer
+
+> **supersedes 本节 2026-09-11 之前的三页版本**：四页导航（新增 `/models.html`）与
+> Live/Failures 回迁 Overview 是 2026-09-12 的产品决定，理由见本节末尾的决策记录指针。
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────┐
-│ [◇] VMR          Overview Live & Log Help   (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 三页同槽
+│ [◇] VMR          Overview Models Log Help   (⟳4:37) (up 3d 4h 12m) [🔑] (🚨3)          │ 行1 · 四页同槽
 ├──────────────────────────────────────────────────────────────────────────────────────┤
-│ Overview  Live 6  Quota 3  Models 3  Failures 6  Performance  Traffic & Usage         │ 行2 · 页面自有
-├──────────────────────────────────────────────────────────────────────────────────────┤
-│   内容区（Overview/Help: 1280px 居中；Log: 满宽终端）                                  │
+│   内容区（Overview/Models/Log/Help 全部无行 2 导轨，见下）                             │
 ├──────────────────────────────────────────────────────────────────────────────────────┤
 │ VMR · v4.2.1 · pid 48211 · go1.24 · darwin/arm64 · listen 127.0.0.1:8800  bigfatsea/vmr│
 └──────────────────────────────────────────────────────────────────────────────────────┘
@@ -127,9 +128,10 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
 
 - **行 1（sticky，毛玻璃底）**，左到右：品牌（SVG logo + `VMR`）、页内导航、
   **刷新/连接槽**、**uptime 徽**、Key 按钮、**告警（最右）**。
-  - **刷新/连接槽**是同一个位置的三种页面语义：Overview 放刷新倒计时 `⟳ 4:37`（点击即刷，
-    暂停时整枚转黄并显示 `paused`）；Log 放流状态 pill（`streaming`/`paused`/`down`）；
-    Help 放 `static`。一个槽位，一件事——"这一页的数据现在是什么状态"。
+  - **刷新/连接槽**是同一个位置的三种页面语义：Overview/Models 放刷新倒计时 `⟳ 4:37`
+    （点击即刷，暂停时整枚转黄并显示 `paused`）；Log 放流状态 pill
+    （`streaming`/`paused`/`down`）；Help 放 `static`。一个槽位，一件事——
+    "这一页的数据现在是什么状态"。
   - **uptime 徽**：进程存活时长。它会变，且"是不是刚重启过"是运维的高频判断，因此留在
     Header；版本 / pid / go / os-arch / listen 这些永不变的身份信息只在 Footer 出现。
   - **告警**：`⚠️ n`（仅 warning）或 `🚨 n`（含 error），整枚 pill 跟随最高严重度着色，
@@ -137,23 +139,28 @@ error_class 为 core.ErrorClass 实际词表值）。——`internal/server/asse
     内容**只承载可操作状态**：config issue、降级/冷却端点、即将耗尽的 quota gate。
     **滚动统计量（"过去 24h 有 84 个错误"）不进告警**：它永远为真，会把徽章永久钉在非零上，
     把运维训练成无视告警；错误率属于 vitals。
-- **行 2（页面自有导轨）**：Overview=区块锚点条（带计数与滚动高亮）；Log=终端工具条
-  （level 芯片 / 子串过滤 / Pause / Copy view）；Help=指南锚点条。三页共用
-  `.hd-rail` 容器与 `.rail-link` 样式，只是内容不同。（Wrap 切换在 polish 轮删除——
+- **行 2（页面自有导轨）是可选的，不是每页都有**：一个页面把 `rail:[]` 传给
+  `mountConsole` 时，`.hd-rail` 整个 DOM 节点都不渲染（不是渲染成空的），锚点偏移量
+  `--hd-h` 同步从 88px 收缩到 48px——这样才是真的"没有第二行"，而不是留一条空白横条。
+  当前四页都是这个状态：Overview、Models、Help 都已经短到不需要页内跳转；Log 的工具条
+  （level 芯片 / 子串过滤 / Pause / Copy view）被放进页面正文（终端上方一条独立
+  `.term-toolbar`），从未真正用过行 2 这个位置。（Wrap 切换在更早的 polish 轮删除——
   日志始终软换行，一个只影响换行的开关不值一个工具条位。）
 - **Key 按钮三态**：未存键 → `🔑 Set Key`；已存键 → `🔑 ····abcd`（悬停说明存储位置）；
   点击统一打开 §6 的 modal。
 - **Footer**：两栏 slim 条，左=实例完整身份，右=仓库链接。Log 页的 footer 是同构**状态条**
   （左=终端自有状态：行数 / 缓冲 / level / 过滤器；右=实例身份与仓库链接）。
-- 导航三页：**Overview / Live & Log / Help**。
+- 导航四页：**Overview / Models / Log / Help**。Models 是 2026-09-12 新增的一页，承载
+  原来在 Overview 里的 Quota Budgets 与 Virtual Models & Endpoint Topology（见 §8.1）。
 
 ## 5. 宽度策略
 
 | 页面 | 内容区 | 理由 |
 | --- | --- | --- |
-| Overview | `max-width:1280px` 居中 | 宽表（拓扑/Live/Perf）在 1280 下列宽充裕；超宽可读性反降 |
+| Overview | `max-width:1280px` 居中 | 宽表（Live/Perf/Usage）在 1280 下列宽充裕；超宽可读性反降 |
+| Models | `max-width:1280px` 居中 | 与 Overview 同型的两张宽表（配额、拓扑），复用同一套列宽假设 |
 | Help | `max-width:1280px` 居中 | 长文阅读行宽 |
-| Log | **1280px 居中对齐** | 上方承载活动的 Live Requests 与可折叠 Recent Failures 表，下方为工具条与自动换行终端，与 Overview / Help 页面宽度统一 |
+| Log | **满宽 + 终端占满剩余高度** | 纯终端页，不再承载任何表格——全宽比居中窄栏更适合日志行 |
 
 Header/Footer 通栏，内部 `.hd-inner/.rail-inner/.ft-inner` 按所在页对齐。
 
@@ -191,47 +198,57 @@ openOverlay(el) / closeOverlay(el) / wireOverlay(el)  // 所有浮层共用
 
 ## 8. Status + Stats 合并：Overview 单页方案
 
-### 8.1 Status 现状块 → Overview 的映射（压缩分析）
+### 8.1 Status 现状块 → Overview / Models 的映射（压缩分析）
+
+Quota Budgets 与 Virtual Models & Endpoint Topology 落在**独立的 `/models.html` 页**
+（8.1a），不在 Overview——两张表都是相对静态的配置/拓扑事实，运维查看它们的节奏和查看
+"现在有什么在跑"完全不同，合在一页只会让 Overview 变长而不提供任何交互收益。其余全部
+块留在 Overview。
 
 | 现状块（status/stats） | 压缩策略 | 去处 |
 | --- | --- | --- |
 | Header 徽章行（version/pid/listen/osarch/uptime） | uptime 留 Header；version/pid 进 `.sysline` 首段；go/os-arch/listen 只进 Footer | Header / sysline / Footer |
-| 四张大指标卡 + Storage 卡 | 合成**一条 vitals 指标带**（单卡四段，§8.3）；系统明细/存储/audit 收成**单行** `.sysline`（无折叠、无标题） | 首屏 |
+| 四张大指标卡 + Storage 卡 | 合成**一条 vitals 指标带**（单卡四段，§8.3）；系统明细/存储/audit 收成**单行** `.sysline`（无折叠、无标题） | Overview 首屏 |
 | 黄色告警 banner | 移除，并入 Header 最右的**告警 pill**（只留可操作项） | Header |
-| Quota 表 | 保留，列重构（§8.4-a），含 Req 24h 列 | Quota Budgets 区 |
-| Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**直接补在对应虚拟模型底部**（PRI 标 FB） | Virtual Models 区 |
+| Quota 表 | 保留，列重构（§8.4-a），含 Req 24h 列 | `/models.html` Quota Budgets 区 |
+| Models 拓扑卡组 | **改全宽表**（§8.4-b）：一行 = 虚拟模型 × 端点，虚拟模型名带协议前缀，含 Headroom 与 Share 列；Fallback 端点**直接补在对应虚拟模型底部**（PRI 标 FB） | `/models.html` Virtual Models 区 |
 | Connect Your Agent 卡 | **删除**（导航已有 Help；连接信息归 Help 页的 Connection 卡） | — |
 | stats 并发卡 | 删除（与 vitals 并发段重复，去重） | — |
-| stats in-flight 表 | 并入，列序与列义重构（§8.4-c），自适应短轮询驱动 | Live Requests 区 |
-| —（新增） | **Recent Failures**（§8.4-d）：填补 Live 与小时聚合之间的诊断盲区 | Recent Failures 区 |
-| stats by_provider_model | 并入，列重构（§8.4-e） | Performance 区 |
-| stats Requests-per-Hour | 升级为 **Requests & Tokens** 组合图（§8.4-f） | Traffic & Usage 带 |
-| stats by_key×2 | 并入，列重构（§8.4-g），与图表同属 Traffic & Usage 带 | Traffic & Usage 带 |
+| stats in-flight 表 | 并入，列序与列义重构（§8.4-c），自适应短轮询驱动 | Overview Live Requests 区 |
+| —（新增） | **Recent Failures**（§8.4-d）：填补 Live 与小时聚合之间的诊断盲区 | Overview Recent Failures 区 |
+| stats by_provider_model | 并入，列重构（§8.4-e） | Overview Performance 区 |
+| stats Requests-per-Hour | 升级为 **Requests & Tokens** 组合图（§8.4-f） | Overview Traffic & Usage 带 |
+| stats by_key×2 | 并入，列重构（§8.4-g），与图表同属 Traffic & Usage 带 | Overview Traffic & Usage 带 |
 
-### 8.2 单页平铺、区块导轨与刷新模型
+### 8.2 两页平铺、无导轨、双层刷新模型
 
-**定案：单页平铺 + 区块导轨。刷新分两层——整页一个 5 分钟倒计时时钟，Live 区与并发 vitals
-一个自适应短轮询。**
+**定案：Overview 与 Models 都是单页平铺，不设区块导轨——两页都已经短到不需要页内跳转
+（Overview 5 个区块、Models 2 个区块，都在一屏到两屏内）。刷新分两层：整页一个 5 分钟
+倒计时时钟，Overview 的 Live 区/Recent Failures/并发 vitals 额外有一个自适应短轮询。**
 
 - Header 的倒计时（5:00）是**整页**的刷新节奏，**点击立即刷新**；`document.hidden` 时暂停；
   暂停状态由倒计时 pill 自身表达（转黄 + `paused`），不另设连接徽。
-- Live 表与并发 vitals 由**前端自适应短轮询**单独驱动（有进行中或排队请求时 ~2s，空闲退避至 15s，标签页隐藏停拍，恢复时立即探测）——elapsed / stalled / tok-out 是这张表存在的意义，5 分钟一刷等于让它假死。服务端 `/stats` 的 in-flight 与并发计数每次读实时算，其余聚合段读缓存时长大于该轮询节奏，一批轮询只算一次 fold。不做事件级 SSE 推送（in-flight 是易变状态集而非追加流，快照轮询天然幂等自愈，详见 LiveStats 设计文档 §5.4）。页面其余绝大部分区域只随整页 5 分钟时钟刷新。
-- 长页的可导航性由 Header 第二行的**区块导轨**承担：`Overview / Live / Quota / Models /
-  Failures / Performance / Traffic & Usage`（Live 在 Quota 之前——polish 轮据反馈前移，
-  §8.4-c），条目带计数（Live 显示当前 running 数、Failures 显示缓冲条数），滚动时高亮
-  当前区块。区块的锚点偏移统一用 `--hd-h`（`scroll-margin-top`）。
+- Overview 的 Live 表、Recent Failures 与并发 vitals 由**前端自适应短轮询**单独驱动
+  （有进行中或排队请求时 ~2s，空闲退避至 15s，标签页隐藏停拍，恢复时立即探测）——
+  elapsed / stalled / tok-out 是这张表存在的意义，5 分钟一刷等于让它假死。服务端
+  `/stats` 的 in-flight 与并发计数每次读实时算，其余聚合段读缓存时长大于该轮询节奏，
+  一批轮询只算一次 fold。不做事件级 SSE 推送（in-flight 是易变状态集而非追加流，快照
+  轮询天然幂等自愈，详见 LiveStats 设计文档 §5.4）。Overview 其余区域、以及 Models 整页，
+  只随整页 5 分钟时钟刷新（Models 上的两张表都是相对静态的配置/拓扑事实，不需要快轮询）。
 
 ```
 Overview 页（单页，自上而下）
 ├─ vitals 指标带（4 段）+ sysline 系统详情单行        ← /status
-├─ Live Requests                                     ← /stats（in-flight 注册表）
-├─ Quota Budgets                                     ← /status
-├─ Virtual Models & Endpoint Topology（含 Fallback） ← /status + /stats（Share 列 join）
-├─ Recent Failures                                   ← /stats（新增 recent_errors 环）
+├─ Live Requests                                     ← /stats（in-flight 注册表，自适应轮询）
 ├─ Performance by Provider & Model（10/100 切换）    ← /stats
-└─ Traffic & Usage（单一时间窗控制整带）             ← /stats
-    ├─ Requests & Tokens 组合图
-    └─ Usage by Upstream Key Label / by Caller
+├─ Traffic & Usage（单一时间窗控制整带）             ← /stats
+│   ├─ Requests & Tokens 组合图
+│   └─ Usage by Provider & Model / by Caller
+└─ Recent Failures（默认折叠）                       ← /stats（recent_errors 环，自适应轮询）
+
+Models 页（单页，自上而下）
+├─ Quota Budgets                                     ← /status
+└─ Virtual Models & Endpoint Topology（含 Fallback） ← /status + /stats（Share 列 join）
 ```
 
 ### 8.3 vitals 指标带：四段
@@ -288,7 +305,7 @@ Req 24h 列的数据来自 `/status`（拓扑）与 `/stats`（`by_provider_mode
 
 **c. Live Requests**
 
-DOM 布局调整为位于 Quota Budgets 之前；表格容器 `.table-wrap.bounded` 按并发 limit 动态计算固定高度（`limit * 44 + 56px`），仅渲染 `running` 状态条目（排队中条目不在列表中展示）。
+DOM 布局位于 vitals 指标带之后、Performance 之前——Overview 最靠上的内容区块（§8.2）；仅渲染 `running` 状态条目（排队中条目不在列表中展示）。
 
 | 列 | 说明 |
 | --- | --- |
@@ -342,10 +359,10 @@ Live（正在发生）与小时聚合（发生过什么）之间存在一段诊�
 | Provider : Model | key_label 内嵌；独立 Key Label 列删除 |
 | Mode | `stream` / `json`，**独立一列、写字不用图标**（见下） |
 | Requests | **窗口内的实际样本数**。ring 只收成功样本，所以它是「这一行的分位数究竟建立在多少个请求上」——不满窗口容量时转黄并在悬停里说明。失败不在这张表里，由 Recent Failures 与图上的错误标记承担 |
-| Tok in+cw / cr | 窗口内输入侧两值：fresh+cache_write 与 cache_read |
+| Tok in (hit %) | 窗口内总输入 token（fresh+cache_write+cache_read）与其中 cache_read 的占比；三分项明细留在悬停 |
 | Tok out | 窗口内输出侧 |
-| TTFT p50 / p90 | 首 token 延迟，nearest-rank |
-| Tok/s p50 / p90 | **单请求四分量 token 总和 ÷ 该请求总耗时**，再取 nearest-rank 分位 |
+| TTFT p50 / p90 | 首 token 延迟，nearest-rank；越大越差，尾部取 p90 |
+| Tok OUT/s p50 / p10 | 单请求输出 token 生成吞吐（流式扣 `ttft_ms`，非流式用整个 `dur_ms`），nearest-rank 分位。方向与 TTFT 相反：吞吐越大越好，尾部（最坏情况）取 p10 而非 p90——见 LiveStats 设计文档 §4/§9 |
 
 **一行 = 一个 (端点 × 传输方式)**：ring 的键含 `stream`，设计上"绝不互混分位数"，
 所以表的行键也必须含它。**传输方式写成独立一列的文字标签，不用图标**——图标要求读者
@@ -390,9 +407,15 @@ Recent Failures 的事；"什么时候开始错的"是图上的错误标记；�
   时间范围、requests + 错误数与错误率、`tok in 总计 = fresh + cw + cr`（分项全列）、tok out。
   tooltip 先渲染后测宽再定位，不用硬编码宽度猜测（右边缘会溢出）。
 
-**g. Usage by Upstream Key Label / by Caller**（两表同构）
+**g. Usage by Provider & Model / by Caller**（两表同构；前者按 `Provider : Model` 分组，
+取代了本节草案原先设想的按 Upstream Key Label 分组——同一账号下的多个上游模型份额差异
+往往比账号本身更值得先看）
 
-| Key Label（或 Caller） | Req ok / err | Tok in+cw / cr | Tok out | Share |
+| Provider : Model（或 Caller） | Req ok / err | Tok in (hit %) | Tok out | Tok OUT/s | Share |
+
+Tok OUT/s 是窗口内的宏观平均吞吐（`Σtok out / Σ有效生成时长`，流式行按 `dur_ms - ttft_ms`
+折算，非流式行用整个 `dur_ms`），不是逐请求分位数——两表按 provider/model 或 caller 折叠了
+一段时间窗，天然只剩得下一个平均值。
 
 - **按总 token 降序**：这两张表唯一的问题是"谁在烧"，第一大户必须是第一行；
 - **Share 列**：`.sharebar` 迷你条 + 百分比；
@@ -572,6 +595,7 @@ G2–G5 属于 Part 1 的 `/status` 契约，只在本文登记。
 | 12 | Performance 的 TPS / Tok/s 两列 | **只删 TPS，保留 Tok/s**——两列本就重复，留下名字自解释、口径更完整的那个（§8.4-e） |
 | 13 | Live 表的 Seq 列 | **删除**，关联号不占诊断列宽（§8.4-c） |
 | 14 | Live 表 `First / Last` 列名 | 用 **`First / Last Byte`**，跟随底层字段命名；同表内 `Tok in/out` 是 token 计数，两个词不混用（§8.4-c） |
+| 15 | Live Requests / Recent Failures 常驻页面 | 2026-09-11 曾短暂移到 `/log.html`（"Live & Log"）；2026-09-12 **改回 Overview**，并新增独立的 `/models.html` 承载 Quota Budgets + Virtual Models & Endpoint Topology（原方案就在 Overview 上，2026-09-11 那次搬迁未连带更新本节，是本次一并订正的记录）（§4、§8.1、§8.2） |
 
 ## 12. 未纳入本轮（记入 ROADMAP）
 

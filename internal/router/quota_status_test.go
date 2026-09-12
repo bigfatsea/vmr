@@ -118,3 +118,46 @@ models:
 		t.Fatalf("EstimatedPct = %v, want ~50", st[0].EstimatedPct)
 	}
 }
+
+// TestQuotaStatus_UsedIsRoundedForDisplay pins the P1-4 fix: repeated
+// fractional charges (the same class of drift model_multipliers produces
+// over many real requests) leave IEEE754 summation noise in the raw
+// quota.Counters float64 — that's fine and expected internally (see
+// quota.Counters' doc comment: it must stay unrounded to avoid a systematic
+// charge-time bias) — but /status's QuotaProviderStatus is a display/API
+// boundary, and 0.1+0.1+0.1 must read back as a clean 0.3, not
+// 0.30000000000000004.
+func TestQuotaStatus_UsedIsRoundedForDisplay(t *testing.T) {
+	rt := New(nil)
+	rt.Quota = quota.NewRegistry("")
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai-completions: https://example.com}
+    api_key: k1
+    quota:
+      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 100000}]
+models:
+  m1:
+    endpoints: {openai-completions: [{providers: [p1], models: [m]}]}
+`)
+	snap := mustSnapshot(t, cfg)
+	rt.Install(snap)
+	l := snap.Models["openai-completions"]["m1"].Endpoints[0].Quota.Limits[0]
+	ps := quota.PeriodStart(l, time.Now())
+	for i := 0; i < 3; i++ {
+		rt.Quota.Charge("p1", "tokens/1mo", ps, quota.Counters{Fresh: 0.1}, 0)
+	}
+
+	st := rt.QuotaStatus()
+	if len(st) != 1 {
+		t.Fatalf("got %d entries, want 1", len(st))
+	}
+	if st[0].Used != 0.3 {
+		t.Fatalf("Used = %v (%.20f), want a clean 0.3 — float summation noise leaked into the display value", st[0].Used, st[0].Used)
+	}
+	if st[0].Fresh != 0.3 {
+		t.Fatalf("Fresh = %v, want a clean 0.3", st[0].Fresh)
+	}
+}

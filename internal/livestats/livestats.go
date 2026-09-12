@@ -84,23 +84,38 @@ type SumCount struct {
 // output-token generation throughput: tokens.out over (dur_ms - ttft_ms)
 // for streamed samples, tokens.out / dur_ms for non-streamed ones
 // (design §8).
+//
+// TTFT and toks read their p90/p10 in opposite directions on purpose: TTFT
+// is a cost metric (bigger is worse), so its tail is the top decile —
+// sorted-ascending index at 90%. toks is a yield metric (bigger is better),
+// so its tail — the worst-case throughput floor an operator actually wants
+// for an SLA read — is the *bottom* decile, sorted-ascending index at 10%,
+// not 90%. Reusing p90 for toks would silently report the fastest 10% of
+// requests as if it were the guaranteed floor.
 type WindowBlock struct {
 	N       int64       `json:"n"`
 	Tokens  TokenCounts `json:"tokens"`
 	TTFTP50 int64       `json:"ttft_p50_ms"`
 	TTFTP90 int64       `json:"ttft_p90_ms"`
 	ToksP50 float64     `json:"toks_p50"`
-	ToksP90 float64     `json:"toks_p90"`
+	ToksP10 float64     `json:"toks_p10"`
 }
 
 // Sample is one completed request as the completion hook sees it. TS is the
 // arrival time and decides the hour bucket (design §3.2). Provider, Model
-// and KeyLabel are the winning attempt's service identity — all empty when
-// the request never forwarded, in which case only the request-face outcome
-// count is booked (design §4.2). TTFTMS 0 means unmeasured and is excluded
-// from ttft sums and the ring. ErrorClass/Status/Attempt feed only the
-// recent_errors ring (contracts §1.6) — memory-only, slim/rollup never
-// carry them; ErrorClass/Status quote the terminal attempt verbatim.
+// and KeyLabel identify which upstream endpoint the terminal attempt
+// targeted — populated whenever at least one attempt was made, forwarded or
+// not (design §4.2), so a failed request still groups under the endpoint
+// that actually failed instead of an anonymous bucket. Only empty when the
+// request never reached an attempt at all (client-side rejection or
+// no-candidate). Forwarded is the separate, authoritative gate for
+// service-quality aggregation: only a forwarded sample's tokens/dur/ttft
+// feed Counters' sums or the performance ring (design §4.2) — Provider
+// being non-empty no longer implies Forwarded. TTFTMS 0 means unmeasured
+// and is excluded from ttft sums and the ring. ErrorClass/Status/Attempt
+// feed only the recent_errors ring (contracts §1.6) — memory-only,
+// slim/rollup never carry them; ErrorClass/Status quote the terminal
+// attempt verbatim.
 type Sample struct {
 	TS           time.Time
 	VModel       string
@@ -111,6 +126,7 @@ type Sample struct {
 	Provider     string
 	Model        string
 	KeyLabel     string
+	Forwarded    bool
 	DurMS        int64
 	TTFTMS       int64
 	Tokens       TokenCounts
@@ -189,7 +205,7 @@ func (c *Counters) addSample(s Sample) {
 	default:
 		c.Error++
 	}
-	if s.Provider == "" {
+	if !s.Forwarded {
 		return
 	}
 	c.Tokens.add(s.Tokens)

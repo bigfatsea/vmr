@@ -49,6 +49,7 @@ func TestAggregator_AttributionRules(t *testing.T) {
 		Provider:     "p1",
 		Model:        "m1",
 		KeyLabel:     "main",
+		Forwarded:    true,
 		DurMS:        100,
 		TTFTMS:       0, // unmeasured: must be excluded from ttft sum/n and ring
 		Tokens:       TokenCounts{In: 200, Out: 100},
@@ -66,6 +67,7 @@ func TestAggregator_AttributionRules(t *testing.T) {
 		Provider:     "p1",
 		Model:        "m1",
 		KeyLabel:     "main",
+		Forwarded:    true,
 		DurMS:        500,
 		TTFTMS:       120,
 		Tokens:       TokenCounts{In: 300, Out: 150},
@@ -173,12 +175,13 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 		t.Fatalf("openSlim h9: %v", err)
 	}
 	row9 := slimRow{
-		TS:       h9.Add(10 * time.Minute).Format(time.RFC3339),
-		VModel:   "coding",
-		Outcome:  OutcomeOK,
-		Provider: "p1",
-		Model:    "m1",
-		Tokens:   TokenCounts{In: 100, Out: 50},
+		TS:        h9.Add(10 * time.Minute).Format(time.RFC3339),
+		VModel:    "coding",
+		Outcome:   OutcomeOK,
+		Provider:  "p1",
+		Model:     "m1",
+		Forwarded: true,
+		Tokens:    TokenCounts{In: 100, Out: 50},
 	}
 	b9, _ := json.Marshal(row9)
 	f9.Write(append(b9, '\n'))
@@ -191,14 +194,15 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 	}
 	for i := 1; i <= 120; i++ {
 		row10 := slimRow{
-			TS:       h10.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
-			VModel:   "coding",
-			Outcome:  OutcomeOK,
-			Provider: "p1",
-			Model:    "m1",
-			DurMS:    int64(i * 10),
-			TTFTMS:   int64(i),
-			Tokens:   TokenCounts{In: 1, Out: 1},
+			TS:        h10.Add(time.Duration(i) * time.Second).Format(time.RFC3339),
+			VModel:    "coding",
+			Outcome:   OutcomeOK,
+			Provider:  "p1",
+			Model:     "m1",
+			Forwarded: true,
+			DurMS:     int64(i * 10),
+			TTFTMS:    int64(i),
+			Tokens:    TokenCounts{In: 1, Out: 1},
 		}
 		b10, _ := json.Marshal(row10)
 		f10.Write(append(b10, '\n'))

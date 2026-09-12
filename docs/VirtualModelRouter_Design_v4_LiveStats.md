@@ -265,12 +265,21 @@ in-flight 进行中请求的注册表**不在本包**——它是 router 运行�
 
 ### 4.2 归因规则
 
-一个请求有两层事实，归属要分清：
+一个请求有三层事实，归属要分清——早期版本把"这次尝试打到了哪个端点"与"这次尝试值不值得
+计入服务质量"混成一层，导致所有失败请求（无论是否真的发起过 attempt）在 `by_provider_model`
+里全部塌缩进同一个匿名 `provider=""` 桶：
 
 | 事实层 | 归属维度 | 规则 |
 | --- | --- | --- |
 | 请求面（总能观测） | `ts/vmodel/protocol/stream/outcome/client_key_tag` | 直接取自 record；失败、取消、404 的请求也计入这些维度的 outcome 计数 |
-| 服务面（仅转发成功时有意义） | `provider/model/key_label`、token、TTFT、吞吐 | 只取 winning attempt（`IsForwarded` 的那个）；全尝试失败的请求在 provider 维度上**缺席**（outcome 计数已覆盖其存在性） |
+| 端点身份（只要发起过 attempt 就有意义） | `provider/model/key_label` | 取**终态 attempt**——转发成功时是 winning attempt，全部失败时是最后一次尝试的那个 attempt；只有 0-attempt 的网关级拒绝（鉴权失败、请求体非法、全端点冷却）才真正没有端点可归属，这时才留空。`Sample.Forwarded` 是与此完全独立的第二个字段（见下一行），不能靠 provider 是否为空反推 |
+| 服务质量（仅转发成功时有意义） | token、TTFT、吞吐、ring 准入 | 由显式的 `Sample.Forwarded` 门控（`Counters.addSample`/`addRing` 都读这个字段，不读 `Provider==""`）；一次失败的终态 attempt 即使有 provider/model 身份，也绝不贡献 token/dur/ttft 或进入性能 ring |
+
+这样一次失败请求仍然可以在 `by_provider_model`/Usage 表里挂在它真正打过的那个端点名下
+（用于错误计数、故障归因），同时其 token/TTFT/吞吐依旧不会污染"服务质量"这条纯净的成功样本
+口径。`slimRow` 持久化时显式带上 `forwarded` 字段，不再靠 `provider` 是否非空反推——旧格式
+（升级前写入、尚未滚动的当前小时 slim 行）缺这个字段时按 `false` 读回，代价有界且自愈：只影响
+升级那一刻仍开着的那一个小时，下一次滚动后即恢复正常。
 
 - `ttft_ms=0` 是"未测量"（Part 1 的既有语义：本地快速拒绝、瞬时响应），聚合时排除，
   不计入 `ttft_ms` 的 `{sum,n}`，也不入 ring；
@@ -448,8 +457,8 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
     `by_client_key_tag[]` / `by_key_label[]` 同理是近 7 天的累计画像；
   - **窗口块**（`last_10` / `last_100`）不只是分位数，它是"这一段最近样本"的完整画像：
     `n`（**窗口内实际样本数**）、`tokens` 四项在该窗口内的和、`ttft_p50/p90`、
-    `toks_p50/p90`。`n` 必须出现在输出里——ring 常常不满 100，消费者不知道 `n` 就会把
-    一个 12 样本的 p90 当成 100 样本的 p90 来读；
+    `toks_p50/p10`（不是 `p90`——见下方 toks 口径段的方向说明）。`n` 必须出现在输出里
+    ——ring 常常不满 100，消费者不知道 `n` 就会把一个 12 样本的分位数当成 100 样本的来读；
   - `overall`：把所有 ring 的样本并在一起后算出的同一个窗口块。分位数不可合并，所以
     这一项**必须由服务端在读时对样本并集算**，消费者拿到分行数据后自己是算不出来的。
     它是为控制台首屏那个"全局 TTFT p50"加的——不过该 vitals 段在 console polish 轮
@@ -480,6 +489,16 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   - ring key 不带 `stream` 区分（§3.4），流式与非流式样本共用同一个 100 条环——`toksOf`
     按每条记录自带的 `stream` 位分别取分母，两类请求的时间构成本就不同，混进同一个不
     分流式的分母才是无意义的平均。
+  - **分位数方向：`toks` 取 p10，不是 p90。** `ttft` 是耗时/成本型指标（越大越差），它的
+    尾部——运维想看的"最坏情况"——是升序排序后靠后的那一端，p90 正确。`toks` 是产出/收益
+    型指标（越大越好），方向相反：它的尾部（最坏情况的吞吐下限）是升序排序后靠**前**的那
+    一端，即 p10；沿用 p90 会把窗口里最快的 10% 请求误报成"90% 请求能达到的保底速度"。
+  - **`toksOf` 有一个 `minToksSpanMS`（50ms）下限。** 流式响应的生成段（`dur_ms - ttft_ms`）
+    可能只有几毫秒（上游把尾部几个 chunk 背靠背一次性冲刷回来，或网络抖动后突发到达），
+    这时几个 token 除以个位数毫秒会算出上千 tok/s 的物理上不可能的速率，并单方面主导整
+    个窗口的分位数。低于这个下限的样本视为无有效吞吐信号，与零输出/非正跨度样本同样被
+    整体剔出 toks 样本池，而不是被限幅（limiting 会把噪声悄悄压成一个看似合理但仍然虚构
+    的数字，不如直接不算）。
 
 ### 8.1 `recent_errors[]`：失败明细环
 
@@ -501,7 +520,8 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
   在排障时是两种完全不同的结论，合并计数会把它们抹平）；
 - `error_class` **直接引用路由半区自己的 `core.ErrorClass`**，读侧绝不重新分类：分类逻辑
   只有一份，在 `DefaultClassify`；
-- 从未转发成功的请求 `provider/key_label/model` 为空串，与 §4.2 的归因规则一致；
+- `provider/key_label/model` 取终态 attempt 的身份（转发成功时是 winning attempt，全部
+  失败时是最后一次尝试），只有 0-attempt 的网关级拒绝才是空串——与 §4.2 的归因规则一致；
 - 与性能 ring 一样，它只反映当前进程这一段时间内发生的事，不追求完整——完整的取证
   记录是 audit 的职责。
 
@@ -532,7 +552,8 @@ roll goroutine 与它跟 `bookPastSampleLocked`/下一次 roll/`Close` 的交互
 | 小时归属按到达时刻 | 与 audit 的请求语义一致 | 跨边界长请求把全部 token 记入到达小时——接受 |
 | 聚合器粗 mutex | 状态是一个账本整体，粗锁正确性一目了然 | 与 init 注册表的原子读惯例场景不同，不适用；`/stats` 读路径持锁做 O(rollup) fold，控制台 Overview 页活跃期 ~2s 轮询 × 多标签页会放大——由 `CachedSnapshot()` 的 `snapCacheTTL`（3s，大于轮询节奏）读缓存兜住（一拍通常复用上一次 fold，活跃期稳态每几秒一次；`Record` 不使缓存失效，监控容忍数秒滞后），`Snapshot()` 仍是纯聚合供测试与需精确读的调用方 |
 | probe 流量不进统计 | 不写 audit 的既有决定自然延伸 | —— |
-| provider 维度在全失败请求上缺席 | 无服务发生就没有服务面事实 | outcome 计数（请求面）覆盖其存在性 |
+| 端点身份（provider/model/key_label）取终态 attempt，不要求转发成功；服务质量（token/TTFT/吞吐/ring 准入）单独由显式 `Sample.Forwarded` 门控 | 最初版本让 provider 是否为空兼职"是否转发成功"的信号，导致全部失败请求（不管真的打过哪个端点）在 `by_provider_model`/Usage 表里塌缩进同一个匿名 `provider=""` 桶——故障归因需要"打过哪个端点"这个事实，它在转发失败时依然存在且有意义，只是"这次尝试的服务质量"不存在 | `livestats.Sample`/`slimRow` 多一个显式字段；旧格式 slim 行缺 `forwarded` 时按 false 读回，代价有界（只影响升级瞬间仍开着的当前小时）且自愈 |
+| `toks` 分位数取 p10，不取 p90；`toksOf` 加 `minToksSpanMS`（50ms）下限 | `toks` 是产出型指标（越大越好），尾部（最坏情况）在升序排序的前端而非后端——沿用耗时型指标（`ttft`）的 p90 习惯会把最快的 10% 误报成保底速度；亚毫秒级生成跨度会算出上千 tok/s 的物理不可能值，单点主导整个窗口分位数 | 字段更名 `ToksP90`→`ToksP10`（JSON `toks_p90`→`toks_p10`），下游消费者需同步；低于下限的样本整体退出 toks 样本池（不做限幅） |
 | ring key 带 `key_label`，输出行也带 | §3.1 已判定「靠解析展开后的 provider 名反推 label 是脆弱的」——这条纪律不能只用在写侧而让读侧去拆名字 | key 多一个字段；行数不变（展开名本就一账号一个） |
 | 窗口块输出 `n`（窗口内实际样本数） | ring 常常不满 100；不给 `n`，一个 12 样本的 p90 会被当成 100 样本的 p90 读 | 输出多一个整数 |
 | `toks` 只留一个口径：输出 token 生成吞吐，流式扣 `ttft_ms` | 四分量总和÷整耗时会把 prefill/网络等待混进"生成速度"里稀释信号；「首 token 慢不慢」已由 `ttft_p50/p90` 单独回答，吞吐口径不必重复 | 非流式一次性整体写回，没有可分离的生成段，仍用整个 `dur_ms` 作分母；`toksOf` 因此按每条记录的 `stream` 位分支，`ringEntry` 多存一个 bool |
