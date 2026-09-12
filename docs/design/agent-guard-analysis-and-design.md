@@ -259,7 +259,7 @@ VMR 架构的立足之本是**字节保真透传（Byte-faithful passthrough）*
 
 **Agent Guard 的定位界定：第 6 项受批准偏离（受控安全合规干预）**：
 出向伪名化改写与入向流式熔断并非随意的业务修改，而是为了阻断外部威胁（AC-1/AC-2）的**受控安全合规干预扩展（Controlled Security Intervention）**。为了严格捍卫 VMR 的架构纯洁性，该偏离必须满足以下四大刚性约束：
-1. **严格配置驱动，默认绝对关闭**：`security.outbound.mode: off` 与 `security.inbound.tool_call_guard_mode: off` 时，VMR 维持 100% 原始字节保真透传，零偏离、零额外开销；
+1. **严格配置驱动，默认绝对关闭**：`guard.outbound.mode: off` 与 `guard.inbound.tool_call_guard_mode: off` 时，VMR 维持 100% 原始字节保真透传，零偏离、零额外开销；
 2. **透明且可逆的保形还原**：伪名化在请求发出前改写，在响应返回客户端前自动无缝还原，对本地工作区呈现“透明进出”的幂等语义；
 3. **确定性审计痕迹（Audit Trail）**：任何安全改写或熔断动作，必须在 `audit.Record` 的 `Attempt.Norm` 列表中明确登记（如 `["outbound_redacted", "sanitized_invisible_runes", "tool_call_blocked"]`），解释每一处字节差异；
 4. **明确的 Fail-Open vs Fail-Closed 边界**：脱敏引擎遇到非致命异常时默认 Fail-Open 保障业务连续性；遇到不可信 RCE 高危系统命令时严格 Fail-Closed 熔断。
@@ -376,7 +376,7 @@ flowchart TB
 
 | 模块路径 | 承担职责与扩展契约 | 架构约束与性能保障 |
 |---|---|---|
-| `internal/server` | **HTTP 请求入口安全守门**：在 `server.ServeHTTP` 解析 `core.CanonicalRequest` 前后，调用脱敏引擎；在 `block` 模式下拦截非法请求并返回 HTTP 400。 | 不产生多余内存拷贝；只在 `security.outbound.mode != off` 时切入。 |
+| `internal/server` | **HTTP 请求入口安全守门**：在 `server.ServeHTTP` 解析 `core.CanonicalRequest` 前后，调用脱敏引擎；在 `block` 模式下拦截非法请求并返回 HTTP 400。 | 不产生多余内存拷贝；只在 `guard.outbound.mode != off` 时切入。 |
 | `internal/jsonscan` | **出向报文极速切片扫描与就地改写**：扩展 `ScanAndRedactCredentials`，利用既有的单遍 byte-index 扫描技术，就地改写敏感凭据。 | 纯 Go 原生字节操作，零完整 JSON 反序列化开销。 |
 | `internal/respnorm` | **入向流式安全护栏中枢**：在 `respnorm.Wrap` 中接入 `RuneSanitizer`、`ToolCallGuard` 与 `SlidingWindowRestorer`；扩展 `Applied() []string`。 | 维持流式单遍处理，普通 Chunk 零缓冲直接透传。 |
 | `internal/core` | **共享数据契约定义**：在 `core.RequestFacts` 中扩充轻量安全标记；定义 `ErrSecurityViolation` 错误枚举。 | 维持零内部依赖（Zero Internal Dependencies）铁律。 |
@@ -668,66 +668,90 @@ data: {"type":"message_stop"}
 
 ### 7.1 `config.yaml` 统一安全配置规范
 
-在 `config.yaml` 中新增统一的 `security` 配置块，遵循 VMR 的 `snake_case` 命名规范与严格校验体系：
+在 `config.yaml` 中新增顶层 `guard` 配置块，遵循 VMR 的 `snake_case` 命名规范与严格校验（`KnownFields: true`）体系：
+
+- **命名收敛**：采纳贴合子系统名称的极简标识 `guard`（而非泛化的 `security`），保持与 `ttl`、`models`、`analytics` 等顶层键相同的高内聚短命名风格；
+- **零配置零开销**：不声明 `guard:` 时默认完全关闭，100% 维持原生字节保真透传；
+- **全内置开箱即用**：出向凭据扫描默认启用所有经实证检验的高置信度规则（Gitleaks 精选库），入向高危命令默认覆盖主流破坏模式，**用户无需编写复杂正则表达式**；
+- **以次充好审计剥离**：中转站伪造与掺水审计（`fraud_audit`）属于前置 `vmr diagnose` 与后置 `vmr analyze` 的原生内置行为，不进入实时请求配置；
+- **路径归一化防穿透**：`protected_paths` 底层自动结合 `os.UserHomeDir()` 完成 `~` 展开、相对路径清洗与绝对路径计算，彻底杜绝大模型猜出 `/Users/xxx/` 或使用 `../../` 绕过拦截。
 
 ```yaml
-security:
-  # ===================================================================
-  # 1. 出向敏感信息防泄露 (Outbound Redaction, 瓦解 AC-2 凭据嗅探)
-  # ===================================================================
+# ==============================================================================
+# guard: Agent Guard 双向防护护栏 (默认关闭，需显式声明 mode 开启)
+# ==============================================================================
+guard:
+  # ----------------------------------------------------------------------------
+  # 信任白名单: 豁免护栏审查的受信任 Provider (如企业内网 vLLM 集群、官方直连通道)
+  # 统一置于 guard 顶级作用域，集中管控，不污染 providers[] 的网络连接定义
+  # ----------------------------------------------------------------------------
+  trusted_providers:
+    - internal-vllm
+    - anthropic-direct
+
+  # ----------------------------------------------------------------------------
+  # 1. 出向防护: 防止 Agent 上下文探索泄漏 API 密钥与敏感资产 (请求端)
+  # ----------------------------------------------------------------------------
   outbound:
-    # 模式可选: off | audit_only | block | replace (默认 off，完全零开销)
+    # 运行模式:
+    #   - off        : 完全关闭，维持原生纯透传 (默认)
+    #   - audit_only : 仅在审计日志中记录泄露事实，不改写、不阻断 (适合上线前摸底)
+    #   - block      : 命中高危凭据时立即阻断，向客户端返回 HTTP 400 统一错误
+    #   - replace    : 确定性保形双向伪名化，上游发假名，下游自动还原 (保 Prompt Cache)
     mode: replace
 
-    # 生效的高置信度 Tier 1 凭据规则
-    active_rules:
-      - openai-api-key
-      - gcp-api-key
-      - huggingface-access-token
-      - github-pat
-      - aws-access-key
-      - logleak-sk-style-key
-
-    # 确定性 HMAC 派生 Salt (留空则在进程首次启动时自动随机生成)
+    # 确定性 HMAC 盐值 (维持 Prompt Cache 跨重启 100% 命中的关键)
+    # 若留空，VMR 启动时自动在内存中生成随机 32 字节 Salt (单次进程内有效)
     salt: "${VMR_SECURITY_SALT:-}"
 
-    # 内存反向映射表缓存生命周期 (基于最近请求的滑动窗口)
+    # 内存反向映射表滑动过期生命周期 (Go duration 格式)
+    # 默认 30m，覆盖绝大多数 Agent 单任务长会话的生命周期
     session_ttl: 30m
 
-    # 向系统提示词中注入安全注记 (避免模型主动修复或校验假名)
+    # 是否向系统提示词中注入防篡改注记 (避免模型主动修复或校验假名)
+    # 支持多态配置:
+    #   - true             : 注入系统内置的标准英文提示词注记
+    #   - false            : 不注入任何提示词
+    #   - "自定义提示内容" : 注入团队自定的本地化说明 (如面向中文 Agent 的说明)
     inject_system_note: true
 
-  # ===================================================================
-  # 2. 入向恶意注入与危险代码防护 (Inbound Guard, 瓦解 AC-1 载荷投毒)
-  # ===================================================================
+  # ----------------------------------------------------------------------------
+  # 2. 入向防护: 防止中转站投毒或提示词注入诱导恶意代码执行 (响应端)
+  # ----------------------------------------------------------------------------
   inbound:
-    # 不可见控制字符与 ASCII Smuggling 线速清洗: true | false
+    # 是否剥离 Unicode 标签字符区 (U+E0000~U+E007F) 与不可见零宽控制符
+    # 纳秒级纯 Go Rune 扫描清洗，彻底杜绝 ASCII Smuggling 隐藏指令注入
     sanitize_invisible_runes: true
 
-    # 结构化 Tool Call 参数风控模式: off | audit_only | circuit_break
+    # 结构化 Tool Call 参数风控模式:
+    #   - off           : 关闭，原始透传 (默认)
+    #   - audit_only    : 仅在日志中记录命中的高危工具调用，不阻断
+    #   - circuit_break : 触发高危规则时，协议级优雅熔断，下发安全错误事件并终止流
     tool_call_guard_mode: circuit_break
 
-    # 受保护的本地敏感路径 (write_file / edit_file 拦截)
+    # 受保护的宿主机敏感文件与路径 (禁止 write_file / edit_file 触碰)
+    # 底层自动执行路径归一化 (Path Normalization):
+    #   - 自动展开 `~` 为当前宿主真实家目录 (如 /Users/xxx 或 /home/xxx)
+    #   - 自动解析绝对路径、符号链接与跨目录相对路径逃逸 (../../)
     protected_paths:
       - "~/.ssh/*"
       - "~/.bashrc"
       - "~/.zshrc"
       - "/etc/*"
 
-    # 触发熔断的高危执行命令模式
-    blocked_commands:
+    # 触发熔断的高危系统命令类别 (默认全开，支持显式覆写)
+    # 内置模式库覆盖以下 CWE 类别:
+    #   - destructive_root_deletion : CWE-78 (强制清空根或家目录: rm -rf /, rm -rf ~)
+    #   - reverse_shell             : CWE-319 (反向网络控制隧道: /dev/tcp, nc -e, mkfifo)
+    #   - disk_destruction          : CWE-78 (裸写设备或销毁分区: mkfs, dd 到 /dev/sd*)
+    #   - base64_exec               : CWE-95 (混淆动态执行管道: echo b64 | base64 -d | sh)
+    #   - credential_exfiltration   : CWE-312 (敏感凭据外带渗出: curl -d @~/.ssh/id_rsa)
+    blocked_command_categories:
       - destructive_root_deletion
       - reverse_shell
       - disk_destruction
       - base64_exec
-      - exfiltration
-
-  # ===================================================================
-  # 3. 中转站以次充好与异常审计 (Fraud Auditing, 离线指标比对)
-  # ===================================================================
-  fraud_audit:
-    check_thinking_trace: true
-    check_usage_inflation: true
+      - credential_exfiltration
 ```
 
 ---
