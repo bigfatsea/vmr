@@ -308,8 +308,8 @@ flowchart TB
 
         subgraph IngressPipe ["1. 入口准入与出向凭据脱敏"]
             Server["server.ServeHTTP<br/>(请求准入 / 鉴权 / RequestFacts 提取)"]
-            OutEngine["出向脱敏引擎 (jsonscan 字节级改写)<br/>(高危凭据扫描 ➔ 确定性保形伪名化)"]
-            MemTable[("并发安全伪名反向查找表<br/>(内存 TTL 滑动窗口)")]
+            OutEngine["出向脱敏引擎 (jsonscan 字节级改写)<br/>(高危凭据扫描 -> 确定性保形伪名化)"]
+            MemTable[("并发安全伪名反向查找表<br/>内存 TTL 滑动窗口")]
         end
 
         subgraph CoreRouting ["2. 核心路由与选路执行"]
@@ -318,9 +318,9 @@ flowchart TB
 
         subgraph EgressPipe ["3. 入向响应流式安全护栏 (respnorm.Wrap 流水线)"]
             direction TB
-            RuneSan["① RuneSanitizer<br/>(ASCII Smuggling 隐写字符剔除)"]
-            ToolGuard["② ToolCallGuard<br/>(增量参数聚合 & 协议级安全熔断)"]
-            WindowRestore["③ SlidingWindowRestorer<br/>(微型滑动窗口 & 反查还原真实 Key)"]
+            RuneSan["1. RuneSanitizer<br/>(ASCII Smuggling 隐写字符剔除)"]
+            ToolGuard["2. ToolCallGuard<br/>(增量参数聚合 & 协议级安全熔断)"]
+            WindowRestore["3. SlidingWindowRestorer<br/>(微型滑动窗口 & 反查还原真实 Key)"]
             RuneSan --> ToolGuard --> WindowRestore
         end
 
@@ -334,7 +334,7 @@ flowchart TB
     end
 
     %% 两个半区之间的唯一契约边界
-    AuditFile[("【双半区唯一解耦契约】<br/>Append-Only JSONL 审计日志文件<br/>(0600 权限，本地磁盘持久化)")]
+    AuditFile[("双半区唯一解耦契约<br/>Append-Only JSONL 审计日志文件<br/>(0600 权限，本地磁盘持久化)")]
 
     %% 分析半区 (纯离线只读消费，零网络 I/O)
     subgraph AnalyticsHalf ["VMR 分析半区 (Analytics Half: 纯离线只读溯源，零网络 I/O)"]
@@ -344,29 +344,30 @@ flowchart TB
     end
 
     %% 1. 在线请求数据流
-    Client -->|1. 原始请求体 (含潜在泄漏凭据)| Server
-    Server -->|2. 字节切片扫描| OutEngine
-    OutEngine -->|注册假名映射: sk-vmrx-... ➔ sk-orig-...| MemTable
-    OutEngine -->|3. 已脱敏的 CanonicalRequest| Router
-    Router -->|4. 上游 HTTP 请求 (瓦解 AC-2 嗅探)| Upstream
+    Client -->|"1. 原始请求体 (含潜在泄漏凭据)"| Server
+    Server -->|"2. 字节切片扫描"| OutEngine
+    OutEngine -->|"注册假名映射: sk-vmrx-... -> sk-orig-..."| MemTable
+    OutEngine -->|"3. 已脱敏的 CanonicalRequest"| Router
+    Router -->|"4. 上游 HTTP 请求 (瓦解 AC-2 嗅探)"| Upstream
 
     %% 2. 在线响应数据流 (严格流水线无分叉)
-    Upstream -->|5. SSE 响应流 (含潜在后门/隐写)| RuneSan
-    WindowRestore <-->|内存反查真实 Secret| MemTable
-    WindowRestore -->|6. 纯净且已还原真实凭据的响应流| Client
+    Upstream -->|"5. SSE 响应流 (含潜在后门/隐写)"| RuneSan
+    WindowRestore -->|"反查真实 Secret"| MemTable
+    MemTable -->|"返回原始凭据"| WindowRestore
+    WindowRestore -->|"6. 纯净且已还原真实凭据的响应流"| Client
 
     %% 3. 审计记录流 (落盘)
-    Server -.->|提取请求事实| AuditWriter
-    ToolGuard -.->|登记拦截标记| AuditWriter
-    WindowRestore -.->|登记还原标记| AuditWriter
-    AuditWriter -->|7. 追加写入| AuditFile
+    Server -.->|"提取请求事实"| AuditWriter
+    ToolGuard -.->|"登记拦截标记"| AuditWriter
+    WindowRestore -.->|"登记还原标记"| AuditWriter
+    AuditWriter -->|"7. 追加写入"| AuditFile
 
     %% 4. 离线分析流 (严格单向读取文件，不上网)
-    AuditFile ==>|离线只读消费| MacroReport
-    AuditFile ==>|因果关系重构| TaskJourney
+    AuditFile ==>|"离线只读消费"| MacroReport
+    AuditFile ==>|"因果关系重构"| TaskJourney
 
     %% 5. 运维诊断探针 (复用路由半区网络栈)
-    Diagnose -.->|主动巡检探测| Upstream
+    Diagnose -.->|"主动巡检探测"| Upstream
 ```
 
 ### 3.4 VMR 核心模块挂载点与职责映射契约
