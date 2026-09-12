@@ -3,9 +3,9 @@
 # Agent Guard: 保护 Coding Agent 的双向全生命周期安全防护体系设计
 ## —— 出向敏感信息防泄露 × 入向恶意代码与中间人投毒防注入 × 供应链真伪审计
 
-> **文档定位**：本文档针对 Coding Agent（如 Claude Code、OpenClaw、Cursor、Aider、SWE-agent 等）在自动化执行任务时面临的双向安全威胁，系统化展开**威胁模型剖析、业界方案批判性调查、关键工程技术辨析**，并提出符合 VMR（Virtual Model Router）设计哲学（单二进制、纯 Go 零 CGO、线速极低开销、字节保真、Prompt Cache 友好、离线深度审计）的体系化架构与落地设计方案。
+> **文档定位**：本文档针对 Coding Agent（如 Claude Code、OpenClaw、Cursor、Aider、SWE-agent 等）在自动化执行任务时面临的双向安全威胁，系统化展开**威胁模型剖析、业界方案批判性调查、关键工程技术辨析**，并提出符合 VMR（Virtual Model Router）设计哲学（单二进制、纯 Go 零 CGO、线速极低开销、字节保真透传受控演进、Prompt Cache 100% 保持、离线深度审计）的体系化架构与落地设计方案。
 >
-> 本文属于全方位的**调查分析报告与技术方案设计**，代表团队经过全面对比、事实核验与技术权衡后的**最终决策与技术标准**。
+> 本文属于全方位的**调查分析报告与技术方案设计**，代表团队经过全面对比、事实核验与技术权衡后的**最终架构决策与技术标准**。
 
 ---
 
@@ -25,22 +25,25 @@
     - [辨析 4：探针侵入性与以次充好检测的工程定位](#辨析-4探针侵入性与以次充好检测的工程定位)
   - [2.3 综合对比分析：融合、借鉴、替代、补充与 VMR 的核心优势](#23-综合对比分析融合借鉴替代补充与-vmr-的核心优势)
 - [3. Agent Guard 总体架构与纵深防御哲学](#3-agent-guard-总体架构与纵深防御哲学)
-  - [3.1 纵深防御的三层职责边界划分](#31-纵深防御的三层职责边界划分)
-  - [3.2 路由核（在线护栏）与分析核（离线溯源）双半区协同架构](#32-路由核在线护栏与分析核离线溯源双半区协同架构)
-  - [3.3 纯 Go 零 CGO 与线速流式转发原则](#33-纯-go-零-cgo-与线速流式转发原则)
+  - [3.1 VMR 核心契约、字节保真与受控偏离界定](#31-vmr-核心契约字节保真与受控偏离界定)
+  - [3.2 纵深防御的三层职责边界划分](#32-纵深防御的三层职责边界划分)
+  - [3.3 路由核（在线护栏）与分析核（离线溯源）双半区协同架构](#33-路由核在线护栏与分析核离线溯源双半区协同架构)
+  - [3.4 VMR 核心模块挂载点与职责映射契约](#34-vmr-核心模块挂载点与职责映射契约)
+  - [3.5 纯 Go 零 CGO 与线速流式转发原则](#35-纯-go-零-cgo-与线速流式转发原则)
 - [4. 方向一深度设计：出向防护 —— 防止请求端敏感信息泄露](#4-方向一深度设计出向防护--防止请求端敏感信息泄露)
   - [4.1 泄露根因与长会话上下文放大效应](#41-泄露根因与长会话上下文放大效应)
   - [4.2 为什么传统单向打码是灾难：双向保形伪名化设计](#42-为什么传统单向打码是灾难双向保形伪名化设计)
   - [4.3 Prompt Cache（KV Cache）100% 保持：基于 Salt 的确定性 HMAC 派生](#43-prompt-cachekv-cache100-保持基于-salt-的确定性-hmac-派生)
-  - [4.4 响应端微型滑动窗口反向还原状态机（TTFT 零损耗）](#44-响应端微型滑动窗口反向还原状态机ttft-零损耗)
+  - [4.4 响应端微型滑动窗口反向还原状态机（TTFT 零损耗）与非流式单遍替换](#44-响应端微型滑动窗口反向还原状态机ttft-零损耗与非流式单遍替换)
   - [4.5 提示词内联安全指引（Prompt Security Guard）](#45-提示词内联安全指引prompt-security-guard)
   - [4.6 规则分级体系（Tier 1 强凭据 vs Tier 2 易混淆文本）](#46-规则分级体系tier-1-强凭据-vs-tier-2-易混淆文本)
 - [5. 方向二深度设计：入向防护 —— 防止返回恶意代码与危险指令注入](#5-方向二深度设计入向防护--防止返回恶意代码与危险指令注入)
   - [5.1 第一道防线：ASCII Smuggling 与不可见控制符线速清洗](#51-第一道防线ascii-smuggling-与不可见控制符线速清洗)
   - [5.2 第二道防线：结构化 Tool Call 参数护栏（精准防御的核心抓手）](#52-第二道防线结构化-tool-call-参数护栏精准防御的核心抓手)
     - [5.2.1 抓 Tool Call 远优于抓 Markdown 文本的根本逻辑](#521-抓-tool-call-远优于抓-markdown-文本的根本逻辑)
-    - [5.2.2 命令执行类工具（bash / terminal）高危模式库与 CWE 映射](#522-命令执行类工具bash--terminal高危模式库与-cwe-映射)
-    - [5.2.3 文件写操作类工具（write_file / edit_file）保护路径规则](#523-文件写操作类工具write_file--edit_file保护路径规则)
+    - [5.2.2 流式增量参数聚合与扫描机制（增量解析与零时延流式透传）](#522-流式增量参数聚合与扫描机制增量解析与零时延流式透传)
+    - [5.2.3 命令执行类工具（bash / terminal）高危模式库与 CWE 映射](#523-命令执行类工具bash--terminal高危模式库与-cwe-映射)
+    - [5.2.4 文件写操作类工具（write_file / edit_file）保护路径规则](#524-文件写操作类工具write_file--edit_file保护路径规则)
   - [5.3 第三道防线：协议级流式安全熔断（Circuit Breaker）](#53-第三道防线协议级流式安全熔断circuit-breaker)
   - [5.4 第四道防线：离线供应链依赖拼写篡改（Typosquatting）比对](#54-第四道防线离线供应链依赖拼写篡改typosquatting比对)
 - [6. 中转站以次充好与掺水行为的态势感知](#6-中转站以次充好与掺水行为的态势感知)
@@ -52,7 +55,16 @@
   - [7.1 `config.yaml` 统一安全配置规范](#71-configyaml-统一安全配置规范)
   - [7.2 `audit.Record` 安全元数据与透明审计流水账（SHA-256）](#72-auditrecord-安全元数据与透明审计流水账sha-256)
   - [7.3 `vmr analyze` 宏观安全看板与 Task Journey 因果溯源](#73-vmr-analyze-宏观安全看板与-task-journey-因果溯源)
-- [8. 实施路线图与落地规划](#8-实施路线图与落地规划)
+- [8. 重大架构决策与权衡分析（Decisions & Tradeoffs / Options）](#8-重大架构决策与权衡分析decisions--tradeoffs--options)
+  - [8.1 决策 1：出向保形伪名化（Redaction）拦截改写的挂载层级与生命周期](#81-决策-1出向保形伪名化redaction拦截改写的挂载层级与生命周期)
+  - [8.2 决策 2：架构契约与字节保真透传（Byte-Faithful Passthrough）的定位演进](#82-决策-2架构契约与字节保真透传byte-faithful-passthrough的定位演进)
+  - [8.3 决策 3：入向 Tool Call 增量参数解析与安全拦截在流式（SSE）链路的切入时机](#83-决策-3入向-tool-call-增量参数解析与安全拦截在流式sse链路的切入时机)
+  - [8.4 决策 4：假名泄漏、状态生命周期与本地工作区一致性回滚策略](#84-决策-4假名泄漏状态生命周期与本地工作区一致性回滚策略)
+  - [8.5 决策 5：本地审计日志（`audit.Record`）中敏感原始请求体的存储与隐私合规权衡](#85-决策-5本地审计日志auditrecord中敏感原始请求体的存储与隐私合规权衡)
+- [9. 实施路线图与落地规划](#9-实施路线图与落地规划)
+  - [9.1 Phase 1：离线双向安全态势感知与验真探针（零线上风险，快速见效）](#91-phase-1离线双向安全态势感知与验真探针零线上风险快速见效)
+  - [9.2 Phase 2：出向保形伪名化 + 入向隐写字符线速清洗（筑牢基础底线）](#92-phase-2出向保形伪名化--入向隐写字符线速清洗筑牢基础底线)
+  - [9.3 Phase 3：结构化 Tool Call 参数护栏与协议级熔断（完成终极闭环）](#93-phase-3结构化-tool-call-参数护栏与协议级熔断完成终极闭环)
 
 ---
 
@@ -63,15 +75,15 @@
 在传统人机问答（Chatbot）场景中，大语言模型只是一个“文字生成器”，安全边界主要受限于合规审核（审查不良生成内容）或防越狱（Jailbreak）。输出内容即便存在安全隐患，通常只停留在人类视觉阅读与感知层面。
 
 然而，**Coding Agent（如 Claude Code、OpenClaw、Cursor、Aider、SWE-agent）的普及彻底颠覆了传统的安全信任边界**：
-1. **真实环境的系统执行特权**：Agent 不是只讲空话的聊天机器人，它拥有驱动本地终端（`bash` / `cmd`）、读写工作区乃至系统关键路径文件（`read_file` / `write_file`）、发起网络请求（`curl` / `git`）、安装系统与语言依赖（`npm` / `pip` / `cargo`）等**真实的本地操作系统权限**。
+1. **真实环境的系统执行特权**：Agent 不是只讲空话的聊天机器人，它拥有驱动本地终端（`bash` / `cmd`）、读写工作区乃至系统关键路径文件（`read_file` / `write_file` / `edit_file`）、发起网络请求（`curl` / `git`）、安装系统与语言依赖（`npm` / `pip` / `cargo`）等**真实的本地操作系统特权**。
 2. **信任链断裂与自动化盲从**：Agent 客户端通常会将大模型返回的结构化 `tool_calls`（OpenAI 规范）或 `tool_use`（Anthropic 规范）解析后，直接或半自动提交给本地宿主机执行。一旦输出被恶意污染，相当于攻击者在开发者本机获得了**任意命令执行（RCE）与提权后门**。
 3. **工作区的主动探索与敏感数据回传**：Agent 为了理解工程上下文，会主动遍历目录、读取配置文件、执行命令获取错误堆栈。若工作区内存在未被忽略的敏感凭据，Agent 会无意识地将其打包作为 Prompt 上下文送往远端。
 
 ### 1.2 中转站中间人攻击实测数据与攻击分类学（arXiv:2604.08407）
 
-过去行业普遍认为大模型安全威胁主要来自“Prompt Injection（提示词注入）”或“模型本身的对齐缺陷”。然而，2026 年 4 月国际前沿研究论文 **《Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain》**（arXiv:2604.08407）给全行业敲响了警钟：
+过去行业普遍认为大模型安全威胁主要来自“Prompt Injection（提示词注入）”或“模型本身的对齐缺陷”。然而，国际前沿研究论文 **《Your Agent Is Mine: Measuring Malicious Intermediary Attacks on the LLM Supply Chain》**（arXiv:2604.08407）给全行业敲响了警钟：
 
-> **核心发现**：研究团队对公开市场（淘宝、闲鱼、第三方聚合平台及主流开源开源模板搭建）的 **428 个 API 中转代理服务** 进行了为期 3 个月的无害化黑盒探针实测，结果令人震惊：
+> **核心发现**：研究团队对公开市场（聚合平台、电商渠道及主流开源镜像搭建）的 **428 个 API 中转代理服务** 进行了为期 3 个月的无害化黑盒探针实测，结果令人震惊：
 > - **至少 9 个中转站正在主动篡改模型返回载荷并注入恶意指令**；
 > - **17 个中转站在后台无差别嗅探并持久化窃取用户的 API Key 与敏感凭据**；
 > - **中转站投毒发生在模型推理循环之外（Outside the Model Reasoning Loop）**，所有基于 Prompt、RLHF 和模型自我对齐的防御措施在此全部失效！
@@ -117,31 +129,31 @@
 
 Coding Agent 处于两个极度危险的交叉口：
 
-```
-                    ┌─────────────────────────────────────────┐
-                    │      本地宿主机环境 / 开发者工作区        │
-                    │   • 真实执行特权 (Bash, 终端, 读写磁盘)   │
-                    │   • 本地敏感资产 (.env, ~/.ssh, 代码库)   │
-                    └────────────────────┬────────────────────┘
-                                         ▲
-                         [入向风险 Inbound]   │   [出向风险 Outbound]
-                • AC-1: 恶意载荷直接注入     │   • AC-2: 凭据被动嗅探外泄
-                • AC-1.a: 依赖包投毒伪造    │   • 本地未忽略配置与私钥流出
-                • ASCII Smuggling 隐写指令   │   • 多轮上下文持续重放放大
-                                         │   ▼
-                    ┌─────────────────────────────────────────┐
-                    │             VMR Agent Guard             │
-                    │        (智能安全网关与审计中枢)         │
-                    └────────────────────┬────────────────────┘
-                                         ▲
-                                         │ (经过不可信公共网络 / 中转代理)
-                                         ▼
-                    ┌─────────────────────────────────────────┐
-                    │     第三方 API 中转站 / 远端模型提供商    │
-                    │   • 恶意中转劫持与中间人投毒            │
-                    │   • 以次充好 / 逆向 Web 套壳 / Token 虚报 │
-                    │   • 间接提示词注入 (IPI, 第三方网页/Issue)│
-                    └─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph LocalEnv ["开发者本地宿主机 / 工作区"]
+        LocalHost["真实执行特权 (Bash / 终端 / 读写磁盘)"]
+        LocalAssets["本地敏感资产 (.env / ~/.ssh / 私钥 / 源码)"]
+    end
+
+    subgraph Gateway ["VMR Agent Guard (微秒级安全网关与审计中枢)"]
+        OutGuard["出向防护: 凭据扫描与确定性伪名化"]
+        InGuard["入向防护: 隐写清洗与 Tool Call 参数熔断"]
+    end
+
+    subgraph UpstreamEnv ["不可信公网 / 第三方中转站 / 远端模型"]
+        MITM["中间人投毒 (AC-1 / AC-1.a / AC-1.b)"]
+        Sniffer["被动凭据嗅探与资产窃取 (AC-2)"]
+        ModelQuirks["以次充好 / 偷吞思考链 / Token 虚报"]
+    end
+
+    LocalAssets -->|1. 未隔离配置外发| OutGuard
+    OutGuard -->|2. 保形伪名化传输| Sniffer
+    Sniffer -.->|AC-2 被动嗅探失效| UpstreamEnv
+
+    MITM -->|3. 返回恶意 Tool Call / 隐写字符| InGuard
+    InGuard -->|4. 隐写清洗 & 恶意熔断 / 假名还原| LocalHost
+    InGuard -.->|阻断 AC-1 RCE 攻击| LocalHost
 ```
 
 **Agent Guard 的四大设计宗旨**：
@@ -220,110 +232,139 @@ Coding Agent 处于两个极度危险的交叉口：
 
 经过全方位对比，我们明确了 Agent Guard 方案的定位与取舍：
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                             Agent Guard 方案决断全景                             │
-├─────────────────┬────────────────────────────────────────────────────────────────┤
-│ 1. 深度融合     │ • 融合 arXiv:2604.08407 攻击分类体系 (AC-1, AC-1.a, AC-1.b, AC-2)│
-│    (Integrate)  │ • 融合 Meta CodeShield 的 Tier 1 高危调用点正则思想与 50+ CWE 库 │
-├─────────────────┼────────────────────────────────────────────────────────────────┤
-│ 2. 批判借鉴     │ • 借鉴 api-relay-audit 的免执行转写 Echo 探针与 SHA-256 流水账   │
-│    (Adopt)      │ • 借鉴 Higress 的结构化 DenyResponseBody 规范构建流式熔断回执  │
-│                 │ • 借鉴 USENIX Security 2025 LLMmap 的行为指纹探针机制          │
-├─────────────────┼────────────────────────────────────────────────────────────────┤
-│ 3. 果断替代     │ • 用“协议级优雅流熔断（下发安全事件与 [DONE]）”替代粗暴的 TCP 断流│
-│    (Replace)    │ • 用“纯 Go 线性 RE2 + Rune 清洗”替代必须启用 CGO 的 Tree-sitter │
-├─────────────────┼────────────────────────────────────────────────────────────────┤
-│ 4. 有力补充     │ • 补充基于编辑距离（Levenshtein ≤ 2）的依赖包 Typosquatting 审计│
-│    (Supplement) │ • 补充长上下文大海捞针（32k~200k）与 Thinking Signature 验真   │
-│                 │ • 补充 Token Usage 计费虚报比对审计 (本地 tokenutil 对账)       │
-├─────────────────┼────────────────────────────────────────────────────────────────┤
-│ 5. 核心超越     │ ★ 独创“确定性保形双向伪名化”：Prompt Cache 100% 命中，TTFT 零损耗│
-│    (Superior)   │ ★ 独创“锚定 Tool Call 结构化参数”防御：彻底粉碎自然语言文本误报│
-│                 │ ★ 极简单二进制与零 CGO 交付：秒级启动，全平台通用，免去环境地狱  │
-│                 │ ★ 宏观报表 + Task Journey 因果溯源：全生命周期可视化安全合规闭环│
-└─────────────────┴────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph Strategy ["Agent Guard 方案决断全景"]
+        direction TB
+        S1["1. 深度融合 (Integrate)<br>• arXiv:2604.08407 攻击分类体系 (AC-1/AC-1.a/AC-2)<br>• Meta CodeShield Tier 1 正则思想与 50+ CWE 库"]
+        S2["2. 批判借鉴 (Adopt)<br>• api-relay-audit 免执行 Echo 探针与 SHA-256 流水账<br>• Higress 结构化 DenyResponseBody 规范<br>• USENIX Security 2025 LLMmap 行为指纹探针"]
+        S3["3. 果断替代 (Replace)<br>• 用协议级优雅流熔断替代粗暴 TCP 断流<br>• 用纯 Go 线性 RE2 + Rune 清洗替代 CGO Tree-sitter"]
+        S4["4. 有力补充 (Supplement)<br>• 离线 Levenshtein 依赖包 Typosquatting 审计<br>• 长上下文 (32k~200k) 大海捞针与 Thinking 签名验真<br>• 本地 tokenutil 对账审计 Token 计费虚报"]
+        S5["5. 核心超越 (Superior)<br>★ 确定性保形双向伪名化: Prompt Cache 100% 保持<br>★ 锚定 Tool Call 结构化参数: 终结自然语言误报<br>★ 单二进制零 CGO 极简交付与跨平台便携<br>★ 宏观看板 + Task Journey 因果溯源全生命周期闭环"]
+    end
 ```
 
 ---
 
 ## 3. Agent Guard 总体架构与纵深防御哲学
 
-### 3.1 纵深防御的三层职责边界划分
+### 3.1 VMR 核心契约、字节保真与受控偏离界定
+
+VMR 架构的立足之本是**字节保真透传（Byte-faithful passthrough）**——坚决拒绝通用协议转换或破坏性中间修改，确保上游提供商与客户端直接调用表现完全等价。在既有架构中，仅存在 **5 项受严格批准的正当偏离**：
+1. `model-name rewrite`：由 `internal/jsonscan` 提供的顶层 `model` 字段改写；
+2. `role-map remapping`：解决特定厂商不支持 `system` 角色等方言映射；
+3. `imgprep`：请求体内联图像下采样与本地磁盘缓存；
+4. `respnorm`：基于证据的厂商特定 Quirk 修复（如 MiniMax `<think>` 标签与文本思考过程草稿剥离）；
+5. `respnorm`：缺失 `[DONE]` 结束符的协议合规补齐（仅限 OpenAI Completions SSE）。
+
+**Agent Guard 的定位界定：第 6 项受批准偏离（受控安全合规干预）**：
+出向伪名化改写与入向流式熔断并非随意的业务修改，而是为了阻断外部威胁（AC-1/AC-2）的**受控安全合规干预扩展（Controlled Security Intervention）**。为了严格捍卫 VMR 的架构纯洁性，该偏离必须满足以下四大刚性约束：
+1. **严格配置驱动，默认绝对关闭**：`security.outbound.mode: off` 与 `security.inbound.tool_call_guard_mode: off` 时，VMR 维持 100% 原始字节保真透传，零偏离、零额外开销；
+2. **透明且可逆的保形还原**：伪名化在请求发出前改写，在响应返回客户端前自动无缝还原，对本地工作区呈现“透明进出”的幂等语义；
+3. **确定性审计痕迹（Audit Trail）**：任何安全改写或熔断动作，必须在 `audit.Record` 的 `Attempt.Norm` 列表中明确登记（如 `["outbound_redacted", "sanitized_invisible_runes", "tool_call_blocked"]`），解释每一处字节差异；
+4. **明确的 Fail-Open vs Fail-Closed 边界**：脱敏引擎遇到非致命异常时默认 Fail-Open 保障业务连续性；遇到不可信 RCE 高危系统命令时严格 Fail-Closed 熔断。
+
+### 3.2 纵深防御的三层职责边界划分
 
 没有任何单一组件能够解决图灵完备环境下的全部安全问题。Agent Guard 确立了清晰的纵深防御（Defense-in-Depth）三层分工：
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ 1. 网关在线层 (VMR Wire-Speed Guard) —— 微秒级线速把关                 │
-│    • 出向: Tier 1 凭据阻断 / 确定性保形伪名化 (瓦解 AC-2 嗅探，保 Cache)│
-│    • 入向: 不可见字符与 ASCII Smuggling 隐写线速清洗                   │
-│    • 入向: 结构化 Tool Call 参数强特征阻断 (瓦解 AC-1 载荷注入)         │
-│    • 入向: 触发式微型滑动窗口反向还原 (零 TTFT 损耗)                   │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ 2. 客户端执行环境 (Client Runtime Sandbox) —— 运行态物理隔离           │
-│    • 权限收敛: 限制 Agent 进程的外联网络、非工作区文件只读挂载        │
-│    • 供应链: 执行包安装前调用本地沙箱校验 Hook                         │
-│    • 人工门禁: 高危变更强制二次确认 (Human-in-the-loop)                │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ 3. 离线分析层 (VMR Offline Analytics: vmr analyze) —— 异步深度溯源     │
-│    • 全量审计: 记录所有出向脱敏、入向拦截与 SHA-256 流水账             │
-│    • 供应链与文件风险画像: 离线分析依赖引入、Typosquatting 拼写比对    │
-│    • 假冒中转感知: 基于 TTFT/TPS/Thinking 缺失与 Token 虚报的可疑度   │
-└────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Tier1 ["Tier 1: 网关在线层 (VMR Wire-Speed Guard)"]
+        T1_Out["出向: Tier 1 强特征凭据阻断 / 确定性保形伪名化"]
+        T1_In1["入向: 不可见控制符与 ASCII Smuggling 线速清洗 (<10µs)"]
+        T1_In2["入向: 结构化 Tool Call 参数强特征扫描与流式熔断"]
+        T1_Restore["入向: 触发式微型滑动窗口反向还原 (零 TTFT 损耗)"]
+    end
+
+    subgraph Tier2 ["Tier 2: 客户端运行时环境 (Client Runtime Sandbox)"]
+        T2_Sandbox["权限收敛: 限制工作区外文件读写与外联网络"]
+        T2_Hook["供应链防御: 包安装执行前的本地环境校验 Hook"]
+        T2_HITL["高危操作人工二次确认门禁 (Human-in-the-Loop)"]
+    end
+
+    subgraph Tier3 ["Tier 3: 离线分析层 (VMR Offline Analytics: vmr analyze)"]
+        T3_Audit["全量审计流水: SHA-256 密码学防篡改指纹与脱敏台账"]
+        T3_Supply["供应链风险分析: 依赖包引入与 Typosquatting 拼写比对"]
+        T3_Fraud["中转欺诈画像: TTFT/TPS 离群检测、思考链缺失与 Token 膨胀"]
+    end
+
+    Tier1 -->|防护过滤后的可信流| Tier2
+    Tier1 -.->|Append-Only JSONL 审计日志| Tier3
+    Tier2 -.->|任务执行轨迹与本地状态| Tier3
 ```
 
-### 3.2 路由核（在线护栏）与分析核（离线溯源）双半区协同架构
+### 3.3 路由核（在线护栏）与分析核（离线溯源）双半区协同架构
 
-```
-                     [ Client: Coding Agent (Claude Code / OpenClaw) ]
-                                    │            ▲
-                   1. Client Request│            │ 8. Real Response
-                   (含潜在泄漏凭据) │            │ (还原真实凭据/已清洗)
-                                    ▼            │
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│ VMR Core (In-Process Pipeline)                                                    │
-│                                                                                   │
-│  [ 出向请求防护引擎 Outbound Redaction Engine ]                                   │
-│   ├── Aho-Corasick + RE2 双阶段极速扫描 (Tier 1 Gitleaks 规则)                    │
-│   ├── 模式分支:                                                                   │
-│   │    ├── Mode: block   ──► [命中高危凭据] ──► 立即返回 HTTP 400 统一错误         │
-│   │    └── Mode: replace ──► 确定性保形伪名化 (sk-xxx ──► sk-vmrx-9e2f4a1c)       │
-│   └── 注册反向映射表 Table[sk-vmrx-9e2f4a1c] = sk-xxx (TTL 内存管理)              │
-│                                                                                   │
-│  [ 路由与请求转发 (Byte-Faithful Upstream Transport) ]                            │
-│                                   │            ▲                                  │
-│                                   │            │ 4. Raw Upstream Stream           │
-│                                   │            │ (可能夹带恶意代码/隐写字符)       │
-│                                   ▼            │                                  │
-│                             (Public Internet / Upstream)                          │
-│                                   │            │                                  │
-│  [ 入向响应流式安全护栏 Inbound Stream Guard ] └────────────────────────────────┐ │
-│   ├── 防线 1: ASCII Smuggling / 零宽字符线速清洗 (Rune Sanitizer, <10µs)        │ │
-│   ├── 防线 2: 结构化 Tool Call 参数护栏 (bash / write_file 强特征比对)          │ │
-│   │            └── 若命中高危规则 ──► 协议级流式安全熔断 (下发安全事件与 [DONE])   │ │
-│   └── 防线 3: 触发式微型滑动窗口反向还原器 (Triggered Sliding Window)            │ │
-│                └── 识别 `vmrx` 占位符 ──► 反查并替换为真实密钥 (零 TTFT 损耗)   │ │
-│                                                                                 │ │
-│  [ 审计日志写入器 (Audit Logger) ] ◄────────────────────────────────────────────┴─┘
-│   └── 记录: OutboundRedacted, InboundSanitized, ToolCallBlocked, SHA-256, Metrics
-└───────────────────────────────────┬───────────────────────────────────────────────┘
-                                    │ Append-only JSONL Logs
-                                    ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│ VMR Analytics (vmr analyze / Task Journey)                                        │
-│  ├── 宏观安全态势报告: 凭据泄露排行、被拦截恶意调用统计、中转欺诈可疑度               │
-│  └── Task Journey 取证溯源: 精准定位哪一步 Tool Call 导致凭据外泄或触发恶意注入     │
-└───────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Client["Coding Agent 客户端 (Claude Code / Cursor / OpenClaw)"]
+
+    subgraph VMR_Core ["VMR 路由半区 (Routing Half: 在线极速微秒链路)"]
+        direction TB
+        ServerEntry["server.ServeHTTP: 请求准入、鉴权与 RequestFacts 提取"]
+        OutEngine["Outbound Redaction Engine: jsonscan 字节级凭据扫描与保形伪名化"]
+        MemTable[("并发安全伪名反向查找表 (TTL 滑动窗口)")]
+        RouterCore["router.Serve: 策略选路、故障转移 (Failover) 与重试"]
+        RespNorm["respnorm.Wrap: 流式响应正规化与安全护栏"]
+
+        subgraph RespNorm_Internal ["respnorm 内部流式拦截器"]
+            RuneSan["RuneSanitizer: ASCII Smuggling 隐写字符剔除"]
+            ToolGuard["ToolCallGuard: 增量参数扫描与协议级熔断"]
+            WindowRestore["SlidingWindowRestorer: vmrx 占位符反查还原"]
+        end
+
+        AuditWriter["audit.Record 写入器: 追加写入 JSONL"]
+    end
+
+    Upstream["第三方 API 中转站 / 模型提供商"]
+
+    subgraph VMR_Analytics ["VMR 分析核 (Analytics Half: 离线只读深度溯源)"]
+        direction TB
+        AuditLog[("Append-Only JSONL 审计日志 (0600 权限)")]
+        MacroReport["vmr analyze: 宏观安全态势看板 (凭据泄露排行 / 拦截时间线 / 欺诈评分)"]
+        TaskJourney["Task Journey: 会话因果溯源与恶意注入步骤标红"]
+        DiagnoseProbe["vmr diagnose: 免执行 Echo 探针 / 大海捞针 / LLMmap 离线验真"]
+    end
+
+    Client -->|1. Client Request (含潜在凭据)| ServerEntry
+    ServerEntry -->|2. 原始请求体| OutEngine
+    OutEngine -->|注册假名映射| MemTable
+    OutEngine -->|3. 伪名化后的 CanonicalRequest| RouterCore
+    RouterCore -->|4. 发起上游 HTTP 请求| Upstream
+    Upstream -->|5. SSE 响应流 (含潜在恶意指令/隐写)| RespNorm
+    RespNorm --> RuneSan
+    RuneSan --> ToolGuard
+    ToolGuard --> WindowRestore
+    WindowRestore <-->|反查真实凭据| MemTable
+    RespNorm -->|6. 净化与还原后的纯净响应流| Client
+
+    ServerEntry -.->|记录请求元数据| AuditWriter
+    RespNorm -.->|记录 Applied 拦截标记| AuditWriter
+    AuditWriter -->|7. 落盘| AuditLog
+
+    AuditLog -->|离线消费| MacroReport
+    AuditLog -->|因果拓扑| TaskJourney
+    DiagnoseProbe -.->|探针巡检| Upstream
 ```
 
-### 3.3 纯 Go 零 CGO 与线速流式转发原则
+### 3.4 VMR 核心模块挂载点与职责映射契约
+
+为了保持代码库的极致精简与高内聚，Agent Guard 的全部功能点与现有 `internal/` 模块建立一对一的清晰挂载映射，坚决不引入庞杂的外置抽象：
+
+| 模块路径 | 承担职责与扩展契约 | 架构约束与性能保障 |
+|---|---|---|
+| `internal/server` | **HTTP 请求入口安全守门**：在 `server.ServeHTTP` 解析 `core.CanonicalRequest` 前后，调用脱敏引擎；在 `block` 模式下拦截非法请求并返回 HTTP 400。 | 不产生多余内存拷贝；只在 `security.outbound.mode != off` 时切入。 |
+| `internal/jsonscan` | **出向报文极速切片扫描与就地改写**：扩展 `ScanAndRedactCredentials`，利用既有的单遍 byte-index 扫描技术，就地改写敏感凭据。 | 纯 Go 原生字节操作，零完整 JSON 反序列化开销。 |
+| `internal/respnorm` | **入向流式安全护栏中枢**：在 `respnorm.Wrap` 中接入 `RuneSanitizer`、`ToolCallGuard` 与 `SlidingWindowRestorer`；扩展 `Applied() []string`。 | 维持流式单遍处理，普通 Chunk 零缓冲直接透传。 |
+| `internal/core` | **共享数据契约定义**：在 `core.RequestFacts` 中扩充轻量安全标记；定义 `ErrSecurityViolation` 错误枚举。 | 维持零内部依赖（Zero Internal Dependencies）铁律。 |
+| `internal/audit` | **密码学审计流水账记录**：在 `audit.Record` 扩展 `SecurityAuditRecord`，记录请求/响应 SHA-256 摘要与脱敏拦截元数据。 | 遵照 `0600` 文件权限保护审计日志。 |
+| `internal/livestats` | **微秒级性能指标沉淀**：实时记录包含安全护栏运行下的 TTFT 与 TPS（`ToksP50`）分位数。 | 保持无锁/极低锁开销的内存环形缓冲区设计。 |
+| `internal/tokenutil` | **Token 虚标离线核对**：在离线分析阶段，通过 `tokenutil.Estimate` 与中转站返回的 Usage 进行交叉对账。 | 纯 Go 查表极速估算，无第三方分词依赖。 |
+| `internal/report` & `internal/journey` | **宏观态势看板与因果溯源**：在 `vmr analyze` 中生成凭据泄露排行、拦截时间线，在 Task Journey 中将受污染的 Tool Call 明确标红。 | 仅离线消费 JSONL 审计日志，绝不反向引用路由核代码。 |
+| `cmd/vmr` & `internal/diagnose` | **离线主动验真探针**：扩展 `vmr diagnose`，引入 Echo 转写比对探针与大海捞针探针。 | 仅在运维显式触发时独立运行，绝不侵入用户真实业务流量。 |
+
+### 3.5 纯 Go 零 CGO 与线速流式转发原则
 
 - **纯 Go 线性执行保证**：所有正则使用 Go 标准库 `regexp`（基于 RE2 自动机，时间复杂度严格与文本长度呈线性 $O(N)$，彻底杜绝回溯导致的 ReDoS 拒绝服务攻击）；字符清洗基于 `unicode/utf8` 原生 Rune 操作；
 - **零内存分配与零 TTFT 损耗**：
@@ -359,27 +400,62 @@ Coding Agent 处于两个极度危险的交叉口：
 **基于 Salt 的确定性派生方案**：
 $$\text{Pseudonym} = \text{Prefix} + \text{"vmrx-"} + \text{TruncatedHex}(\text{HMAC-SHA256}(\text{Secret}, \text{GlobalSalt}))$$
 
-- **状态解耦**：对于同一个真实密钥，无论是在第 1 轮还是第 100 轮会话，无论 VMR 是否重启，生成的伪名完全恒定不变；
+- **状态解耦**：对于同一个真实密钥，无论是在第 1 轮还是第 100 轮会话，无论 VMR 是否重启（只要 Salt 保持稳定），生成的伪名完全恒定不变；
 - **Prompt Cache 稳定**：输入历史文本的字节序列在多轮会话中保持完全相同，**Prompt Cache 命中率维持 100%**；
-- **反向查找表轻量化**：反向表只需以 `Pseudonym` 为 Key、真实 `Secret` 为 Value 驻留在内存中，TTL 设定为会话滑动窗口（如 30 分钟），无须长期持久化存储。
+- **前缀保形感知（Prefix-Aware Formatting）**：
+  - OpenAI 风格密钥（`sk-proj-...`）：生成 `sk-vmrx-9e2f4a1c`；
+  - Anthropic 风格密钥（`sk-ant-...`）：生成 `sk-ant-vmrx-9e2f4a1c`；
+  - GitHub 个人访问令牌（`ghp_...`）：生成 `ghp_vmrx9e2f4a1c`；
+  - AWS Access Key（`AKIA...`，要求 20 位大写字母数字）：生成 `AKIAVMRX` + 12 位大写十六进制。
+  这确保了各类语言 SDK 的本地校验器均能合法通过，不会因格式校验异常而中断。
+- **反向查找表轻量化**：反向表只需以 `Pseudonym` 为 Key、真实 `Secret` 为 Value 驻留在内存并发哈希表中，TTL 设定为会话滑动窗口（如 30 分钟），无须长期持久化存储。
 
-### 4.4 响应端微型滑动窗口反向还原状态机（TTFT 零损耗）
+### 4.4 响应端微型滑动窗口反向还原状态机（TTFT 零损耗）与非流式单遍替换
 
 在 SSE 流式响应中，伪名字符串可能被分词器切碎跨越在不同的 HTTP Chunk 中。Agent Guard 设计了**触发式微型滑动窗口（Triggered Sliding Window）**：
 
-```
-Upstream SSE Chunk 1: "... api_key = 'sk-"  ──► [未见 vmrx 特征] ──► 立即透传 (零缓冲)
-Upstream SSE Chunk 2: "vmrx-9e2f4a"         ──► [命中 vmrx 前缀] ──► 触发滑动窗口暂存 (Hold)
-Upstream SSE Chunk 3: "1c' \n other_data"   ──► [集齐完整定长伪名]
-                                                   ├── 提取 `sk-vmrx-9e2f4a1c`
-                                                   ├── 内存表反查 ──► 真实 `sk-proj-orig-123`
-                                                   └── 替换后立即冲刷 Flush 真实字节并释放暂存
+```mermaid
+stateDiagram-v2
+    [*] --> Passthrough: 接收上游 SSE Chunk
+
+    state Passthrough {
+        [*] --> CheckPrefix: 扫描字节流
+        CheckPrefix --> DirectEmit: 未见 "vmrx-" 特征
+        DirectEmit --> [*]: 立即透传 (零时延, 0ms TTFT)
+    }
+
+    Passthrough --> HoldInWindow: 发现 "vmrx-" 特征前缀
+
+    state HoldInWindow {
+        [*] --> AccumulateBytes: 暂存进入微型滑动窗口 (上限 64B)
+        AccumulateBytes --> CheckComplete: 检查是否集齐定长假名 Token
+        CheckComplete --> AccumulateBytes: 长度不足，等待后续 Chunk
+    }
+
+    HoldInWindow --> RestoreAndFlush: 集齐完整假名 (如 sk-vmrx-9e2f4a1c)
+
+    state RestoreAndFlush {
+        [*] --> TableLookup: 反查内存映射表 Table[vmrx_id]
+        TableLookup --> SplicingBytes: 替换为真实密钥 (如 sk-proj-123456)
+        SplicingBytes --> FlushClient: 冲刷真实字节至客户端
+        FlushClient --> [*]
+    }
+
+    RestoreAndFlush --> Passthrough: 窗口排空，恢复透传
+
+    HoldInWindow --> FailSafeFlush: 遇到流结束 ([DONE] / message_stop) 或窗口溢出 (>64B 未匹配)
+    state FailSafeFlush {
+        [*] --> EmitRaw: 原样冲刷暂存字节 (Fail-Safe, 绝不吞字)
+        EmitRaw --> [*]
+    }
+    FailSafeFlush --> [*]
 ```
 
 - **正常流量零开销**：对于 99.9% 未命中 `vmrx` 特征前缀的 Chunk，直接透传客户端，TTFT 零劣化；
 - **占位符全小写十六进制**：统一采用 `[0-9a-f]`，分词器切分极其稳定；
 - **大小写归一化匹配**：响应端在比对反向表时执行大小写归一化，无论是 `SK-VMRX-A1B2` 还是 `sk-vmrx-a1b2` 均能精确还原；
-- **超时与异常兜底**：流结束（`[DONE]`）或遇到连接中断时，暂存区无条件原样冲刷，绝不丢失数据。
+- **非流式（`stream: false`）单遍替换**：对于非流式调用，`respnorm` 的缓冲模式会在收到完整响应体后，利用内存反向映射表执行一次性 `bytes.Replace` 高速替换，随后直接返回客户端；
+- **超时与异常兜底**：流结束（`[DONE]` 或 `message_stop`）或遇到网络异常中断时，暂存区无条件原样冲刷，绝不丢失数据。
 
 ### 4.5 提示词内联安全指引（Prompt Security Guard）
 
@@ -406,7 +482,7 @@ Upstream SSE Chunk 3: "1c' \n other_data"   ──► [集齐完整定长伪名]
 - **清洗目标**：
   1. **Unicode 标签字符区（Tags Block）**：`U+E0000` 至 `U+E007F`（ASCII Smuggling 专用隐写载荷）；
   2. **非正常零宽控制符**：`U+200B` (Zero-Width Space)、`U+200C` (ZWNJ)、`U+200D` (ZWJ)、`U+200E` / `U+200F` (方向控制符)、`U+FEFF` (BOM 若出现在流中间)；
-  3. **非打印 ASCII 控制字符**：`0x00` - `0x08`、`0x0B`、`0x0E` - `0x1F`（保留正常的制表符与换行符）。
+  3. **非打印 ASCII 控制字符**：`0x00` - `0x08`、`0x0B`、`0x0E` - `0x1F`（保留正常的制表符 `\t` 与换行符 `\n`/`\r`）。
 - **执行机制**：
   在 SSE 流式传输中，每个 Chunk 经过纯 Go 实现的 `RuneSanitizer`，就地剔除或转义目标区间的字符，单 Chunk 开销小于 10µs，内存 0 分配。
 
@@ -421,7 +497,23 @@ Upstream SSE Chunk 3: "1c' \n other_data"   ──► [集齐完整定长伪名]
 
 只有当危险指令被装入 `bash` 或 `write_file` 的实参时，威胁才是确定的、必须拦截的。
 
-#### 5.2.2 命令执行类工具（bash / terminal）高危模式库与 CWE 映射
+#### 5.2.2 流式增量参数聚合与扫描机制（增量解析与零时延流式透传）
+
+在真实的流式传输中，大模型吐出的 Tool Call 实参是切碎在连续的小 Chunk 中的。例如：
+- Chunk A: `{"command": "rm `
+- Chunk B: `-r`
+- Chunk C: `f /"}`
+
+如果仅对单 Chunk 进行孤立正则匹配，规则将完全失效。
+**增量累加与零时延透传的架构契约**：
+1. **客户端执行时机事实**：所有 Coding Agent 客户端（Claude Code、Cursor、OpenClaw 等）在接收 Tool Call 时，都必须完整接收并成功解析实参 JSON 后，才会将命令提交给本地宿主机执行。在流式传输途中，客户端仅仅在内存中缓冲文本，**绝对不会执行未闭合的命令片段**。
+2. **零时延透传 + 旁路状态机累加**：
+   - 当 `respnorm` 收到 Tool Call 实参的 Delta 数据时，**立即原样透传给客户端（保障 0ms TTFT 损耗）**；
+   - 与此同时，内部维护当前 Tool Call Index 的内存累加缓冲区（参数上限默认限制为 64KB）；
+   - 在追加每一段 Delta 时，针对累加缓冲区执行 Aho-Corasick 与 RE2 正则匹配。
+3. **熔断切入点**：一旦累加缓冲区命中高危阻断模式，立即触发熔断状态机：丢弃后续所有上游数据，向客户端发送协议级错误帧与终止帧，并断开与中转站的上游 TCP 连接。由于客户端尚未获得完整合法 JSON，危险指令被绝对阻断在执行之前！
+
+#### 5.2.3 命令执行类工具（bash / terminal）高危模式库与 CWE 映射
 
 当识别到调用的工具为系统执行类工具（`bash`、`sh`、`terminal`、`execute_command`）时，对其 `command` 实参运行 Aho-Corasick + RE2 规则库扫描：
 
@@ -433,7 +525,7 @@ Upstream SSE Chunk 3: "1c' \n other_data"   ──► [集齐完整定长伪名]
 | **混淆动态执行管道** | `echo\s+[A-Za-z0-9+/=]{20,}\s*\|\s*base64\s+-d\s*\|\s*(?:ba)?sh`<br>`python[0-9.]*\s+-c\s+['"]import\s+pty;pty.spawn.*['"]` | **CWE-95** | 试图通过 Base64 编码绕过文本审计直接执行 |
 | **敏感资产隐蔽外带** | `curl\s+.*-(?:d\|F)\s+@[~/\.a-zA-Z0-9_-]*(?:id_rsa\|credentials\|\.env)` | **CWE-312** | 将本地私钥或配置通过 HTTP POST 渗漏至外网 |
 
-#### 5.2.3 文件写操作类工具（write_file / edit_file）保护路径规则
+#### 5.2.4 文件写操作类工具（write_file / edit_file）保护路径规则
 
 当识别到调用的工具为写文件类工具时，对其 `path` 参数进行强校验：
 
@@ -449,19 +541,67 @@ Upstream SSE Chunk 3: "1c' \n other_data"   ──► [集齐完整定长伪名]
 
 在 SSE 流式传输中，一旦增量累积的 `tool_calls` 参数命中了高危阻断规则，网关必须执行**协议级安全熔断**。
 
-**坚决摒弃粗暴的 TCP 断流，采用协议标准事件优雅终止**：
-如果直接 reset TCP 连接，Coding Agent 客户端（如 Claude Code、OpenClaw）会抛出未捕获的底层网络异常并导致整个 Agent 进程崩溃退出。
-**正确的做法是向客户端发送符合协议标准的错误帧与终止帧**：
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as Coding Agent (Client)
+    participant VMR as VMR respnorm (Inbound Guard)
+    participant Upstream as 不可信中转站 (Upstream)
+    participant Audit as 审计日志 (audit.Record)
 
+    Upstream->>VMR: SSE Chunk: tool_calls delta ("com")
+    Note over VMR: 增量累加实参: "com"<br>扫描高危模式: 未命中
+    VMR->>Client: 透传 SSE Chunk ("com")
+
+    Upstream->>VMR: SSE Chunk: tool_calls delta ("mand: rm -rf /")
+    Note over VMR: 增量累加: "command: rm -rf /"<br>扫描高危模式: 命中 CWE-78 根目录删除!
+
+    rect rgb(255, 230, 230)
+        Note over VMR: 触发协议级流式安全熔断 (Circuit Break)
+        VMR->>Upstream: 主动关闭上游连接 (Close TCP)
+        alt OpenAI 协议 (openai-completions)
+            VMR->>Client: 注入合成安全提示与 finish_reason: "stop"
+            VMR->>Client: event: error (Security Violation JSON)
+            VMR->>Client: data: [DONE]
+        else Anthropic 协议 (anthropic-messages)
+            VMR->>Client: event: content_block_delta (安全拦截警示文本)
+            VMR->>Client: event: message_delta (stop_reason: "stop_sequence")
+            VMR->>Client: event: message_stop
+        end
+    end
+
+    Note over Client: 收到合规报错帧，安全终止当前 Tool Call<br>避免宿主机被执行任意命令 (RCE)
+    VMR->>Audit: 记录 Attempt.Norm = ["tool_call_blocked:rm_rf_root"]
+```
+
+**双协议优雅终止帧结构定义**：
+坚决摒弃粗暴的 TCP Reset（会导致 Agent 进程因底层未捕获网络异常而整体崩溃）。必须依据客户端当前请求的入向协议（`Protocol`）下发对应格式的标准错误：
+
+1. **OpenAI Completions 协议优雅终止帧**：
 ```
 event: message
-data: {"choices":[{"delta":{"tool_calls":[{"function":{"arguments":"\n[VMR Agent Guard: Blocked dangerous command 'rm -rf /']"}}]}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\n[VMR Agent Guard: Dangerous command blocked by policy]"}}],"finish_reason":"stop"}}]}
 
 event: error
-data: {"type":"security_violation","error":{"message":"Blocked by VMR Agent Guard: destructive OS command detected."}}
+data: {"error":{"message":"Blocked by VMR Agent Guard: destructive OS command detected (CWE-78)","type":"security_violation","code":"vmr_security_tool_call_blocked"}}
 
 event: message
 data: [DONE]
+```
+
+2. **Anthropic Messages 协议优雅终止帧**（注意：Anthropic 协议无 `[DONE]`，以 `message_stop` 收尾）：
+```
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\n/* [VMR Agent Guard: Dangerous command blocked by policy] */"}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"stop_sequence","stop_sequence":"[VMR_BLOCKED]"}}
+
+event: error
+data: {"type":"error","error":{"type":"security_violation","message":"Blocked by VMR Agent Guard: destructive OS command detected (CWE-78)"}}
+
+event: message_stop
+data: {"type":"message_stop"}
 ```
 
 随后网关主动切断与远端不可信中转站的上游 TCP 连接。这种处理方式既保证了恶意命令绝对不会被客户端执行，又让 Agent 能够正常收到安全报错并优雅恢复。
@@ -484,7 +624,7 @@ data: [DONE]
 
 ### 6.2 TTFT 与 TPS 统计学指纹离群检测
 
-- 利用 VMR `internal/livestats` 原生记录的微秒级 TTFT 与 TPS；
+- 利用 VMR `internal/livestats` 原生记录的微秒级 TTFT 与 TPS（`ToksP50`）；
 - 在 `vmr analyze` 中按 Provider 聚合统计：若某中转站提供的 Claude 3.5 模型的 TPS 异常高企（如 >250 tokens/s，远超官方集群常规分布），或 TTFT 严重偏离标准差，系统打标该 Provider 存在极高的“开源小模型替跑”嫌疑。
 
 ### 6.3 Token Usage 计费虚报与膨胀审计
@@ -506,7 +646,7 @@ data: [DONE]
 
 ### 7.1 `config.yaml` 统一安全配置规范
 
-在 `config.yaml` 中新增统一的 `security` 配置块：
+在 `config.yaml` 中新增统一的 `security` 配置块，遵循 VMR 的 `snake_case` 命名规范与严格校验体系：
 
 ```yaml
 security:
@@ -514,9 +654,9 @@ security:
   # 1. 出向敏感信息防泄露 (Outbound Redaction, 瓦解 AC-2 凭据嗅探)
   # ===================================================================
   outbound:
-    # 模式可选: off | audit_only | block | replace
+    # 模式可选: off | audit_only | block | replace (默认 off，完全零开销)
     mode: replace
-    
+
     # 生效的高置信度 Tier 1 凭据规则
     active_rules:
       - openai-api-key
@@ -525,33 +665,33 @@ security:
       - github-pat
       - aws-access-key
       - logleak-sk-style-key
-      
-    # 确定性 HMAC 派生 Salt (留空则进程启动时自动生成随机 Salt)
+
+    # 确定性 HMAC 派生 Salt (留空则在进程首次启动时自动随机生成)
     salt: "${VMR_SECURITY_SALT:-}"
-    
-    # 内存反向映射表缓存生命周期 (滑动窗口)
+
+    # 内存反向映射表缓存生命周期 (基于最近请求的滑动窗口)
     session_ttl: 30m
-    
-    # 向系统提示词中注入安全注记 (避免模型主动修改假名)
+
+    # 向系统提示词中注入安全注记 (避免模型主动修复或校验假名)
     inject_system_note: true
 
   # ===================================================================
   # 2. 入向恶意注入与危险代码防护 (Inbound Guard, 瓦解 AC-1 载荷投毒)
   # ===================================================================
   inbound:
-    # 不可见字符与 ASCII Smuggling 线速清洗: true | false
+    # 不可见控制字符与 ASCII Smuggling 线速清洗: true | false
     sanitize_invisible_runes: true
-    
+
     # 结构化 Tool Call 参数风控模式: off | audit_only | circuit_break
     tool_call_guard_mode: circuit_break
-    
-    # 受保护的本地敏感路径 (write_file 拦截)
+
+    # 受保护的本地敏感路径 (write_file / edit_file 拦截)
     protected_paths:
       - "~/.ssh/*"
       - "~/.bashrc"
       - "~/.zshrc"
       - "/etc/*"
-      
+
     # 触发熔断的高危执行命令模式
     blocked_commands:
       - destructive_root_deletion
@@ -561,7 +701,7 @@ security:
       - exfiltration
 
   # ===================================================================
-  # 3. 中转站以次充好与异常审计 (Fraud Auditing)
+  # 3. 中转站以次充好与异常审计 (Fraud Auditing, 离线指标比对)
   # ===================================================================
   fraud_audit:
     check_thinking_trace: true
@@ -572,38 +712,40 @@ security:
 
 ### 7.2 `audit.Record` 安全元数据与透明审计流水账（SHA-256）
 
-在 `audit.Record` 中扩展轻量安全元数据与密码学透明流水账（参考 `api-relay-audit`）：
+在 `audit.Record` 中扩展轻量安全元数据与密码学透明流水账（参考 `api-relay-audit`），契约结构定义于 `internal/audit`：
 
 ```go
 // SecurityAuditRecord 记录单次请求的安全风控与取证元数据
 type SecurityAuditRecord struct {
-    // 密码学透明流水账 (防篡改取证，不记录敏感明文)
-    RequestSHA256     string   `json:"req_sha256,omitempty"`     // 原始请求体哈希
+    // 密码学透明流水账 (防篡改取证，日志中绝不记录敏感明文)
+    RequestSHA256     string   `json:"req_sha256,omitempty"`     // 原始请求体加盐哈希
     ResponseSHA256    string   `json:"resp_sha256,omitempty"`    // 原始响应体哈希
-    
+
     // 出向防护数据
     OutboundMode      string   `json:"out_mode,omitempty"`       // "block" | "replace" | "audit_only"
     LeakedRules       []string `json:"leaked_rules,omitempty"`   // 命中的规则名，如 ["gcp-api-key"]
     RedactedCount     int      `json:"redacted_cnt,omitempty"`   // 替换/拦截的条目数
-    
+
     // 入向防护数据
     SanitizedRunes    int      `json:"sanitized_runes,omitempty"`// 剥离的不可见隐写字符数
     ToolCallBlocked   bool     `json:"tool_blocked,omitempty"`   // 是否触发了 Tool Call 安全熔断
     BlockedToolName   string   `json:"blocked_tool,omitempty"`   // 触发工具名，如 "bash"
     BlockedPattern    string   `json:"blocked_pat,omitempty"`    // 命中模式，如 "reverse_shell"
-    
+
     // 欺诈审计
     ThinkingMissing   bool     `json:"thinking_missing,omitempty"` // 声明推理但缺失思考链
     UsageInflated     bool     `json:"usage_inflated,omitempty"`   // Token 计费虚标可疑
 }
 ```
 
+同时，响应流层面的所有实际干预，全额记录在 `audit.Attempt.Norm` 切片中（例如：`["outbound_redacted", "sanitized_invisible_runes", "tool_call_blocked:cwe_78"]`），完全遵循 VMR 现有审计可解释性规范。
+
 ---
 
 ### 7.3 `vmr analyze` 宏观安全看板与 Task Journey 因果溯源
 
 1. **宏观安全态势看板（Macro Security Dashboard）**：
-   - 凭据泄露统计表（唯一值数、泄露频次、主要涉及的代码工程）；
+   - 凭据泄露统计表（唯一值数、泄露频次、主要涉及的代码工程与文件）；
    - 拦截的恶意 Tool Call 与反弹 Shell 事件时间线；
    - 中转站风险画像：各 Provider 的隐写字符剔除率、思考链缺失率与 Token 膨胀系数。
 2. **Task Journey 细节溯源（Journey Timeline Integration）**：
@@ -613,11 +755,119 @@ type SecurityAuditRecord struct {
 
 ---
 
-## 8. 实施路线图与落地规划
+## 8. 重大架构决策与权衡分析（Decisions & Tradeoffs / Options）
+
+本节系统化梳理 Agent Guard 在架构设计过程中面临的核心冲突、设计权衡与决策依据。每个决策均明确标出推荐方案（Recommended）及备选方案的深度对比。
+
+### 8.1 决策 1：出向保形伪名化（Redaction）拦截改写的挂载层级与生命周期
+
+* **背景与冲突**：出向凭据扫描改写若挂载过早，可能污染客户端原始报文的审计取证；若挂载过晚（如在上游 HTTP Transport 层），则无法复用会话指纹，且每次 Failover 重试都会重复支付正则扫描开销。
+
+```
+Option A (推荐 / Recommended): HTTP 入口与前置解析层统一拦截改写 (server.ServeHTTP + jsonscan)
+Option B: 路由半区内部、Adapter.BuildRequest 前按 Provider 动态拦截改写
+Option C: Upstream Transport (http.RoundTripper) 字节流切入
+```
+
+| 评估维度 | Option A: HTTP 入口统一拦截改写 (推荐) | Option B: Adapter 前按 Provider 改写 | Option C: Transport 字节流拦截 |
+|---|---|---|---|
+| **Prompt Cache 友好度** | **最优**。同一请求不论尝试哪个候选 Endpoint，发出的假名保持完全一致。 | 较差。不同 Provider 若策略有微小差异，可能造成重试时 Payload 字节抖动。 | 中等。依赖流式拦截，无法做全报文结构化缓存。 |
+| **计算开销与延迟** | **极低**。整次请求生命周期**仅执行 1 次扫描改写**，Failover 重试零重复开销。 | 较重。每次故障转移尝试（`tryOne`）均重新执行正则匹配与切片。 | 较高。在最底层的每个 HTTP Request 处拦截，多次重试多次扫描。 |
+| **会话指纹一致性** | **完美契合**。Sticky 会话计算基于伪名化后的稳定文本，天然维持 Affinity。 | 复杂。需确保脱敏前后指纹计算逻辑的特殊兼容分支。 | 脱节。Transport 层无法感知会话指纹。 |
+| **代码内聚性与侵入度** | **高内聚**。直接复用 `internal/jsonscan` 现有单遍扫描与拼接能力，无架构断层。 | 中等。需侵入各个协议 Adapter 的内部构造逻辑。 | 较差。破坏 Transport 纯净转发职责。 |
+
+* **最终决策**：**采纳 Option A**。在 `server.ServeHTTP` 完成基础鉴权并产出 `CanonicalRequest` 时，通过 `jsonscan` 进行单遍扫描与保形伪名化，将注册好的映射注入内存表，后续 `router` 的多候选重试完全基于已脱敏的安全请求体执行。
+
+---
+
+### 8.2 决策 2：架构契约与字节保真透传（Byte-Faithful Passthrough）的定位演进
+
+* **背景与冲突**：VMR 铁律要求“字节保真透传，仅有 5 个受批准偏离”。出向改写假名与入向字符清洗是否破坏了这一定位？如何平衡安全刚需与架构纯洁性？
+
+```
+Option A (推荐 / Recommended): 正式确立为 VMR 第 6 项受批准偏离 (受控安全合规干预)，默认关闭，配置驱动
+Option B: 将 Agent Guard 作为独立的前置/后置 Proxy 进程外挂 (Sidecar 架构)
+Option C: 隐式作为 respnorm 和 jsonscan 内部特殊 quirk 处理，不提升为架构偏离
+Option D: 完全不做中间修改，仅做只读审计告警 (Audit-Only)
+```
+
+| 评估维度 | Option A: 第 6 项受控偏离 (推荐) | Option B: 独立 Sidecar 进程 | Option C: 内部 Quirk 隐式处理 | Option D: 纯只读审计 |
+|---|---|---|---|
+| **单二进制交付与体验** | **极致**。零额外运维负担，单个二进制一键启动即享完整能力。 | 繁琐。需维护两个进程、两个配置、跨进程 IPC，体验断崖式下跌。 | 良好。但概念混淆，破坏代码文档规范。 | 良好。但无法阻断攻击。 |
+| **AC-1/AC-2 防护有效性** | **100% 阻断**。从源头粉碎嗅探与后门执行。 | **100% 阻断**。但增加 1~2ms IPC 时延。 | **100% 阻断**。 | **0% 阻断**。资产已泄漏，机器已沦陷。 |
+| **架构契约诚实度** | **完全透明诚实**。在设计文档与审计记录中庄严陈述边界，不玩文字游戏。 | 规避问题。将矛盾转嫁给外部系统。 | **隐瞒违约**。掩耳盗铃，违反系统严谨性原则。 | 表面严守契约，实质放弃核心业务价值。 |
+
+* **最终决策**：**采纳 Option A**。坦诚将 Agent Guard 界定为“第 6 项受批准偏离”。通过“默认关闭（`mode: off`）、严格配置驱动、双向保形对消、全链路审计记录”四大约束，既赋予开发者坚不可摧的安全护盾，又在架构学理上维护了系统的一致与严谨。
+
+---
+
+### 8.3 决策 3：入向 Tool Call 增量参数解析与安全拦截在流式（SSE）链路的切入时机
+
+* **背景与冲突**：流式首字时延（TTFT）与安全检查深度存在天然矛盾。全局缓冲破坏打字机体验，单 Chunk 正则漏报切碎的危险指令。
+
+```
+Option A (推荐 / Recommended): 挂载于 internal/respnorm，增量累加参数并在流中扫描；命中高危模式时下发协议级优雅终止帧与 [DONE] / message_stop，截断上游
+Option B: 网关层在识别到 tool_calls 时实行全局阻塞式缓冲，完整反序列化 JSON 校验无误后再整体放行
+Option C: 旁路异步监听，在检测到高危调用后向宿主机发送外带 Kill 信号终止 Agent 进程
+```
+
+| 评估维度 | Option A: 增量累加 + 协议优雅终止 (推荐) | Option B: 全局阻塞缓冲 | Option C: 旁路外带 Kill 信号 |
+|---|---|---|---|
+| **流式打字机首字延迟 (TTFT)** | **0ms 额外时延**。正常 Chunk 零等待立即流式转发。 | **毁灭性恶化**。Tool Call 生成期间客户端完全静默，卡顿数秒。 | **0ms 额外时延**。 |
+| **防御确定性 (Zero Window of Vulnerability)** | **100% 可靠**。利用客户端“未闭合 JSON 不执行”铁律，在闭合前精准拦截。 | **100% 可靠**。但牺牲全部流式体验。 | **存在竞态窗口**。Kill 信号到达前命令可能已被本地 Shell 执行。 |
+| **Agent 进程健壮性** | **完美自愈**。Agent 接收到协议标准报错，保留任务上下文并优雅继续。 | 较好。 | **灾难性崩溃**。Agent 进程被 SIGKILL 暴毙，当前任务成果全毁。 |
+| **实现复杂度与依赖** | **极轻**。利用 `respnorm` 既有流式切片框架，纯 Go 状态机驱动。 | 简单。但内存占用随并发长 Tool Call 线性暴涨。 | 极重。需侵入操作系统进程管理或宿主机 Agent 守护协议。 |
+
+* **最终决策**：**采纳 Option A**。深度契合 Agent 执行生命周期的内在事实，以零延迟代价换取 100% 的安全拦截确定性，并提供业界最高水准的协议级优雅恢复。
+
+---
+
+### 8.4 决策 4：假名泄漏、状态生命周期与本地工作区一致性回滚策略
+
+* **背景与冲突**：如果大模型在对话中记住了假名，或者会话结束后假名被写进了本地文件，反向映射表若失效，如何保证工作区一致性？映射表是否需要永久落盘？
+
+```
+Option A (推荐 / Recommended): 内存级滑动窗口 TTL + 会话级确定性 Salt + 本地工作区非侵入式还原 + 客户端兜底补偿
+Option B: 引入持久化数据库 (SQLite / Redis) 永久保存全量假名映射
+Option C: 无状态密文嵌入机制 (将真实凭据用网关私钥加密后 Base64 嵌入假名中)
+```
+
+| 评估维度 | Option A: 确定性 Salt + 内存滑动窗口 (推荐) | Option B: 永久持久化数据库 | Option C: 无状态密文嵌入 |
+|---|---|---|---|
+| **单二进制零依赖铁律** | **完全契合**。纯内存并发安全 `sync.Map` / 分段锁哈希表，重启即走。 | 违背初衷。引入本地文件锁、数据库文件膨胀与损坏恢复负担。 | 契合。纯数学计算。 |
+| **Prompt Cache 与长度兼容性** | **极高**。定长短 Hex（如 8~16 字符），格式完全契合原生 API Key。 | 极高。 | **严重破坏**。密文长度往往 >128 字符，极易突破模型前缀约束与正则规则。 |
+| **长期一致性与重启容忍度** | **高**。只要配置中的 `salt` 固定，重启后同一 Secret 算出的假名完全相同。 | **最高**。映射永久存在。 | **最高**。无状态自带解密能力。 |
+| **内存与泄露风险** | **零风险**。滑动窗口（30m）自动过期，无内存泄漏与磁盘明文常驻隐患。 | 较高。持久化文件成为新的本地敏感凭据泄露源。 | 较低。但需妥善管理私钥。 |
+
+* **最终决策**：**采纳 Option A**。通过“确定性 HMAC + 配置固定 Salt”解决重启后的伪名漂移问题；响应端滑动窗口确保 99.99% 的假名在出网关瞬间即被还原为真实凭据；对罕见极端情况，提供 `vmr restore-workspace` 离线辅助扫描脚本作为底线兜底。
+
+---
+
+### 8.5 决策 5：本地审计日志（`audit.Record`）中敏感原始请求体的存储与隐私合规权衡
+
+* **背景与冲突**：VMR 原生审计契约要求 `Client.Request` 忠实记录客户端发送的原始内容。如果请求中包含泄露的明文密钥，审计日志是否原样持久化明文？
+
+```
+Option A (推荐 / Recommended): 审计体存储脱敏后内容 + 原始明文加盐 SHA-256 指纹 (安全优先)
+Option B: 审计日志原样存储未经脱敏的真实请求体 (保真优先，依赖 0600 文件权限)
+Option C: 彻底放弃存储请求体，仅保留统计指标与规则命中标签 (激进隐私保护)
+```
+
+| 评估维度 | Option A: 脱敏体 + 原始 SHA-256 (推荐) | Option B: 原样保留原始明文 | Option C: 彻底不存请求体 |
+|---|---|---|---|
+| **二次泄露防御 (AC-2)** | **极佳**。即使审计日志文件被未授权读取，也不会直接暴露出向真实凭据。 | **高危**。审计文件直接沦为攻击者提权后的凭据金矿。 | **无敌**。根本没有数据。 |
+| **溯源取证能力 (Forensics)** | **高**。通过密码学哈希可证实原始报文篡改情况，结合脱敏元数据可精准重构事件。 | **最高**。完全拥有历史明文。 | **归零**。无法进行因果推演与误报复核。 |
+| **双半区契约兼容性** | **完美**。`vmr analyze` 与 Task Journey 均基于脱敏后报文运行，展现一致的安全视野。 | 兼容。但给离线分析带来凭据二次外溢风险。 | **破坏**。Task Journey 无法生成上下文拓扑。 |
+
+* **最终决策**：**采纳 Option A**。在 `audit.Record` 中，`Client.Request` 存储已安全脱敏的报文，同时以 `req_sha256` 记录真实明文的哈希指纹，兼顾不可逆密码学防篡改取证与本地敏感资产的绝对防泄露。
+
+---
+
+## 9. 实施路线图与落地规划
 
 建议按照**风险完全可控、收益立竿见影、复杂度渐进交付**的节奏，分为三个独立阶段稳步实施：
 
-### Phase 1：离线双向安全态势感知与验真探针（零线上风险，快速见效）
+### 9.1 Phase 1：离线双向安全态势感知与验真探针（零线上风险，快速见效）
 - **交付内容**：
   1. 裁剪并集成 Gitleaks Tier 1/2 规则库；
   2. 扩展 `audit.Record` 安全元数据字段与 SHA-256 流水账计算；
@@ -625,16 +875,16 @@ type SecurityAuditRecord struct {
   4. 扩展 `vmr diagnose`，引入免执行转写 Echo 探针与大海捞针探针。
 - **价值**：不触碰线上关键路径，迅速为团队摸清历史凭据泄露底细与中转站服务质量。
 
-### Phase 2：出向保形伪名化 + 入向隐写字符线速清洗（筑牢基础底线）
+### 9.2 Phase 2：出向保形伪名化 + 入向隐写字符线速清洗（筑牢基础底线）
 - **交付内容**：
   1. 实现基于 Salt 的确定性 HMAC 保形伪名生成器与并发安全反向查找表；
-  2. 实现响应端流式微型滑动窗口反向还原器（严格保证 TTFT 零损耗）；
+  2. 实现响应端流式微型滑动窗口反向还原器（严格保证 TTFT 零损耗）及非流式单遍替换；
   3. 实现入向流式 ASCII Smuggling 与 Unicode 隐写字符清洗器。
 - **价值**：彻底瓦解 AC-2 凭据被动嗅探，防止真实凭据上云，彻底杜绝隐写提示词注入。
 
-### Phase 3：结构化 Tool Call 参数护栏与协议级熔断（完成终极闭环）
+### 9.3 Phase 3：结构化 Tool Call 参数护栏与协议级熔断（完成终极闭环）
 - **交付内容**：
   1. 解析 OpenAI `tool_calls` 与 Anthropic `tool_use` 的增量参数；
   2. 接入命令执行与敏感路径防护规则集；
-  3. 实现协议级优雅流熔断机制（下发安全错误事件并优雅终止），联动沙箱边界。
+  3. 实现协议级优雅流熔断机制（适配 OpenAI 与 Anthropic 双协议终止规范），联动沙箱边界。
 - **价值**：彻底阻断 AC-1 载荷注入与恶意代码执行，为 Coding Agent 筑起全天候坚不可摧的终极安全护盾。
