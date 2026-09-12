@@ -297,55 +297,76 @@ flowchart TD
 ### 3.3 路由核（在线护栏）与分析核（离线溯源）双半区协同架构
 
 ```mermaid
-flowchart TD
-    Client["Coding Agent 客户端 (Claude Code / Cursor / OpenClaw)"]
+flowchart TB
+    %% 外部参与实体
+    Client["Coding Agent 客户端<br/>(Claude Code / Cursor / OpenClaw)"]
+    Upstream["不可信上游 / 第三方中转站<br/>(API Relay / Providers)"]
 
-    subgraph VMR_Core ["VMR 路由半区 (Routing Half: 在线极速微秒链路)"]
+    %% 路由半区 (在线请求/响应转发与微秒护栏)
+    subgraph RoutingHalf ["VMR 路由半区 (Routing Half: 在线极速转发与微秒级护栏)"]
         direction TB
-        ServerEntry["server.ServeHTTP: 请求准入、鉴权与 RequestFacts 提取"]
-        OutEngine["Outbound Redaction Engine: jsonscan 字节级凭据扫描与保形伪名化"]
-        MemTable[("并发安全伪名反向查找表 (TTL 滑动窗口)")]
-        RouterCore["router.Serve: 策略选路、故障转移 (Failover) 与重试"]
-        RespNorm["respnorm.Wrap: 流式响应正规化与安全护栏"]
 
-        subgraph RespNorm_Internal ["respnorm 内部流式拦截器"]
-            RuneSan["RuneSanitizer: ASCII Smuggling 隐写字符剔除"]
-            ToolGuard["ToolCallGuard: 增量参数扫描与协议级熔断"]
-            WindowRestore["SlidingWindowRestorer: vmrx 占位符反查还原"]
+        subgraph IngressPipe ["1. 入口准入与出向凭据脱敏"]
+            Server["server.ServeHTTP<br/>(请求准入 / 鉴权 / RequestFacts 提取)"]
+            OutEngine["出向脱敏引擎 (jsonscan 字节级改写)<br/>(高危凭据扫描 ➔ 确定性保形伪名化)"]
+            MemTable[("并发安全伪名反向查找表<br/>(内存 TTL 滑动窗口)")]
         end
 
-        AuditWriter["audit.Record 写入器: 追加写入 JSONL"]
+        subgraph CoreRouting ["2. 核心路由与选路执行"]
+            Router["router.Serve<br/>(策略排队 / 粘性会话 / Failover 重试)"]
+        end
+
+        subgraph EgressPipe ["3. 入向响应流式安全护栏 (respnorm.Wrap 流水线)"]
+            direction TB
+            RuneSan["① RuneSanitizer<br/>(ASCII Smuggling 隐写字符剔除)"]
+            ToolGuard["② ToolCallGuard<br/>(增量参数聚合 & 协议级安全熔断)"]
+            WindowRestore["③ SlidingWindowRestorer<br/>(微型滑动窗口 & 反查还原真实 Key)"]
+            RuneSan --> ToolGuard --> WindowRestore
+        end
+
+        subgraph AuditLogger ["4. 审计元数据登记"]
+            AuditWriter["audit.Logger<br/>(安全元数据 & SHA-256 密码学流水账)"]
+        end
+
+        subgraph ActiveDiagnoseTool ["5. 路由半区主动诊断工具 (CLI 独立触发)"]
+            Diagnose["vmr diagnose<br/>(免执行 Echo 探针 / 大海捞针 / LLMmap 验真)"]
+        end
     end
 
-    Upstream["第三方 API 中转站 / 模型提供商"]
+    %% 两个半区之间的唯一契约边界
+    AuditFile[("【双半区唯一解耦契约】<br/>Append-Only JSONL 审计日志文件<br/>(0600 权限，本地磁盘持久化)")]
 
-    subgraph VMR_Analytics ["VMR 分析核 (Analytics Half: 离线只读深度溯源)"]
+    %% 分析半区 (纯离线只读消费，零网络 I/O)
+    subgraph AnalyticsHalf ["VMR 分析半区 (Analytics Half: 纯离线只读溯源，零网络 I/O)"]
         direction TB
-        AuditLog[("Append-Only JSONL 审计日志 (0600 权限)")]
-        MacroReport["vmr analyze: 宏观安全态势看板 (凭据泄露排行 / 拦截时间线 / 欺诈评分)"]
-        TaskJourney["Task Journey: 会话因果溯源与恶意注入步骤标红"]
-        DiagnoseProbe["vmr diagnose: 免执行 Echo 探针 / 大海捞针 / LLMmap 离线验真"]
+        MacroReport["vmr analyze (宏观安全态势看板)<br/>• 凭据泄露排行与高频项目统计<br/>• 恶意 Tool Call 拦截时间线<br/>• 中转以次充好与 Token 虚报画像"]
+        TaskJourney["Task Journey (任务会话因果溯源)<br/>• 全景因果拓扑与 Tool Call 步骤重构<br/>• 标记具体哪一步导致泄露或触发熔断<br/>• 依赖包 Typosquatting 编辑距离比对"]
     end
 
-    Client -->|1. Client Request (含潜在凭据)| ServerEntry
-    ServerEntry -->|2. 原始请求体| OutEngine
-    OutEngine -->|注册假名映射| MemTable
-    OutEngine -->|3. 伪名化后的 CanonicalRequest| RouterCore
-    RouterCore -->|4. 发起上游 HTTP 请求| Upstream
-    Upstream -->|5. SSE 响应流 (含潜在恶意指令/隐写)| RespNorm
-    RespNorm --> RuneSan
-    RuneSan --> ToolGuard
-    ToolGuard --> WindowRestore
-    WindowRestore <-->|反查真实凭据| MemTable
-    RespNorm -->|6. 净化与还原后的纯净响应流| Client
+    %% 1. 在线请求数据流
+    Client -->|1. 原始请求体 (含潜在泄漏凭据)| Server
+    Server -->|2. 字节切片扫描| OutEngine
+    OutEngine -->|注册假名映射: sk-vmrx-... ➔ sk-orig-...| MemTable
+    OutEngine -->|3. 已脱敏的 CanonicalRequest| Router
+    Router -->|4. 上游 HTTP 请求 (瓦解 AC-2 嗅探)| Upstream
 
-    ServerEntry -.->|记录请求元数据| AuditWriter
-    RespNorm -.->|记录 Applied 拦截标记| AuditWriter
-    AuditWriter -->|7. 落盘| AuditLog
+    %% 2. 在线响应数据流 (严格流水线无分叉)
+    Upstream -->|5. SSE 响应流 (含潜在后门/隐写)| RuneSan
+    WindowRestore <-->|内存反查真实 Secret| MemTable
+    WindowRestore -->|6. 纯净且已还原真实凭据的响应流| Client
 
-    AuditLog -->|离线消费| MacroReport
-    AuditLog -->|因果拓扑| TaskJourney
-    DiagnoseProbe -.->|探针巡检| Upstream
+    %% 3. 审计记录流 (落盘)
+    Server -.->|提取请求事实| AuditWriter
+    ToolGuard -.->|登记拦截标记| AuditWriter
+    WindowRestore -.->|登记还原标记| AuditWriter
+    AuditWriter -->|7. 追加写入| AuditFile
+
+    %% 4. 离线分析流 (严格单向读取文件，不上网)
+    AuditFile ==>|离线只读消费| MacroReport
+    AuditFile ==>|因果关系重构| TaskJourney
+
+    %% 5. 运维诊断探针 (复用路由半区网络栈)
+    Diagnose -.->|主动巡检探测| Upstream
 ```
 
 ### 3.4 VMR 核心模块挂载点与职责映射契约
