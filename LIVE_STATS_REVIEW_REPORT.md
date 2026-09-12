@@ -347,12 +347,16 @@
     - 但服务端 `HourlyRow` 的数据桶是按服务端的 `time.Local` 划分的。如果跨时区访问，图表底部的时间戳与服务端日志记录无法对应。
   - **双 Y 轴遮挡**：当 Token 极大但请求较少，或请求极多但 Token 很少时，折线与柱状图容易重叠，缺少自动规避或分离轴模式。
 
-#### 项 6.2：`Usage by Provider & Model` 与 `Usage by Caller` 表格
+#### 项 6.2：`Usage by Provider & Model` 与 `Usage by Caller` 表格 (用量明细与错误归属)
 - **数据**：从 `stats.hourly[]` 按 `provider + model` 或 `client_key_tag` 聚合。
 - **列**：`Req ok / err`, `Tok in+cw / cr`, `Tok out`, `Tok Share`。
-- **合理性与 Label 问题审查**：
+- **合理性与严重缺陷审查**：
+  - **【重大底层归因 Bug：具体模型 Error 全为 0，最后有一行 “-” 显示 “0/10”】**：
+    - 现象：在线实例的 `Usage by Provider & Model` 表格中，所有有明确 Provider 和 Model name 的行，其 Error 计数器竟然**全都是 0**；但在表格最底部却出现了一行 Provider Model 为 `"—"` 的记录，Req 显示为 `0 / 10`（即 10 次错误全被算到了该行头上）！
+    - 代码溯源：在 `internal/server/stats.go` 的 `sampleFromRecord` 中，仅当 `att.IsForwarded()` 为 true 时才会提取并赋值 `s.Provider` 和 `s.Model`。但失败的请求（`outcome == "error"`）从未成功将响应写回客户端，因此 **没有任何 Attempt 会被标记为 Forwarded**！这导致所有失败请求的 Provider 和 Model 在样本中被无条件置空（`""`），聚合到小时账本后，前端只能渲染成 Provider 为 `"—"`，造成正常模型无法统计到错误、所有错误全被“吃”到匿名行的严重失真！
   - **【同问题 5.2】`Tok in+cw / cr` 问题重现**：同样的认知负担；
-  - **【`Tok Share` 权重未说明】**：代码计算 `(incw + cr + out) / total * 100`，即把 1 个低价值的 cache read token 与 1 个高成本的 fresh/output token 1:1 等权求和计算份额。如果不标明这是“Unweighted Token Volume Share”，会导致部分重度依赖缓存的模型用量份额被过度虚高放大。
+  - **【`Tok Share` 权重未说明】**：代码计算 `(incw + cr + out) / total * 100`，即把 1 个低价值的 cache read token 与 1 个高成本的 fresh/output token 1:1 等权求和计算份额。如果不标明这是“Unweighted Token Volume Share”，会导致部分重度依赖缓存的模型用量份额被过度虚高放大；
+  - **【布局局促与指标扩展诉求】**：目前使用 `<div class="grid-2">` 左右各占 50% 分栏，排版极为拥挤，无法容纳更多的生成性能指标（如平均吐字速率 `Tok OUT/s`）。建议将其改为横向通栏（100% 宽度），并补充输出生成速率。
 
 ---
 
@@ -362,15 +366,16 @@
 - **数据**：`stats.inflight[]`。
 - **列**：`Age`, `Client`, `Virtual Model`, `Attempt`, `Provider : Model`, `Mode`, `TTFT`, `Tok Out`, `Status`。
 - **呈现**：实时展示耗时与输出 Token 增长，超过 10s 未收到上游字节标记为红色 `stalled`。
-- **合理性**：
-  - **设计极其优秀**。直击实时请求排查痛点，字段精炼、状态准确。
-  - **【残留冗余问题】**：该表格已从 `status.html` 迁移至 `log.html`，但 `status.html` 内部仍残留了 `let liveExpanded = false;` 以及 2s 一次的 `livePollTick` 轮询空转。
+- **合理性与页面归宿研判**：
+  - **设计极其优秀**。直击实时请求排查痛点，字段精炼、状态准确；
+  - **【页面归宿不当】**：该表格目前被放置在 `/log.html` 页面，但它属于最典型的“系统运行大盘实时状态”。将它放在日志流页面导致 `/status.html` 失去了最高频的排障入口，同时让 `status.html` 内部残留的 2s 轮询陷入无渲染目标的空转。**强烈建议将其移回 `/status.html` 核心大盘**，使 `/log.html` 纯粹化为终端日志流。
 
 #### 项 7.2：`Recent Failures` (最近失败折叠表)
 - **数据**：`stats.recent_errors[]`（上限 100 条）。
 - **呈现**：可折叠面板，顶部提供错误类别 Filter Chips，支持点击过滤特定错误码。
-- **合理性**：
-  - **设计优秀**。支持快速归因排查。
+- **合理性与页面归宿研判**：
+  - **设计优秀**。支持快速归因排查；
+  - **【页面归宿不当】**：与 Live Requests 同理，最近失败列表是运维观测的核心资产，应随 Live Requests 一同**移回 `/status.html` 底部作为错误复盘兜底面板**。
 
 ---
 
@@ -395,7 +400,10 @@
 | **P0-2** | **全站表格 `Tok in+cw / cr` 反人类展示问题** | `status.html` (Perf, Usage×2) | 前端呈现逻辑与 Label 缺陷 | **极高**：彻底降低人脑心算成本，统一全站 Token 认知模型（Prompt + Cache Hit %）。 |
 | **P0-3** | **Quota Headroom 顶部说明与计算物理意义完全相反** | `status.html` (Quota Headroom) | Label 文案与定义解释错误 | **高**：避免用户因“花得越快数值越小”而对 Headroom 产生机制性误解。 |
 | **P0-4** | **虚拟模型表格 P0 优先级样式缺失降级为 `pri-n`** | `status.html` (Models PRI) | 前端渲染三元判断遗漏 | **高**：仅改动一行三元判断，即可让核心主路由 P0 恢复最高视觉层级。 |
-| **P0-5** | **`status.html` 中残留无用高频轮询与空置变量** | `status.html` (Poller & State) | 历史重构残留代码 | **中高**：停止 Overview 页面每 2 秒一次的无意义高频空转，减轻浏览器与后端压力。 |
+| **P0-5** | **Usage 表中错误请求归属丢失 Bug（Provider/Model 置空导致 Error 全归入 “-” 行）** | `internal/server/stats.go`<br>`status.html` (Usage) | 后端 Sample 归因判断缺陷 | **极高**：彻底修复只有成功转发才赋予模型的 Bug，让故障模型承担真实 Error 计数。 |
+| **P0-6** | **控制台页面职责拆分与全局导航统一（新建 `/models.html`、移回 Live 组件至 `/status.html`、统一导航）** | `server.go`<br>`console.js`<br>`status.html`<br>`log.html` | 页面架构与运维职责划分 | **极高**：解耦静态模型拓扑与实时运行大盘；使 `/log.html` 回归纯终端日志流，让 2s 轮询物尽其用。 |
+| **P0-7** | **`/status.html` 整体布局重构（删除 Rail、7 大 Section 顺排、Usage 左右分栏改横向通栏）** | `status.html`<br>`console.css` | 页面排版结构与信息流优化 | **高**：释放 40px 顶部垂直空间，信息流层次分明，通栏设计为新增关键指标提供从容空间。 |
+| **P0-8** | **Usage 双表扩充 "Tok OUT/s" 吞吐率列（基于现存 DurMS/TTFTMS 聚合真实生成速度）** | `status.html` (Usage) | 性能指标呈现扩展 | **高**：无需后端改造，直接将现存耗时与输出 Token 转换为宏观窗口平均吐字速度。 |
 
 ---
 
@@ -529,6 +537,113 @@ Performance 表格、Usage by Provider 表格、Usage by Caller 表格中，输�
 
 ---
 
+### 6.5 深度剖析 5：Usage 表中错误请求归属丢失 Bug（Provider/Model 置空导致 Error 全入 “-” 行）
+
+#### 1. 问题描述
+在 `Usage by Provider & Model` 表格中，所有有明确 Provider 和 Model 的行，其 `Req ok / err` 列的 Error 数值**全都是 0**；但在表格底部却单独出现了一行 Provider Model 为 `"—"` 的记录，Req 显示为类似 `0 / 10`。所有上游错误未被记入具体模型，而是全部被推给了一个匿名的短横线行。
+
+#### 2. 根因分析
+- 核心漏洞位于 `internal/server/stats.go` 的 `sampleFromRecord(rec)` 函数：
+  代码在提取 Provider 和 Model 时，仅当 `att.IsForwarded()` 为 true 时才会执行 `win = i; s.Provider = att.Provider; s.Model = att.Model`。
+- 但是，根据 `internal/audit/forwarded.go` 的设计，`IsForwarded()` 仅在请求成功且响应实际写回客户端时才会被标记（`SetForwarded()` 的唯一调用方是 `router.forwardSuccess`）。
+- 一旦请求彻底失败（`outcome == "error"`），没有任何一个 Attempt 会被标记为 Forwarded！这导致 `win` 永远为 `-1`，`s.Provider` 和 `s.Model` 永远保持默认空字符串 `""`！
+- 这些带有空标识的失败 Sample 写入聚合账本后，在前端 `status.html` 中被合并进 `d.provider || '—'`，从而产生了所有错误全被“吞”进 `"—"` 这一行、而具体模型永远“零错误”的严重失真现象。
+
+#### 3. 建议解决方案
+1. **分流修复归因逻辑（`internal/server/stats.go: sampleFromRecord`）**：
+   - 当 `win < 0`（未成功转发）但 `len(rec.Attempts) > 0`（实际向上游发起过尝试）时：
+     说明该请求经历了上游报错或超时淘汰，应该**将终端尝试（Terminal Attempt，即 `rec.Attempts[len-1]`）的 `Provider`、`Model`、`KeyLabel` 赋给 `s`**！与后文提取 `s.ErrorClass` 和 `s.Status` 使用 `final` 的逻辑保持一致。
+     这样，因某上游端点报错导致的请求失败，就会准确归属于该上游模型，真实反映各模型的故障率。
+   - 当 `len(rec.Attempts) == 0` 时：
+     说明是网关前置拦截（如客户端鉴权 401、请求体非法 400、所有端点冷却导致的 `no_candidate`），此时确实无上游端点，`s.Provider` 保持为空。
+2. **前端渲染优化（`status.html`）**：
+   - 对于空 Provider 行，前端不再仅渲染单一破折号 `"—"`，而是渲染为具有明确物理含义的标签：
+     `<span class="ep t-dim" title="Requests failed before routing (client error, auth, or no available candidates)">(gateway / unrouted)</span>`。
+
+---
+
+### 6.6 深度剖析 6：控制台页面职责拆解与全局导航统一
+
+#### 1. 问题描述
+目前 `/status.html` 既承载着静态/半静态的拓扑与配额（Quota Budgets, Virtual Models & Endpoint Topology），又承载着高动态的运行时流量、性能与用量大盘；而实时在途的 `Live Requests` 与 `Recent Failures` 反而被割裂放置在 `/log.html` 页面。这导致：
+1. Overview 页面过长，运维打开页面后被庞大的静态拓扑挤压，无法快速查看核心业务运行态；
+2. `/log.html` 承载了实时请求表格，失去了纯粹终端日志流的定位；
+3. 全站导航栏仅有 3 项（`Overview / Live & Log / Help`），缺少对模型资产的管理入口。
+
+#### 2. 根因分析
+- 控制台在早期单页设计时将所有功能塞入 Overview，后期为了给日志流补充上下文，临时将 Live Requests 搬到了 `log.html`；
+- 这破坏了“大盘总览（Overview）”与“日志终端（Logs）”的职责边界，并导致 `status.html` 内部残留了无用空转的 2s 轮询逻辑。
+
+#### 3. 建议解决方案
+1. **新建 `/models.html` 页面**：
+   - 将原本在 `/status.html` 中的 “Quota Budgets” 与 “Virtual Models & Endpoint Topology” 两个 section 完整迁移至 `/models.html`；
+   - 后端在 `internal/server/server.go` 中挂载 `GET /models.html`，复用现有的 `GET /status` 与 `GET /stats` API，无额外后端数据开发成本。
+2. **实时组件回迁至 `/status.html`**：
+   - 将 `Live Requests` 与 `Recent Failures` 移回 `/status.html`；
+   - `/status.html` 的自适应轮询器（`armLivePoll`：有在途请求时 2s 轮询，闲时 15s 轮询）正式接管 Live Requests 渲染，彻底消除空转；
+   - `/log.html` 移除实时请求组件，恢复为纯粹的全屏实时日志流与终端（Terminal）。
+3. **全站单点统一导航栏（`internal/server/assets/console.js`）**：
+   - 在 `mountConsole()` 中统一配置 4 大导航入口：
+     - **Overview** $\rightarrow$ `/status.html`
+     - **Models** $\rightarrow$ `/models.html`
+     - **Log** $\rightarrow$ `/log.html`（原 `Live & Log` 改为 `Log`）
+     - **Help** $\rightarrow$ `/help.html`
+
+---
+
+### 6.7 深度剖析 7：Overview 单页布局重构（删除 Rail、7 大 Section 顺排、Usage 横向通栏）
+
+#### 1. 问题描述
+- 导航栏下方存在 5 个锚点的二级快捷链接栏（Rail，占高 40px），在 Quota 和 Models 剥离后，单页内已无长页面锚点跳转需求，白白浪费首屏可视高度；
+- `Usage by Provider & Model` 与 `Usage by Client` 当前使用左右 50% 栅格（`grid-2`）分栏，横向宽度仅约 600px，排版极为拥挤局促，无法承载更多的性能指标。
+
+#### 2. 根因分析
+- 二级 Rail 在页面精简后属于冗余导航结构；
+- 左右分栏假定两个表格行数接近且指标精简，但实际运行中上游模型可能有十几行，而客户端可能仅两三行，且左右分栏严重压缩了数据列的延展空间。
+
+#### 3. 建议解决方案
+1. **删除快捷链接栏 Rail**：
+   - `status.html` 调用 `mountConsole({ active: 'overview', rail: [] })`；
+   - `console.js` 适配空 rail 情况，不渲染 `.hd-rail` DOM 节点，将顶部吸顶预留高度从 88px 收缩为 48px，瞬间释放 40px 的宝贵垂直显示空间。
+2. **规范 7 大 Section 顺排**：
+   严格按照如下运维心理动线自上而下顺排：
+   1. `[Hero Panel, with sys info]`（核心 Vitals 卡片与系统底栏）
+   2. `[Live Requests]`（当前正在执行的在途请求）
+   3. `[Performance by Provider & Model]`（各模型微观窗口耗时与吞吐性能）
+   4. `[Traffic Stats]`（宏观时间窗口时序混合图表）
+   5. `[Usage by Provider & Model]`（横向 100% 通栏表格）
+   6. `[Usage by Client]`（横向 100% 通栏表格，原 Usage by Caller）
+   7. `[Recent Failures]`（最近异常折叠面板）
+3. **Usage 表格改为横向通栏**：
+   - 拆解 `<div class="grid-2">`，两个表格均采用 100% 通栏宽度（1280px），为后续增加吞吐率、命中率明细提供充裕的视觉空间。
+
+---
+
+### 6.8 深度剖析 8：Usage 双表扩充 "Tok OUT/s" 列（宏观窗口吞吐率聚合）
+
+#### 1. 问题描述
+在 `Usage by Provider & Model` 和 `Usage by Client` 两个表格中，仅有总量数据（请求数、Token 数、Share），无法获知在过去 24 小时或 7 天里，各个模型在大规模真实流量下的**宏观平均吐字速度**，也无法排查哪个客户端侧整体感受到的生成速度最慢。
+
+#### 2. 根因分析
+- 前端编写时仅累加了 `tokens` 计数，忽略了小时账本中已经具备的耗时字段；
+- 实际上，后端 `HourlyRow.Counters` 在设计之初就已经完整记录了 `DurMS`（总耗时）和 `TTFTMS`（首包延迟），底层数据源完备且原生支持。
+
+#### 3. 建议解决方案
+1. **聚合算法（前端 `status.html: renderUsage`）**：
+   - 在前端根据选定窗口（24h / 3d / 7d）遍历 `hourlyRows` 时，累加每个 Provider:Model 或 Client 的指标：
+     `totalOut += c.tokens.out`，`totalDurMS += c.dur_ms.sum`，`totalTtftMS += c.ttft_ms.sum`；
+   - 计算净生成有效时长（剔除首字 prefill 耗时）：
+     $$\text{SpanMS} = \text{totalDurMS} - \text{totalTtftMS}$$
+     若为非流式或无 TTFT 记录，则保底使用 $\text{totalDurMS}$；
+   - 计算加权平均生成吞吐率：
+     $$\text{Tok OUT/s} = \frac{\text{totalOut}}{(\text{SpanMS} / 1000)}$$
+2. **表格列定义与渲染**：
+   - 在两个通栏表格中插入新列 `Tok OUT/s`（位于 `Tok out` 与 `Tok Share` 之间）；
+   - 使用已有的 `fmtRate(rate)` 渲染（例如 `45.2` tok/s）；当没有输出 Token 或耗时为 0 时安全回退至灰色 `—`；
+   - 表头 Tooltip 标明：`Average generation throughput over the selected window: tokens.out / (dur_ms - ttft_ms)`。
+
+---
+
 ## 7. 总结与后续落地指引 (Executive Summary & Next Steps)
 
 ### 7.1 总结陈词
@@ -536,18 +651,20 @@ Performance 表格、Usage by Provider 表格、Usage by Caller 表格中，输�
 
 **核心结论如下**：
 1. **系统底层架构扎实**：基于内存环形缓冲区（Ring Buffer）和轻量 WAL+Rollup 的两级 Ledger 架构性能极佳，数据采集全面，实时性与耐久性兼顾；
-2. **呈现逻辑存在明显的技术视角偏差**：
-   - 存在如用户指出的两个典型问题：**速率 P90 分位数方向倒置** 以及 **Token 呈现 `in+cw / cr` 反人类心算**；
-   - 存在 **Headroom 文案因果倒置**、**P0 优先级样式 Bug**、**Vitals 8 天伪全量总计** 等若干低成本但高影响的体验缺陷。
-3. **改造价值极高**：通过本次梳理出的 P0 梯队改造项，仅需极少量的代码修正（主要是公式方向、前端模板拼接与文案更正），无需触动数据库结构或底层通信协议，即可在极低风险下实现监控体验与专业度的质的飞跃。
+2. **呈现逻辑存在明显的技术视角偏差与重大归因漏洞**：
+   - 存在如用户指出的典型问题：**速率 P90 分位数方向倒置** 以及 **Token 呈现 `in+cw / cr` 反人类心算**；
+   - 挖掘出重大后端归因 Bug：**失败请求因非 Forwarded 导致 Provider/Model 被置空，造成模型 Error 统计全为 0，所有错误沦落至 “-” 匿名行**；
+   - 梳理出控制台页面职能切分与布局架构重组方案：通过**新建 `/models.html`、回迁 Live 组件、删除 Rail、双表通栏并扩充 `Tok OUT/s`**，实现控制台体验质的跃升。
+3. **改造价值极高且风险可控**：上述 P0 梯队重构项边界极度清晰，不需要变动底层数据存储协议，仅需少量 Go 映射修正与前端页面模板重组即可落地。
 
 ### 7.2 后续落地建议路线图
 1. **批次 1（立即可做，P0 梯队）**：
-   - 修正 `ring.go` 中吞吐率的分位数取值逻辑（改用 P10 代表长尾卡顿下限，或提供区间）；
-   - 在 `toksOf` 中增加极小耗时防御过滤，剔除单点脉冲畸变；
-   - 将 Performance 表格与 Usage 表格的 `Tok in+cw / cr` 统一升级为 `Tok in (hit %)`；
-   - 修正 Headroom 说明文案及 P0 优先级样式；
-   - 清理 Overview 页面无用残留的 2s 轮询与空置变量。
+   - **后端修正**：修复 `sampleFromRecord` 中失败请求的终端 Attempt Provider/Model 归属，彻底解决 Error 漏计与 “-” 匿名行问题；
+   - **分位数修正**：修正 `ring.go` 中吞吐率的分位数取值逻辑（改用 P10 代表长尾卡顿下限，或提供区间），在 `toksOf` 中增加极小耗时防御过滤；
+   - **页面拆分与导航统一**：新建 `/models.html` 承载配额与拓扑，将 Live Requests / Recent Failures 移回 `/status.html`，并在 `console.js` 中统一 4 大导航入口；
+   - **Overview 布局重构**：移除 Rail 快捷栏（吸顶收缩至 48px），按 7 大 Section 重排，Usage 双表改为横向通栏；
+   - **指标升级**：全站表格统一重构为 `Tok in (hit %)`，并在两个通栏 Usage 表格中利用现存耗时数据计算并新增 `Tok OUT/s` 列；
+   - **细节修正**：修正 Headroom 顶部说明文案、补齐 Virtual Models 的 P0 优先级专属高亮样式。
 2. **批次 2（近期规划，P1 梯队）**：
    - 将 Vitals Strip 的 `... total` 优化为 `... / 3.01K (7d total)`；
    - 将模型能力与上下文容量拆分为结构化徽章排版；
