@@ -473,7 +473,7 @@
 - **行为检测已成体系**：13 种行为 finding 码（`exact_repeat_tool_call`、`semantic_oscillation`、
   `error_retry_unadapted`、`goal_drift`、`plan_execution_misalignment` 等）+ benchmarks 群体检出率 +
   工具序列 N-gram 挖掘（含序列尾步错误率）。
-- **规模**：~124K 行 Go，版本 v0.6.4+（Unreleased）。仍为单二进制、零外部数据库；分析半区离线只读审计日志。
+- **规模**：~124K 行 Go，版本 v0.7.0。仍为单二进制、零外部数据库；分析半区离线只读审计日志。
 
 ### 11.1 能力对照矩阵（按当前代码逐项重核）
 
