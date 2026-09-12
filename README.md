@@ -1,11 +1,11 @@
-<!-- Ver 2026-08-06 10:30, by Gemini 3.6 Flash -->
+<!-- Ver 2026-09-12 18:00, by pi -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative, flight recorder, agent audit, request replay -->
 
 # vmr — Zero-Instrumentation Router & Flight Recorder for AI Agents
 
 **vmr** is a single-binary router and flight recorder for AI agents that run unattended. One stable virtual model name (`coding`, `claude`, `agent`) hides every provider, key, and failover rule behind it — point any OpenAI/Anthropic-compatible client's `base_url` at vmr and you're done, **zero SDK modifications or code instrumentation required**.
 
-That same byte-faithfulness — no protocol translation, ever — is what makes the recording trustworthy: nothing vmr logs is something vmr itself rewrote first. Every request becomes a `details/` audit entry, an agent execution narrative (`vmr analyze -journey`), a cross-run divergence diff (`vmr analyze -compare id1,id2`), or an exact 1-click replay (`vmr replay`). When a 3 AM failover or a silent content-block happens, you find out from the log afterward, not from a dead session you have to explain to yourself the next morning.
+That same byte-faithfulness — no protocol translation, ever — is what makes the recording trustworthy: nothing vmr logs is something vmr itself rewrote first. Every request becomes a `requests/details/` audit entry, an agent execution narrative (`vmr analyze -journey`), a cross-run divergence diff (`vmr analyze -compare id1,id2`), a structural diff (`vmr diff`), or an exact 1-click replay (`vmr replay`). When a 3 AM failover or a silent content-block happens, you find out from the log afterward, not from a dead session you have to explain to yourself the next morning.
 
 English | [简体中文](README.zh.md)
 
@@ -23,7 +23,7 @@ English | [简体中文](README.zh.md)
 
 ## See It in Action
 
-### 1. In-Flight Failover Evidence (`details/*.md`)
+### 1. In-Flight Failover Evidence (`requests/details/r-*.md`)
 Real output from the checked-in [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) — run `./vmr analyze -details -o /tmp/out examples/sample-audit.jsonl` and compare. The primary endpoint silently content-blocks the request; vmr retries the same payload on the backup endpoint, so the client only sees a 200 OK:
 
 ```
@@ -63,16 +63,17 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **Zero Instrumentation**: Drop-in proxy via `base_url` — zero code changes or SDK tracing required. Native OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and OpenAI Responses (`/v1/responses`) ingress.
 - **Error-Class Aware Failover**: Smartly retries across backup endpoints for rate-limits, dead keys, or content blocks; background probes handle endpoint recovery without blocking live traffic.
 - **Session-Sticky Prompt Cache Protection**: Pins multi-turn agent conversations to warm upstream prompt caches, preventing routing from inflating token costs.
-- **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes vendor quirk repairs (MiniMax `<think>` stripping, soft-block empty 200 OK detection).
-- **Measured, Not Assumed**: Load-tested to 150 req/s — p95 stays under 10ms for every non-image scenario; the only real per-request cost is optional image downscaling. See [`loadtest/`](loadtest/).
+- **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes evidence-based vendor quirk repairs (MiniMax `<think>` stripping) and audit norm tracking (`soft_block_detected`).
+- **Measured, Not Assumed**: Comprehensive load testing across 17 scenarios (plain, stream, and image regimes, stressing sustained SSE concurrency, quota pacing, and sticky session affinity) with p95 router overhead remaining under 10ms. See [`loadtest/`](loadtest/).
+- **Live Observability**: Zero-dependency live telemetry (`internal/livestats`) with hourly slim WAL, local rollup archives, nearest-rank TTFT and token generation throughput percentiles (p50/p10), and unified built-in CSR console (`/status.html`, `/models.html`, `/log.html`, `/help.html`).
 
 ### Pillar B: Post-Flight Audit, Journeys & Forensic Replay
-- **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency.
-- **1-Click Request Replay (`vmr replay`)**: Re-issue any failed request using exact historical byte payloads to reproduce bugs instantly.
-- **Unified Analysis Entry Point (`vmr analyze`)**: One command, one output directory — the full navigable suite (aggregate report + task journeys) from a single call by default, or `-journey`/`-compare`/`-benchmark` to zoom into exactly one view.
-- **Aggregate Report (`vmr analyze`)**: Groups raw HTTP calls into sessions -> tasks -> turns, marks newly-added context (`🆕`), and flags declared-but-never-called tool schemas.
-- **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a step-by-step narrative — what context went in, what the model did with it, where a compaction event silently dropped information.
-- **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diffs core behavior metrics across runs or agent frameworks, automatically pinpointing exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
+- **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency without HTML escaping.
+- **1-Click Request Replay (`vmr replay`) & Structural Comparison (`vmr diff`)**: Re-issue any historical request using exact raw payloads to reproduce bugs, or diff any two request coordinates across headers, system prompts, tools, and message LCP.
+- **Unified Analysis Suite (`vmr analyze`)**: One command, domain slices (`macro/*.json`), and a verified `manifest.json`. Renders complete Markdown reports, web dashboard skeleton pages, and supports fast `-render-only` re-generation and `-no-cache` bypass.
+- **Aggregate Report**: Groups raw HTTP calls into sessions -> tasks -> turns, tracks newly-added context (`🆕`), flags declared-but-never-called tool schemas, and models pay-as-you-go equivalent costs.
+- **Agent Task Narrative (`vmr analyze -journey <id>`)**: Reconstructs one task's full execution into a step-by-step narrative with prompt cache break attribution, touched workspace artifacts tracking, and compaction loss detection.
+- **Behavioral Profiling & Divergence Detection (`vmr analyze -compare id1,id2`)**: Diffs core behavior metrics across runs or agent frameworks, clusters repeated task runs, and pinpoints exact Step-level divergence points with optional LLM cause hypotheses (`-llm-addr`).
 
 ## Quick Start
 
@@ -145,10 +146,14 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","input":"hi"}'
 
-# Status & Health (JSON & Web Dashboard)
+# Status & Health (JSON & Web Console)
 curl http://127.0.0.1:8800/status
-# Or open http://127.0.0.1:8800/status.html in your browser
-# Live console log (tail -f in the browser): http://127.0.0.1:8800/log.html
+curl http://127.0.0.1:8800/stats
+# Unified Built-in Console (Overview, Models, Live Terminal Log & Agent Guides):
+# - Overview: http://127.0.0.1:8800/status.html
+# - Models & Quotas: http://127.0.0.1:8800/models.html
+# - Live Terminal Log: http://127.0.0.1:8800/log.html
+# - Agent Configuration Guide: http://127.0.0.1:8800/help.html
 ```
 </details>
 
@@ -174,7 +179,7 @@ Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 ## Learn More
 
 - **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr analyze`, complete CLI reference.
-- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Journeys](docs/VirtualModelRouter_Design_v4_Analytics.md), plus two topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md) and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
+- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Journeys](docs/VirtualModelRouter_Design_v4_Analytics.md), plus three topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md), [Live Stats & Telemetry](docs/VirtualModelRouter_Design_v4_LiveStats.md), and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
 
 ## Development
 

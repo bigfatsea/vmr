@@ -1,11 +1,12 @@
-<!-- Ver 2026-08-15 14:30, by gemini-3.7-flash -->
+<!-- Ver 2026-09-12 18:00, by pi -->
 
 # Virtual Model Router (vmr) — 设计方案 · 战略定位与竞品分析
 
-**这是 v4 版设计文档里唯一回答"为什么做"的一篇**，其余三篇都回答"怎么做"：
+**这是 v4 版设计文档里唯一回答"为什么做"的一篇**，其余四篇都回答"怎么做"：
 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1，路由核心）、
 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2，分析半区）、
-`docs/VirtualModelRouter_Design_v4_Quota.md`（额度感知路由专篇，下称"额度设计文档"）。
+`docs/VirtualModelRouter_Design_v4_Quota.md`（额度感知路由专篇，下称"额度设计文档"）、
+`docs/VirtualModelRouter_Design_v4_LiveStats.md`（实时请求统计与统一控制台专篇）。
 本文只记战略层面的判断与竞品坐标，**不复述任何算法细节**——算法仍在演进，
 复述一份会立刻过期的副本没有意义。
 
@@ -17,8 +18,8 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 
 * **目标用户画像**：**100 人以内的中小型 AI 研发团队、AI 创业项目与重度 Agent 架构师**。此类团队采购了多家厂商的 Token-Plan / Coding-Plan 以降低成本，急需在不修改代码的前提下实现多订阅聚合、防锁死、防 Prefix-Cache 失效，同时具备轻量级、无 DB 依赖的 Agent 执行诊断能力。
 * **双核一体两面架构**：
-  1. **In-Flight Passthrough Router**：极轻量代理层，支持 OpenAI / Anthropic / OpenAI Responses 协议双向原样透传。支持基于 Session Affinity 的 Prefix-Cache 保护、错误类型感知的 Failover、以及基于本地消耗累计的 Token-Plan 额度平衡调度。实测在 150 req/s 下，除图片降采样外的每个场景 p95 路由开销都低于 10ms（压测脚手架见仓库 `loadtest/`）。
-  2. **Post-Flight Agent Forensics**：基于两层忠实 Raw Byte Audit Log，提供零埋点的 Agent 执行叙事还原（`vmr analyze`）、跨 Run 行为差异对比（`vmr analyze -compare`）与一键二进制重放（`vmr replay`）。
+  1. **In-Flight Passthrough Router**：极轻量代理层，支持 OpenAI / Anthropic / OpenAI Responses 协议双向原样透传。支持基于 Session Affinity 的 Prefix-Cache 保护、错误类型感知的 Failover、以及基于本地消耗累计的 Token-Plan 额度平衡调度。经 17 种场景（包含流式、配额与粘性会话）全面压测标定，除图片降采样外的每个非图像场景 p95 路由开销都低于 10ms（压测脚手架见仓库 `loadtest/`）。
+  2. **Post-Flight Agent Forensics**：基于两层忠实 Raw Byte Audit Log，提供零埋点的 Agent 执行叙事还原（`vmr analyze`）、跨 Run 行为差异对比（`vmr analyze -compare`）、单请求结构比对（`vmr diff`）与一键二进制重放（`vmr replay`）。
   3. **模块间松耦合**：路由与诊断分析模块在逻辑和运行态完全独立，仅以标准 JSONL/zstd 格式的 Audit Log 作为唯一数据契约。
 
 ---
@@ -75,7 +76,7 @@ VMR (Virtual Model Router) 是一款专为 AI Agent 研发设计的单二进制�
 
 VMR 采用"本地 Response 消耗累计 + 双层会话黏性路由"策略，但**这不是一个负载均衡问题**——把流量喂给账号 A 就是不喂给账号 B，而套餐额度周期性作废、不结转，所以要优化的是"在每个套餐各自到期前恰好烧完"，不是"把压力摊匀"。这个区分是整套算法的立论前提：直觉上最自然的"剩余额度比例"公式，在套餐重置日彼此错开（多账号是分批买的，重置日对齐是例外不是常态）时会给出方向性错误的结论——一个 4 天后到期、还剩 30% 额度的账号最该被优先烧掉，纯按剩余比例排反而会把它排到最后。完整推导与算法见额度设计文档，本节只记路由框架层面的策略性决定，不复述其算法细节——算法本身仍在演进，复述一份会立刻过期的公式副本没有意义。
 
-本节的核心算法（headroom 比值、贪心分配）覆盖的是 2.1 第 4 点中"月度/日度 Token 总量桶"这一类套餐；"滚动时间窗口限流"类套餐（如 Claude Code Max/Pro）不适用同一套配速模型——多 Limit 并存与桶/闸角色判定已交付，能用短 tumbling 窗口近似大多数速率闸场景，但真正的严格滚动窗口（Ring 平滑）仍未交付，继续由现有健康状态机的冷却/退避兜底，详见额度设计文档"现状与后续计划"一节。
+本节的核心算法（Headroom 比值、贪心分配）覆盖的是 2.1 第 4 点中"月度/日度 Token 总量桶"这一类套餐；"滚动时间窗口限流"类套餐通过多 Limit 并存的桶/闸模型进行短 tumbling 窗口近似，速率受限时由健康状态机的冷却与退避兜底。
 
 ### 4.1 本地 Response Token 累计：为什么不等厂商开放配额 API
 

@@ -1,11 +1,11 @@
-<!-- Ver 2026-08-06 10:30, by Gemini 3.6 Flash -->
+<!-- Ver 2026-09-12 18:00, by pi -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代, 黑匣子, 审计重放, 行为剖面 -->
 
 # vmr — 无侵入透明路由器与 AI Agent 全生命周期黑匣子
 
 **vmr** 是一个单二进制的、给无人值守 Agent 用的透明路由器与黑匣子。一个稳定的虚拟模型名字（`coding`、`claude`、`agent`）把供应商、Key、故障切换规则全部藏在身后——把任意 OpenAI/Anthropic 兼容客户端的 `base_url` 指向 vmr 即可，**无需任何 SDK 修改或代码埋点**。
 
-正是这份字节级透传——从不做协议翻译——让这份记录真正可信：vmr 记下来的，从来不是它自己先改写过的东西。每一条请求都会落成一条 `details/` 审计记录、一段 Agent 执行叙事（`vmr analyze -journey`）、一份跨运行行为剖面对比（`vmr analyze -compare id1,id2`），或一次精确的 1-Click 重放（`vmr replay`）。凌晨三点发生的一次故障切换、一次悄无声息的内容拦截，事后你是从日志里看到的，而不是面对一个已经死掉的会话，第二天早上自己都解释不清发生了什么。
+正是这份字节级透传——从不做协议翻译——让这份记录真正可信：vmr 记下来的，从来不是它自己先改写过的东西。每一条请求都会落成一条 `requests/details/` 审计记录、一段 Agent 执行叙事（`vmr analyze -journey`）、一份跨运行行为剖面对比（`vmr analyze -compare id1,id2`）、一次结构差异比对（`vmr diff`），或一次精确的 1-Click 重放（`vmr replay`）。凌晨三点发生的一次故障切换、一次悄无声息的内容拦截，事后你是从日志里看到的，而不是面对一个已经死掉的会话，第二天早上自己都解释不清发生了什么。
 
 [English](README.md) | 简体中文
 
@@ -23,7 +23,7 @@
 
 ## 现场视角
 
-### 1. 运行时 Failover 现场 (`details/*.md`)
+### 1. 运行时 Failover 现场 (`requests/details/r-*.md`)
 真实来自内置示例 [`examples/sample-audit.jsonl`](examples/sample-audit.jsonl) —— 自己跑一遍 `./vmr analyze -details -o /tmp/out examples/sample-audit.jsonl` 对比即可。主端点悄悄内容拦截了请求，vmr 把同一条 payload 换到备用端点重试，客户端从头到尾只看到一个正常的 200 OK：
 
 ```
@@ -63,16 +63,17 @@ Task 1: Search codebase and outline implementation
 - **零代码埋点接入**：只需修改 `base_url`，无需修改项目代码或 Tracing SDK。原生支持 OpenAI (`/v1/chat/completions`)、Anthropic (`/v1/messages`) 和 OpenAI Responses (`/v1/responses`) 三大协议入口。
 - **错误类感知 Failover**：智能区分限流、死 Key 与内容拦截；后台独立恢复探针，绝不用真实请求当探针，不拖累并发调用。
 - **Session-Sticky Prompt Cache 保护**：多轮对话自动钉在已预热的端点上，防止故障切换打断供应商 Prompt Cache 造成费用静默飙升。
-- **字节级透传**：零中介格式翻译、零参数改写，上游新特性上线当天可用；包含 MiniMax `<think>` 剥离与软屏蔽空响应等隐式防御。
-- **实测过，不是拍脑袋**：压测到 150 req/s，非图片场景 p95 稳定在 10ms 以内；唯一真实开销是可选的图片降采样。见 [`loadtest/`](loadtest/)。
+- **字节级透传**：零中介格式翻译、零参数改写，上游新特性上线当天可用；包含 MiniMax `<think>` 剥离与软屏蔽审计追踪（`soft_block_detected`）。
+- **实测过，不是拍脑袋**：覆盖 17 种场景（包含持续慢流并发、配额水位调度、会话粘性以及按 plain / stream / image 独立成本标定），非图片场景 p95 路由开销稳定在 10ms 以内。见 [`loadtest/`](loadtest/)。
+- **实时可观测性**：零内部依赖的轻量级实时指标账本（`internal/livestats`，小时 WAL + 本地 Rollup 归档），TTFT 与产出型 Token 生成速率百分位（p50/p10），以及统一内置控制台（`/status.html`, `/models.html`, `/log.html`, `/help.html`）。
 
 ### 柱石 B：运行后审计、叙事与重放
-- **两层真实字节记录**：无伪造记录客户端↔VMR、VMR↔上游双层原始字节。
-- **1-Click 故障重试 (`vmr replay`)**：基于历史日志字节，1-Click 无损重发快速复现线上故障。
-- **统一分析入口 (`vmr analyze`)**：一条命令、一个输出目录——默认一次调用产出完整可导航套件（聚合报表 + 任务 journey），或用 `-journey`/`-compare`/`-benchmark` 只变焦进某一个视图。
-- **聚合统计报告 (`vmr analyze`)**：自动归组为会话 → 任务 → 轮次，标注增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费。
-- **Agent 任务叙事 (`vmr analyze -journey <id>`)**：把单个任务的完整执行过程还原成逐 Step 的故事——进了什么上下文、模型拿它做了什么、哪一次压缩事件悄悄丢了信息。
-- **行为剖面与分叉点对比 (`vmr analyze -compare id1,id2`)**：自动对比核心行为指标，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
+- **两层真实字节记录**：无伪造记录客户端↔VMR、VMR↔上游双层原始字节，落盘不进行 HTML 转义。
+- **1-Click 故障重放 (`vmr replay`) 与结构对比 (`vmr diff`)**：基于历史日志字节无损重发复现线上故障，或对任意两条请求坐标进行 Header / Prompt / Tools / 消息 LCP 结构差异分析。
+- **领域切片分析套件 (`vmr analyze`)**：基于领域切片（`macro/*.json`）与校验签章 `manifest.json`。一键生成完整 Markdown 报告与静态看板骨架页，支持快速从磁盘重绘（`-render-only`）与强制旁路缓存（`-no-cache`）。
+- **聚合统计报告**：自动归组为会话 → 任务 → 轮次，标注上下文增量 (`🆕`)，揭示声明了却从未被调用的 Tool Schema 浪费，建模按量等价成本。
+- **Agent 任务叙事 (`vmr analyze -journey <id>`)**：还原逐 Step 的任务执行故事，支持提示词缓存击穿结构归因（Cache Break Attribution）、触碰工件（Touched Artifacts）追踪与压缩信息丢失检测。
+- **行为剖面与分叉点对比 (`vmr analyze -compare id1,id2`)**：自动对比核心行为指标，对重复任务进行聚类分析，定位步级分叉点 (Divergence Point)，可选挂载 `-llm-addr` 生成归因因果链。
 
 ## 快速开始
 
@@ -145,10 +146,14 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-vmr-local-xxx" \
   -d '{"model":"coding","input":"hi"}'
 
-# 探针与健康状态 (JSON 与 Web 可视化看板)
+# 探针与实时遥测 (JSON 与 Web 可视化控制台)
 curl http://127.0.0.1:8800/status
-# 或在浏览器中打开 http://127.0.0.1:8800/status.html 访问可视化看板
-# 实时控制台日志（浏览器版 tail -f）：http://127.0.0.1:8800/log.html
+curl http://127.0.0.1:8800/stats
+# 统一内置控制台（概览、模型拓扑、实时日志与配置向导）：
+# - 概览大屏 (Overview): http://127.0.0.1:8800/status.html
+# - 模型与配额 (Models): http://127.0.0.1:8800/models.html
+# - 实时终端日志 (Log): http://127.0.0.1:8800/log.html
+# - Agent 配置向导 (Help): http://127.0.0.1:8800/help.html
 ```
 </details>
 
@@ -174,7 +179,7 @@ curl http://127.0.0.1:8800/status
 ## 延伸阅读
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr analyze`、完整 CLI 参考。
-- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Journey](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加两篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
+- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Journey](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加三篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[实时指标与控制台](docs/VirtualModelRouter_Design_v4_LiveStats.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
 
 ## 开发
 

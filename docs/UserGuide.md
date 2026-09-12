@@ -25,6 +25,9 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Condition-based routing](#condition-based-routing)
   - [Sticky Model (session affinity)](#sticky-model-session-affinity)
   - [Quota-Aware Routing](#quota-aware-routing)
+- [Built-in console and live telemetry](#built-in-console-and-live-telemetry)
+  - [The four console pages](#the-four-console-pages)
+  - [Live telemetry API (GET /stats)](#live-telemetry-api-get-stats)
 - [Audit and reporting](#audit-and-reporting)
   - [The audit log](#the-audit-log)
   - [Usage and cost reports](#usage-and-cost-reports)
@@ -515,6 +518,25 @@ An alias resolves in exactly one hop — pointing one at another alias, or at a 
 `vmr analyze`'s $ estimates resolve these same two layers independently at report-generation time from whatever `config.yaml` is reachable via its `-c` flag (default `./config.yaml`) — no config.yaml in reach degrades gracefully to standard-list-price-only. See [Cost estimate and pricing](#cost-estimate-and-pricing) below for the display-currency option, independent of each account's `pricing.currency` write-in annotation above.
 
 Full design: `docs/VirtualModelRouter_Design_v4_Quota.md`.
+
+## Built-in console and live telemetry
+
+Beyond offline audit analysis, vmr runs a zero-dependency real-time telemetry engine (`internal/livestats`) and serves a unified built-in browser console (`//go:embed`, zero external CDN dependencies) directly from the running binary. All console pages share a single API key authentication modal and localStorage cache (`VMRAuth`).
+
+### The four console pages
+
+- **Overview (`GET /status.html`)**: The operational home. A top vitals strip (concurrency, requests, tokens, and endpoint health counts), the active **Live Requests** table, performance percentiles by Provider & Model (TTFT p50/p90 and output generation throughput `Tok OUT/s` p50/p10 with whole-row last-10/last-100 switching), an interactive traffic & usage section (pure-SVG combo chart with error markers and 24h/3d/7d range control, plus per-provider and per-caller usage tables), and a collapsible **Recent Failures** ring (up to 100 errors within 24h). Concurrency, Live Requests, and Recent Failures poll adaptively (~2s active, 15s idle, paused when the tab is hidden); the whole page refreshes every 5 minutes.
+- **Models (`GET /models.html`)**: The configuration and quota home. Displays Quota Budgets (configured amounts, usage progress, headroom ratio, 24h traffic share, and reset times) alongside the Virtual Models & Endpoint Topology table (priority tiers, provider:model endpoints, health status, headroom, and context-window/capability badges). Refreshes on the same 5-minute countdown clock without fast polling.
+- **Terminal Log (`GET /log.html`)**: A full-bleed, browser-based live terminal streaming the process's stdout/stderr log in real time (`GET /log`). Includes level filtering chips, substring search with match highlighting, ⌘P pause/resume, clipboard copy, and automatic smooth scroll handoff ("↓ N new" chip).
+- **Configuration Guide (`GET /help.html` and `GET /help.zh.html`)**: Interactive setup snippets for major agent frameworks (Claude Code, Codex, OpenClaw, OpenCode, Cursor, Hermes, Pi Agent, WorkBuddy) with copyable per-protocol Base URLs and dynamic model tables populated live from `/status`.
+
+### Live telemetry API (GET /stats)
+
+`GET /stats` provides an auth-gated JSON telemetry snapshot:
+- **Concurrency & in-flight**: active slots, waiting requests, and lock-free in-flight streaming milestones (`sent_at`, `first_byte_at`, `last_byte_at`, and `est_out`).
+- **Rollups**: hourly rollups (default 48h, configurable `?range=24h|3d|7d`) and daily local calendar-day rollups backed by a durable slim WAL (`vmr-stats-YYYYMMDD-HH.jsonl`, 0600) and append-only rollup archive (`vmr-stats-rollup.jsonl`).
+- **Performance rings**: per-provider nearest-rank TTFT percentiles (p50/p90) and output generation throughput `toks` (p50/p10, floored at a 50ms generation span to eliminate burst noise), plus a server-computed `overall` window block.
+- **Recent failures**: a circular ring of recent failed or canceled attempts (up to 100 within 24h) stamped with the router's authoritative `error_class`.
 
 ## Audit and reporting
 
