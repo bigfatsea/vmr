@@ -150,3 +150,55 @@ func nearestRankFloat(sorted []float64, p float64) float64 {
 	}
 	return sorted[idx-1]
 }
+
+// globalRing is a fixed-capacity circular buffer of the last globalRingCap
+// (300) completed ok+forwarded requests across all providers and models.
+type globalRing struct {
+	buf  [globalRingCap]RecentRequestEntry
+	next int
+	n    int
+}
+
+func (r *globalRing) add(e RecentRequestEntry) {
+	if r == nil {
+		return
+	}
+	r.buf[r.next] = e
+	r.next = (r.next + 1) % globalRingCap
+	if r.n < globalRingCap {
+		r.n++
+	}
+}
+
+// recent returns the most recent k entries, newest first; k <= 0 or beyond
+// fill level returns all available entries.
+func (r *globalRing) recent(k int) []RecentRequestEntry {
+	if r == nil || r.n == 0 {
+		return []RecentRequestEntry{}
+	}
+	if k <= 0 || k > r.n {
+		k = r.n
+	}
+	out := make([]RecentRequestEntry, k)
+	for i := 0; i < k; i++ {
+		idx := (r.next - 1 - i + globalRingCap) % globalRingCap
+		out[i] = r.buf[idx]
+	}
+	return out
+}
+
+func addGlobalRing(gr *globalRing, s Sample) {
+	if gr == nil || s.Outcome != OutcomeOK || !s.Forwarded || s.TTFTMS == 0 {
+		return
+	}
+	gr.add(RecentRequestEntry{
+		TS:       s.TS,
+		Provider: s.Provider,
+		KeyLabel: s.KeyLabel,
+		Model:    s.Model,
+		Stream:   s.Stream,
+		DurMS:    s.DurMS,
+		TTFTMS:   s.TTFTMS,
+		Tokens:   s.Tokens,
+	})
+}

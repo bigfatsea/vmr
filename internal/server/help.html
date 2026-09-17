@@ -416,7 +416,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
       <p>• <b>401 from every request</b> → the key in <code class="mono">Authorization: Bearer</code> must match an entry of <code class="mono">api_keys:</code>.</p>
       <p>• <b>Unknown model</b> → virtual models are per-protocol; check <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> for the protocol each name answers on.</p>
       <p>• <b>401s appearing mid-session</b> → vmr was reloaded with a changed <code class="mono">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
-      <p>• <b>A request feels slow or hangs</b> → open <a href="/status.html#live">Overview → Live Requests</a>: a red <i>stalled</i> badge means no upstream byte for over 10s; a long <i>queued</i> elapsed means the concurrency gate is full.</p>
+      <p>• <b>A request feels slow or hangs</b> → open <a href="/status.html#live">Overview → Live Requests</a>: a red <i>stalled</i> badge means no upstream byte for over 5s; a long <i>queued</i> elapsed means the concurrency gate is full.</p>
       <p>• <b>All requests suddenly fail over</b> → check <a href="/status.html#models">endpoint health</a> for cooldowns, and <a href="/status.html#quota">Quota Budgets</a> for a saturated gate.</p>
       <p>• <b>A request just failed and you want to know why</b> → <a href="/status.html#failures">Overview → Recent Failures</a> lists the last failures with the router's own error class; the class chips double as a filter when one class floods the buffer.</p>
     </div>

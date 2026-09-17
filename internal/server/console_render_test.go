@@ -397,6 +397,18 @@ func statsFixture(now time.Time) map[string]any {
 				"status": 503, "dur_ms": 1450,
 			},
 		},
+		"recent_requests": []map[string]any{
+			{
+				"ts":        now.Add(-1 * time.Minute).Format(time.RFC3339),
+				"provider":  "bai_free",
+				"key_label": "key_1",
+				"model":     "glm-5.3-flash",
+				"stream":    true,
+				"dur_ms":    1000,
+				"ttft_ms":   311,
+				"tokens":    counters["tokens"],
+			},
+		},
 		"by_provider_model": []map[string]any{
 			{
 				"provider": "bai_free", "key_label": "key_1", "model": "glm-5.3-flash",
@@ -506,6 +518,8 @@ func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
 	}
 
 	checks := []struct{ field, want string }{
+		{"modelsBody", "Anthropic Messages (/v1/messages)"},
+		{"modelsBody", `<span class="t-strong">agent</span>`},
 		{"modelsBody", "glm-5.3-flash"},
 		{"modelsBody", "512K"},
 		{"modelsBody", "text"},
@@ -515,6 +529,9 @@ func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
 		if !strings.Contains(res[c.field], c.want) {
 			t.Errorf("%s: missing %q\ngot: %s", c.field, c.want, res[c.field])
 		}
+	}
+	if strings.Contains(res["modelsBody"], "anthropic:") {
+		t.Errorf("modelsBody should not contain protocol prefix in virtual model cell, got: %s", res["modelsBody"])
 	}
 }
 

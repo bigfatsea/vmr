@@ -37,18 +37,7 @@
     <span class="badge b-dim" id="models-count-badge">0 models · 0 endpoints</span>
     <span class="count">share = this endpoint's share of requests for its virtual model in the last 24h</span>
   </div>
-  <div class="table-wrap">
-    <table class="c">
-      <thead><tr>
-        <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
-        <th>Provider : Model</th><th>Health</th>
-        <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
-        <th class="num" title="Requests this endpoint served over the last 24h, and their share of this virtual model's requests">Req 24h</th>
-        <th>Context / Capabilities</th>
-      </tr></thead>
-      <tbody id="models-body"></tbody>
-    </table>
-  </div>
+  <div id="models-body"></div>
 
 </main>
 
@@ -292,9 +281,23 @@ function renderQuota(quotaList, models, statsData) {
   }).join('');
 }
 
+function protocolTitle(proto) {
+  switch (proto) {
+  case 'openai-completions':
+    return 'OpenAI Chat Completions (/v1/chat/completions)';
+  case 'anthropic':
+  case 'anthropic-messages':
+    return 'Anthropic Messages (/v1/messages)';
+  case 'openai-responses':
+    return 'OpenAI Responses (/v1/responses)';
+  default:
+    return proto || 'Unknown Protocol';
+  }
+}
+
 // ============ Render Virtual Models & Endpoint Topology ============
 function renderModels(modelsList, statsData) {
-  const modelsBody = document.getElementById('models-body');
+  const container = document.getElementById('models-body');
   const modelsBadge = document.getElementById('models-count-badge');
   const list = modelsList || [];
 
@@ -323,94 +326,137 @@ function renderModels(modelsList, statsData) {
   });
 
   let totalEpCount = 0;
-  const mainRows = [];
-
+  const protoGroups = new Map();
   list.forEach(m => {
-    // Sort endpoints: main endpoints first (by priority), fallback endpoints at the bottom
-    const eps = (m.endpoints || []).slice().sort((a, b) => {
-      if (!!a.from_fallback !== !!b.from_fallback) {
-        return a.from_fallback ? 1 : -1;
-      }
-      return (a.priority || 0) - (b.priority || 0);
-    });
-
-    if (eps.length > 0) {
-      totalEpCount += eps.length;
-      eps.forEach((ep, idx) => {
-        mainRows.push({
-          model: m,
-          ep,
-          isFirst: idx === 0,
-          rowspan: eps.length,
-        });
-      });
-    }
+    const proto = m.protocol || 'other';
+    if (!protoGroups.has(proto)) protoGroups.set(proto, []);
+    protoGroups.get(proto).push(m);
+    totalEpCount += (m.endpoints || []).length;
   });
 
   modelsBadge.textContent = `${list.length} models · ${totalEpCount} endpoints`;
 
-  if (!mainRows.length) {
-    modelsBody.innerHTML = `<tr><td colspan="7" class="empty-cell">
+  if (!list.length) {
+    container.innerHTML = `<div class="table-wrap"><table class="c"><tbody><tr><td class="empty-cell">
       <div class="t-dim">No virtual models configured.</div>
       <div class="hint">Virtual models map incoming protocols and aliases to candidate endpoints.</div>
-    </td></tr>`;
+    </td></tr></tbody></table></div>`;
     return;
   }
 
-  modelsBody.innerHTML = mainRows.map(r => {
-    const m = r.model;
-    const ep = r.ep;
-    const nowMs = Date.now();
-    const hInfo = endpointHealthInfo(ep, nowMs);
+  const preferredOrder = ['openai-completions', 'anthropic-messages', 'anthropic', 'openai-responses'];
+  const allProtos = Array.from(protoGroups.keys()).sort((a, b) => {
+    const ia = preferredOrder.indexOf(a);
+    const ib = preferredOrder.indexOf(b);
+    if (ia !== -1 && ib !== -1) return ia - ib;
+    if (ia !== -1) return -1;
+    if (ib !== -1) return 1;
+    return a.localeCompare(b);
+  });
 
-    const vmKey = `${m.protocol}:${m.id}`;
-    const vmTotal = vmTotalReqs24h.get(vmKey) || 0;
-    const epCount = vmEpReqs24h.get(`${vmKey}\x00${ep.provider}\x00${ep.model}`) || 0;
-    const sharePct = vmTotal > 0 ? (epCount / vmTotal * 100) : 0;
-    const shareCell = vmTotal > 0
-      ? `${fmtInt(epCount)} · ${fmtPct(sharePct)}`
-      : '<span class="dim" title="No requests for this virtual model in the last 24h">—</span>';
+  const nowMs = Date.now();
+  let html = '';
 
-    const priCell = ep.from_fallback
-      ? '<span class="pri pri-fb" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
-      : `<span class="pri ${ep.priority === 0 ? 'pri-0' : (ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n'))}">P${ep.priority}</span>`;
+  for (const proto of allProtos) {
+    const protoModels = protoGroups.get(proto) || [];
+    let protoEps = 0;
+    const protoRows = [];
 
-    const fullTitle = `${ep.provider} : ${ep.model}`;
-    const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
+    protoModels.forEach(m => {
+      const eps = (m.endpoints || []).slice().sort((a, b) => {
+        if (!!a.from_fallback !== !!b.from_fallback) {
+          return a.from_fallback ? 1 : -1;
+        }
+        return (a.priority || 0) - (b.priority || 0);
+      });
 
-    // Per-endpoint facts — context window and capabilities are resolved per
-    // (provider, upstream model) against model_defaults, so endpoints under
-    // one virtual model can legitimately differ here. The context size (a
-    // capacity number) and capability tags (feature labels) get two
-    // different visual treatments instead of one slash-joined string.
-    const ctxSize = ep.max_context_tokens > 0
-      ? `<span class="badge b-dim tight">${fmtKMG(ep.max_context_tokens)}</span>`
-      : '';
-    const capsText = (ep.capabilities || []).map(c => esc(c)).join(' · ');
-    const ctxCell = (ctxSize || capsText)
-      ? `<span title="${esc(fullTitle)} context window / capabilities">${ctxSize}${ctxSize && capsText ? ' ' : ''}${capsText ? `<span class="dim">${capsText}</span>` : ''}</span>`
-      : '<span class="dim">—</span>';
+      if (eps.length > 0) {
+        protoEps += eps.length;
+        eps.forEach((ep, idx) => {
+          protoRows.push({
+            model: m,
+            ep,
+            isFirst: idx === 0,
+            rowspan: eps.length,
+          });
+        });
+      }
+    });
 
-    const hr = ep.headroom;
-    const hrCls = headroomClass(hr);
-    const hrTitle = headroomTitle(hr);
-    const hrVal = fmtHeadroom(hr);
+    const rowsHtml = protoRows.map(r => {
+      const m = r.model;
+      const ep = r.ep;
+      const hInfo = endpointHealthInfo(ep, nowMs);
 
-    let modelCell = '';
-    if (r.isFirst) {
-      modelCell = `<td rowspan="${r.rowspan}"><span class="dim">${esc(m.protocol)}:</span><br><span class="t-strong">${esc(m.id)}</span></td>`;
-    }
+      const vmKey = `${m.protocol}:${m.id}`;
+      const vmTotal = vmTotalReqs24h.get(vmKey) || 0;
+      const epCount = vmEpReqs24h.get(`${vmKey}\x00${ep.provider}\x00${ep.model}`) || 0;
+      const sharePct = vmTotal > 0 ? (epCount / vmTotal * 100) : 0;
+      const shareCell = vmTotal > 0
+        ? `${fmtInt(epCount)} · ${fmtPct(sharePct)}`
+        : '<span class="dim" title="No requests for this virtual model in the last 24h">—</span>';
 
-    return `<tr class="${r.isFirst ? 'grp' : ''}">
-      ${modelCell}
-      <td class="num">${priCell}</td>
-      <td>${epCell}</td>
-      <td>${hInfo.badge}</td>
-      <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
-      <td class="num">${shareCell}</td>
-      <td>${ctxCell}</td>
-    </tr>`;
-  }).join('');
+      const priCell = ep.from_fallback
+        ? '<span class="pri pri-fb" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
+        : `<span class="pri ${ep.priority === 0 ? 'pri-0' : (ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n'))}">P${ep.priority}</span>`;
+
+      const fullTitle = `${ep.provider} : ${ep.model}`;
+      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
+
+      // Per-endpoint facts — context window and capabilities are resolved per
+      // (provider, upstream model) against model_defaults, so endpoints under
+      // one virtual model can legitimately differ here. The context size (a
+      // capacity number) and capability tags (feature labels) get two
+      // different visual treatments instead of one slash-joined string.
+      const ctxSize = ep.max_context_tokens > 0
+        ? `<span class="badge b-dim tight">${fmtKMG(ep.max_context_tokens)}</span>`
+        : '';
+      const capsText = (ep.capabilities || []).map(c => esc(c)).join(' · ');
+      const ctxCell = (ctxSize || capsText)
+        ? `<span title="${esc(fullTitle)} context window / capabilities">${ctxSize}${ctxSize && capsText ? ' ' : ''}${capsText ? `<span class="dim">${capsText}</span>` : ''}</span>`
+        : '<span class="dim">—</span>';
+
+      const hr = ep.headroom;
+      const hrCls = headroomClass(hr);
+      const hrTitle = headroomTitle(hr);
+      const hrVal = fmtHeadroom(hr);
+
+      let modelCell = '';
+      if (r.isFirst) {
+        modelCell = `<td rowspan="${r.rowspan}"><span class="t-strong">${esc(m.id)}</span></td>`;
+      }
+
+      return `<tr class="${r.isFirst ? 'grp' : ''}">
+        ${modelCell}
+        <td class="num">${priCell}</td>
+        <td>${epCell}</td>
+        <td>${hInfo.badge}</td>
+        <td class="num ${hrCls} help" title="${hrTitle}">${hrVal}</td>
+        <td class="num">${shareCell}</td>
+        <td>${ctxCell}</td>
+      </tr>`;
+    }).join('');
+
+    html += `<div>
+      <div class="sub-head">${esc(protocolTitle(proto))}
+        <span class="count">${protoModels.length} models · ${protoEps} endpoints</span>
+      </div>
+      <div class="table-wrap">
+        <table class="c">
+          <thead><tr>
+            <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
+            <th>Provider : Model</th><th>Health</th>
+            <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
+            <th class="num" title="Requests this endpoint served over the last 24h, and their share of this virtual model's requests">Req 24h</th>
+            <th>Context / Capabilities</th>
+          </tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>`;
+  }
+
+  container.innerHTML = html;
 }
 
 // ============ Whole Page Refresh ============

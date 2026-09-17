@@ -88,10 +88,10 @@
       <thead><tr>
         <th>State</th>
         <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
-        <th>Model</th><th>Caller</th>
+        <th>Caller</th><th>Model</th>
         <th>Provider : Model</th>
-        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Att</th>
-        <th class="num" title="Time to the first response chunk from the upstream · age of the most recent chunk. A streaming request whose last chunk is over 10s old is flagged as stalled.">First / Last Byte</th>
+        <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Attempts</th>
+        <th class="num" title="Time to the first response chunk from the upstream. A streaming request whose last chunk is over 5s old is flagged as stalled.">TTFT</th>
         <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
         <th class="num" title="Output tokens counted so far from the response stream; a compressed response body cannot be counted and shows —">Tok out <span class="dim">est</span></th>
       </tr></thead>
@@ -106,7 +106,9 @@
     <span class="seg">
       <span class="seg-label">window</span>
       <button class="btn sm" data-basis="10">last 10</button>
+      <button class="btn sm" data-basis="30">last 30</button>
       <button class="btn sm on" data-basis="100">last 100</button>
+      <button class="btn sm" data-basis="300">last 300</button>
     </span>
   </div>
   <div class="table-wrap">
@@ -134,9 +136,9 @@
       <span><span class="line"></span>requests <span class="dim">(right axis)</span></span>
       <span><span class="xdot"></span>bucket with errors</span>
       <span class="spacer"></span>
-      <span><span class="dot fresh"></span>tok in · fresh</span>
-      <span><span class="dot cw"></span>tok in · cache write</span>
-      <span><span class="dot cr"></span>tok in · cache read</span>
+      <span><span class="dot fresh"></span>tok fresh in</span>
+      <span><span class="dot cw"></span>cache write</span>
+      <span><span class="dot cr"></span>cache read</span>
       <span><span class="dot out"></span>tok out <span class="dim">(left axis)</span></span>
     </div>
     <div id="chart"></div>
@@ -210,7 +212,7 @@ let lastStatsData = null;    // ?range=-scoped: feeds Performance/Chart/Usage
 let lastLiveStats = null;    // unscoped default tail: feeds Live Requests/Recent Failures
 let failFilter = null;
 
-const RANGE_BTNS = ['24h', '3d', '7d'];
+const RANGE_BTNS = ['12h', '24h', '3d', '7d'];
 
 let modelColorMap = new Map();
 
@@ -220,6 +222,7 @@ function updateModelPalette(statusData, statsData) {
     (m.endpoints || []).forEach(ep => { if (ep.model) models.add(ep.model); });
   });
   (statsData && statsData.by_provider_model || []).forEach(r => { if (r.model) models.add(r.model); });
+  (statsData && statsData.recent_requests || []).forEach(r => { if (r.model) models.add(r.model); });
   (statsData && statsData.recent_errors || []).forEach(f => { if (f.model) models.add(f.model); });
   (statsData && statsData.inflight || []).forEach(e => { if (e.model) models.add(e.model); });
 
@@ -485,7 +488,7 @@ function formatWhen(ts) {
   return `${month}-${day} ${timeStr}`;
 }
 
-const STALL_S = 10;
+const STALL_S = 5;
 
 // ============ Render Live Requests (slot table) ============
 // Persistent-row rendering: a seq → row record map survives across polls, so
@@ -521,16 +524,19 @@ function elapsedSec(fromStr, toStr, nowMs) {
   return Math.max(0, Math.floor((to - from) / 1000));
 }
 
-function firstLastCellHTML(e, nowMs) {
-  if (!e.first_byte_at) return '<span class="dim" title="No response byte received yet">—</span>';
-  const ft = e.sent_at ? dec2((new Date(e.first_byte_at) - new Date(e.sent_at)) / 1000) + 's' : '—';
+function ttftCellHTML(e, nowMs) {
   const to = e.ended_at ? new Date(e.ended_at).getTime() : nowMs;
   const age = e.last_byte_at ? Math.max(0, Math.floor((to - new Date(e.last_byte_at).getTime()) / 1000)) : 0;
   const isStalled = !e.ended_at && e.state !== 'ended' && e.stream && age >= STALL_S;
-  const last = isStalled
-    ? `<span class="badge stall" title="No upstream chunk for ${age}s — this stream looks stalled">stalled ${fmtDur(age)}</span>`
-    : fmtDur(age);
-  return `${ft} <span class="dim">·</span> ${last}`;
+  const stallBadge = isStalled
+    ? ` <span class="badge stall" title="No upstream chunk for ${age}s — this stream looks stalled">stalled ${fmtDur(age)}</span>`
+    : '';
+
+  if (!e.first_byte_at) {
+    return `<span class="dim" title="No response byte received yet">—</span>${stallBadge}`;
+  }
+  const ft = e.sent_at ? dec2((new Date(e.first_byte_at) - new Date(e.sent_at)) / 1000) + 's' : '—';
+  return `${ft}${stallBadge}`;
 }
 
 function attemptCellHTML(n) {
@@ -562,11 +568,11 @@ function paintLiveRow(rec, e, nowMs) {
     ? '<span class="badge b-dim">queued</span>'
     : '<span class="badge b-cyan">running</span>';
   c[1].textContent = fmtDur(elapsedSec(e.ts, '', nowMs));
-  c[2].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
-  c[3].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[2].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[3].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
   c[4].innerHTML = endpointCellHTML(e);
   c[5].innerHTML = attemptCellHTML(e.attempt);
-  c[6].innerHTML = firstLastCellHTML(e, nowMs);
+  c[6].innerHTML = ttftCellHTML(e, nowMs);
   paintTokCell(c[7], e.est_in || 0, 'Input tokens not estimated');
   paintTokCell(c[8], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
 }
@@ -581,11 +587,11 @@ function freezeRow(rec, e, nowMs) {
   const c = rec.cells;
   c[0].innerHTML = '<span class="badge b-dim" title="Request left the in-flight set — values frozen at their final snapshot">ended</span>';
   c[1].textContent = fmtDur(elapsedSec(e.ts, e.ended_at, nowMs));
-  c[2].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
-  c[3].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[2].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[3].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
   c[4].innerHTML = endpointCellHTML(e);
   c[5].innerHTML = attemptCellHTML(e.attempt);
-  c[6].innerHTML = firstLastCellHTML(e, nowMs);
+  c[6].innerHTML = ttftCellHTML(e, nowMs);
   paintTokCell(c[7], e.est_in || 0, 'Input tokens not estimated');
   paintTokCell(c[8], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
 }
@@ -761,52 +767,100 @@ failuresHead.addEventListener('click', () => {
 });
 
 // ============ Render Performance ============
-function renderPerf(byProviderModel, basis) {
-  const body = document.getElementById('perf-body');
-  const cap = Number(basis);
-  // Rows whose Requests count in the selected window is 0 carry no
-  // performance signal — drop them instead of rendering a "no samples" stub.
-  const rows = (byProviderModel || []).filter(r => {
-    const wb = basis === '10' ? r.last_10 : r.last_100;
-    return wb && (wb.n || 0) > 0;
-  });
+function nearestRank(sorted, p) {
+  if (!sorted.length) return 0;
+  const idx = Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length)));
+  return sorted[idx - 1];
+}
 
-  if (!rows.length) {
+function toksOfEntry(e) {
+  const tok = e.tokens || {};
+  if ((tok.out || 0) <= 0 || (e.dur_ms || 0) <= 0) return 0;
+  let spanMS = e.dur_ms;
+  if (e.stream && (e.ttft_ms || 0) > 0 && e.dur_ms > e.ttft_ms) {
+    spanMS = e.dur_ms - e.ttft_ms;
+  }
+  if (spanMS < 50) return 0;
+  return (tok.out || 0) / (spanMS / 1000);
+}
+
+function renderPerf(recentRequests, basis) {
+  const body = document.getElementById('perf-body');
+  const cap = Number(basis) || 100;
+  const samples = (recentRequests || []).slice(0, cap);
+
+  if (!samples.length) {
     body.innerHTML = `<tr><td colspan="6" class="empty-cell">
-      <div class="t-dim">No provider models recorded.</div>
-      <div class="hint">Performance metrics are computed from completed successful requests.</div>
+      <div class="t-dim">No completed requests recorded yet.</div>
+      <div class="hint">Performance metrics are computed from completed successful requests in the recent window.</div>
     </td></tr>`;
     return;
   }
 
-  body.innerHTML = rows.map(r => {
-    const wb = basis === '10' ? r.last_10 : r.last_100;
-    const n = wb ? (wb.n || 0) : 0;
+  // Group by (provider, model)
+  const groupMap = new Map();
+  samples.forEach(e => {
+    const key = `${e.provider || '—'}\x00${e.model || '—'}`;
+    let g = groupMap.get(key);
+    if (!g) {
+      g = {
+        provider: e.provider || '—',
+        model: e.model || '—',
+        n: 0,
+        fresh: 0, cw: 0, cr: 0, out: 0,
+        ttfts: [],
+        toks: []
+      };
+      groupMap.set(key, g);
+    }
+    g.n++;
+    const tok = e.tokens || {};
+    g.fresh += tok.in || 0;
+    g.cw += tok.cache_write || 0;
+    g.cr += tok.cache_read || 0;
+    g.out += tok.out || 0;
+    if ((e.ttft_ms || 0) > 0) {
+      g.ttfts.push(e.ttft_ms);
+    }
+    const rate = toksOfEntry(e);
+    if (rate > 0) {
+      g.toks.push(rate);
+    }
+  });
 
+  // Sort groups by Requests count descending; tie break on provider:model name
+  const rows = Array.from(groupMap.values()).sort((a, b) => {
+    if (b.n !== a.n) return b.n - a.n;
+    const cmp = a.provider.localeCompare(b.provider);
+    if (cmp !== 0) return cmp;
+    return a.model.localeCompare(b.model);
+  });
+
+  body.innerHTML = rows.map(r => {
     const pk = `${r.provider} : ${r.model}`;
     const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : ${modelSpan(r.model)}</span>`;
+    const nCell = fmtInt(r.n);
 
-    const nCell = n < cap
-      ? `<span class="t-warn" title="Window not full: this row has only ${n} of ${cap} samples, so the percentiles rest on ${n} requests">${fmtInt(n)}</span>`
-      : fmtInt(n);
+    const promptTotal = r.fresh + r.cw + r.cr;
+    const hitPct = promptTotal > 0 ? (r.cr / promptTotal * 100) : 0;
+    const tokTitle = `fresh: ${fmtKMG(r.fresh)} · cache write: ${fmtKMG(r.cw)} · cache read: ${fmtKMG(r.cr)}`;
+    const incwCell = `<span title="${esc(tokTitle)}">${fmtKMG(promptTotal)} <span class="dim">(${fmtPct(hitPct)})</span></span>`;
+    const outCell = fmtKMG(r.out);
 
-    let incwCell = '<span class="dim" title="No samples in this window">—</span>';
-    let outCell = '<span class="dim" title="No samples in this window">—</span>';
     let ttftCell = '<span class="dim" title="No samples in this window">—</span>';
-    let toksCell = '<span class="dim" title="No samples in this window">—</span>';
+    if (r.ttfts.length > 0) {
+      r.ttfts.sort((a, b) => a - b);
+      const p50 = nearestRank(r.ttfts, 0.5);
+      const p90 = nearestRank(r.ttfts, 0.9);
+      ttftCell = `${fmtTTFT(p50)} <span class="dim">/</span> ${fmtTTFT(p90)}`;
+    }
 
-    if (wb && wb.tokens) {
-      const incw = (wb.tokens.in || 0) + (wb.tokens.cache_write || 0);
-      const cr = wb.tokens.cache_read || 0;
-      const promptTotal = incw + cr;
-      const hitPct = promptTotal > 0 ? (cr / promptTotal * 100) : 0;
-      const tokTitle = `fresh: ${fmtKMG(wb.tokens.in || 0)} · cache write: ${fmtKMG(wb.tokens.cache_write || 0)} · cache read: ${fmtKMG(cr)}`;
-      incwCell = `<span title="${esc(tokTitle)}">${fmtKMG(promptTotal)} <span class="dim">(${fmtPct(hitPct)})</span></span>`;
-      outCell = fmtKMG(wb.tokens.out || 0);
-      ttftCell = `${fmtTTFT(wb.ttft_p50_ms)} <span class="dim">/</span> ${fmtTTFT(wb.ttft_p90_ms)}`;
-      toksCell = (wb.toks_p50 > 0 || wb.toks_p10 > 0)
-        ? `<span title="p50: ${dec2(wb.toks_p50 || 0)} tok out/s · p10 (worst-case floor): ${dec2(wb.toks_p10 || 0)} tok out/s">${fmtRate(wb.toks_p50)} <span class="dim">/</span> ${fmtRate(wb.toks_p10)}</span>`
-        : '<span class="dim" title="No throughput measurement">—</span>';
+    let toksCell = '<span class="dim" title="No throughput measurement">—</span>';
+    if (r.toks.length > 0) {
+      r.toks.sort((a, b) => a - b);
+      const p50 = nearestRank(r.toks, 0.5);
+      const p10 = nearestRank(r.toks, 0.1);
+      toksCell = `<span title="p50: ${dec2(p50)} tok out/s · p10 (worst-case floor): ${dec2(p10)} tok out/s">${fmtRate(p50)} <span class="dim">/</span> ${fmtRate(p10)}</span>`;
     }
 
     return `<tr>
@@ -824,7 +878,7 @@ document.querySelectorAll('[data-basis]').forEach(b => {
   b.onclick = () => {
     document.querySelectorAll('[data-basis]').forEach(x => x.classList.toggle('on', x === b));
     perfBasis = b.dataset.basis;
-    renderPerf(lastStatsData && lastStatsData.by_provider_model, perfBasis);
+    renderPerf(lastStatsData && lastStatsData.recent_requests, perfBasis);
   };
 });
 
@@ -853,6 +907,7 @@ function bucketLabel(i, cfg, nowMs) {
 
 function renderChart(rangeKey, hourlyRows) {
   const cfg = {
+    '12h': { n: 12, bh: 1 },
     '24h': { n: 24, bh: 1 },
     '3d':  { n: 72, bh: 1 },
     '7d':  { n: 168, bh: 1 },
@@ -892,7 +947,7 @@ function renderChart(rangeKey, hourlyRows) {
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const maxTok = Math.max(1000, ...data.map(d => d.fresh + d.cw + d.cr + d.out)) * 1.12;
   const maxReq = Math.max(10, ...data.map(d => d.req)) * 1.15;
-  const groupW = plotW / cfg.n, barW = Math.max(1, Math.min(16, groupW * 0.35));
+  const groupW = plotW / cfg.n, barW = Math.max(2, Math.min(22, groupW * 0.45));
 
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="font-family:var(--font-mono)">`;
   s += `<text x="${padL}" y="11" fill="#6e7681" font-size="10">tokens</text>`;
@@ -909,16 +964,29 @@ function renderChart(rangeKey, hourlyRows) {
   const x = i => padL + groupW * i + groupW / 2;
 
   data.forEach((d, i) => {
-    const gx = x(i) - barW - 1;
+    const bx = x(i) - barW / 2;
     const hFresh = plotH * d.fresh / maxTok;
     const hCw = plotH * d.cw / maxTok;
     const hCr = plotH * d.cr / maxTok;
     const hOut = plotH * d.out / maxTok;
 
-    if (hFresh > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1"/>`;
-    if (hCw > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1"/>`;
-    if (hCr > 0) s += `<rect x="${gx}" y="${padT + plotH - hFresh - hCw - hCr}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1"/>`;
-    if (hOut > 0) s += `<rect x="${x(i) + 1}" y="${padT + plotH - hOut}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1"/>`;
+    let curY = padT + plotH;
+    if (hFresh > 0) {
+      curY -= hFresh;
+      s += `<rect x="${bx}" y="${curY}" width="${barW}" height="${hFresh}" fill="#58a6ff" rx="1"/>`;
+    }
+    if (hCw > 0) {
+      curY -= hCw;
+      s += `<rect x="${bx}" y="${curY}" width="${barW}" height="${hCw}" fill="#bc8cff" rx="1"/>`;
+    }
+    if (hCr > 0) {
+      curY -= hCr;
+      s += `<rect x="${bx}" y="${curY}" width="${barW}" height="${hCr}" fill="#39c5cf" rx="1"/>`;
+    }
+    if (hOut > 0) {
+      curY -= hOut;
+      s += `<rect x="${bx}" y="${curY}" width="${barW}" height="${hOut}" fill="#3fb950" rx="1"/>`;
+    }
   });
 
   const pts = data.map((d, i) => `${x(i)},${padT + plotH - plotH * d.req / maxReq}`).join(' ');
@@ -933,7 +1001,7 @@ function renderChart(rangeKey, hourlyRows) {
       : `<circle cx="${x(i)}" cy="${cy}" r="${dotR}" fill="#d29922"/>`;
   });
 
-  const labelStep = cfg.n <= 24 ? 3 : (cfg.n <= 72 ? 12 : 24);
+  const labelStep = cfg.n <= 12 ? 2 : (cfg.n <= 24 ? 3 : (cfg.n <= 72 ? 12 : 24));
   data.forEach((d, i) => {
     if (i % labelStep === 0 || i === cfg.n - 1) {
       s += `<text x="${x(i)}" y="${H - 8}" fill="#8b949e" font-size="10" text-anchor="middle">${bucketLabel(i, cfg, now)}</text>`;
@@ -1000,7 +1068,7 @@ function renderChart(rangeKey, hourlyRows) {
 
 // ============ Render Usage Tables ============
 function renderUsage(hourlyRows, rangeKey) {
-  const windowHours = { '24h': 24, '3d': 72, '7d': 168 }[rangeKey] || 24;
+  const windowHours = { '12h': 12, '24h': 24, '3d': 72, '7d': 168 }[rangeKey] || 24;
   const cutoff = Date.now() - windowHours * 3600 * 1000;
 
   const keyMap = new Map();
@@ -1242,7 +1310,7 @@ async function refreshAll() {
     renderVitalsAndSysline(statusData, statsData);
     renderLive(statsData.inflight || [], statsData.recently_ended || [], statsData.concurrency || {});
     renderFailures(statsData.recent_errors || []);
-    renderPerf(statsData.by_provider_model || [], perfBasis);
+    renderPerf(statsData.recent_requests || [], perfBasis);
     renderChart(currentRange, statsData.hourly || []);
     renderUsage(statsData.hourly || [], currentRange);
 

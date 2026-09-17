@@ -18,6 +18,10 @@ const (
 // non-stream samples share this one ring.
 const ringCap = 100
 
+// globalRingCap is the cross-endpoint latency window capacity: last 300
+// completed ok requests across all providers and models.
+const globalRingCap = 300
+
 // rollupRetentionDays is the in-memory rollup window (design §8): the last
 // this-many whole calendar days plus the current partial one. Startup only
 // loads rollup rows inside it; each day roll evicts anything older. The
@@ -99,6 +103,19 @@ type WindowBlock struct {
 	TTFTP90 int64       `json:"ttft_p90_ms"`
 	ToksP50 float64     `json:"toks_p50"`
 	ToksP10 float64     `json:"toks_p10"`
+}
+
+// RecentRequestEntry is one completed ok+forwarded request in the global
+// recent-requests ring, recording actual sample data for the Performance view.
+type RecentRequestEntry struct {
+	TS       time.Time   `json:"ts"`
+	Provider string      `json:"provider"`
+	KeyLabel string      `json:"key_label,omitempty"`
+	Model    string      `json:"model"`
+	Stream   bool        `json:"stream"`
+	DurMS    int64       `json:"dur_ms"`
+	TTFTMS   int64       `json:"ttft_ms"`
+	Tokens   TokenCounts `json:"tokens"`
 }
 
 // Sample is one completed request as the completion hook sees it. TS is the

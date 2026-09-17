@@ -351,7 +351,7 @@ func TestStatsJSONContract(t *testing.T) {
 	for _, key := range []string{
 		`"in_flight":`, `"waiting":`, `"ttft_p50_ms":`, `"ttft_p90_ms":`,
 		`"toks_p50":`, `"toks_p10":`, `"n":43`, `"tokens":`,
-		`"key_label":`, `"overall":`, `"recent_errors":`,
+		`"key_label":`, `"overall":`, `"recent_requests":`, `"recent_errors":`,
 		`"attempt":2`, `"error_class":"upstream_5xx"`, `"status":502`,
 		`"value":`, `"counters":`, `"last_100":`,
 	} {
@@ -374,6 +374,7 @@ func TestParseRangeTail(t *testing.T) {
 		want int
 	}{
 		{"", livestats.HourlyTailDefault},
+		{"12h", 12},
 		{"24h", 24},
 		{"3d", 72},
 		{"7d", 168},

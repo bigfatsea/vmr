@@ -31,23 +31,26 @@ type statsResponse struct {
 		InFlight int64 `json:"in_flight"`
 		Waiting  int64 `json:"waiting"`
 	} `json:"concurrency"`
-	Inflight        []router.InflightEntry     `json:"inflight"`
-	RecentlyEnded   []router.InflightEntry     `json:"recently_ended"`
-	Hourly          []livestats.HourlyRow      `json:"hourly"`
-	Daily           []livestats.HourlyRow      `json:"daily"`
-	Overall         *livestats.WindowBlock     `json:"overall,omitempty"`
-	RecentErrors    []livestats.RecentErrorRow `json:"recent_errors"`
-	ByProviderModel []livestats.ProviderRow    `json:"by_provider_model"`
-	ByClientKeyTag  []livestats.DimensionRow   `json:"by_client_key_tag"`
-	ByKeyLabel      []livestats.DimensionRow   `json:"by_key_label"`
+	Inflight        []router.InflightEntry         `json:"inflight"`
+	RecentlyEnded   []router.InflightEntry         `json:"recently_ended"`
+	Hourly          []livestats.HourlyRow          `json:"hourly"`
+	Daily           []livestats.HourlyRow          `json:"daily"`
+	Overall         *livestats.WindowBlock         `json:"overall,omitempty"`
+	RecentRequests  []livestats.RecentRequestEntry `json:"recent_requests"`
+	RecentErrors    []livestats.RecentErrorRow     `json:"recent_errors"`
+	ByProviderModel []livestats.ProviderRow        `json:"by_provider_model"`
+	ByClientKeyTag  []livestats.DimensionRow       `json:"by_client_key_tag"`
+	ByKeyLabel      []livestats.DimensionRow       `json:"by_key_label"`
 }
 
 // parseRangeTail resolves ?range= to the hourly tail it selects
-// (contracts §1.5): 24h|3d|7d → 24/72/168 hours; absent or unrecognized
+// (contracts §1.5): 12h|24h|3d|7d → 12/24/72/168 hours; absent or unrecognized
 // values fall back to the 48h default. 7d is the cap because the in-memory
 // rollup only holds ~7 days — it is also the widest window the console offers.
 func parseRangeTail(q string) int {
 	switch q {
+	case "12h":
+		return 12
 	case "24h":
 		return 24
 	case "3d":
@@ -92,6 +95,7 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		resp.Hourly = snap.Hourly
 		resp.Daily = snap.Daily
 		resp.Overall = snap.Overall
+		resp.RecentRequests = snap.RecentRequests
 		resp.RecentErrors = snap.RecentErrors
 		resp.ByProviderModel = snap.ByProviderModel
 		resp.ByClientKeyTag = snap.ByClientKeyTag
@@ -105,6 +109,9 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.RecentErrors == nil {
 		resp.RecentErrors = []livestats.RecentErrorRow{}
+	}
+	if resp.RecentRequests == nil {
+		resp.RecentRequests = []livestats.RecentRequestEntry{}
 	}
 	if resp.ByProviderModel == nil {
 		resp.ByProviderModel = []livestats.ProviderRow{}

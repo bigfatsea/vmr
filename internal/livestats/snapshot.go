@@ -9,16 +9,17 @@ import (
 // Snapshot is the JSON-ready read-time aggregation behind GET /stats
 // (design §8). Everything is computed at read time from the in-memory
 // ledger; nothing here mutates aggregator state. Hourly is parameterized
-// by the caller's tail (HourlyTailDefault, or 24/72/168 via ?range=);
+// by the caller's tail (HourlyTailDefault, or 12/24/72/168 via ?range=);
 // daily[] is always the last dailyTail local-calendar days with data.
 type Snapshot struct {
-	Hourly          []HourlyRow      `json:"hourly"`
-	Daily           []HourlyRow      `json:"daily"`
-	Overall         *WindowBlock     `json:"overall,omitempty"`
-	RecentErrors    []RecentErrorRow `json:"recent_errors"`
-	ByProviderModel []ProviderRow    `json:"by_provider_model"`
-	ByClientKeyTag  []DimensionRow   `json:"by_client_key_tag"`
-	ByKeyLabel      []DimensionRow   `json:"by_key_label"`
+	Hourly          []HourlyRow          `json:"hourly"`
+	Daily           []HourlyRow          `json:"daily"`
+	Overall         *WindowBlock         `json:"overall,omitempty"`
+	RecentRequests  []RecentRequestEntry `json:"recent_requests"`
+	RecentErrors    []RecentErrorRow     `json:"recent_errors"`
+	ByProviderModel []ProviderRow        `json:"by_provider_model"`
+	ByClientKeyTag  []DimensionRow       `json:"by_client_key_tag"`
+	ByKeyLabel      []DimensionRow       `json:"by_key_label"`
 }
 
 // HourlyRow is one (hour or day × dims) group in the hourly/daily slices.
@@ -143,7 +144,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	}
 	fold(a.cur, a.hour)
 
-	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.recentErrs, hourlyTail, a.now())
+	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.globalRing, a.recentErrs, hourlyTail, a.now())
 }
 
 // bookAxis adds a group's request-face outcome counts and tokens to a
@@ -166,7 +167,7 @@ func bookAxis(m map[string]*Counters, v string, c Counters) {
 // assembleSnapshot folds the hour rows into hourly/daily slices, builds the
 // provider rows with their recent window blocks, the overall block over the
 // union of all ring samples (contracts §1.3), and the recent_errors rows.
-func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, recentErrs []Sample, hourlyTail int, now time.Time) Snapshot {
+func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, gr *globalRing, recentErrs []Sample, hourlyTail int, now time.Time) Snapshot {
 	// hourly[] keeps the most recent hourlyTail hours with data; daily[] the
 	// most recent dailyTail local-calendar-days. Both windows are derived from
 	// the full observed-hour set before either is truncated.
@@ -235,6 +236,7 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 	}
 	snap.Daily = sortedDaily(daily)
 	snap.Overall = overallBlock(rings)
+	snap.RecentRequests = gr.recent(globalRingCap)
 	snap.RecentErrors = recentErrorRows(recentErrs, now.Add(-24*time.Hour))
 	snap.ByProviderModel = buildProviderRows(prov, rings)
 	snap.ByClientKeyTag = buildAxisRows(byTag)

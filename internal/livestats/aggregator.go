@@ -15,15 +15,16 @@ import (
 // (§4.3: one lock per request, coarse by design); Record never blocks on
 // anything but that mutex and the file write.
 type Aggregator struct {
-	mu     sync.Mutex
-	dir    string
-	now    func() time.Time
-	hour   time.Time // start of the hour the slim file is open for
-	slim   *os.File  // current hour's slim WAL; nil when the write side degraded
-	lock   *os.File  // advisory dir lock (.vmr-stats.lock); held for the aggregator's lifetime
-	rollup map[time.Time]map[dimsKey]Counters
-	cur    map[dimsKey]Counters
-	rings  map[ringKey]*ring
+	mu         sync.Mutex
+	dir        string
+	now        func() time.Time
+	hour       time.Time // start of the hour the slim file is open for
+	slim       *os.File  // current hour's slim WAL; nil when the write side degraded
+	lock       *os.File  // advisory dir lock (.vmr-stats.lock); held for the aggregator's lifetime
+	rollup     map[time.Time]map[dimsKey]Counters
+	cur        map[dimsKey]Counters
+	rings      map[ringKey]*ring
+	globalRing *globalRing
 
 	// recentErrs is the recent_errors ring (§8.1): the last recentErrCap
 	// non-ok samples, stored newest first. Purely in-memory — restart
@@ -63,11 +64,12 @@ func New(dir string) (*Aggregator, error) {
 // NewAt is New with an injectable clock, for tests.
 func NewAt(dir string, now func() time.Time) (*Aggregator, error) {
 	a := &Aggregator{
-		dir:    dir,
-		now:    now,
-		rollup: make(map[time.Time]map[dimsKey]Counters),
-		cur:    make(map[dimsKey]Counters),
-		rings:  make(map[ringKey]*ring),
+		dir:        dir,
+		now:        now,
+		rollup:     make(map[time.Time]map[dimsKey]Counters),
+		cur:        make(map[dimsKey]Counters),
+		rings:      make(map[ringKey]*ring),
+		globalRing: &globalRing{},
 	}
 	if err := a.recover(now()); err != nil {
 		return nil, err
@@ -122,10 +124,11 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 
 	// Step 3: read the current hour's slim file if it exists, rebuilding
-	// current-hour counters and rings (rings take the last ≤100 entries).
+	// current-hour counters and rings (per-key rings take the last ≤100 entries
+	// each, the global ring the last ≤300 across all keys).
 	slimFile := filepath.Join(a.dir, hourFileName(a.hour))
 	if f, err := os.Open(slimFile); err == nil {
-		rebuildCurrentHour(f, a.cur, a.rings)
+		rebuildCurrentHour(f, a.cur, a.rings, a.globalRing)
 		f.Close()
 	}
 
@@ -141,8 +144,9 @@ func (a *Aggregator) recover(now time.Time) error {
 }
 
 // rebuildCurrentHour feeds a current-hour slim's rows into the counter map
-// and the rings (rings naturally keep the last ≤100 entries per key).
-func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]*ring) {
+// and the rings (rings naturally keep the last ≤100 entries per key, and the
+// global ring keeps the last ≤300 across all keys).
+func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]*ring, gr *globalRing) {
 	_ = readJSONL(f, func(line []byte) error {
 		var row slimRow
 		if json.Unmarshal(line, &row) != nil {
@@ -158,6 +162,7 @@ func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]
 		c.addSample(s)
 		cur[key] = c
 		addRing(rings, s)
+		addGlobalRing(gr, s)
 		return nil
 	})
 }
@@ -232,6 +237,7 @@ func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 	c.addSample(s)
 	a.cur[key] = c
 	addRing(a.rings, s)
+	addGlobalRing(a.globalRing, s)
 	a.recentErrs = bookRecentError(a.recentErrs, s)
 
 	if appendFile && a.slim != nil {
@@ -281,6 +287,7 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 	c.addSample(s)
 	a.rollup[hour][key] = c
 	addRing(a.rings, s)
+	addGlobalRing(a.globalRing, s)
 	a.recentErrs = bookRecentError(a.recentErrs, s)
 
 	// In last-wins semantics, appending the updated total ensures subsequent
@@ -361,7 +368,7 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 
 // Snapshot aggregates the whole ledger, fresh every call. Read path, holds
 // the same coarse mutex (§4.3). hourlyTail bounds the hourly[] window
-// (HourlyTailDefault, or 24/72/168 via /stats?range=). Tests and callers
+// (HourlyTailDefault, or 12/24/72/168 via /stats?range=). Tests and callers
 // needing an exact read use this; the /stats HTTP path uses CachedSnapshot.
 func (a *Aggregator) Snapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()

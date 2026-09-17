@@ -148,6 +148,14 @@ func TestModelsPage_ServesHTML(t *testing.T) {
 	if !strings.Contains(body, "VMRAuth") {
 		t.Errorf("body missing injected VMRAuth from console.js")
 	}
+
+	// Protocol grouping markers
+	if !strings.Contains(body, "protocolTitle") {
+		t.Errorf("models.html missing protocolTitle function")
+	}
+	if !strings.Contains(body, `<div id="models-body"></div>`) {
+		t.Errorf("models.html missing models-body container div")
+	}
 }
 
 func TestHelpPage_ServesHTML(t *testing.T) {
@@ -483,7 +491,7 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	// explicitly out (design §4.1). Scope the check to the live-slot code
 	// (between the STALL_S marker and the failures renderer): console.js's
 	// injected countdown clock legitimately uses setInterval.
-	liveCodeStart := strings.Index(body, "const STALL_S = 10;")
+	liveCodeStart := strings.Index(body, "const STALL_S = 5;")
 	liveCodeEnd := strings.Index(body, "Render Recent Failures")
 	if liveCodeStart == -1 || liveCodeEnd == -1 || liveCodeStart >= liveCodeEnd {
 		t.Fatal("status.html live-slot code block markers not found")
@@ -577,5 +585,35 @@ func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
 	logIdx := strings.Index(body, `<pre id="log">`)
 	if toolbarIdx == -1 || logIdx == -1 || toolbarIdx > logIdx {
 		t.Errorf("log.html layout order wrong: want toolbar (%d) < log area (%d)", toolbarIdx, logIdx)
+	}
+}
+
+func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
+	body := string(overviewHTMLPage)
+
+	// Live Requests columns
+	for _, th := range []string{
+		"<th>State</th>",
+		">Elapsed</th>",
+		"<th>Caller</th><th>Model</th>",
+		"<th>Provider : Model</th>",
+		">Attempts</th>",
+		">TTFT</th>",
+	} {
+		if !strings.Contains(body, th) {
+			t.Errorf("status.html missing Live Requests header %s", th)
+		}
+	}
+
+	// Performance basis buttons: 10, 30, 100, 300
+	for _, basis := range []string{`data-basis="10"`, `data-basis="30"`, `data-basis="100"`, `data-basis="300"`} {
+		if !strings.Contains(body, basis) {
+			t.Errorf("status.html missing performance basis button %s", basis)
+		}
+	}
+
+	// Traffic range buttons: 12h, 24h, 3d, 7d
+	if !strings.Contains(body, "const RANGE_BTNS = ['12h', '24h', '3d', '7d'];") {
+		t.Errorf("status.html missing RANGE_BTNS with 12h")
 	}
 }

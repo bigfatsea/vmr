@@ -413,7 +413,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
       <p>• <b>所有请求都返回 401</b> → <code class="mono">Authorization: Bearer</code> 中的密钥必须与 <code class="mono">api_keys:</code> 中的某一匹配。</p>
       <p>• <b>模型不存在</b> → 虚拟模型按协议区分；到 <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> 查看每个名字应答的协议。</p>
       <p>• <b>会话中途突然 401</b> → vmr 在密钥变更后被重载过；重新设置密钥（🔑 按钮，仅存储在本浏览器）。</p>
-      <p>• <b>请求很慢或卡住</b> → 打开 <a href="/status.html#live">Overview → Live Requests</a>：红色 <i>stalled</i> 标记表示超过 10 秒没有上游字节；<i>queued</i> 计时很长表示并发闸门已满。</p>
+      <p>• <b>请求很慢或卡住</b> → 打开 <a href="/status.html#live">Overview → Live Requests</a>：红色 <i>stalled</i> 标记表示超过 5 秒没有上游字节；<i>queued</i> 计时很长表示并发闸门已满。</p>
       <p>• <b>所有请求突然全部故障转移</b> → 到 <a href="/status.html#models">端点健康</a> 查看 cooldown，到 <a href="/status.html#quota">Quota Budgets</a> 查看是否配额耗尽。</p>
       <p>• <b>请求刚失败，想知道为什么</b> → <a href="/status.html#failures">Overview → Recent Failures</a> 列出最近的失败及其路由错误类别；当某一类错误刷屏时，类别芯片可点击过滤。</p>
     </div>

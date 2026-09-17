@@ -328,3 +328,58 @@ func TestSnapshot_DailyBucketsUseLocalCalendarDay(t *testing.T) {
 		t.Errorf("daily bucket local clock = %02d:%02d:%02d, want 00:00:00 (local midnight, not UTC)", h, m, s)
 	}
 }
+
+func TestSnapshot_RecentRequestsGlobalRing(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	agg, err := NewAt(dir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewAt: %v", err)
+	}
+	defer agg.Close()
+
+	// 1. Record an error - should NOT enter recent_requests
+	agg.Record(Sample{
+		TS: now.Add(1 * time.Minute), Outcome: OutcomeError, Forwarded: true,
+		Provider: "p1", Model: "m1", TTFTMS: 100, DurMS: 200,
+	})
+
+	// 2. Record unforwarded ok - should NOT enter
+	agg.Record(Sample{
+		TS: now.Add(2 * time.Minute), Outcome: OutcomeOK, Forwarded: false,
+		Provider: "p1", Model: "m1", TTFTMS: 100, DurMS: 200,
+	})
+
+	// 3. Record TTFTMS=0 ok - should NOT enter (unmeasured)
+	agg.Record(Sample{
+		TS: now.Add(3 * time.Minute), Outcome: OutcomeOK, Forwarded: true,
+		Provider: "p1", Model: "m1", TTFTMS: 0, DurMS: 200,
+	})
+
+	snap := agg.Snapshot(HourlyTailDefault)
+	if len(snap.RecentRequests) != 0 {
+		t.Fatalf("expected 0 recent requests, got %d", len(snap.RecentRequests))
+	}
+
+	// 4. Record 350 valid samples to test capacity capping (300) and newest-first order
+	for i := 1; i <= 350; i++ {
+		agg.Record(Sample{
+			TS: now.Add(time.Duration(i) * time.Minute), Outcome: OutcomeOK, Forwarded: true,
+			Provider: "p1", Model: "m1", TTFTMS: int64(i * 10), DurMS: int64(i * 20),
+			Tokens: TokenCounts{In: int64(i), Out: int64(i * 2)},
+		})
+	}
+
+	snap = agg.Snapshot(HourlyTailDefault)
+	if len(snap.RecentRequests) != 300 {
+		t.Fatalf("expected 300 recent requests, got %d", len(snap.RecentRequests))
+	}
+
+	// Newest first: first entry should be sample 350, last entry sample 51
+	if snap.RecentRequests[0].TTFTMS != 3500 {
+		t.Errorf("newest entry TTFTMS = %d, want 3500", snap.RecentRequests[0].TTFTMS)
+	}
+	if snap.RecentRequests[299].TTFTMS != 510 {
+		t.Errorf("oldest retained entry TTFTMS = %d, want 510", snap.RecentRequests[299].TTFTMS)
+	}
+}
