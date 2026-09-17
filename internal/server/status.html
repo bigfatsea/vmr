@@ -44,6 +44,10 @@
 #failures-head.open #failures-chev{transform:rotate(90deg)}
 
 /* Upstream model name coloring — hue assigned by alphabetical rank */
+
+/* Ended requests gray out — the row froze at its terminal snapshot and is
+   waiting to be pushed out of the slot capacity */
+#live-body tr.ended{opacity:.5}
 </style>
 </head>
 <body>
@@ -86,6 +90,7 @@
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
+        <th class="num" title="Monotonic per-process request sequence number — live rows on top, ended rows below in end order">Seq</th>
         <th>State</th>
         <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
         <th>Caller</th><th>Model</th>
@@ -510,9 +515,9 @@ function liveSlotCount(limit) {
 function buildLiveRow(seq) {
   const tr = document.createElement('tr');
   tr.dataset.seq = String(seq);
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 10; i++) {
     const td = document.createElement('td');
-    if (i === 1 || i === 5 || i === 6 || i === 7 || i === 8) td.className = 'num';
+    if (i === 0 || i === 2 || i === 6 || i === 7 || i === 8 || i === 9) td.className = 'num';
     tr.appendChild(td);
   }
   return tr;
@@ -564,17 +569,19 @@ function paintTokCell(td, v, unknownTitle) {
 
 function paintLiveRow(rec, e, nowMs) {
   const c = rec.cells;
-  c[0].innerHTML = e.state === 'queued'
+  rec.tr.classList.remove('ended');
+  c[0].textContent = e.seq;
+  c[1].innerHTML = e.state === 'queued'
     ? '<span class="badge b-dim">queued</span>'
     : '<span class="badge b-cyan">running</span>';
-  c[1].textContent = fmtDur(elapsedSec(e.ts, '', nowMs));
-  c[2].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
-  c[3].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
-  c[4].innerHTML = endpointCellHTML(e);
-  c[5].innerHTML = attemptCellHTML(e.attempt);
-  c[6].innerHTML = ttftCellHTML(e, nowMs);
-  paintTokCell(c[7], e.est_in || 0, 'Input tokens not estimated');
-  paintTokCell(c[8], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
+  c[2].textContent = fmtDur(elapsedSec(e.ts, '', nowMs));
+  c[3].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[4].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
+  c[5].innerHTML = endpointCellHTML(e);
+  c[6].innerHTML = attemptCellHTML(e.attempt);
+  c[7].innerHTML = ttftCellHTML(e, nowMs);
+  paintTokCell(c[8], e.est_in || 0, 'Input tokens not estimated');
+  paintTokCell(c[9], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
 }
 
 // freezeRow paints the ended form once — ended badge, Elapsed pinned at
@@ -584,16 +591,18 @@ function paintLiveRow(rec, e, nowMs) {
 function freezeRow(rec, e, nowMs) {
   rec.ended = true;
   rec.entry = e;
+  rec.tr.classList.add('ended');
   const c = rec.cells;
-  c[0].innerHTML = '<span class="badge b-dim" title="Request left the in-flight set — values frozen at their final snapshot">ended</span>';
-  c[1].textContent = fmtDur(elapsedSec(e.ts, e.ended_at, nowMs));
-  c[2].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
-  c[3].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
-  c[4].innerHTML = endpointCellHTML(e);
-  c[5].innerHTML = attemptCellHTML(e.attempt);
-  c[6].innerHTML = ttftCellHTML(e, nowMs);
-  paintTokCell(c[7], e.est_in || 0, 'Input tokens not estimated');
-  paintTokCell(c[8], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
+  c[0].textContent = e.seq;
+  c[1].innerHTML = '<span class="badge b-dim" title="Request left the in-flight set — values frozen at their final snapshot">ended</span>';
+  c[2].textContent = fmtDur(elapsedSec(e.ts, e.ended_at, nowMs));
+  c[3].innerHTML = `<span class="ep" title="${esc(e.client_key_tag || '—')}">${esc(e.client_key_tag || '—')}</span>`;
+  c[4].innerHTML = `<span class="dim">${esc(e.protocol)}:</span><b>${esc(e.vmodel)}</b>${modeTag(e.stream)}`;
+  c[5].innerHTML = endpointCellHTML(e);
+  c[6].innerHTML = attemptCellHTML(e.attempt);
+  c[7].innerHTML = ttftCellHTML(e, nowMs);
+  paintTokCell(c[8], e.est_in || 0, 'Input tokens not estimated');
+  paintTokCell(c[9], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
 }
 
 function renderLive(inflightList, endedList, conc) {
@@ -659,8 +668,8 @@ function renderLive(inflightList, endedList, conc) {
       const rec = liveState.rows.get(seqs[i]);
       if (rec) {
         if (rec.cells) {
-          VMRTween.reset(rec.cells[7]);
           VMRTween.reset(rec.cells[8]);
+          VMRTween.reset(rec.cells[9]);
         }
         if (rec.tr) rec.tr.remove();
         liveState.rows.delete(seqs[i]);
@@ -682,7 +691,7 @@ function renderLive(inflightList, endedList, conc) {
   if (!order.length) {
     if (!liveState.emptyRow) {
       liveState.emptyRow = document.createElement('tr');
-      liveState.emptyRow.innerHTML = `<td colspan="9" class="empty-cell">
+      liveState.emptyRow.innerHTML = `<td colspan="10" class="empty-cell">
         <div class="t-dim">No requests in flight right now.</div>
       </td>`;
     }

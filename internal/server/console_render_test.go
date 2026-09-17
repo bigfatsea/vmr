@@ -573,6 +573,8 @@ func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
   const liveQueuedText = queuedBadge.textContent;
   const liveQueuedHidden = queuedBadge.hidden;
   const row1Seq = liveBody.children[0].dataset.seq;
+  const row1SeqCell = String(liveBody.children[0].children[0].textContent);
+  const row1NotGrayed = !liveBody.children[0].classList.contains('ended');
 
   // 3. Streaming progress on req1 (est_out 50 -> 120): persists same tr
   const trBefore = liveBody.children[0];
@@ -586,6 +588,8 @@ func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
   const endedRunning = runningBadge.textContent;
   const endedRowHTML = liveBody.children[0].innerHTML;
   const hasEndedBadge = endedRowHTML.includes('ended');
+  const endedRowGrayed = liveBody.children[0].classList.contains('ended');
+  const endedRowSeqCell = String(liveBody.children[0].children[0].textContent);
 
   // 5. Overflow capacity: push requests 2..11 (total 11 requests).
   // With limit: 6, liveSlotCount is 8. Exactly 8 rows must remain in the DOM,
@@ -632,9 +636,13 @@ func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
     liveQueuedText,
     liveQueuedHidden,
     row1Seq,
+    row1SeqCell,
+    row1NotGrayed,
     sameNode,
     endedRunning,
     hasEndedBadge,
+    endedRowGrayed,
+    endedRowSeqCell,
     slotCount,
     topSeq,
     bottomSeq,
@@ -659,9 +667,13 @@ func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
 		LiveQueuedText   string `json:"liveQueuedText"`
 		LiveQueuedHidden bool   `json:"liveQueuedHidden"`
 		Row1Seq          string `json:"row1Seq"`
+		Row1SeqCell      string `json:"row1SeqCell"`
+		Row1NotGrayed    bool   `json:"row1NotGrayed"`
 		SameNode         bool   `json:"sameNode"`
 		EndedRunning     string `json:"endedRunning"`
 		HasEndedBadge    bool   `json:"hasEndedBadge"`
+		EndedRowGrayed   bool   `json:"endedRowGrayed"`
+		EndedRowSeqCell  string `json:"endedRowSeqCell"`
 		SlotCount        int    `json:"slotCount"`
 		TopSeq           string `json:"topSeq"`
 		BottomSeq        string `json:"bottomSeq"`
@@ -683,8 +695,14 @@ func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
 	if res.Row1Seq != "1" || !res.SameNode {
 		t.Errorf("persistent node mismatch: seq=%s same=%v", res.Row1Seq, res.SameNode)
 	}
+	if res.Row1SeqCell != "1" || !res.Row1NotGrayed {
+		t.Errorf("live row seq cell = %q, grayed=%v, want seq in first cell and no ended class", res.Row1SeqCell, !res.Row1NotGrayed)
+	}
 	if res.EndedRunning != "0 running" || !res.HasEndedBadge {
 		t.Errorf("ended row mismatch: running=%s hasEnded=%v", res.EndedRunning, res.HasEndedBadge)
+	}
+	if !res.EndedRowGrayed || res.EndedRowSeqCell != "1" {
+		t.Errorf("ended row grayed=%v seqCell=%q, want grayed with seq retained", res.EndedRowGrayed, res.EndedRowSeqCell)
 	}
 	if res.SlotCount != 8 {
 		t.Errorf("slot capacity cap = %d, want 8 (clamped to limit 6 + 2)", res.SlotCount)

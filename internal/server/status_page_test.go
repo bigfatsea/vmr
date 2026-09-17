@@ -593,6 +593,7 @@ func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
 
 	// Live Requests columns
 	for _, th := range []string{
+		">Seq</th>",
 		"<th>State</th>",
 		">Elapsed</th>",
 		"<th>Caller</th><th>Model</th>",

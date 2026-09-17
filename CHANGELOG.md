@@ -31,7 +31,7 @@ commits and design docs hold the full reasoning.
 
 ### Changed
 - Console Overview (`status.html`) UI enhancements:
-  - Live Requests table reordered columns to State, Elapsed, Caller, Model, Provider : Model, Attempts, TTFT, Tok in (est), Tok out (est); renamed "First / Last Byte" to "TTFT", renamed "Att" to "Attempts", and lowered streaming stall warning threshold from 10s to 5s.
+  - Live Requests table: Seq (monotonic per-process sequence) as the first column, remaining columns State, Elapsed, Caller, Model, Provider : Model, Attempts, TTFT, Tok in (est), Tok out (est); renamed "First / Last Byte" to "TTFT", renamed "Att" to "Attempts", lowered streaming stall warning threshold from 10s to 5s, and ended rows gray out until pushed out of the slot capacity.
   - Performance by Provider & Model now records a cross-endpoint global ring of the last 300 requests (`recent_requests[]` over `GET /stats`), with last 10 / 30 / 100 / 300 window filtering and rows sorted by request count descending.
   - Traffic & Usage chart redesigned into a single four-layer stacked bar (`fresh in` → `cache write` → `cache read` → `tok out`), with window controls updated to 12h / 24h / 3d / 7d (`GET /stats?range=12h` support added in `internal/server/stats.go`).
 - Console Models (`models.html`) UI enhancements:
