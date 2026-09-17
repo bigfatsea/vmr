@@ -3,6 +3,7 @@ package livestats
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -117,13 +118,7 @@ func readJSONL(f io.Reader, decode func(line []byte) error) error {
 }
 
 // errSkipLine marks a line readJSONL should silently drop.
-var errSkipLine = errSkip()
-
-func errSkip() error { return &skipLine{} }
-
-type skipLine struct{}
-
-func (*skipLine) Error() string { return "skip line" }
+var errSkipLine = errors.New("skip line")
 
 // loadRollup reads the rollup file into an in-memory map, last row per
 // (hour, dims) key winning (§3.3). A missing file starts from an empty map

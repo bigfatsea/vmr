@@ -199,9 +199,7 @@ func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 func ComputeL2Digest(inputHashes [][]byte, pricingFP []byte, formatVersion int, paramsFP []byte) [32]byte {
 	var components [][]byte
 	components = append(components, digest.EncodeInt64(int64(len(inputHashes))))
-	for _, h := range inputHashes {
-		components = append(components, h)
-	}
+	components = append(components, inputHashes...)
 	components = append(components, pricingFP)
 	components = append(components, digest.EncodeInt64(int64(formatVersion)))
 	components = append(components, paramsFP)
@@ -213,9 +211,7 @@ func ComputeL2Digest(inputHashes [][]byte, pricingFP []byte, formatVersion int, 
 func ComputeVMFingerprint(sliceHashes [][]byte) [32]byte {
 	var components [][]byte
 	components = append(components, digest.EncodeInt64(int64(len(sliceHashes))))
-	for _, h := range sliceHashes {
-		components = append(components, h)
-	}
+	components = append(components, sliceHashes...)
 	return digest.Digest(components...)
 }
 

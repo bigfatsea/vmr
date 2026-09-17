@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -189,11 +188,7 @@ func BuildJourneyIndexRow(chain []*ctxgraph.Lineage, title string, partial bool)
 		}
 		lineages[i] = l.LineageID()
 	}
-	files := make([]string, 0, len(fileSet))
-	for f := range fileSet {
-		files = append(files, f)
-	}
-	sort.Strings(files)
+	files := fmtutil.SortedKeys(fileSet)
 	return JourneyIndexRow{
 		ID:       ID(chain),
 		Client:   first.ClientKeyTag,
@@ -270,11 +265,7 @@ func SourceFiles(idx *JourneyIndex, ids ...string) []string {
 			set[f] = true
 		}
 	}
-	files := make([]string, 0, len(set))
-	for f := range set {
-		files = append(files, f)
-	}
-	sort.Strings(files)
+	files := fmtutil.SortedKeys(set)
 	return files
 }
 

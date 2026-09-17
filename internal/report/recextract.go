@@ -85,25 +85,26 @@ func sortRows(rows []Row, key string) {
 func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 	// date/hour bucket keys use fmtutil.DisplayZone, not rf.TS's own offset.
 	r := &rec2{
-		ts:            rf.TS,
-		date:          rf.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
-		hour:          rf.TS.In(fmtutil.DisplayZone).Hour(),
-		model:         rf.Model,
-		protocol:      rf.Protocol,
-		outcome:       rf.Outcome,
-		stream:        rf.Stream,
-		durMS:         rf.DurMS,
-		ttftMS:        rf.TTFTMS,
-		path:          path,
-		line:          rf.Line,
-		bytesIn:       rf.BytesIn,
-		bytesOut:      rf.BytesOut,
-		toolDeclCount: rf.ToolDeclCount,
-		toolDeclBytes: rf.ToolDeclBytes,
-		endpoint:      rf.Endpoint,
-		errClass:      rf.ErrorClass,
-		clientKey:     rf.ClientKey,
-		truncated:     rf.TruncatedRaw, // may be OR'd with ri.Truncated below
+		ts:              rf.TS,
+		date:            rf.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
+		hour:            rf.TS.In(fmtutil.DisplayZone).Hour(),
+		model:           rf.Model,
+		protocol:        rf.Protocol,
+		outcome:         rf.Outcome,
+		stream:          rf.Stream,
+		durMS:           rf.DurMS,
+		ttftMS:          rf.TTFTMS,
+		path:            path,
+		line:            rf.Line,
+		bytesIn:         rf.BytesIn,
+		bytesOut:        rf.BytesOut,
+		endpoint:        rf.Endpoint,
+		errClass:        rf.ErrorClass,
+		clientKey:       rf.ClientKey,
+		truncated:       rf.TruncatedRaw, // may be OR'd with ri.Truncated below
+		guard:           rf.Guard,
+		guardScan:       rf.GuardScan,
+		guardScanFailed: rf.GuardScanFailed,
 	}
 	if rf.DurMS > 0 && rf.TTFTMS > 0 {
 		r.streamMS = rf.DurMS - rf.TTFTMS
@@ -137,10 +138,7 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 		r.taskID = ri.TaskID
 		r.taskSeq = ri.TaskSeq
 		r.sessSeq = ri.SessSeq
-		r.tags = ri.Tags
 		r.compaction = ri.Compaction
-		r.summarizes = ri.Summarizes
-		r.continuesTo = ri.ContinuesTo
 		r.detailFile = ri.DetailFile
 		r.newInstruction = ri.NewInstruction
 		r.workloadClass = workloadClassOf(ri)

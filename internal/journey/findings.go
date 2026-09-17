@@ -30,7 +30,6 @@ import (
 type FindingSource string
 
 const (
-	SourceRule        FindingSource = "rule"         // default: deterministic rule match
 	SourceLLMInferred FindingSource = "llm_inferred" // LLM semantic detector inference
 )
 
@@ -38,9 +37,7 @@ const (
 type FindingConfidence string
 
 const (
-	ConfidenceHigh   FindingConfidence = "HIGH"   // Direct, undeniable textual evidence anchor
-	ConfidenceMedium FindingConfidence = "MEDIUM" // Indirect evidence requiring inference
-	ConfidenceLow    FindingConfidence = "LOW"    // Elimination or weak heuristic
+	ConfidenceHigh FindingConfidence = "HIGH" // Direct, undeniable textual evidence anchor
 )
 
 // Finding is one Step-located, rule-derived or LLM-inferred "worth a second look" flag.
@@ -230,7 +227,7 @@ func detectNarrationWithoutAction(steps []*Step, tx i18n.JourneyFindingsText) []
 		}
 		runEnd := i + 1
 		for runEnd < len(steps) && len(steps[runEnd].ToolCalls) == 0 && steps[runEnd].RespText != "" &&
-			jaccardSim(wordSet(steps[runEnd-1].RespText), wordSet(steps[runEnd].RespText)) >= narrationJaccardThreshold {
+			jaccardSimilarity(wordSet(steps[runEnd-1].RespText), wordSet(steps[runEnd].RespText)) >= narrationJaccardThreshold {
 			runEnd++
 		}
 		runLen := runEnd - i
@@ -250,30 +247,13 @@ func detectNarrationWithoutAction(steps []*Step, tx i18n.JourneyFindingsText) []
 	return out
 }
 
-func wordSet(s string) map[string]bool {
+func wordSet(s string) map[string]struct{} {
 	fields := strings.Fields(strings.ToLower(s))
-	set := make(map[string]bool, len(fields))
+	set := make(map[string]struct{}, len(fields))
 	for _, f := range fields {
-		set[f] = true
+		set[f] = struct{}{}
 	}
 	return set
-}
-
-func jaccardSim(a, b map[string]bool) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	inter := 0
-	for w := range a {
-		if b[w] {
-			inter++
-		}
-	}
-	union := len(a) + len(b) - inter
-	if union == 0 {
-		return 0
-	}
-	return float64(inter) / float64(union)
 }
 
 // --- error_then_unverified_success -----------------------------------------

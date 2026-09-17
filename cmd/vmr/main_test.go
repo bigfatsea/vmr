@@ -788,6 +788,21 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 					"waiting":   0,
 				},
 			},
+			"audit": map[string]any{
+				"enabled":                true,
+				"active_file_size_bytes": 12000000,
+				"active_file_size":       "12 MB",
+				"total_size_bytes":       85000000,
+				"total_size":             "85 MB",
+				"retention_days":         30,
+			},
+			"image_cache": map[string]any{
+				"enabled":        true,
+				"size_bytes":     4000000,
+				"size":           "4 MB",
+				"capacity_bytes": 100000000,
+				"capacity":       "100 MB",
+			},
 			"models": []map[string]any{
 				{
 					"id":       "vm",
@@ -827,6 +842,9 @@ models:
 	if !strings.Contains(got, "concurrency: 2/8") {
 		t.Errorf("output should show concurrency 2/8: %q", got)
 	}
+	if !strings.Contains(got, "storage: audit=85 MB (active=12 MB retention=30d)  image_cache=4 MB/100 MB") {
+		t.Errorf("output should show storage line: %q", got)
+	}
 	if !strings.Contains(got, "vm [openai-completions]") {
 		t.Errorf("output should show model name: %q", got)
 	}
@@ -836,6 +854,64 @@ models:
 	if !strings.Contains(got, "ok") {
 		t.Errorf("endpoint state should be ok: %q", got)
 	}
+}
+
+func TestCmdStatus_StorageRendering(t *testing.T) {
+	// Case 1: disabled storage blocks
+	t.Run("disabled", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"instance": map[string]any{
+					"pid":         os.Getpid(),
+					"listen":      "127.0.0.1:8000",
+					"version":     "test",
+					"config":      map[string]any{"path": "config.yaml"},
+					"concurrency": map[string]any{"limit": 8},
+				},
+				"audit":       map[string]any{"enabled": false},
+				"image_cache": map[string]any{"enabled": false},
+			})
+		}))
+		defer ts.Close()
+
+		path := writeTempFile(t, "config.yaml", fmt.Sprintf("listen: %s\nproviders: [{name: p1, api_key: k, base_url: {openai-completions: https://example.com}}]\nmodels: {vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}}\n", ts.Listener.Addr().String()))
+		got := captureStdout(t, func() {
+			if err := cmdStatus([]string{"-c", path}); err != nil {
+				t.Fatalf("cmdStatus: %v", err)
+			}
+		})
+		if !strings.Contains(got, "storage: audit=disabled  image_cache=disabled") {
+			t.Errorf("output should show disabled storage line: %q", got)
+		}
+	})
+
+	// Case 2: nil storage blocks (no storage: line)
+	t.Run("nil_storage", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"instance": map[string]any{
+					"pid":         os.Getpid(),
+					"listen":      "127.0.0.1:8000",
+					"version":     "test",
+					"config":      map[string]any{"path": "config.yaml"},
+					"concurrency": map[string]any{"limit": 8},
+				},
+			})
+		}))
+		defer ts.Close()
+
+		path := writeTempFile(t, "config.yaml", fmt.Sprintf("listen: %s\nproviders: [{name: p1, api_key: k, base_url: {openai-completions: https://example.com}}]\nmodels: {vm: {endpoints: {openai-completions: [{providers: [p1], models: [m]}]}}}\n", ts.Listener.Addr().String()))
+		got := captureStdout(t, func() {
+			if err := cmdStatus([]string{"-c", path}); err != nil {
+				t.Fatalf("cmdStatus: %v", err)
+			}
+		})
+		if strings.Contains(got, "storage:") {
+			t.Errorf("output should not show storage line when nil: %q", got)
+		}
+	})
 }
 
 // TestCmdStatus_HalfOpenRendersDistinctFromOK pins the fix for a finding
@@ -995,26 +1071,5 @@ models:
 	}
 	if receivedAuth != "Bearer "+expectedKey {
 		t.Errorf("received auth via -key = %q, want Bearer %s", receivedAuth, expectedKey)
-	}
-}
-
-// dialHost turns a bind address into something you can actually connect
-// to. cfg.Listen is routinely a wildcard ("0.0.0.0:8800") and lsof reports
-// the same socket as "*:8800" — vmr.sh ps feeds both forms straight into
-// `vmr status -addr`.
-func TestDialHostRewritesWildcardBinds(t *testing.T) {
-	cases := map[string]string{
-		"0.0.0.0:8800":   "127.0.0.1:8800",
-		"*:8800":         "127.0.0.1:8800",
-		":8800":          "127.0.0.1:8800",
-		"[::]:8800":      "127.0.0.1:8800",
-		"127.0.0.1:8901": "127.0.0.1:8901",
-		"localhost:8800": "localhost:8800",
-		"garbage":        "garbage", // not host:port — pass through so the dial reports the real reason
-	}
-	for in, want := range cases {
-		if got := dialHost(in); got != want {
-			t.Errorf("dialHost(%q) = %q, want %q", in, got, want)
-		}
 	}
 }

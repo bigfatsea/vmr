@@ -11,6 +11,7 @@ package journey
 
 import (
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -661,18 +662,6 @@ func stepToolSignature(s *Step) toolSignature {
 	return toolSignature{hasCall: len(s.ToolCalls) > 0, names: names}
 }
 
-func sameNames(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // stepArgsEqual reports whether a and b issued exactly the same tool calls,
 // in the same order, with byte-identical arguments — only ever called once
 // both sides' toolSignature already matched, to tell "same tools, same
@@ -727,7 +716,7 @@ func computeDivergence(jA, jB *Journey) DivergencePoint {
 	for i := 0; i < n; i++ {
 		sa, sb := stepToolSignature(a[i].step), stepToolSignature(b[i].step)
 		switch {
-		case sa.hasCall != sb.hasCall || !sameNames(sa.names, sb.names):
+		case sa.hasCall != sb.hasCall || !slices.Equal(sa.names, sb.names):
 			return DivergencePoint{
 				Found: true, Index: i, AStepSeq: a[i].step.Seq, BStepSeq: b[i].step.Seq,
 				TaskTitle: a[i].taskTitle, ATools: sa.names, BTools: sb.names, Severity: DivergenceHeavy,

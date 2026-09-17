@@ -1,4 +1,4 @@
-// Ver 2026-08-02 12:30, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 //
 // runProbe protocol dispatch test:
 // Regression test: ensures Responses endpoints send appropriate probe bodies,
@@ -180,6 +180,52 @@ models:
 	}
 	if !bytes.Contains(captured, []byte(`"messages"`)) {
 		t.Errorf("the existing Chat Completions probe shape must be unchanged: %s", captured)
+	}
+}
+
+// TestRunProbe_AnthropicSendsVersionHeader covers the independent review's
+// follow-up finding: runProbe built its synthetic probe request with a nil
+// header (no Header field set at all on the CanonicalRequest literal), and
+// Anthropic{}.BuildRequest deliberately never invents an anthropic-version
+// the caller didn't supply -- so the background half-open recovery probe
+// was rejected with HTTP 400 by any spec-compliant Anthropic endpoint,
+// classified ErrClient/ReportNeutral (see the "wrong-shaped body" comment
+// a few lines above runProbe's CanonicalRequest literal, same failure
+// shape for a different root cause), leaving an otherwise-healthy
+// Anthropic endpoint stuck re-probing forever without ever confirming
+// recovery.
+func TestRunProbe_AnthropicSendsVersionHeader(t *testing.T) {
+	t.Parallel()
+	var gotVersion string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotVersion = r.Header.Get("anthropic-version")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"content":[{"type":"text","text":"ok"}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+timeouts:
+  probe: 2s
+providers:
+  - {name: p1, base_url: {anthropic-messages: `+upstream.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      anthropic-messages:
+        - {providers: [p1], models: [model-one]}
+`)
+	snap := mustSnapshot(t, cfg)
+	rt := New(nil)
+	rt.Install(snap)
+	snap = rt.Snapshot()
+	ep := snap.Models["anthropic-messages"]["vm"].Endpoints[0]
+
+	rt.runProbe(ep, snap)
+
+	if gotVersion == "" {
+		t.Error("anthropic-version header not sent, want a non-empty value (real Anthropic endpoints reject requests missing it)")
 	}
 }
 

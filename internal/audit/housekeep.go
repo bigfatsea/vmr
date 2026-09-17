@@ -22,10 +22,6 @@ import (
 // atomic write site in the repo.
 const compressTempPattern = ".audit-compress-*.tmp"
 
-func isCompressTemp(name string) bool {
-	return strings.HasPrefix(name, ".audit-compress-") && strings.HasSuffix(name, ".tmp")
-}
-
 // staleTempPrefixes are the atomic-write temp prefixes this package's sweep
 // reclaims: compressOne's own .audit-compress-* (see compressTempPattern) and
 // quota's .vmr-quota-* (internal/quota writes vmr-quota.json through

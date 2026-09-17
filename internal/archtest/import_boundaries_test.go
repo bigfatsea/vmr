@@ -173,6 +173,20 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/report",
 		"vmr/internal/journey",
 	},
+	// auditdiff (two-coordinate structural comparison behind `vmr diff`) is
+	// the same shape as reqdetail just above: a pure, side-effect-free
+	// consumer of audit.Record/ctxgraph.Manifest/chatmsg, never a producer
+	// report/journey/the CLI's routing half should reach into or that
+	// should reach back into them. cmd/vmr/cmd_diff.go is the only
+	// production caller; internal/replay.LoadRecord supplies the
+	// *audit.Record it takes.
+	"vmr/internal/auditdiff": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+		"vmr/internal/config",
+		"vmr/internal/report",
+		"vmr/internal/journey",
+	},
 	// server is the HTTP surface and admin layer. Under the two-halves
 	// contract (docs/VirtualModelRouter_Design_v4_Analytics.md Part 2:
 	// "Two halves, one contract"), the routing half and analytics half
@@ -190,33 +204,42 @@ var forbiddenImports = map[string][]string{
 	},
 }
 
-// zeroInternalDepPackages must not depend on any other vmr/internal/*
-// package at all, per CLAUDE.md's module map: these are the leaf layer both
-// halves import freely, which only stays safe while none of them grows a
-// dependency of its own. core holds the shared types; fmtutil the display
-// formatting; i18n the EN/ZH text tables. jsonscan joined this list when it
-// was extracted from internal/adapter's
-// classify.go/fingerprint.go — a pure JSON byte-range scanning engine with
-// no reason to depend on anything but the standard library.
-// Checked separately from forbiddenImports above because "must
-// have zero deps" isn't expressible as a finite forbidden list without
+// allowedDepPackages generalizes what used to be zeroInternalDepPackages (a
+// flat "must have zero vmr/internal deps" list) into a per-package allow
+// list, an empty slice still meaning zero. Agent Guard's internal/guard
+// (docs/design/agent-guard-technical-spec-final-2.0.md's ADR-1) needed exactly
+// one non-zero entry — {jsonscan}, since CLAUDE.md already states
+// "jsonscan is the system's one JSON byte-scanning engine; a private
+// reimplementation is a whole bug class" and guard's Engine.Scan walks
+// arbitrary JSON to find credential-shaped string values, which needs
+// jsonscan's quote/escape-aware primitives (SkipJSONString,
+// SkipJSONValue, SkipJSONWS) rather than a second copy of them — a single
+// non-zero list entry didn't justify a whole second table alongside this
+// one, so the zero-dep list became the general case (nil/empty) of this
+// one instead. core holds the shared types; fmtutil the display
+// formatting; i18n the EN/ZH text tables. jsonscan itself stays in the
+// zero-dep tier — it must not gain a dependency on guard or anything else,
+// or "the one shared scanning engine" stops being a leaf.
+// Checked separately from forbiddenImports above because "these exact deps
+// and no more" isn't expressible as a finite forbidden list without
 // silently going stale every time a new internal package is added elsewhere
 // in the tree.
-var zeroInternalDepPackages = []string{
-	"vmr/internal/buildinfo",
+var allowedDepPackages = map[string][]string{
+	"vmr/internal/buildinfo": nil,
 	// dashboard's Go side is only embed + WriteSkeletons; its pages live in
 	// embedded HTML/JS assets, so it stays a zero-dep leaf like the others.
-	"vmr/internal/dashboard",
-	"vmr/internal/digest",
-	"vmr/internal/core",
-	"vmr/internal/fmtutil",
-	"vmr/internal/i18n",
-	"vmr/internal/jsonscan",
-	"vmr/internal/livestats",
-	"vmr/internal/logtee",
-	"vmr/internal/rundir",
-	"vmr/internal/sysinfo",
-	"vmr/internal/tokenutil",
+	"vmr/internal/dashboard": nil,
+	"vmr/internal/digest":    nil,
+	"vmr/internal/core":      nil,
+	"vmr/internal/fmtutil":   nil,
+	"vmr/internal/i18n":      nil,
+	"vmr/internal/jsonscan":  nil,
+	"vmr/internal/livestats": nil,
+	"vmr/internal/logtee":    nil,
+	"vmr/internal/rundir":    nil,
+	"vmr/internal/sysinfo":   nil,
+	"vmr/internal/tokenutil": nil,
+	"vmr/internal/guard":     {"vmr/internal/jsonscan"},
 }
 
 // loadtestNoInternalDeps pins the boundary stated in the design doc's
@@ -243,19 +266,30 @@ func TestArchitecture_LoadtestRunnerNoInternalDeps(t *testing.T) {
 	}
 }
 
-// TestArchitecture_ZeroInternalDepPackages guards the leaf packages every
-// other package in this project is free to import without a boundary
-// concern — that promise only holds if they never grow an internal
-// dependency of their own.
-func TestArchitecture_ZeroInternalDepPackages(t *testing.T) {
-	for _, pkg := range zeroInternalDepPackages {
+// TestArchitecture_AllowedInternalDeps guards the leaf-ish packages in
+// allowedDepPackages: most (an empty/nil entry) are free for every other
+// package in this project to import without a boundary concern, which only
+// holds while they never grow an internal dependency of their own; guard's
+// non-empty entry pins ADR-1's white list instead — {jsonscan} allowed,
+// nothing else.
+func TestArchitecture_AllowedInternalDeps(t *testing.T) {
+	for pkg, allowed := range allowedDepPackages {
+		allow := make(map[string]bool, len(allowed))
+		for _, a := range allowed {
+			allow[a] = true
+		}
 		out, err := exec.Command("go", "list", "-deps", pkg).Output()
 		if err != nil {
 			t.Fatalf("go list -deps %s: %v", pkg, err)
 		}
 		for _, d := range strings.Fields(string(out)) {
-			if d != pkg && strings.HasPrefix(d, "vmr/internal/") {
+			if d == pkg || !strings.HasPrefix(d, "vmr/internal/") || allow[d] {
+				continue
+			}
+			if len(allowed) == 0 {
 				t.Errorf("%s must have zero vmr/internal dependencies, but depends on %s", pkg, d)
+			} else {
+				t.Errorf("%s's allowed vmr/internal dependencies are %v, but it also depends on %s", pkg, allowed, d)
 			}
 		}
 	}

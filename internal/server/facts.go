@@ -26,6 +26,7 @@ package server
 
 import (
 	"bytes"
+	"slices"
 
 	"vmr/internal/core"
 	"vmr/internal/jsonscan"
@@ -231,10 +232,11 @@ func estimateTextTokens(body []byte, spans []attachmentSpan) int64 {
 // its own (correct) image estimate whenever a document marker appeared
 // anywhere in the body — including mere mentions of PDFs in message text.
 func estimateDocumentTokens(body []byte, spans []attachmentSpan) int64 {
-	// No attachment payload spans → no document bytes to size, whatever
-	// markers the body text might mention. Skip the 4 whole-body Contains
-	// scans below on the ~95% of requests that carry no attachment at all.
-	if len(spans) == 0 {
+	// No document-kind span → no document bytes to size, whatever markers
+	// the body text might mention (and whatever other attachment kinds,
+	// e.g. images, spans does carry). Skip the 4 whole-body Contains scans
+	// below on requests that carry no document attachment at all.
+	if !slices.ContainsFunc(spans, func(s attachmentSpan) bool { return s.kind == spanDocument }) {
 		return 0
 	}
 	hasMarker := false

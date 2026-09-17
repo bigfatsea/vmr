@@ -4,6 +4,7 @@ package router
 
 import (
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,20 +238,9 @@ func TestServe_QuotaReordering_MisalignedResetDays(t *testing.T) {
 	if endpoint != "openai-completions/plan-c/mc" {
 		t.Fatalf("winning endpoint = %s, want openai-completions/plan-c/mc (plan-c has the least time left relative to its usage)", endpoint)
 	}
-	if got := w.Header().Get("X-VMR-Route-Reason"); got == "" || !containsSubstr(got, "pick=quota") {
+	if got := w.Header().Get("X-VMR-Route-Reason"); got == "" || !strings.Contains(got, "pick=quota") {
 		t.Errorf("X-VMR-Route-Reason = %q, want it to show pick=quota", got)
 	}
-}
-
-func containsSubstr(s, sub string) bool {
-	return len(s) >= len(sub) && (func() bool {
-		for i := 0; i+len(sub) <= len(s); i++ {
-			if s[i:i+len(sub)] == sub {
-				return true
-			}
-		}
-		return false
-	})()
 }
 
 // fmtQuotaCfg builds a 3-provider config where each provider's monthly

@@ -98,11 +98,6 @@ type analyzeRun struct {
 // modes into cmdAnalyze inline pushed it over archtest's per-function line
 // budget (a "composition, not an algorithm" split, same reasoning as
 // analyzeRun's own). Returns whether exactly one of -journey/-compare/
-// validateAnalyzeModeFlags checks the mutual-exclusion rules across
-// cmdAnalyze's mode-selecting flags — split out once folding P15.1's new
-// modes into cmdAnalyze inline pushed it over archtest's per-function line
-// budget (a "composition, not an algorithm" split, same reasoning as
-// analyzeRun's own). Returns whether exactly one of -journey/-compare/
 // -benchmark was given. -journey-only is deliberately NOT exclusive with
 // -render-all (unlike -macro-only/-list-only) — it composes with it,
 // see analyzeRun.journeyOnly's own doc comment.
@@ -339,15 +334,7 @@ func finishAnalyze(r *analyzeRun, rep *report.Report2) error {
 // modes that didn't run the report half; the manifest then stamps only the
 // slices that actually exist on disk.
 func commitManifest(r *analyzeRun, rep *report.Report2) error {
-	manifest, err := report.BuildManifest(r.outDir, rep, r.lang)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
-		return nil
-	}
-	if err := report.WriteManifest(r.outDir, manifest); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: manifest not written — this snapshot will be treated as invalid by -render-only and the L2 cache until the next analyze: %v\n", err)
-	}
-	return nil
+	return writeReportManifest(r.outDir, rep, r.lang)
 }
 
 // runMacroOnly is -macro-only's whole run: the macro report half, then the

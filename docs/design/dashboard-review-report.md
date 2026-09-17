@@ -2,7 +2,7 @@
 
 # VMR Console 统一化 Demo — Dashboard 专项深度 Review
 
-**评审对象**：`docs/design/console-unification.md`（评审时为草案 v3，现已随本报告定稿至 v5）与 `docs/design/demo/` 四页静态 Demo。
+**评审对象**：`console-unification` 控制台统一化方案与 `docs/design/demo/` 四页静态 Demo。
 **评审视角**：系统运维人员 / 模型管理员 / 接入方开发者三类真实使用者的视线流、认知负荷与操作闭环。
 **评审边界**：只动方案文档与 Demo HTML，不触碰 `internal/server/*.html`、`/status`、`/stats` 的任何实现。
 **产出**：第一轮直接修改 27 项 + 10 项决策（已于 2026-09-10 全部拍板，见 §4.3）+ 第二轮复审 8 项（§5.2）+ 第三轮补充 4 项（Stage 6，其中两项推翻了评审自己的误判）。全部改动已落地到 Demo 与方案文档；系统代码未触碰。
@@ -261,7 +261,7 @@ sparkline 是可行的（`hourly[]` 已有数据），但会显著增加指标�
 
 ### 4.2 已执行优化清单（Applied Modifications）
 
-共 27 项，全部已落地到 `docs/design/demo/*.html` 与 `docs/design/console-unification.md`。
+共 27 项，全部已落地到 `docs/design/demo/*.html` 与方案设计。
 
 **A. 语义正确性（最高价值，5 项）**
 
@@ -316,7 +316,7 @@ sparkline 是可行的（`hourly[]` 已有数据），但会显著增加指标�
 | E5 | index.html 文案全面重写（F70） | 三处描述指向已删除的 tab 与 Connect URL |
 | E6 | 行内色值改工具类、字节单位统一、Mock 协议一致性、Demo 面板可折叠、窄屏断点（F09/F16/F41/F72/F73） | 令牌纪律在样板里就破了；Demo 数据自相矛盾 |
 
-方案文档 `console-unification.md` 同步升到 v4：新增原则 7（颜色语义唯一）、8（首屏五问）、
+方案文档同步升到 v4：新增原则 7（颜色语义唯一）、8（首屏五问）、
 9（每个数字自带口径）；新增 §8.3（vitals 五段）与 §8.6（极端状态契约）；§4、§8.4-a/b/c/d/e、
 §8.5 按上述改动重写。
 

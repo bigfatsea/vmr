@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 package diagnose
 
 import (
@@ -454,6 +454,102 @@ models:
 	if r.Status != StatusOK {
 		t.Fatalf("status = %s, want ok (detail=%q) — anthropic endpoints must never be probed with role \"developer\"", r.Status, r.Detail)
 	}
+}
+
+// TestTestEndpoint_AnthropicSendsVersionHeader covers the independent
+// review's follow-up finding: testEndpoint built its synthetic probe
+// request with an empty header map, and Anthropic{}.BuildRequest
+// deliberately never invents an anthropic-version the caller didn't supply
+// -- so the base `vmr diagnose` connectivity check (not just -guard) was
+// rejected with HTTP 400 by any spec-compliant Anthropic endpoint,
+// misreporting a perfectly healthy endpoint as unreachable.
+// TestCollectEndpointTriples_IncludesFallbackOnlyProvider covers the
+// independent review's finding: collectEndpointTriples only walked
+// cfg.Models[...].Endpoints, never cfg.FallbackEndpoints -- a provider
+// declared exclusively as a top-level fallback (a disaster-recovery tier
+// with no matching primary endpoint anywhere) never appeared in either the
+// base `vmr diagnose` connectivity check or -guard's security probes,
+// leaving it completely unverified until failover reached it for real.
+func TestCollectEndpointTriples_IncludesFallbackOnlyProvider(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+listen: 127.0.0.1:0
+providers:
+  - {name: primary, base_url: {openai-completions: "https://primary.example"}, api_key: k}
+  - {name: fb, base_url: {openai-completions: "https://fallback.example"}, api_key: k}
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [primary], models: [model-a]}
+fallback_endpoints:
+  openai-completions:
+    - {providers: [fb], models: [model-b], priority: 90}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := collectEndpointTriples(cfg)
+	want := epKey{"openai-completions", "fb", "model-b"}
+	found := false
+	for _, k := range keys {
+		if k == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("collectEndpointTriples(cfg) = %v, want it to include the fallback-only triple %v", keys, want)
+	}
+}
+
+func TestTestEndpoint_AnthropicSendsVersionHeader(t *testing.T) {
+	ts := versionCheckingUpstream(t)
+	defer ts.Close()
+	cfg, err := config.Parse([]byte(fmt.Sprintf(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {anthropic-messages: %q}, api_key: k}
+models:
+  vm: {endpoints: {anthropic-messages: [{providers: [p1], models: [m]}]}}
+`, ts.URL)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ep := mkEndpoint(cfg, "anthropic-messages", "p1", "m")
+	r := testEndpoint(context.Background(), cfg, ep, 5*time.Second)
+	if r.Status != StatusOK {
+		t.Fatalf("status = %s, want ok (detail=%q) — anthropic-version must be sent", r.Status, r.Detail)
+	}
+}
+
+// versionCheckingUpstream fails the probe (400, matching Anthropic's real
+// error shape) if anthropic-version is missing -- the regression net for
+// the missing-header bug: a lenient mock that ignores the header would
+// otherwise pass even when vmr never sent it. Reply shape otherwise mirrors
+// echoUpstream's (probe.Echoed is a protocol-agnostic substring search, so
+// the exact reply envelope doesn't need to be Anthropic-shaped).
+func versionCheckingUpstream(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("anthropic-version") == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"anthropic-version header is required"}}`)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var req struct {
+			Messages []struct{ Content string } `json:"messages"`
+		}
+		reply := ""
+		if err := json.Unmarshal(body, &req); err == nil && len(req.Messages) > 0 {
+			content := req.Messages[len(req.Messages)-1].Content
+			const prefix = "Reply with exactly this token and nothing else: "
+			if i := strings.Index(content, prefix); i >= 0 {
+				reply = content[i+len(prefix):]
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%q}}]}`, reply)
+	}))
 }
 
 // responsesEchoUpstream is echoUpstream's Responses-protocol counterpart:

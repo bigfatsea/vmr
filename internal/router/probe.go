@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 
 // Serve's background half (see router.go) — a dedicated, lightweight
 // request that verifies a half-open endpoint without making any real
@@ -70,7 +70,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	} else {
 		body, nonce = probe.Request(ep.Model)
 	}
-	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body}
+	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: body, Header: probe.RequiredHeaders(ep.AdapterType)}
 	ctx, cancel := context.WithTimeout(rt.Context(), snap.Cfg.Timeouts.Probe.D())
 	defer cancel()
 
@@ -100,18 +100,20 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 	}
 	defer resp.Body.Close()
 	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, probeBodyCap))
+	if readErr != nil {
+		// Mirrors tryOne's handleErrorResponse: a body read failure means
+		// respBody is a fragment, not a classifiable error body — running
+		// it through ClassifyError risks a wrong verdict from missing
+		// vendor phrasing (e.g. reading a truncated 401 body as a lesser
+		// class). Treat it as the network failure it actually is — checked
+		// before the status-code branch below so a 200 OK that dies mid-read
+		// isn't misclassified as a successful probe (KNOWN_ISSUES §2.134).
+		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
+		rt.logf("%s, status=%d, error=network:%v, dur=%s, cooldown=%s", logPrefix, resp.StatusCode, readErr, fmtDur(dur), cd)
+		return
+	}
 
 	if resp.StatusCode >= 400 {
-		if readErr != nil {
-			// Mirrors tryOne's handleErrorResponse: a body read failure means
-			// respBody is a fragment, not a classifiable error body — running
-			// it through ClassifyError risks a wrong verdict from missing
-			// vendor phrasing (e.g. reading a truncated 401 body as a lesser
-			// class). Treat it as the network failure it actually is.
-			cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-			rt.logf("%s, status=%d, error=network:%v, dur=%s, cooldown=%s", logPrefix, resp.StatusCode, readErr, fmtDur(dur), cd)
-			return
-		}
 		class := ad.ClassifyError(resp.StatusCode, respBody)
 		if class == core.ErrContent || class == core.ErrClient || class == core.ErrContextLimit || class == core.ErrQuirk {
 			// Request-specific outcomes — the probe prompt itself got

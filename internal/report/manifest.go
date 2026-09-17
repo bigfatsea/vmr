@@ -8,16 +8,14 @@
 package report
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"vmr/internal/ctxgraph"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
@@ -34,6 +32,12 @@ const (
 	SliceRequestsIndex          = "requests/index.json"
 	SliceJourneysIndex          = "journeys/index.json"
 	SliceJourneysBenchmarks     = "journeys/benchmarks.json"
+	// SliceMacroGuard is Agent Guard's optional M2 slice (slices.go's
+	// GuardSlice) — deliberately NOT in MacroSlicePaths: it is not one of
+	// the five core domain slices written as an atomic unit, and a run
+	// with Agent Guard unconfigured (every run today) never writes it at
+	// all, unlike the five which are always written together.
+	SliceMacroGuard = "macro/guard.json"
 )
 
 // MacroSlicePaths lists the 5 core macro domain slices.
@@ -55,6 +59,7 @@ var AllSlicePaths = []string{
 	SliceRequestsIndex,
 	SliceJourneysIndex,
 	SliceJourneysBenchmarks,
+	SliceMacroGuard,
 }
 
 // TimePoint represents a timestamp as both raw epoch milliseconds (for
@@ -96,31 +101,6 @@ type Manifest struct {
 	Slices      map[string]SliceRef `json:"slices"`
 	Footnotes   map[string]string   `json:"footnotes,omitempty"`
 	Disclaimers []string            `json:"disclaimers,omitempty"`
-}
-
-// HasSlice checks if the manifest contains a reference for the given slice path.
-func (m *Manifest) HasSlice(relPath string) bool {
-	if m == nil || m.Slices == nil {
-		return false
-	}
-	_, ok := m.Slices[relPath]
-	return ok
-}
-
-// GetSlice retrieves the SliceRef for a relative path or semantic key.
-func (m *Manifest) GetSlice(relPath string) (SliceRef, bool) {
-	if m == nil || m.Slices == nil {
-		return SliceRef{}, false
-	}
-	if ref, ok := m.Slices[relPath]; ok {
-		return ref, true
-	}
-	for _, ref := range m.Slices {
-		if ref.Path == relPath {
-			return ref, true
-		}
-	}
-	return SliceRef{}, false
 }
 
 // BuildFootnotesAndDisclaimers extracts structured footnote definitions and
@@ -177,7 +157,7 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 	if rep != nil {
 		timeRange = [2]string{rep.Meta.From, rep.Meta.To}
 		for _, in := range rep.Meta.Inputs {
-			sha, _ := HashFile(in)
+			sha, _ := ctxgraph.HashFile(in)
 			inputs = append(inputs, InputFile{
 				Path:   in,
 				SHA256: sha,
@@ -201,7 +181,7 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 	for _, relPath := range AllSlicePaths {
 		fullPath := filepath.Join(dir, relPath)
 		if fi, err := os.Stat(fullPath); err == nil && !fi.IsDir() {
-			sha, err := HashFile(fullPath)
+			sha, err := ctxgraph.HashFile(fullPath)
 			if err != nil {
 				return nil, fmt.Errorf("hash slice %s: %w", relPath, err)
 			}
@@ -297,7 +277,7 @@ func ValidateManifest(dir string) (*Manifest, error) {
 			p = key
 		}
 		fullPath := filepath.Join(dir, p)
-		actualSHA, err := HashFile(fullPath)
+		actualSHA, err := ctxgraph.HashFile(fullPath)
 		if err != nil {
 			return nil, fmt.Errorf("hash slice %q (%s): %w", key, p, err)
 		}
@@ -329,21 +309,6 @@ func requireMacroSlices(slices map[string]SliceRef) error {
 		}
 	}
 	return nil
-}
-
-// HashFile computes the lowercase hex-encoded SHA-256 digest of the file at path.
-func HashFile(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // writeJSONAtomic writes data as formatted JSON to filepath.Join(dir, filename)

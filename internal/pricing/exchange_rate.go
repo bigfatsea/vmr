@@ -3,6 +3,7 @@
 package pricing
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"strings"
@@ -29,7 +30,7 @@ type exchangeRateFile struct {
 // generation date.
 func LoadDefaultExchangeRate() (rates map[string]float64, generatedAt string, err error) {
 	var ef exchangeRateFile
-	dec := yaml.NewDecoder(strings.NewReader(string(standardExchangeRateYAML)))
+	dec := yaml.NewDecoder(bytes.NewReader(standardExchangeRateYAML))
 	dec.KnownFields(true)
 	if err := dec.Decode(&ef); err != nil {
 		return nil, "", fmt.Errorf("embedded standard_exchange_rate.yaml: %w", err)

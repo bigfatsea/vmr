@@ -1,8 +1,8 @@
 // Ver 2026-09-15, by pi
 
-// Deprecated: legacy renderDecisionSpine eating in-memory *Journey was deleted
-// in Phase 3 in favor of viewmodel_spine.go (D11).
-// capFullWith, positionalToolResults and truncation constants retained here.
+// Legacy renderDecisionSpine eating in-memory *Journey was deleted in Phase 3
+// in favor of viewmodel_spine.go (D11); capFullWith, positionalToolResults and
+// the truncation constants below are still live and used by it.
 package journey
 
 import "vmr/internal/chatmsg"

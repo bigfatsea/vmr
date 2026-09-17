@@ -60,6 +60,7 @@ func printStatus(st *statusResponse) {
 	if st.Traffic.Sticky.Entries > 0 {
 		fmt.Printf("sticky: %d session(s) pinned\n", st.Traffic.Sticky.Entries)
 	}
+	printStorage(st)
 	for _, q := range st.Quota {
 		estNote := ""
 		if q.EstimatedPct > 0 {
@@ -124,6 +125,34 @@ func printStatus(st *statusResponse) {
 			}
 			fmt.Printf("  p%-3d %-40s %s\n", ep.Priority, ep.Endpoint, state)
 		}
+	}
+}
+
+func printStorage(st *statusResponse) {
+	if st.Audit == nil && st.ImageCache == nil {
+		return
+	}
+	var parts []string
+	if a := st.Audit; a != nil {
+		if a.Enabled {
+			ret := ""
+			if a.RetentionDays > 0 {
+				ret = fmt.Sprintf(" retention=%dd", a.RetentionDays)
+			}
+			parts = append(parts, fmt.Sprintf("audit=%s (active=%s%s)", a.TotalSize, a.ActiveFileSize, ret))
+		} else {
+			parts = append(parts, "audit=disabled")
+		}
+	}
+	if ic := st.ImageCache; ic != nil {
+		if ic.Enabled {
+			parts = append(parts, fmt.Sprintf("image_cache=%s/%s", ic.Size, ic.Capacity))
+		} else {
+			parts = append(parts, "image_cache=disabled")
+		}
+	}
+	if len(parts) > 0 {
+		fmt.Printf("storage: %s\n", strings.Join(parts, "  "))
 	}
 }
 

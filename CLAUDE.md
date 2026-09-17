@@ -83,7 +83,8 @@ Routing half:
 | `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, `/status` (auth-gated), unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/status`) |
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |
-| `diagnose`, `replay` | `vmr diagnose` / `vmr replay` — both reuse the same `Adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses, so what they show is byte-identical to what would really happen |
+| `diagnose`, `replay` | `vmr diagnose` / `vmr replay` — both reuse the same `Adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses, so what they show is byte-identical to what would really happen. `replay.ResolveAuditPath`/`LoadRecord` are also `vmr diff`'s one coordinate-to-record resolver — the single place a "basename:line" coordinate becomes a real file path and an `audit.Record` |
+| `guard` | Agent Guard's detection-and-intervention core (`docs/design/agent-guard-technical-spec-final-2.0.md`): anchored regex `Rule`s + JSON string-value walk (`Engine.Scan`) + deterministic `Fingerprint` (no salt — KNOWN_ISSUES K-G19), outbound observe/reject (`Outbound` — audit_only or block; the former mode: replace/pseudonym-restore machinery was removed, see the package doc), inbound (`Inbound`: SSE re-framing + Unicode-steganography sanitization only — the online Tool Call gate and circuit-break frames were removed, ADR-15; `InspectToolCall`'s command/path/credential-echo judgment survives as an offline-only detection function). Depends on `jsonscan` only (an explicit `archtest` allow-list entry, not the zero-dep tier). Wired online via `server`/`router` mount points, `config`'s `guard:` schema, and `vmr diagnose -guard` (probe library in `probe/guard.go`); consumed offline by `report`'s guardscan fallback and `tools/guard_corpus_scan` |
 
 Analytics half:
 
@@ -95,6 +96,7 @@ Analytics half:
 | `reqdetail` | Two layers, with different inputs — do not collapse them. Per-record fact extraction (role token/char shares, tool signature, error class, image counts — `report/session.go`'s own aggregation calls these too, not just detail rendering) is a pure function of one `audit.Record` and nothing else. The detail page renderer built on top of it (`requests/details/*.md`, plus its deterministic coordinate-hash filename with the `r-` prefix — `FileName`/`FileNameForRecord`/`FileNameForManifest`) is a pure function of `(record, manifest, prev manifest)`: `prev` is cross-record context the caller injects, so byte-identical output between `report` and `journey` requires both to pass the *same* triple — which is why the render fingerprint carries `m`/`prev` identity, not just lang |
 | `report` | `vmr analyze`'s macro half: aggregation into the five domain slices under `macro/*.json` plus `requests/index.json`, stamped by `manifest.json` (written last, admission token); rendering goes through the ViewModel layer (`viewmodel_*.go` builders + fixed serializer) reading the slices from disk. A new report section arrives as a new `internal/report/viewmodel_*.go` builder, not as more lines in an existing one — the `archtest` line budget is what enforces that |
 | `journey` | `vmr analyze`'s journey half: Journey/Task/Step narrative, behavior indicators, findings, journey comparison, benchmark statistics, optional LLM interpretation layer; products under `journeys/`, self-contained `j-<id>.json` (tree + `bodies` blob table) |
+| `auditdiff` | `vmr diff`'s comparison algorithm: two `audit.Record`/`ctxgraph.Manifest` pairs in, a structured header/system/tools/messages `Report` plus one of five narrow verdicts out — a pure function, no file I/O, no CLI concerns. `cmd/vmr/cmd_diff.go` is the only production caller |
 
 Shared guards:
 
@@ -109,10 +111,12 @@ root allowed to see both halves at once.
 ## Invariants to not accidentally break
 
 - **Byte-faithful passthrough.** No canonical IR, no cross-protocol translation. Exactly
-  five sanctioned deviations: model-name rewrite, role-map remapping, `imgprep`'s
+  six sanctioned deviations: model-name rewrite, role-map remapping, `imgprep`'s
   image downscale (the largest — a real unmarshal/rewrite/re-marshal), `respnorm`'s
   evidence-based quirk repairs (each behind a content guard, fail-open to "unmodified" on
-  any doubt), and `respnorm`'s `[DONE]` delimiter completion.
+  any doubt), `respnorm`'s `[DONE]` delimiter completion, and `guard`'s inbound Unicode
+  steganography sanitization (strictly opt-in via `guard:` config, fail-open on any doubt,
+  never touches the outbound request body — see the Agent Guard design doc's ADR-2).
 - **Two halves, one contract.** `report`/`journey`/`ctxgraph`/`taskseg`/`chatmsg`/`reqdetail` never
   import `router`/`server`/`config`; the JSONL audit record is the only coupling. `archtest`-enforced.
 - **`ctxgraph`/`chatmsg` are the single source of truth** for message hashing and message

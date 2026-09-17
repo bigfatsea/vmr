@@ -4,6 +4,7 @@ package journey
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -126,22 +127,15 @@ var metricSpecs = []metricSpec{
 func metricDiff(code MetricCode, label string, kind MetricKind, a, b float64) MetricDiff {
 	d := MetricDiff{Metric: code, Label: label, Kind: kind, A: a, B: b}
 	denom := a
-	if abs(b) > abs(a) {
+	if math.Abs(b) > math.Abs(a) {
 		denom = b
 	}
 	if denom != 0 {
-		d.DeltaRel = (b - a) / abs(denom)
+		d.DeltaRel = (b - a) / math.Abs(denom)
 	}
 	floor := notableFloor[kind]
-	d.Notable = abs(b-a) >= floor && abs(d.DeltaRel) >= notableRelThreshold
+	d.Notable = math.Abs(b-a) >= floor && math.Abs(d.DeltaRel) >= notableRelThreshold
 	return d
-}
-
-func abs(f float64) float64 {
-	if f < 0 {
-		return -f
-	}
-	return f
 }
 
 // journeyMetric is one single-journey behavior-indicator row — the same

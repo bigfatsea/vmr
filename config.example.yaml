@@ -1,4 +1,4 @@
-# Ver 2026-08-02 13:30, by Sonnet 5
+# Ver 2026-09-14 23:30, by Sonnet 5
 # vmr config — the fully annotated reference. Just want to get running?
 # Copy config.minimal.yaml instead (~10 lines) and come back here for a knob.
 # vmr config — copy to config.yaml and adjust.
@@ -170,6 +170,30 @@ fallback_endpoints:
     - providers: [openrouter2]
       models: [z-ai/glm-5.2]
       priority: 90              # required and must be > 0 on a fallback entry — see the header comment above
+
+# guard: Agent Guard's bidirectional credential/inbound-forensics layer
+# (docs/design/agent-guard-technical-spec-final-2.0.md). Omit entirely (as here) for
+# 100% original byte-faithful passthrough with zero code-path overhead. Outbound
+# intervention keeps credentials away from untrusted relays (audit_only is the
+# only mode calibrated purely from offline evidence — never start higher up the
+# mode list); inbound intervention only strips steganographic Unicode runes from
+# responses (ADR-15) — it never blocks, never changes the HTTP status code, and
+# never inspects tool calls: judging whether a tool call is safe to run is your
+# Coding Agent client's own approval gate and sandbox's job, not this gateway's,
+# which never has as much context to make that call with. Deep dive on
+# credential/tool-call/rune findings either way: offline, via `vmr analyze`.
+# guard:
+#   trusted_providers: [minimax, deepseek]   # must name real providers[] entries;
+#                                  # outbound scanning is skipped only when EVERY
+#                                  # candidate for a request's virtual model is trusted
+#   outbound:
+#     mode: audit_only            # off | audit_only | block — audit_only is the
+#                                  # only mode calibrated purely from offline
+#                                  # evidence; never start higher up this list.
+#                                  # (The former replace/pseudonym-restore mode was
+#                                  # removed — block is the stronger posture now.)
+#   inbound:
+#     sanitize_invisible_runes: true   # the only inbound knob — see above
 
 providers:
   # base_url must include the provider's own full API version (/v1, /v3,

@@ -1,8 +1,8 @@
 // Ver 2026-09-15, by pi
 
-// Deprecated: legacy toolCallLine eating chatmsg.ToolCall was deleted in Phase 3
-// in favor of viewmodel_spine.go's vmToolCallBlocks (D11).
-// Argument shape analysis and truncation helpers retained here.
+// Legacy toolCallLine eating chatmsg.ToolCall was deleted in Phase 3 in favor
+// of viewmodel_spine.go's vmToolCallBlocks (D11); argument shape analysis and
+// truncation helpers below are still live and used by it.
 package journey
 
 import (

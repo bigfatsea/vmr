@@ -85,6 +85,7 @@ var bundleConstructors = map[string]func(Lang) any{
 	"JourneyIndexT":   func(l Lang) any { return JourneyIndexT(l) },
 	"ComparesIndex":   func(l Lang) any { return ComparesIndex(l) },
 	"ToolWaste":       func(l Lang) any { return ToolWaste(l) },
+	"Guard":           func(l Lang) any { return Guard(l) },
 }
 
 func TestBundlesHaveNoEmptyStrings(t *testing.T) {

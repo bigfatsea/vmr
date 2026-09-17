@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -21,6 +21,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
+	"vmr/internal/guard"
 	"vmr/internal/health"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
@@ -45,6 +46,14 @@ type Router struct {
 	// it nil, and every registry method is nil-safe for that case — same
 	// convention as Quota above.
 	Inflight *InflightRegistry
+
+	// Guard is Agent Guard's online engine (M4, narrowed by ADR-15), nil unless cmd_start.go's
+	// setupGuard wires one up (same "cfg.Guard != nil at startup" gate
+	// internal/server.Server.guard uses — see that field's doc comment).
+	// forwardSuccess's inbound mount point is nil-safe: a nil Guard means
+	// no guard.Inbound wrapping happens at all, byte-identical to this
+	// field never having existed.
+	Guard *guard.Guard
 
 	snap atomic.Pointer[Snapshot]
 
@@ -139,7 +148,7 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 		return
 	}
 
-	if ifh := inflightHandleFrom(r.Context()); ifh != nil {
+	if ifh := InflightHandleFrom(r.Context()); ifh != nil {
 		ifh.SetEstIn(creq.Facts.EstimatedTokens)
 	}
 
@@ -378,7 +387,7 @@ func (rt *Router) tryOne(w http.ResponseWriter, r *http.Request, creq *core.Cano
 	// In-flight sent stamp (LiveStats §5.2), same point as the audit request
 	// stamp: every attempt overwrites the previous one, so a request stuck
 	// in failover shows the endpoint it is currently waiting on.
-	ifh := inflightHandleFrom(r.Context())
+	ifh := InflightHandleFrom(r.Context())
 	ifh.stampSent(attempt, ep.Provider, ep.Model, ep.KeyLabel)
 
 	resp, err := snap.clientFor(ep).Do(req)
@@ -533,15 +542,20 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	copyRespHeaders(w.Header(), resp.Header)
 	w.Header().Set("X-VMR-Endpoint", ep.Name())
 	w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempt))
+
+	// isSSE/opaque decide respnorm's transport mode. Agent Guard's inbound
+	// side never blocks or changes the status code (ADR-15), so unlike the
+	// pre-ADR-15 shape there is no reason to delay WriteHeader for either
+	// response shape — it is always written immediately.
+	ct := resp.Header.Get("Content-Type")
+	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
+	opaque := resp.Header.Get("Content-Encoding") != ""
 	w.WriteHeader(resp.StatusCode)
 
 	// Wrap the upstream body with the response normalizer (internal/respnorm):
 	// true streaming by default, buffered only when a known upstream quirk
 	// shape is detected, raw passthrough when the body is compressed — see
 	// that package's doc comment for what triggers buffering.
-	ct := resp.Header.Get("Content-Type")
-	isSSE := strings.Contains(ct, "text/event-stream") || (ct == "" && creq.Stream)
-	opaque := resp.Header.Get("Content-Encoding") != ""
 	rbody := respnorm.Wrap(body, respnorm.Options{
 		ClientModel:   creq.Model,
 		UpstreamModel: ep.Model,
@@ -550,33 +564,7 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 		Opaque:        opaque,
 	})
 
-	// Both SSE and non-SSE bodies go through copyFlush so the stream_idle
-	// watchdog covers every upstream response body: a 200 whose body stalls
-	// mid-transfer must abort instead of parking the request forever. The
-	// per-chunk Flush is a no-op concern for JSON bodies — Content-Length is
-	// stripped anyway.
-	// Per-chunk in-flight stamping (§5.3) rides on the same reads; no-op
-	// when the request carries no registered handle.
-	copyErr := copyFlush(r.Context(), w, inflightStamped(rbody, inflightHandleFrom(r.Context())), snap.Cfg.Timeouts.StreamIdle.D())
-	status := "OK"
-	if r.Context().Err() != nil {
-		status = "CANCELED"
-		att.SetCanceled()
-	} else if isClientWriteError(copyErr) {
-		// The client disconnected (or its connection died) mid-transfer: the
-		// context cancellation can trail the write failure by a few
-		// microseconds, so this branch catches what the ctx check above would
-		// miss. Count it as a client-side cancel, not an upstream TRUNCATED —
-		// the supplier didn't fail, its output just stopped being deliverable.
-		// The response is already committed (headers + partial body), so
-		// there's nothing more to write; skip the ErrAbortHandler abort below
-		// because the connection is already gone.
-		status = "CANCELED"
-		att.SetCanceled()
-	} else if copyErr != nil {
-		status = "TRUNCATED" // upstream died mid-stream; the response is already committed
-		att.SetTruncated(copyErr)
-	}
+	copyErr, status := relayResponseBody(rt, snap, w, r, ep, att, rbody, body, isSSE, opaque, snap.Cfg.Timeouts.StreamIdle.D())
 	rt.reportStreamOutcome(key, status)
 	*healthReported = true
 	// Charged here regardless of copyErr — a truncated response still
@@ -592,7 +580,6 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// parity differential test pins stamp vs charge against each other.
 	att.SetTokens(tokenStamp(rbody, creq))
 	att.SetKeyLabel(ep.KeyLabel)
-	att.SetNorm(rbody.Applied(), rbody.RawPreStrip())
 	att.SetUpstreamModel(rbody.ObservedModel())
 	// rbody.Usage() is safe to read here even on copyFlush's early-return
 	// paths (idle timeout, canceled, write error), where the reader
@@ -608,36 +595,8 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	// Telemetry.RecordOutcome's doc comment.
 	rt.Telemetry.RecordOutcome(copyErr == nil && status != "CANCELED", status == "CANCELED")
 	rt.logf("%s, %s, %s(%s, %dx)", logPrefix, usageTokenField(usage, ok, creq), status, fmtDur(time.Since(start)), attempt)
-	if status == "TRUNCATED" {
-		// The upstream body died mid-stream after we already committed a
-		// 200 + headers. respnorm flushed whatever it was safe to deliver
-		// into the client response above (see flushRawOnError); abort the
-		// connection now (net/http recovers ErrAbortHandler silently,
-		// dropping the terminating chunk) so the client SDK sees a broken
-		// transfer instead of a clean empty/partial success. All
-		// bookkeeping above — quota charge, audit norm/usage, telemetry,
-		// the log line — has already run; server.chatHandler's deferred
-		// audit write still fires during the unwind.
-		panic(http.ErrAbortHandler)
-	}
+	abortIfBrokenStream(status)
 	return true, nil, true
-}
-
-// reportStreamOutcome turns a finished (or aborted) stream's outcome into
-// the health verdict forwardSuccess deferred until the stream ended: a full
-// response is a real success; a mid-stream cut is transient-failure
-// evidence even though the 200 was already committed and failover can no
-// longer react to it; a client-side cancel says nothing about the endpoint
-// and must not deepen the backoff.
-func (rt *Router) reportStreamOutcome(key, status string) {
-	switch status {
-	case "OK":
-		rt.Health.ReportSuccess(key)
-	case "TRUNCATED":
-		rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
-	default: // CANCELED
-		rt.Health.ReportNeutral(key)
-	}
 }
 
 func parseRetryAfter(h http.Header) time.Duration {

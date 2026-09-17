@@ -129,10 +129,10 @@ func TestExtractUsage_OpenAICompletionsGatewayDoubleCount(t *testing.T) {
 	}
 }
 
-// TestExtractUsage_OpenAICompletionsPrompTokens pins that the same explicit
+// TestExtractUsage_OpenAICompletionsPromptTokens pins that the same explicit
 // branch also reads a normal OpenAI-shaped object (prompt_tokens only, no
 // input_tokens alias) without inventing a second count.
-func TestExtractUsage_OpenAICompletionsPrompTokens(t *testing.T) {
+func TestExtractUsage_OpenAICompletionsPromptTokens(t *testing.T) {
 	t.Parallel()
 	body := map[string]any{
 		"usage": map[string]any{

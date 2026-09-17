@@ -26,7 +26,7 @@ import "time"
 type StitchKind int
 
 const (
-	stitchNoneKind StitchKind = iota
+	_ StitchKind = iota // zero value renders as "none" in String()
 	// StitchCompaction: the broken lineage's opening manifest has strong
 	// blob overlap with a temporally-preceding lineage's accumulated
 	// content, and the break itself was a Contract (history shrank) — the

@@ -1,4 +1,4 @@
-// Ver 2026-08-20 00:00, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 
 // The other half of the shared parse cache (see internal/ctxgraph's
 // cache.go): report's own per-record aggregation facts, cached alongside
@@ -76,13 +76,11 @@ type recordFacts struct {
 	DurMS    int64     `json:"dur_ms,omitempty"`
 	TTFTMS   int64     `json:"ttft_ms,omitempty"`
 
-	BytesIn       int64  `json:"bytes_in,omitempty"`
-	BytesOut      int64  `json:"bytes_out,omitempty"`
-	ToolDeclCount int    `json:"tool_decl_count,omitempty"`
-	ToolDeclBytes int64  `json:"tool_decl_bytes,omitempty"`
-	Endpoint      string `json:"endpoint,omitempty"`
-	ErrorClass    string `json:"error_class,omitempty"`
-	ClientKey     string `json:"client_key,omitempty"`
+	BytesIn    int64  `json:"bytes_in,omitempty"`
+	BytesOut   int64  `json:"bytes_out,omitempty"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	ErrorClass string `json:"error_class,omitempty"`
+	ClientKey  string `json:"client_key,omitempty"`
 
 	TruncatedRaw        bool  `json:"truncated_raw,omitempty"`
 	ImagesRaw           int   `json:"images_raw,omitempty"`
@@ -92,6 +90,21 @@ type recordFacts struct {
 	EstOut              int64 `json:"est_out,omitempty"`
 
 	Attempts []attemptFacts `json:"attempts,omitempty"`
+
+	// Guard carries audit.Record.Guard through the cache verbatim — always
+	// nil today (see Report2.Guard's doc comment), but caching it now
+	// (rather than adding it only once M3/M4 populate it) avoids a second
+	// CacheSchemaVersion bump later, and guardcol.go needs it fed through
+	// both the fresh-decode and cache-hit paths identically.
+	Guard *audit.GuardRecord `json:"guard,omitempty"`
+	// GuardScan is the Fallback Path's result (ADR-12): computed by
+	// scanRecordForGuard (guardscan.go) only when Guard is nil, which is
+	// every real record today. Caching it is what makes M2.2/M2.3's
+	// forensic numbers survive a cache-hit rerun identically to a
+	// fresh-decode run — the same reason Guard itself is cached above.
+	GuardScan *GuardScanFacts `json:"guard_scan,omitempty"`
+	// GuardScanFailed is true when a panic occurred during fallback scan.
+	GuardScanFailed bool `json:"guard_scan_failed,omitempty"`
 }
 
 // fileFacts is one input file's full recordFacts payload, the shape
@@ -114,7 +127,6 @@ func extractRecordFacts(arec *audit.Record, line int) recordFacts {
 	if arec.Client.Response != nil {
 		rf.BytesOut = reqdetail.BodyBytes(arec.Client.Response.Body)
 	}
-	rf.ToolDeclCount, rf.ToolDeclBytes = toolDeclInfo(arec.Client.Request.Body)
 	rf.Endpoint, rf.ErrorClass = endpointInfo(arec)
 	rf.ImagesRaw, rf.ImagesCompressedRaw = reqdetail.CountImages(arec.Images)
 	if len(arec.Attempts) > 1 {
@@ -138,6 +150,12 @@ func extractRecordFacts(arec *audit.Record, line int) recordFacts {
 	}
 	rf.EstInFresh, rf.EstOut = chatmsg.EstimateDegradedTokens(arec.Facts, arec.Client.Request.Body, respBody)
 	rf.Attempts = attemptFactsFrom(arec.Attempts)
+	rf.Guard = arec.Guard
+	if arec.Guard == nil || !guardOutboundStamped(arec.Guard) {
+		rf.GuardScan, rf.GuardScanFailed = guardScanSafe(func() *GuardScanFacts { return scanRecordForGuard(arec) })
+	} else {
+		rf.GuardScan, rf.GuardScanFailed = guardScanSafe(func() *GuardScanFacts { return scanInboundFacts(arec) })
+	}
 	return rf
 }
 

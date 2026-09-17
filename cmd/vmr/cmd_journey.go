@@ -108,7 +108,7 @@ func saveJourneyIndex(idx *journey.JourneyIndex, outDir string, lang i18n.Lang) 
 		return err
 	}
 	if idx != nil && len(idx.Journeys) > 1 {
-		idx.Clusters = journey.ComputeTaskClusters(idx.Journeys)
+		idx.Clusters = journey.ComputeTaskClusters(idx.Journeys, lang)
 	}
 	indexPath := filepath.Join(journeysDir, "index.json")
 	if err := idx.Save(indexPath); err != nil {

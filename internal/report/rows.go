@@ -65,6 +65,12 @@ type Report2 struct {
 	Pricing                       *Pricing            `json:"pricing,omitempty"`
 	CostCoverage                  *CostCoverage       `json:"cost_coverage,omitempty"`
 	Highlights                    []string            `json:"highlights,omitempty"`
+	// Guard is Agent Guard's offline credential-exposure summary
+	// (docs/design/agent-guard-technical-spec-final-2.0.md M2). nil when no
+	// records were ingested or guard produced no verdict; on any non-empty
+	// corpus, offline fallback scan covers records lacking online stamps,
+	// so GuardSummary is produced.
+	Guard *GuardSummary `json:"guard,omitempty"`
 
 	// requests is the per-request export (requests/index.json). Unexported so
 	// it stays OUT of the aggregate slices (macro/* is aggregate-only); exposed via
@@ -651,6 +657,120 @@ type StickyModelRow struct {
 	Protocol  string      `json:"protocol"`
 	Continued StickyGroup `json:"continued"`
 	Switched  StickyGroup `json:"switched"`
+}
+
+// GuardSummary is Agent Guard's offline credential-exposure aggregate
+// (docs/design/agent-guard-technical-spec-final-2.0.md M2; guardcol.go builds
+// it from every ingested record's audit.Record.Guard — the Authoritative
+// Fast Path — or, when that is nil, the Fallback Path's own scan of
+// Client.Request/Response.Body (ADR-12; guardscan.go).
+type GuardSummary struct {
+	// RecordsScanned counts every record Agent Guard produced a verdict
+	// for, stamped or fallback-scanned — the denominator for
+	// RecordsWithHits, not a count of every record report ingested.
+	RecordsScanned  int `json:"records_scanned"`
+	RecordsWithHits int `json:"records_with_hits"`
+	// RecordsStamped/RecordsFallbackScanned split RecordsScanned by
+	// source (ADR-12's two paths).
+	RecordsStamped         int            `json:"records_stamped,omitempty"`
+	RecordsFallbackScanned int            `json:"records_fallback_scanned,omitempty"`
+	RecordsScanFailed      int            `json:"records_scan_failed,omitempty"`
+	Rules                  []GuardRuleRow `json:"rules,omitempty"`
+	// RulesetVersion is the audit.Record.Guard.Ver seen on ingested
+	// records — 0 when no two records disagree would be meaningless to
+	// report as a single number, so it is only set when every scanned
+	// record agrees (see guardcol.go's result()).
+	RulesetVersion int `json:"ruleset_version,omitempty"`
+	// Providers is the M2.4 Provider exposure attribution — §4.7's
+	// highest-value block: which actual upstream (the served attempt,
+	// never the virtual model's whole candidate set — Failover can change
+	// which provider a retry lands on) outbound hits actually reached.
+	Providers []GuardProviderRow `json:"providers,omitempty"`
+	// Inbound is the M2.3 inbound forensics block — nil when the
+	// Fallback Path never had a response body to scan (Authoritative
+	// records with no equivalent stamped inbound signal yet, or records
+	// with no Client.Response at all).
+	Inbound *GuardInboundSummary `json:"inbound,omitempty"`
+}
+
+// GuardRuleRow is one credential rule's aggregate across the whole window —
+// the ranking table §4.7 of the design spec calls for: rule × unique
+// fingerprint count × total hit count × "context amplification factor"
+// (MaxPerRecord — see audit.Hit.Count's own doc comment for why that is
+// the correct measure of amplification, not a leak count).
+type GuardRuleRow struct {
+	Rule         string `json:"rule"`
+	Tier         int    `json:"tier"`
+	UniqueFP     int    `json:"unique_fp"`
+	TotalHits    int    `json:"total_hits"`
+	RecordsWith  int    `json:"records_with"`
+	MaxPerRecord int    `json:"max_per_record"`
+}
+
+// GuardProviderRow is one actual upstream provider's outbound-credential
+// exposure (M2.4; §4.7's "which relay to drop first" answer) — attributed
+// by the record's actually-served endpoint, never the virtual model's
+// whole candidate set.
+type GuardProviderRow struct {
+	Provider          string `json:"provider"`
+	TotalHits         int    `json:"total_hits"`
+	UniqueCredentials int    `json:"unique_credentials"`
+	RecordsWith       int    `json:"records_with"`
+}
+
+// GuardInboundSummary is the M2.3 inbound forensics block: what the
+// client actually received (K-G14 — this reports what happened, not what
+// was blocked; nothing here implies interception).
+type GuardInboundSummary struct {
+	// RuneCounts sums guard.ClassifyRunes' categories across every scanned
+	// response's assistant text and tool-call arguments (a re-scan of what
+	// actually reached the client, Client.Response.Body) — see that
+	// function's category constants.
+	RuneCounts map[string]int `json:"rune_counts,omitempty"`
+	// SanitizedRuneCounts sums Record.Guard.SanitizedRunes across every
+	// online-sanitized record — a DIFFERENT, complementary fact from
+	// RuneCounts, not a subset of it: by the time a sanitized response's
+	// body reaches the audit log, the A/B-tier runes the online sanitizer
+	// already stripped are gone, so RuneCounts (built by re-scanning that
+	// same body) can only ever see what survived (almost always C-tier).
+	// SanitizedRuneCounts is the only record of what existed before the
+	// strip — "the client would have received this many invisible
+	// characters had sanitization been off." Rendered separately, never
+	// merged into RuneCounts (K-G14: "already happened" vs. "was
+	// intercepted" must stay distinguishable).
+	SanitizedRuneCounts map[string]int `json:"sanitized_rune_counts,omitempty"`
+	// ToolCallsInspected is every tool call InspectToolCall judged,
+	// clean or not — the denominator ToolFindings' counts are a fraction
+	// of.
+	ToolCallsInspected int `json:"tool_calls_inspected,omitempty"`
+	// ToolFindings is every non-clean judgment (a high-risk command
+	// category, a protected-path write, or a credential echo), grouped by
+	// category — see guardcol.go's aggregation.
+	ToolFindings []GuardToolRiskRow `json:"tool_findings,omitempty"`
+	// ToolEchoEvents/EchoTools are ADR-6's decryption-oracle signal, the
+	// high-risk half (§4.7(2)): a credential the SAME request sent
+	// reappearing inside a tool call's own arguments, cross-referenced per
+	// record, never across records. Zero is the real-corpus baseline any
+	// prior calibration found — any nonzero value here is worth a human
+	// looking at regardless of how small.
+	ToolEchoEvents int      `json:"tool_echo_events,omitempty"`
+	EchoTools      []string `json:"echo_tools,omitempty"`
+	// TextEchoEvents is the same cross-reference against the assistant's
+	// plain text instead of tool arguments — the low-risk half: normal
+	// conversation ("your key sk-... is set") reappearing in prose is not
+	// an attack signal (K-G8-style reasoning), but the count is kept for
+	// the text-vs-tool-arg contrast the design spec's own corpus analysis
+	// is built on.
+	TextEchoEvents int `json:"text_echo_events,omitempty"`
+}
+
+// GuardToolRiskRow is one high-risk category's tally across every
+// inspected tool call (the design spec's command-pattern/protected-path library).
+type GuardToolRiskRow struct {
+	Category string   `json:"category"`
+	CWE      string   `json:"cwe,omitempty"`
+	Count    int      `json:"count"`
+	Tools    []string `json:"tools,omitempty"`
 }
 
 // ProviderRow is one upstream account's (config.yaml's providers[].name)

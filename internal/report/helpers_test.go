@@ -1,6 +1,7 @@
 // Ver 2026-08-20 00:00, report
 
-// Tests for chatmsg.ExtractUsageWithProtocol, load-bearing via session.go's collect().
+// Tests for chatmsg.ExtractUsageWithProtocol, the protocol-aware usage
+// variant; production uses the SSOT chatmsg.ExtractUsageSides (session.go).
 package report
 
 import (

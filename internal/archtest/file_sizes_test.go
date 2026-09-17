@@ -49,7 +49,12 @@ var fileLineExemptions = map[string]int{
 	// rows.go is the report's JSON contract: a new metric adds a field, so
 	// growth is expected. What this catches is the file absorbing accumulation
 	// or rendering logic again, which belongs in ingest.go/viewmodel_*.go.
-	"internal/report/rows.go": 900,
+	// 900 -> 1000 for Agent Guard's GuardSummary/GuardRuleRow rows, 1000 ->
+	// 1010 for GuardInboundSummary.SanitizedRuneCounts (both M2 of
+	// docs/design/agent-guard-technical-spec-final-2.0.md) — a new metric
+	// adding a field is exactly the expected growth this exemption's own
+	// comment describes.
+	"internal/report/rows.go": 1010,
 	// detail.go was split into internal/reqdetail in P2, slimming it to ~286
 	// lines. internal/config/config.go used to carry a 750 exemption here; it
 	// is 699 lines, i.e. under the default, so the exemption was dropped

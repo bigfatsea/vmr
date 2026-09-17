@@ -236,8 +236,11 @@ func EffectiveRate(spec *core.PricingSpec) Rate {
 	return r
 }
 
-// Complete reports whether EffectiveRate(spec) is a Complete() rate —
-// internal/report/cost.go uses this to label a $ estimate as incomplete.
+// Complete reports whether EffectiveRate(spec) is a Complete() rate. It is a
+// verification/test helper, not the aggregation-layer entry point:
+// production code (internal/report/cost.go) resolves the Rate once via
+// RateForEndpoint and calls Rate.Complete() directly, so it never needs the
+// badIndex diagnostic below.
 // Since EffectiveRate has exactly one resolution path (no time dimension to
 // range over), this is a single walk, not a reachability search: badIndex
 // is -1 when spec.Base itself supplied the (possibly incomplete) rate, else

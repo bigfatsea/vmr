@@ -1,0 +1,105 @@
+{
+  "generated_by": "tools/guard_corpus_scan",
+  "rules_version": 1,
+  "files_scanned": 63,
+  "records_total": 63157,
+  "parse_errors": 0,
+  "rules": [
+    {
+      "rule": "generic-sk-prefix",
+      "tier": "tier2",
+      "hits": 29125,
+      "uniq": 38,
+      "records_with": 5721,
+      "max_per_record": 52
+    },
+    {
+      "rule": "gcp-api-key",
+      "tier": "tier1",
+      "hits": 258,
+      "uniq": 4,
+      "records_with": 60,
+      "max_per_record": 8
+    },
+    {
+      "rule": "openai-legacy-key",
+      "tier": "tier1",
+      "hits": 230,
+      "uniq": 5,
+      "records_with": 23,
+      "max_per_record": 10
+    },
+    {
+      "rule": "jwt",
+      "tier": "tier1",
+      "hits": 133,
+      "uniq": 5,
+      "records_with": 54,
+      "max_per_record": 4
+    },
+    {
+      "rule": "github-pat",
+      "tier": "tier1",
+      "hits": 46,
+      "uniq": 1,
+      "records_with": 23,
+      "max_per_record": 2
+    },
+    {
+      "rule": "openai-project-key",
+      "tier": "tier1",
+      "hits": 46,
+      "uniq": 1,
+      "records_with": 23,
+      "max_per_record": 2
+    },
+    {
+      "rule": "aws-access-key",
+      "tier": "tier1",
+      "hits": 14,
+      "uniq": 2,
+      "records_with": 4,
+      "max_per_record": 4
+    },
+    {
+      "rule": "anthropic-api-key",
+      "tier": "tier1",
+      "hits": 0,
+      "uniq": 0,
+      "records_with": 0,
+      "max_per_record": 0
+    },
+    {
+      "rule": "github-oauth",
+      "tier": "tier1",
+      "hits": 0,
+      "uniq": 0,
+      "records_with": 0,
+      "max_per_record": 0
+    },
+    {
+      "rule": "huggingface-token",
+      "tier": "tier1",
+      "hits": 0,
+      "uniq": 0,
+      "records_with": 0,
+      "max_per_record": 0
+    },
+    {
+      "rule": "private-key-block",
+      "tier": "tier1",
+      "hits": 0,
+      "uniq": 0,
+      "records_with": 0,
+      "max_per_record": 0
+    },
+    {
+      "rule": "slack-bot-token",
+      "tier": "tier1",
+      "hits": 0,
+      "uniq": 0,
+      "records_with": 0,
+      "max_per_record": 0
+    }
+  ]
+}

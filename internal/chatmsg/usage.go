@@ -107,6 +107,12 @@ func (u Usage) Fresh() int64 {
 // (see usageFromObj), which aggregated gateways can make guess wrong in
 // both directions. Callers that know the ingress protocol must use
 // ExtractUsageWithProtocol instead.
+//
+// The single merged bool here cannot distinguish a partially-reported ledger
+// from a complete one; router/quota, report, journey and replay all charge
+// and aggregate through ExtractUsageSides instead (see its doc comment).
+// This form remains for callers that only need "was anything reported at
+// all" and don't act on the result financially.
 func ExtractUsage(body any) (Usage, bool) {
 	return ExtractUsageWithProtocol(body, "")
 }

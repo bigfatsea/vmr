@@ -214,6 +214,28 @@ func CapStr(s string, n int) string {
 	return s[:n]
 }
 
+// CodeFence wraps s in a fenced code block whose fence is longer than any
+// backtick run inside s, so message content can never break out of its block.
+func CodeFence(s string) string {
+	n := 3
+	run := 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			if run >= n {
+				n = run + 1
+			}
+		} else {
+			run = 0
+		}
+	}
+	f := strings.Repeat("`", n)
+	if !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	return f + "\n" + s + f + "\n"
+}
+
 // SortedKeys returns m's keys in sorted order. A recurring need across
 // packages that print or iterate a map deterministically (config summaries,
 // adapter/model registries, header tables).

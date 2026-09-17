@@ -371,7 +371,7 @@ func buildPlanAuditPack(j *Journey, lang i18n.Lang) (*PlanAuditEvidencePack, int
 	}
 	var planItems []PlanItemAudit
 	var planStepSeq int
-	var baselineWords map[string]bool
+	var baselineWords map[string]struct{}
 	for _, s := range steps {
 		raw := s.RespText
 		if s.Reasoning != "" {
@@ -394,7 +394,7 @@ func buildPlanAuditPack(j *Journey, lang i18n.Lang) (*PlanAuditEvidencePack, int
 		// the original baseline (not a stale earlier one, and not every
 		// incidental restatement) is what keeps a legitimate mid-task
 		// re-plan from being flagged against an abandoned item list.
-		if planItems != nil && jaccardSim(baselineWords, words) >= 0.4 {
+		if planItems != nil && jaccardSimilarity(baselineWords, words) >= 0.4 {
 			continue
 		}
 		planStepSeq = s.Seq

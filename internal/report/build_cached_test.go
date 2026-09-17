@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,40 +163,6 @@ func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
 	}
 	if len(cache.Files) != 1 {
 		t.Fatalf("expected 1 cache entry, got %d", len(cache.Files))
-	}
-}
-
-// TestWriteRequestsJSON_RoundTripsRows covers WriteRequestsJSON's own
-// remaining job — the parse cache used to round-trip through this same
-// file (a "files" section) but has since moved to its own
-// content-hash-sharded directory; see ctxgraph's own
-// TestSaveCacheDir_LoadCacheDir_RoundTrip for that half now.
-func TestWriteRequestsJSON_RoundTripsRows(t *testing.T) {
-	dir := t.TempDir()
-	rows := []RequestRow{{TS: 1753315200000, Outcome: "ok"}, {TS: 1753315260000, Outcome: "error"}}
-
-	outPath := filepath.Join(dir, "requests/index.json")
-	n, err := WriteRequestsJSON(rows, outPath)
-	if err != nil {
-		t.Fatalf("WriteRequestsJSON: %v", err)
-	}
-	if n != 2 {
-		t.Errorf("n = %d, want 2", n)
-	}
-
-	data, err := os.ReadFile(outPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var idx RequestsIndex
-	if err := json.Unmarshal(data, &idx); err != nil {
-		t.Fatalf("requests-index.json is not valid JSON: %v\n%s", err, data)
-	}
-	if len(idx.Requests) != 2 {
-		t.Errorf("got %d requests, want 2", len(idx.Requests))
-	}
-	if strings.Contains(string(data), `"files"`) {
-		t.Error("vmr-requests.json should no longer embed a \"files\" cache section")
 	}
 }
 

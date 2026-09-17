@@ -1237,8 +1237,12 @@ func TestCmdAnalyze_JourneyWithLLM(t *testing.T) {
 }
 
 // TestCmdAnalyze_JourneyWithRealLLM tests against a live LLM endpoint configured
-// in report.yaml when available and reachable, gracefully skipping otherwise.
+// in report.yaml when explicitly requested via RUN_LIVE_LLM_TEST=1, gracefully
+// skipping otherwise.
 func TestCmdAnalyze_JourneyWithRealLLM(t *testing.T) {
+	if os.Getenv("RUN_LIVE_LLM_TEST") != "1" {
+		t.Skip("skipping live LLM test by default; set RUN_LIVE_LLM_TEST=1 to test against local report.yaml endpoint")
+	}
 	if testing.Short() {
 		t.Skip("hits the configured LLM endpoint; skipped under -short")
 	}

@@ -1,4 +1,4 @@
-# Ver 2026-07-31 17:00, by Sonnet 5
+# Ver 2026-09-14, by Sonnet 5
 
 # Binaries
 /vmr
@@ -92,3 +92,11 @@ _subtasks
 
 # Agent Forge 资产定位（个人本机路径，不入库；协作者自建）
 .agent-forge.yml
+
+# tools/guard_corpus_scan -deep output: keeps masked previews of every
+# candidate credential (prefix/suffix + hit paths + provider + timestamps)
+# for human calibration review. Unlike the committed internal/guard/testdata/
+# corpus_scan.json (pure aggregate counts, no preview material), these are
+# not safe to commit until every entry is confirmed to be a known fixture.
+/docs/design/agent-guard-corpus-deep-analysis.json
+/docs/design/agent-guard-corpus-deep-analysis-report.md

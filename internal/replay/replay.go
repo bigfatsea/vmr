@@ -321,52 +321,6 @@ func effectiveImageDownscaleMaxPx(cfg *config.Config, virtualModel string) int {
 	return route.EffectiveImageDownscaleMaxPx(cfg.ImageDownscaleMaxPx)
 }
 
-// statAuditPathArg classifies the raw AuditPath argument -req needs to
-// treat differently from -ts/-line: "" (omitted entirely), a directory (a
-// hint to search, not the file itself), or an exact file path (the
-// existing strict-consistency-check behavior, unchanged). A path that
-// doesn't exist yet at all is left to the eventual open call to report —
-// this only distinguishes "is it a directory", so a typo'd file path
-// still gets loadRecordByLine's own, more specific error.
-func statAuditPathArg(raw string) (path string, isDir bool, err error) {
-	if raw == "" {
-		return "", false, nil
-	}
-	if fi, statErr := os.Stat(raw); statErr == nil && fi.IsDir() {
-		return raw, true, nil
-	}
-	return raw, false, nil
-}
-
-// resolveReqAuditPath finds the file a -req coordinate's basename refers
-// to, searching — in order — dirHint (if given, from
-// a directory positional argument), the current directory (when dirHint
-// is empty, i.e. the positional argument was omitted entirely), and
-// config.yaml's log_dir; each directory is tried with both the bare
-// basename and its .zst variant (plain-first: a live/current-day file is
-// far more commonly what -print is used to inspect than an
-// already-rotated one). config.Load failing is not fatal here — log_dir
-// is only ever an ADDITIONAL place to look, dirHint/cwd already cover the
-// common case of running this from inside the log directory itself.
-func resolveReqAuditPath(basename, dirHint, configPath string) (string, error) {
-	dirs := []string{dirHint}
-	if dirHint == "" {
-		dirs[0] = "."
-	}
-	if cfg, err := config.Load(configPath); err == nil && cfg.LogDir != "" {
-		dirs = append(dirs, cfg.LogDir)
-	}
-	for _, dir := range dirs {
-		for _, name := range []string{basename, basename + ".zst"} {
-			p := filepath.Join(dir, name)
-			if _, err := os.Stat(p); err == nil {
-				return p, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("-req: couldn't find %q (or its .zst variant) under %v — pass the audit file explicitly as the positional argument", basename, dirs)
-}
-
 // selectRecord dispatches to whichever of Options' three locators is set —
 // Req, TS or Line — after checking that at most one is (Run's -line default
 // is 0, so "not set" and "explicitly line 0" aren't distinguishable, but
@@ -402,7 +356,7 @@ func selectRecord(opts Options) (rv *recordView, path string, line int, err erro
 			return nil, "", 0, serr
 		}
 		if auditPath == "" || isDir {
-			resolved, rerr := resolveReqAuditPath(basename, auditPath, opts.ConfigPath)
+			resolved, rerr := ResolveAuditPath(basename, auditPath, opts.ConfigPath)
 			if rerr != nil {
 				return nil, "", 0, rerr
 			}

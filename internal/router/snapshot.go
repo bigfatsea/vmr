@@ -8,6 +8,7 @@ package router
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"vmr/internal/adapter"
@@ -36,6 +37,19 @@ type ModelRoute struct {
 	// affinity applies unless a virtual model explicitly opts out. See
 	// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section.
 	Sticky bool
+
+	// GuardAllTrusted is Agent Guard's outbound exemption precondition
+	// (M3.5, design spec §4.3): true only when EVERY endpoint this route
+	// could ever dispatch to (all try-order candidates, fallback included)
+	// names a provider in guard.trusted_providers. Computed once here,
+	// at Snapshot build time, because the request entry point doesn't yet
+	// know which candidate Failover will actually land on — "exempt by
+	// actual provider" isn't architecturally available before routing
+	// happens, only "exempt when the whole candidate set is safe" is.
+	// False (never exempt) whenever guard: is absent or trusted_providers
+	// is empty — an operator must opt a route into the exemption
+	// explicitly, it is never the default for an unconfigured instance.
+	GuardAllTrusted bool
 }
 
 // EffectiveOrder returns route's endpoints in the order they would actually
@@ -158,6 +172,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 			}
 		}
 		for protocol, route := range routes {
+			route.GuardAllTrusted = allEndpointsTrusted(route.Endpoints, cfg.Guard)
 			byName, ok := snap.Models[protocol]
 			if !ok {
 				byName = map[string]*ModelRoute{}
@@ -167,6 +182,29 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 		}
 	}
 	return snap, nil
+}
+
+// allEndpointsTrusted implements M3.5's precondition exactly: false
+// whenever guard is unconfigured, no provider is listed as trusted, or
+// the route has no endpoints at all (nothing to be trusted about) —
+// true only when every single endpoint's provider name appears in
+// trusted_providers. config.validateGuard already rejects a
+// trusted_providers entry naming an unknown provider at load time, so
+// every name here is guaranteed to match some cfg.Providers entry.
+func allEndpointsTrusted(eps []*core.Endpoint, g *config.Guard) bool {
+	if g == nil || len(g.TrustedProviders) == 0 || len(eps) == 0 {
+		return false
+	}
+	trusted := make(map[string]bool, len(g.TrustedProviders))
+	for _, p := range g.TrustedProviders {
+		trusted[p] = true
+	}
+	for _, ep := range eps {
+		if !trusted[ep.Provider] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildEndpoints expands one EndpointGroup (fromFallback marks whether it's
@@ -398,7 +436,6 @@ func (rt *Router) Install(s *Snapshot) {
 	}
 }
 
-// ProviderLimits returns a map of provider name -> configured Limits from this snapshot.
 // HealthKeys is the set of endpoint health keys this snapshot can route to —
 // the "keep" set for health.Registry.Prune, so an endpoint dropped from the
 // config stops carrying its failure state (and its /status row) across a hot
@@ -418,6 +455,7 @@ func (s *Snapshot) HealthKeys() map[string]bool {
 	return keep
 }
 
+// ProviderLimits returns a map of provider name -> configured Limits from this snapshot.
 func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
 	if s == nil || s.Cfg == nil {
 		return nil
@@ -432,6 +470,46 @@ func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
 			out[p.Name] = limits
 		}
 	}
+	return out
+}
+
+// UniqueEndpoints returns all unique *core.Endpoint instances across all
+// configured routes in this snapshot, deduplicated by HealthKey and sorted
+// deterministically by (AdapterType, Provider, Model, HealthKey).
+func (s *Snapshot) UniqueEndpoints() []*core.Endpoint {
+	if s == nil {
+		return nil
+	}
+	seen := map[string]*core.Endpoint{}
+	for _, byName := range s.Models {
+		for _, route := range byName {
+			for _, ep := range route.Endpoints {
+				if ep == nil {
+					continue
+				}
+				key := ep.HealthKey()
+				if _, ok := seen[key]; !ok {
+					seen[key] = ep
+				}
+			}
+		}
+	}
+	out := make([]*core.Endpoint, 0, len(seen))
+	for _, ep := range seen {
+		out = append(out, ep)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].AdapterType != out[j].AdapterType {
+			return out[i].AdapterType < out[j].AdapterType
+		}
+		if out[i].Provider != out[j].Provider {
+			return out[i].Provider < out[j].Provider
+		}
+		if out[i].Model != out[j].Model {
+			return out[i].Model < out[j].Model
+		}
+		return out[i].HealthKey() < out[j].HealthKey()
+	})
 	return out
 }
 

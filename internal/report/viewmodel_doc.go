@@ -50,6 +50,7 @@ func BuildMacroReportVM(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkIn
 		vmEndpointValueSection(rep, lang),
 		vmCompactionsSection(rep, lang),
 		vmEfficiencySection(rep, rep.Overall, lang),
+		vmGuardSection(rep, lang),
 		vmRequestIndexSection(rep, lang),
 		vmAppendixSection(rep, lang),
 	}
@@ -165,6 +166,15 @@ func LoadReport(dir string) (*Report2, error) {
 		var idx RequestsIndex
 		if err := json.Unmarshal(reqData, &idx); err == nil {
 			rep.requests = idx.Requests
+		}
+	}
+	// guard.json is optional (SliceMacroGuard is not in MacroSlicePaths).
+	// A read failure of any kind (file absent, malformed) leaves rep.Guard
+	// nil, the same as a run that had no Agent Guard data.
+	if guardData, err := os.ReadFile(filepath.Join(dir, SliceMacroGuard)); err == nil {
+		var gs GuardSlice
+		if err := json.Unmarshal(guardData, &gs); err == nil {
+			rep.Guard = &gs.Summary
 		}
 	}
 	return rep, nil
@@ -297,7 +307,7 @@ func highlights(rep *Report2, lang i18n.Lang) []string {
 // the sorted keys — ties always resolve to the alphabetically-first class
 // name, never map order.
 func topErrorClassCount(classes map[string]int) (cls string, n int) {
-	for _, c := range sortedKeysInt(classes) {
+	for _, c := range fmtutil.SortedKeys(classes) {
 		if m := classes[c]; m > n {
 			cls, n = c, m
 		}

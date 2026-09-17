@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-06 14:00, by Sonnet 5 -->
+<!-- Ver 2026-09-16, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -36,6 +36,10 @@
   - [模型级覆盖](#模型级覆盖)
   - [降采样结果缓存](#降采样结果缓存)
   - [审计目录和缓存目录到底落在哪](#审计目录和缓存目录到底落在哪)
+- [Agent Guard](#agent-guard)
+  - [出向：不让凭据流向不可信中转站](#出向不让凭据流向不可信中转站)
+  - [入向：只做离线取证，在线只净化](#入向只做离线取证在线只净化)
+  - [信任之前，先探测一下中转站](#信任之前先探测一下中转站)
 - [CLI 与端点参考](#cli-与端点参考)
 
 ## 配置
@@ -649,7 +653,7 @@ Agent 场景下每一轮都会把完整对话历史重新发一遍，单日日�
 ./vmr analyze                                                                       # 默认套件：宏观报表 + 每个非噪声 journey，一次调用搞定，不用写 glob
 ```
 
-`-list-only` 列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个传给 `-journey`（不带选择器的 `vmr analyze` 渲染的是默认套件，见下文[命令行与端点参考](#命令行与端点参考)）。`-journey` 接受逗号分隔的多个 token，每个 token 要么是 id/id 前缀，要么是匹配完整 id 的 shell 风格通配符（`*`、`?`、`[...]`）——通配符记得在 shell 里加引号，避免被 shell 自己展开。选择器只解出一个 journey 时直接渲染（也是唯一支持 `-llm-addr` 的形式）；解出不止一个时走 `-render-all` 同一条批处理路径，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/journeys/details/j-<id>.md`（叙事正文）与 `j-<id>.json`（同一任务的行为剖面，见下文）——与其余派生产物一样的 0600/0700 权限，两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
+`-list-only` 列出全部候选任务：id、任务/轮次数、时间范围、标题预览（开场的真实指令）——挑一个传给 `-journey`（不带选择器的 `vmr analyze` 渲染的是默认套件，见下文[CLI 与端点参考](#cli-与端点参考)）。`-journey` 接受逗号分隔的多个 token，每个 token 要么是 id/id 前缀，要么是匹配完整 id 的 shell 风格通配符（`*`、`?`、`[...]`）——通配符记得在 shell 里加引号，避免被 shell 自己展开。选择器只解出一个 journey 时直接渲染（也是唯一支持 `-llm-addr` 的形式）；解出不止一个时走 `-render-all` 同一条批处理路径，共享底层的文件扫描，不会每个候选各自重新扫一遍源文件。产物落在 `{out}/journeys/details/j-<id>.md`（叙事正文）与 `j-<id>.json`（同一任务的行为剖面，见下文）——与其余派生产物一样的 0600/0700 权限，两者都承载完整对话内容。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置——候选列表比预期短时的排查手段。
 
 #### 看板骨架页
 
@@ -724,6 +728,28 @@ models:
 
 ——有设置就原样使用（开头的 `~/` 展开为 home 目录），否则落在持久的 `~/.vmr/logs`/`~/.vmr/image_cache`，再否则（解析不出 home 目录）退到系统临时目录下的 `vmr_logs`/`vmr_image_cache` 子目录，最后才是二进制所在目录的 `./logs`/`./image_cache`。默认持久化是刻意的：macOS 会清理约 3 天未访问的临时目录条目，会静默删掉审计数据——而它是 `vmr analyze` 唯一的数据源。想知道实际解析出来的路径，直接跑 `vmr check -c config.yaml log` / `vmr check -c config.yaml cache`（不带参数的 `vmr check` 与启动摘要也会打印），不用真的启动服务。`vmr.sh` 只查询 `vmr check log` 来定位 server log 落点，而不是在 bash 里另写一份猜测逻辑——dev 模式和 `service install` 因此不会对"数据到底存在哪"这件事产生分歧。两个目录都没有对应的环境变量——想从环境注入，在 `log_dir`/`image_cache_dir` 里显式写 `${VAR}` 即可。
 
+## Agent Guard
+
+面向 Agent 流量的双向安全层，默认关闭：完全不写 `guard:` 键（或不接线）时，请求路径是零开销、字节保真的透传。完整设计、威胁模型与里程碑/验证记录见 `docs/design/agent-guard-technical-spec-final-2.0.md`。`config.example.yaml` 的 guard 块逐项注释了全部旋钮，本节只讲运维视角。
+
+**Agent Guard 不是什么**：它不替代可靠的 API 提供商、可靠的 Coding Agent、可靠的客户端沙箱——这些是你的第一道防线，Agent Guard 不取代它们。它只以小成本解决 VMR 位置上独有优势的两个窄问题：给离开本机的凭据多加一道检查（有些 Agent 对请求体里塞了什么并不小心），以及即使前面都做到位、意外还是发生了时的事后可知。它不判断一次工具调用安不安全该不该跑——那是你的客户端自己的审批门与沙箱的职责，它们掌握的上下文（工作区、你的意图、能向你提问）远比一个网关看一段 JSON 多。
+
+**出向**（`guard.outbound.mode`）在请求体离开本机、发往不可信中转站之前，扫描其中的高置信度凭据格式。三种模式按干预强度递增：`off`、`audit_only`（在审计轨迹里记录命中——唯一纯由离线证据校准过的模式，也是正确的起点）、`block`（HTTP 400 拒绝请求）。`trusted_providers` 在某虚拟模型的全部候选端点（含兜底）都属于受信 provider 时整体豁免。
+
+**入向**（`guard.inbound.sanitize_invisible_runes`）在转发响应前只剥离其中的不可见/隐写 Unicode 字符（emoji 必需字符受保护保留）——入向能力就这一项。它从不检查工具调用，从不阻断响应，也从不改变 HTTP 状态码：净化要么只改几个字节，要么干脆不跑，出错即 Fail-Open。早期版本的 Agent Guard 还在线上给工具调用把关（对高危命令库做两级字面量/正则检查，命中即丢弃事件并熔断）——第一性原理复审后移除：这个判断该由信息更多的客户端来做，不该由只看得到一段 JSON 的网关来做。检测逻辑本身（哪些工具调用看起来危险、哪些路径看起来敏感、凭据有没有被回显）保留在下面的离线一侧——你依然看得到，只是不会拿它实时拦任何东西。
+
+### 出向：不让凭据流向不可信中转站
+
+从 `audit_only` 起步：`vmr analyze` 的 guard 章节随后会报告哪些规则命中、命中多少次，以及——经 Provider 暴露面归因——哪些上游实际看到了凭据形状的内容。审查过自己流量的这份证据之后再沿模式阶梯上移；`block` 会拒绝请求，一次误报就是一次被破坏的工作流。Tier 2 规则（`sk-` 前缀字符串这类更宽松的形状）永不触发阻断——只有 Tier 1 五锚验证过的格式才会。（此前的 `mode: replace`——把命中伪名化、回程再还原——已移除：`block` 严格更安全，携带凭据的请求本就该被拒绝，尤其对事故性粘贴。）
+
+### 入向：只做离线取证，在线只净化
+
+实时层面，Agent Guard 现在只剥离不可见字符——仅此而已。更深的取证（危险工具调用、敏感文件路径、凭据回显、按类别分档的 Unicode 隐写）全部改在离线跑，在 `vmr analyze` 的 guard 章节里，对着审计日志：只要保留窗口够长，它能回溯报告一家中转站实际发过什么，且不存在"误报打断一次正常响应"的风险。看到一条发现，该做的是换掉这家中转站或轮换凭据，而不是以为它当场被拦下了——入向路径现在不拦任何东西。
+
+### 信任之前，先探测一下中转站
+
+`vmr diagnose -guard` 用五类金丝雀载荷（工具调用篡改、静默上下文截断、思维链剥离、用量虚报、隐写字符注入）主动探测上游，并给出逐项判定。"100% 检出 / 0 误报"硬指标是对 mock relay 建立的；协议形态特殊的真实中转可能产生误判——把意外结果当作调查的线索，而不是自动定罪。对用户流量零打扰：探针是你主动发起的合成请求。
+
 ## CLI 与端点参考
 
 | 端点/命令 | 作用 |
@@ -742,7 +768,7 @@ models:
 | `GET /help.html`（+ `/help.zh.html`） | 浏览器配置指南：手风琴式 Agent 接入指南，Connection 卡提供可复制的各协议 base_url 与从 `/status` 实时读取的模型 × 协议对照表，支持用共用 Key 做连接检查，并提供直达 Overview 页各区块的 Troubleshooting 链接——`/help.zh.html` 是中文版，也是唯一保留翻译兄弟页的控制台页面 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
-| `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 每个虚拟模型的 capabilities、最大上下文 tokens 与逐端点健康，以及并发占用。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-key KEY` 传递 API key；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
+| `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 每个虚拟模型的 capabilities、最大上下文 tokens 与逐端点健康，以及并发与存储占用（审计日志与图片缓存）。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-key KEY` 传递 API key；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
 | `vmr analyze [-c config.yaml] [-o dir] [-journey <id\|id前缀\|通配符>[,...] \| -compare <id1,id2> \| -benchmark] [-render-only] [-no-cache] [-render-all] [-macro-only] [-list-only] [-journey-only] [-details] [-include-partial] [-include-self-traffic] [-show-ungrouped] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [glob...]` | 唯一的分析入口：一套 flag 集合；`-journey`/`-compare`/`-benchmark` 是三个互斥的变焦选择器，都不给就是默认套件——唯一一个两个半区都跑的模式。**不带选择器** —— 默认套件 —— 先跑 journey 半区、再跑宏观报表半区，共用同一个 `-o`：输出根目录的汇总报表与机器可读切片（`macro/*.json`、`requests/*`）、列出全部候选的 `journeys/index.{json,md}`、`journeys/details/` 下每个已渲染的非噪声 journey（`heartbeat` 候选仍进索引，只是不预先渲染——见下文）、六张看板骨架页，以及最后写入、作为快照准入凭证的 `manifest.json`。**`-render-only`** 完全跳过日志解压与聚合，直接从磁盘 JSON 快照重绘全部常驻人读产物（见上文[用量与成本报表](#用量与成本报表)）；需要一个有效的 `manifest.json` 已存在，并继承该快照的语言。**`-no-cache`** 绕过解析与产物两级缓存、全量重算——怀疑缓存产物不可信时常备的逃生通道。`-render-all` 把默认套件的渲染范围放宽到含 heartbeat 在内的全部候选。**`-journey`**/**`-compare`**/**`-benchmark`** 各自只变焦进单个/成对/基准统计这一种视图（各自渲染什么见上文[Agent 任务叙事重建](#agent-任务叙事重建journeys)）——只跑这一个 journey 侧视图，不跑宏观报表半区；`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染（只匹配到一个就直接渲染，多个就批处理）。`-compare id1,id2` 两侧用同样的方式解析——id、id 前缀或通配符，各取首个命中的候选。**`-macro-only`** 只跑宏观报表半区——不扫候选、完全不写 `journeys/` 产物。**`-list-only`** 只列出候选 journey、一个都不渲染（写 `journeys/index.{md,json}`，没有 `j-*.md`）。**`-journey-only`** 只跑 journey 半区、跳过宏观报表——不写 `macro/*`/`requests/*`；与 `-macro-only`/`-list-only` 不同，它能与 `-render-all` 组合使用。`-render-all` 与 `-macro-only`/`-list-only` 同传会直接报错（它们本身就是默认套件渲染范围开关的替代），但可以与 `-journey-only` 组合；`-details` 与 `-list-only` 同传同样报错（它本来就什么都不渲染，更谈不上物化）。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-benchmark`、多匹配的 `-journey`、`-macro-only`、`-list-only`、`-journey-only`，也不支持默认套件——批量场景下按 journey 逐次调用 LLM 没有意义，其余模式则不会以可交互方式渲染单条 journey）。`-llm-key` 在所有路径上都会解析——它用来识别过去 `-llm-addr` 自指分析流量并将其排除出统计，与本次运行是否发起新的 LLM 调用无关。`journeys/index.md` 里的候选按类别分组（`task`/`cron`/`heartbeat`/`subagent`，判据是标题里的内容标记）——只有 `heartbeat` 默认折叠进一个 `<details>` 块（真实语料实测显示没有一条 heartbeat 候选达到过 10 个请求，而 `cron`/`subagent` 经常达到——折叠判据与默认渲染范围现在共用同一条阈值，因此首屏可见的每一行都可点）；`journeys/index.json` 仍然全量列出每个候选。若一条 journey 的全部 Step 都是非 anthropic-messages 协议（常见情形——多数部署主要走 openai-completions 形状的端点），该 journey 报告的"疑似问题"章节会带一条披露注记：少数规则检测器与决策脊柱自身的工具结果错误徽标依赖仅 anthropic-messages 协议才会填充的字段，未出现代表"测不出来"，不代表"检查过、干净"——`-benchmark` 报告在语料非 100% anthropic-messages 协议时同样携带这条披露。`-include-self-traffic` 关闭两侧默认的自指流量排除——识别规则只算一次（基于 `report.yaml` 的 `llm_key`，与 `api_keys` 认证同一种取尾变换，外加可选的 `self_traffic_client_tags` 显式列表），每种模式共用同一份结果。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 分析；`-lang`/`report.yaml` 控制输出语言，`-currency` 决定 $ 列的展示币种（见上文[成本估算与定价](#成本估算与定价)） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
 | `vmr diagnose [-c config.yaml]` | 比 `check` 的静态预览更进一步：对每个 provider 做 DNS/TLS/代理连通性检查，再发一次真实的最小请求到每个配置的端点，要求对方原样回显一个一次性 token（并发执行，`-test-timeout` 控制单项超时，默认 15s）——拿到 200 但没回显这个 token 会标成警告而不是直接判通过，用来抓那种网关/中转层拿缓存或兜底响应假装成功的情况——并给出标注了检测结果的路由顺序预览（`-no-test-routing` 跳过真实请求，`-json` 供脚本消费；只要有检查失败就以非零退出码结束） |
@@ -752,7 +778,7 @@ models:
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
-| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh analyze …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`smoke`/`replay`/`analyze`）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
+| `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh analyze …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`smoke`/`replay`/`analyze`/`diff`）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
 
 经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及请求被钉住时才出现的 `pin=`，和真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
 

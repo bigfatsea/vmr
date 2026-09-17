@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-09-15 23:45, by coding
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /health, /status, /status.html, /models.html, /help, /help.html, /help.zh,
@@ -19,6 +19,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
+	"vmr/internal/guard"
 	"vmr/internal/imgprep"
 	"vmr/internal/livestats"
 	"vmr/internal/logtee"
@@ -48,6 +49,11 @@ type Server struct {
 	// liveStats holds the completed-request aggregator (nil = live stats
 	// persistence disabled, e.g. lightweight tests).
 	liveStats *livestats.Aggregator
+	// guard is Agent Guard's online engine (M3.4), built once at
+	// startup — nil in every test and embedding that doesn't opt in via
+	// WithGuard, which is the same as guard: being entirely absent from
+	// config (applyOutboundGuard's nil check treats them identically).
+	guard *guard.Guard
 	// started is when this Server began serving — /health's uptime basis.
 	// Separate from inst.startedAt, which only `vmr start` fills in and
 	// which /status therefore reports conditionally: /health has no
@@ -207,7 +213,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 		var rec *audit.Record
 		var done func()
-		rec, w, done = s.beginAudit(w, protocol, r)
+		rec, w, done = s.beginAudit(w, protocol, r, snap)
 		if done != nil {
 			defer done()
 		}
@@ -295,6 +301,12 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		}
 		defer release()
 
+		// Agent Guard outbound scan (ADR-4/ADR-10, M3.4/M3.5/M3.6) — see applyOutboundGuard.
+		var blocked bool
+		if body, blocked = s.applyOutboundGuard(w, rec, snap, protocol, probeModel, body); blocked {
+			return
+		}
+
 		// Request-only image downscaling (see downscaleImages). The returned
 		// images list is the single source of truth for "does this request
 		// have images" — it feeds rec.Images here AND computeRequestFacts'
@@ -341,7 +353,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 // audit log. The returned http.ResponseWriter wraps the original with a
 // recorder that captures response status and TTFT always, and the response
 // body only when auditing is on (recorder.captureBody).
-func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request) (rec *audit.Record, ww http.ResponseWriter, done func()) {
+func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request, snap *router.Snapshot) (rec *audit.Record, ww http.ResponseWriter, done func()) {
 	reqMsg := audit.Message{Method: r.Method, Path: r.URL.Path}
 	// Redact the request headers only when they'll actually be written: with
 	// -audit=false the completion hook feeds live stats, and sampleFromRecord
@@ -364,6 +376,28 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 	// or a header redact.
 	rw := newRecorder(w, rec.TS, s.audit != nil)
 	return rec, rw, func() {
+		// R-5 (K-G14): inbound rune-sanitization counts live on the last
+		// Attempt as transient state (router-side stamping) — copy them
+		// into the persisted Record.Guard contract here. rec.Guard may be
+		// nil (inbound-only guard config: no outbound scan ever ran), so
+		// create it lazily; RulesVersion is unknown at this point without
+		// the config, so it stays zero. Such an inbound-only stamp
+		// (OutMode empty, no Hits, Ver 0) deliberately does NOT count as an
+		// outbound verdict: report's fallback is direction-aware
+		// (guardscan.go's guardOutboundStamped) and still scans this
+		// record's request body for credential exposure.
+		if len(rec.Attempts) > 0 {
+			lastAtt := &rec.Attempts[len(rec.Attempts)-1]
+			if rec.Guard != nil && rec.Guard.OutMode == "error" {
+				lastAtt.Norm = append(lastAtt.Norm, "guard_outbound_error")
+			}
+			if counts := lastAtt.SanitizedRunes(); len(counts) > 0 {
+				if rec.Guard == nil {
+					rec.Guard = &audit.GuardRecord{}
+				}
+				rec.Guard.SanitizedRunes = counts
+			}
+		}
 		rec.DurMS = time.Since(rec.TS).Milliseconds()
 		rec.TTFTMS = rw.ttftMS
 		rec.Client.Response = rw.message()

@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"vmr/internal/core"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 )
 
@@ -58,7 +59,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 			sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
 			tbl := &TableVM{Headers: t.ErrorByEndpointHeaders[:]}
 			for _, e := range rows {
-				for _, cls := range sortedKeysInt(e.ErrorClasses) {
+				for _, cls := range fmtutil.SortedKeys(e.ErrorClasses) {
 					n := e.ErrorClasses[cls]
 					rate := 0.0
 					if e.Attempts > 0 {
@@ -99,7 +100,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 			sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
 			tbl := &TableVM{Headers: t.QuirkByEndpointHeaders[:]}
 			for _, e := range rows {
-				for _, marker := range sortedKeysInt(e.NormCounts) {
+				for _, marker := range fmtutil.SortedKeys(e.NormCounts) {
 					n := e.NormCounts[marker]
 					rate := 0.0
 					if e.OK > 0 {

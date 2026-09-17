@@ -159,3 +159,68 @@ func TestSelectRecord_TSStillRequiresAuditPath(t *testing.T) {
 		t.Fatal("selectRecord with -ts and no AuditPath: want an error, got nil")
 	}
 }
+
+// TestResolveAuditPath_LogsDirAutoDetected covers the behavior this
+// resolver absorbed from cmd/vmr/cmd_diff.go's formerly-independent copy
+// (KNOWN_ISSUES §2.138): a "./logs" directory under the current working
+// directory is searched automatically, with no dirHint and no config.yaml
+// log_dir pointing at it — `vmr replay -req` and `vmr diff` now share this,
+// where before only the diff-side copy had it.
+func TestResolveAuditPath_LogsDirAutoDetected(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	if err := os.MkdirAll(logsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	auditPath := writeAuditLine(t, logsDir, "vmr-audit-2026-08-05.jsonl", chatRecord("vm", "in-logs-dir"))
+	// A config.yaml whose log_dir points elsewhere: the match must come
+	// from "./logs" auto-detection, not the log_dir fallback.
+	cfgPath := writeMinimalConfig(t, dir, filepath.Join(dir, "unrelated-log-dir"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	got, err := ResolveAuditPath(filepath.Base(auditPath), "", cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveAuditPath: %v", err)
+	}
+	want := filepath.Join("logs", filepath.Base(auditPath))
+	if got != want {
+		t.Errorf("ResolveAuditPath = %q, want %q", got, want)
+	}
+}
+
+// TestResolveAuditPath_BasenameVariant covers the other behavior absorbed
+// from cmd_diff.go's copy: a hand-typed coordinate whose "basename" still
+// carries a leading directory component (rather than the bare form
+// requests/index.json actually publishes) falls back to
+// filepath.Base(basename) in each candidate directory.
+func TestResolveAuditPath_BasenameVariant(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := writeAuditLine(t, dir, "vmr-audit-2026-08-05.jsonl", chatRecord("vm", "hello"))
+	cfgPath := writeMinimalConfig(t, dir, filepath.Join(dir, "unrelated-log-dir"))
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+
+	handTyped := "some/other/dir/" + filepath.Base(auditPath)
+	got, err := ResolveAuditPath(handTyped, "", cfgPath)
+	if err != nil {
+		t.Fatalf("ResolveAuditPath(%q): %v", handTyped, err)
+	}
+	if got != filepath.Base(auditPath) {
+		t.Errorf("ResolveAuditPath(%q) = %q, want %q", handTyped, got, filepath.Base(auditPath))
+	}
+}

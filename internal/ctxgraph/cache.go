@@ -49,7 +49,44 @@ import (
 // v9 (2026-09): Manifest gains ToolsHash / HasTools (digest of top-level
 // tools array) for cache-break attribution. Cached v8 manifests lack
 // tool hashes and must not be reused, hence the bump.
-const CacheSchemaVersion = 9
+// v10 (2026-09): internal/report's recordFacts drops ToolDeclCount/
+// ToolDeclBytes — write-only fields with no reader anywhere in report.
+// A cached v9 fileFacts blob still carries them; decoding it into the slimmer
+// struct is harmless (unknown JSON keys are ignored), but a version bump keeps
+// this cache's "same schema version = safe to reuse" invariant honest
+// rather than silently mixing pre/post-removal shapes.
+// v11 (2026-09): internal/report's recordFacts gains Guard (audit.Record.Guard
+// carried through verbatim, Agent Guard's M2 offline consumption — see
+// docs/design/agent-guard-technical-spec-final-2.0.md). A cached v10 fileFacts
+// blob decodes with Guard == nil regardless of the source record, which
+// would silently under-count guard aggregation on a warm cache; the bump
+// forces one fresh decode per file so guardcol.go sees real data everywhere.
+// v12 (2026-09): internal/report's recordFacts gains GuardScan (the M2.2/
+// M2.3 Fallback Path's result — see guardscan.go's scanRecordForGuard):
+// computed only when Guard is nil, i.e. on every real record today. A
+// cached v11 fileFacts blob decodes with GuardScan == nil unconditionally,
+// which would silently make every warm-cache `vmr analyze` run report zero
+// credential exposure regardless of what a fresh scan would find — exactly
+// the "wrong answer here would silently corrupt aggregated numbers"
+// failure loadCachedFacts' own doc comment warns about, hence the bump.
+//
+// v12 → v13: guard fact semantics changed again — outbound mode: off
+// records no longer stamp Record.Guard (and inbound-only stamps no longer
+// suppress the direction-aware outbound fallback, report.guardscan's
+// guardOutboundStamped), and InspectToolCall's file_write protected-path
+// check became directed (path-named argument values only), so a warm v12
+// cache's Guard/GuardScan facts reproduce the old blind-spot semantics and
+// stale ToolFindings. Hence the bump.
+//
+// v13 → v14: guard.Fingerprint dropped its salt parameter and became a
+// deterministic hash (KNOWN_ISSUES K-G19, fixing the offline fallback
+// scan's per-run random salt causing the same credential's Hit.FP to
+// drift across runs). A warm v13 cache's GuardScan.Hits carry FP values
+// computed under the old per-run random salt — fine in isolation, but
+// they would never match a fresh v14-computed FP for the same credential,
+// silently reintroducing the exact drift this cache-schema mechanism
+// exists to prevent. Hence the bump.
+const CacheSchemaVersion = 14
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no

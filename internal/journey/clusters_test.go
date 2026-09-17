@@ -4,6 +4,8 @@ package journey
 
 import (
 	"testing"
+
+	"vmr/internal/i18n"
 )
 
 func TestComputeTaskClusters(t *testing.T) {
@@ -38,7 +40,7 @@ func TestComputeTaskClusters(t *testing.T) {
 		},
 	}
 
-	clusters := ComputeTaskClusters(rows)
+	clusters := ComputeTaskClusters(rows, i18n.EN)
 	if len(clusters) != 1 {
 		t.Fatalf("expected 1 cluster, got %d", len(clusters))
 	}
@@ -60,7 +62,7 @@ func TestComputeTaskClusters_CheapestFastest(t *testing.T) {
 		{ID: "j-c", Title: "refresh standard price table again", Category: CategoryTask, Requests: 5,
 			Cost: fp(0.07), NetWorkingMS: 45_000, Model: "deepseek-v4"},
 	}
-	cs := ComputeTaskClusters(rows)
+	cs := ComputeTaskClusters(rows, i18n.EN)
 	if len(cs) != 1 {
 		t.Fatalf("want 1 cluster, got %d", len(cs))
 	}
@@ -81,7 +83,7 @@ func TestComputeTaskClusters_CheapestFastest(t *testing.T) {
 
 	// fewer than two members carry cost -> no cheapest mark
 	rows[1].Cost, rows[2].Cost = nil, nil
-	cs = ComputeTaskClusters(rows)
+	cs = ComputeTaskClusters(rows, i18n.EN)
 	if cs[0].Cheapest != "" {
 		t.Errorf("cheapest = %q, want empty when <2 members priced", cs[0].Cheapest)
 	}

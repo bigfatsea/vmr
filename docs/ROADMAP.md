@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-09, by Claude Sonnet 5 -->
+<!-- Ver 2026-09-16, by Sonnet 5 -->
 
 # vmr — Roadmap（产品路线图）
 
@@ -7,7 +7,7 @@
 > 这份记「还没做的能力」。两者性质不同——混进同一张清单会让技术债读起来比实际长。
 >
 > **边界**
-> - 只覆盖**分析半区**（`vmr analyze`）。路由半区的产品路线（Token-Plan 配速的精度阶梯交付、按客户/业务线的额度可见性）见 Strategy 文档与 Core 文档各自的路线图章节；内置控制台（Overview / Log / Help 三页）自己的待办见 console-unification 设计文档末尾的「未纳入本轮」清单——控制台成本视图（Usage 表的 $ 估算）就登记在那里。
+> - 只覆盖**分析半区**（`vmr analyze`）。路由半区的产品路线（Token-Plan 配速的精度阶梯交付、按客户/业务线的额度可见性）见 Strategy 文档与 Core 文档各自的路线图章节；内置控制台（Overview / Models / Log / Help）后续规划中控制台成本视图（Usage 表的 $ 估算）等可根据实际需求评估。
 > - 架构红线（永久不做的东西）见 `KNOWN_ISSUES` 的「永久不做」清单，不在这里。
 > - 本文档记「要做什么、为什么、卡在哪」，不记实现细节；真正动工时另开设计草案与任务规格（`docs/tasks/`）。
 >
@@ -51,6 +51,22 @@
 - **可能的弱代理**：最后一条 assistant 回复是否含完成确认措辞、是否有 deliverable 落盘（`DeliverableFact` 已在 compare 里算）、plan 的 checkbox 是否全 check（`plan_parse.go` 已解析）。拼起来可给「疑似完成 / 疑似未完成 / 无法判断」三态弱信号。
 - **为什么还没做**：价值最高、也最容易做错——一个不准的「成功率」比没有更糟。要做需专门的设计任务先论证各代理信号的假阳/假阴代价，不能仓促上。
 - **与架构红线的关系**：这是一个新的行为维度信号，触及 `KNOWN_ISSUES` 的「永久不做」清单里那条——分析半区标 v1-complete，新增检测器 / 对比维度从默认冲动改为「需理由的例外」。本条正是这种例外：上一条说的专门设计任务（论证各弱代理信号的假阳/假阴代价）就是它要过的举证门槛，不是绕开红线的许可。草案通过前不碰代码。
+
+### R6. 供应链 typosquat 检测 + Provider 诚信 fraud 信号
+
+**状态**：明确延后，未排期。`docs/design/agent-guard-technical-spec-final-2.0.md` §1.1(c)/§4.7/M2.6 已给出方向但标注「可独立砍掉，默认不进 `vmr analyze` 默认产出」。
+
+- **现状**：Agent Guard 的 M0（双向语料标定）、M1（`internal/guard` 双向检测核心：凭据识别、`ClassifyRunes`、`InspectToolCall`）、M2.1–M2.4（`audit.Record.Guard` 契约、`vmr analyze` 的离线补扫、入向取证、Provider 暴露面归因）均已完成并接入 `macro/guard.json`。M2.5（Journey 步骤级安全标注）仍未实现，见该设计文档 §5。该设计文档同时提议的两个信号——依赖包名 typosquatting 检测（按长度分档的编辑距离比对）、Provider fraud 信号（`thinking_missing`/`usage_ratio` 虚报比对）——均未实现。
+- **为什么还没做**：这两项是"新想法"而非护栏的必需品，且比对基准需要真实标定：typosquat 的判定阈值依赖包名长度分档表（设计文档故意不写具体规模数字，避免固化易变数据），`usage_ratio` 的告警阈值需要先标定 `tokenutil.Estimate` 的真实误差分布——按 provider 分层从存量语料中导出即可，无需现测（设计文档 M0.4，未做）。仓促上线一个未标定阈值的"诚信"信号，误报的代价（怀疑无辜 provider）比不做更糟。
+- **触发条件**：出现具体的供应链投毒或 provider 以次充好的真实案例，或 M0.4 的 `tokenutil` 误差标定完成、有据可依的阈值可以推导出来。
+
+### R7. Agent Guard 通用 PII 检测规则（email / 手机号 / 身份证等）
+
+**状态**：明确延后，未排位。`docs/design/agent-guard-technical-spec-final-2.0.md` 附录 A 早期草案曾把这些列为 Tier 2 候选。
+
+- **现状**：`internal/guard.DefaultRules` 的 Tier 2 目前只有 `generic-sk-prefix`（泛化 `sk-` 前缀）一条；`generic-api-key`/`bearer-token`/`email`/`cn-mobile`/`cn-resident-id` 从未落地——设计文档给不出具体模式，且这些检测器把范围从「凭据外带」扩展到「通用 PII」，是与本方案（credential exfiltration）不同的功能轴。
+- **为什么还没做**：没有具体模式可实现，也没有真实语料校准过误报率（尤其 `email`/`cn-mobile` 这类形状宽松的模式，历史上 `sk-` 泛前缀就因缺少边界锚点产生过近万次英文单词误报——同样的坑没理由不为 PII 模式重踩一次）。
+- **触发条件**：出现具体的 PII 检测需求，且能先用 `tools/guard_corpus_scan` 对本仓真实语料标定候选正则的误报率（同 §2.3 的校准方法论）。
 
 ## 3. 新导出格式
 

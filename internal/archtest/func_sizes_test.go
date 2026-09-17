@@ -75,6 +75,13 @@ var funcLineExemptions = map[string]int{
 	// image-conversion blocks were extracted into beginAudit/toAuditImages/
 	// downscaleImages.
 	"internal/server/server.go:chatHandler": 150,
+
+	// runProbe's readErr check moved ahead of the status-code branch
+	// (KNOWN_ISSUES §2.134: a 200 OK that dies mid-read must not read as a
+	// successful probe) — a few lines of guard plus the comment explaining
+	// why it comes first, pushing a linear probe-outcome-classification
+	// composition just over the default.
+	"internal/router/probe.go:runProbe": 122,
 }
 
 // funcBudgetRoots are the trees this test governs: the shipped binary's own

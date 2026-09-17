@@ -363,13 +363,6 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 	return rows
 }
 
-func boolInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
 // buildAxisRows turns one dimension profile into sorted rows. Count is the
 // request-face total across outcomes.
 func buildAxisRows(m map[string]*Counters) []DimensionRow {

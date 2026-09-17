@@ -12,6 +12,7 @@ import (
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -19,23 +20,7 @@ import (
 // codeFence wraps s in a fenced code block whose fence is longer than any
 // backtick run inside s, so message content can never break out of its block.
 func codeFence(s string) string {
-	n := 3
-	run := 0
-	for _, r := range s {
-		if r == '`' {
-			run++
-			if run >= n {
-				n = run + 1
-			}
-		} else {
-			run = 0
-		}
-	}
-	f := strings.Repeat("`", n)
-	if !strings.HasSuffix(s, "\n") {
-		s += "\n"
-	}
-	return f + "\n" + s + f + "\n"
+	return fmtutil.CodeFence(s)
 }
 
 // EscapeHTML neutralizes user/model-derived text before it enters raw

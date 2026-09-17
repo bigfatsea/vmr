@@ -93,7 +93,8 @@ func writeTempJSONL(t *testing.T, dir string, records []map[string]any) string {
 // for the protocol rename: a pre-2026-08 audit line ("openai" / an
 // "openai:acct:model" endpoint label) must aggregate under the current enum,
 // same as a fresh line would. Covers the audit.Record.UnmarshalJSON path
-// report relies on. TODO(2026-10): remove with core.CanonicalProtocol.
+// report relies on. Removal criteria: see docs/KNOWN_ISSUES.md §1.2 (corpus
+// facts, not a date) — remove with audit.CanonicalProtocol.
 func TestBuild_LegacyProtocolNamesNormalized(t *testing.T) {
 	dir := t.TempDir()
 	rec := map[string]any{
@@ -441,11 +442,10 @@ rates:
 
 // TestWriteRequestsJSONL covers WriteRequestsJSONL as a generic row writer.
 // The only production caller today is requests/failed.jsonl (see
-// cmd_report.go) — requests/index.json, the main per-request export, is
-// WriteRequestsJSON (no "L"), a different function with its own
-// "files" cache section. The filename below is deliberately generic
-// (not requests/failed.jsonl) so this test doesn't imply the function
-// is single-purpose.
+// cmd_report.go) — requests/index.json, the main per-request export, goes
+// through WriteRequestsIndex instead. The filename below is deliberately
+// generic (not requests/failed.jsonl) so this test doesn't imply the
+// function is single-purpose.
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
@@ -1548,8 +1548,8 @@ func TestMarkdownEscapesUserDerivedTitles(t *testing.T) {
 // class Go's randomized map order happened to visit last — found while
 // diffing 2.6's table-builder refactor against real production report
 // output, where "主因" (top error class) flipped between two runs of the
-// same unmodified binary. Fixed by iterating sortedKeysInt so a tie always
-// resolves to the alphabetically-first class name.
+// same unmodified binary. Fixed by iterating fmtutil.SortedKeys so a tie
+// always resolves to the alphabetically-first class name.
 func TestTopErrorClassCountDeterministic(t *testing.T) {
 	classes := map[string]int{"transient": 1, "endpoint": 1, "auth": 1}
 	for i := 0; i < 20; i++ {

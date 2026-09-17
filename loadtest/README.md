@@ -70,5 +70,3 @@ The runner cleans up its own subprocesses and targets on exit. For manual runs:
 rm -rf logs/loadtest loadtest/targets*.json /tmp/vmr-loadtest-manual
 rm -f reports/loadtest-report.md
 ```
-rm -f reports/loadtest-report.md
-```

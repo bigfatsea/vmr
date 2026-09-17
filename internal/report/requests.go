@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -45,24 +44,6 @@ type RequestsIndex struct {
 	Requests    []RequestRow           `json:"requests"`
 	Sessions    map[string]SessionMeta `json:"sessions,omitempty"`
 	JourneyLink map[string]string      `json:"journey_link,omitempty"`
-}
-
-// WriteRequestsJSON writes requests/index.json — RequestsIndex's rows only;
-// the parse cache is persisted separately (see RequestsIndex's doc
-// comment).
-func WriteRequestsJSON(rows []RequestRow, path string) (n int, err error) {
-	idx := RequestsIndex{Requests: rows}
-	data, err := json.MarshalIndent(idx, "", "  ")
-	if err != nil {
-		return 0, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return 0, err
-	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return 0, err
-	}
-	return len(rows), nil
 }
 
 // WriteRequestsJSONL writes one RequestRow per line — used for
@@ -142,13 +123,6 @@ func fmtDisplayFull(ts string) string {
 		return cut(ts, 19)
 	}
 	return t.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05")
-}
-
-func orDashModel(m string) string {
-	if m == "" {
-		return "-"
-	}
-	return m
 }
 
 // buildDetailFileSet lists detailDir once and returns its .md basenames as

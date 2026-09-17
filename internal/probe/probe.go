@@ -1,4 +1,4 @@
-// Ver 2026-07-18 22:45, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 
 // Package probe builds the minimal, verifiable request vmr uses to ask "is
 // this endpoint actually alive right now" — shared by internal/diagnose (the
@@ -13,7 +13,29 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
 )
+
+// RequiredHeaders returns the headers a synthetic probe request must set for
+// protocol on top of whatever the caller already has. Every request this
+// package's functions build originates from vmr itself rather than
+// forwarding a real client's — the byte-faithful "never invent a header the
+// client omitted" rule (see adapter/anthropic.BuildRequest's own doc
+// comment) is about not mutating a passthrough request, and doesn't apply
+// to a request that has no client behind it to begin with: this probe IS
+// the client, and needs to send a protocol-valid request like any other one
+// would. Anthropic's Messages API rejects any request missing
+// anthropic-version with HTTP 400, regardless of body shape — every one of
+// this package's callers (vmr diagnose's connectivity and Agent Guard
+// probes, and internal/router's background half-open recovery probe) needs
+// this, so it lives here once instead of three times.
+func RequiredHeaders(protocol string) http.Header {
+	h := http.Header{}
+	if protocol == "anthropic" || protocol == "anthropic-messages" {
+		h.Set("anthropic-version", "2023-06-01")
+	}
+	return h
+}
 
 // Request builds a minimal chat-completion body that asks the model to echo
 // back a one-time nonce, and returns the nonce alongside it for the caller to
@@ -31,7 +53,7 @@ import (
 // see runProbe's 2xx comment for that leniency call. Echoed does the
 // substring match itself.
 func Request(model string) (body json.RawMessage, nonce string) {
-	nonce = newNonce()
+	nonce = NewNonce()
 	b, err := json.Marshal(map[string]any{
 		"model": model,
 		// 300, not just enough room for the nonce: several reasoning-style
@@ -72,7 +94,7 @@ func Request(model string) (body json.RawMessage, nonce string) {
 // diagnostic calls this; the runtime active health probe intentionally
 // stays on Request's minimal single-message shape.
 func RoleCompatRequest(model, role string) (body json.RawMessage, nonce string) {
-	nonce = newNonce()
+	nonce = NewNonce()
 	b, err := json.Marshal(map[string]any{
 		"model":      model,
 		"max_tokens": 300,
@@ -100,7 +122,7 @@ func RoleCompatRequest(model, role string) (body json.RawMessage, nonce string) 
 // /responses endpoint would be rejected as a missing required "input"
 // field, which is exactly the bug this function exists to avoid.
 func ResponsesRequest(model string) (body json.RawMessage, nonce string) {
-	nonce = newNonce()
+	nonce = NewNonce()
 	b, err := json.Marshal(map[string]any{
 		"model":             model,
 		"input":             "Reply with exactly this token and nothing else: " + nonce,
@@ -112,12 +134,12 @@ func ResponsesRequest(model string) (body json.RawMessage, nonce string) {
 	return b, nonce
 }
 
-// newNonce returns a short, effectively-unique token. It doesn't need to be
-// cryptographically unpredictable — only distinct enough that seeing it in a
-// response body is proof this response was generated for this request, not
-// replayed from a cache — so a read failure degrades to an all-zero token
-// (a valid, merely less distinctive, nonce) rather than aborting the probe.
-func newNonce() string {
+// NewNonce returns a short, effectively-unique token for probe verification.
+// It doesn't need to be cryptographically unpredictable — only distinct enough
+// that seeing it in a response body is proof this response was generated for this
+// request, not replayed from a cache — so a read failure degrades to an all-zero
+// token (a valid, merely less distinctive, nonce) rather than aborting the probe.
+func NewNonce() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return "VMR-PROBE-" + hex.EncodeToString(b[:])

@@ -9,7 +9,7 @@
 // response, filtering client headers, classifying an upstream error) does
 // not qualify even when both halves happen to call it — it lives in that
 // half and the other half imports it. core carries no internal imports
-// (archtest's TestArchitecture_ZeroInternalDepPackages); a helper that would
+// (archtest's TestArchitecture_AllowedInternalDeps); a helper that would
 // need one is a sign it is behavior, not a shared type.
 //
 // Documented exceptions — symbols that press on the rule but stay here on
@@ -416,7 +416,7 @@ func NewTokenWeights() TokenWeights {
 // Rate is a per-1,000,000-token four-component price snapshot — the
 // runtime-shape counterpart of internal/pricing.Rate (this package cannot
 // import internal/pricing: core is a zero-internal-dep package, see
-// archtest's TestArchitecture_ZeroInternalDepPackages), in whatever
+// archtest's TestArchitecture_AllowedInternalDeps), in whatever
 // currency the resolving account's pricing.currency names. A nil component
 // means "unknown", never "free" — see PricingSpec's doc comment for why
 // that distinction survives all the way to this type.

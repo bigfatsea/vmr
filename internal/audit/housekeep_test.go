@@ -211,7 +211,7 @@ func TestCompressOne_ConcurrentSameSrcProducesValidArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if isCompressTemp(e.Name()) {
+		if isStaleTemp(e.Name()) {
 			t.Errorf("temp litter left behind: %s", e.Name())
 		}
 	}

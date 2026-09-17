@@ -166,12 +166,12 @@ func renderContextRotSection(b *strings.Builder, buckets []ContextRotBucket, lan
 	}
 
 	// S-2 disclosures: excluded steps with no usage data, and unrecognized
-	// shape counts from chatmsg. Both are hardcoded English because
-	// internal/i18n is the source of truth for both lines.
+	// shape counts from chatmsg. Both localized through internal/i18n.
+	t2 := i18n.Benchmarks(lang)
 	if excluded > 0 {
-		fmt.Fprintf(b, "%s\n", i18n.Benchmarks(lang).ContextRotExcludedNote(excluded))
+		fmt.Fprintf(b, "%s\n", t2.ContextRotExcludedNote(excluded))
 	}
 	if parts, holders := chatmsg.UnrecognizedShapeCounts(); parts > 0 || holders > 0 {
-		fmt.Fprintf(b, "%s\n", i18n.Benchmarks(lang).UnrecognizedShapeNote(int(parts), int(holders)))
+		fmt.Fprintf(b, "%s\n", t2.UnrecognizedShapeNote(int(parts), int(holders)))
 	}
 }

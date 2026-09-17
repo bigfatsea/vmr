@@ -635,7 +635,7 @@ func TestQuotaParity_StreamingSSE_DegradedEstimateBasis(t *testing.T) {
 	}
 	// Round-trip through JSON exactly as audit write/read would, so the test
 	// input is the string chatmsg actually sees in production.
-	jb, err := json.Marshal(string(gz.Bytes()))
+	jb, err := json.Marshal(gz.String())
 	if err != nil {
 		t.Fatalf("marshal opaque body: %v", err)
 	}

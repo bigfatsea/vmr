@@ -1,4 +1,4 @@
-// Ver 2026-07-18 22:45, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 package probe
 
 import (
@@ -6,6 +6,30 @@ import (
 	"strings"
 	"testing"
 )
+
+// TestRequiredHeaders_AnthropicVersionSet covers the independent review's
+// follow-up finding: this package's own synthetic requests need
+// anthropic-version too, not just the Agent Guard probes -- every caller
+// (vmr diagnose's connectivity check, Agent Guard's probes, and
+// internal/router's background half-open recovery probe) shares this one
+// function so the header can't drift out of sync across call sites again.
+func TestRequiredHeaders_AnthropicVersionSet(t *testing.T) {
+	for _, protocol := range []string{"anthropic", "anthropic-messages"} {
+		h := RequiredHeaders(protocol)
+		if h.Get("anthropic-version") == "" {
+			t.Errorf("RequiredHeaders(%q) has no anthropic-version, want one set", protocol)
+		}
+	}
+}
+
+func TestRequiredHeaders_OtherProtocolsUntouched(t *testing.T) {
+	for _, protocol := range []string{"openai-completions", "openai-responses", ""} {
+		h := RequiredHeaders(protocol)
+		if len(h) != 0 {
+			t.Errorf("RequiredHeaders(%q) = %v, want empty", protocol, h)
+		}
+	}
+}
 
 func TestRequest_ShapeAndNonce(t *testing.T) {
 	body, nonce := Request("some-model")

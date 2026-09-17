@@ -380,7 +380,6 @@ type vegetaReport struct {
 		Max  int64 `json:"max"`
 	} `json:"latencies"`
 	Requests    int64          `json:"requests"`
-	Throughput  float64        `json:"throughput"`
 	Success     float64        `json:"success"`
 	StatusCodes map[string]int `json:"status_codes"`
 	Errors      []string       `json:"errors"`

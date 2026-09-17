@@ -127,7 +127,7 @@ func TestWatchOnErrorNotCalledDuringNormalOperation(t *testing.T) {
 // TestWatchStopCancelsArmedTimer pins the lifecycle fix: a write event that
 // arms the debounce timer followed IMMEDIATELY by stop() must leave onChange
 // unfired — the timer runs on its own goroutine, so without the stop function
-// cancelling it, a reload callback would still run once after the caller had
+// canceling it, a reload callback would still run once after the caller had
 // already shut down (a stray reload after the routing table was torn down).
 // The race-free shape: write arms the timer asynchronously; whether the
 // goroutine has armed it before or after stop() runs, the ~300ms debounce

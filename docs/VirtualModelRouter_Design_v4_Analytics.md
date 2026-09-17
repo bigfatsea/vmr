@@ -51,6 +51,8 @@
 * `macro/workloads.json`：时序分布、请求流式占比与客户端上游归属；
 * `macro/context-efficiency.json`：会话拓扑、历史压缩损失与工具集形态。
 
+以上五份是原子写入的核心切片集（缺一即视为产物损坏）。`macro/guard.json`（Agent Guard 的离线双向取证审计，`docs/design/agent-guard-technical-spec-final-2.0.md`）是独立于这五份之外的**可选**追加切片——数据源是新产生的审计字段 `audit.Record.Guard`（在线护栏盖章时）或对 `Client.Request`/`Client.Response.Body` 的离线现场补扫（ADR-12 的 Fallback Path，M3/M4 在线护栏未接线时的今天状态），而非对既有五份数据的再切分，因此不受"新增维度需理由"红线约束（该文档 §1.1(c)）；补扫无论在线护栏是否配置都会运行，只有当一个记录连请求体都为空时才会真正跳过；不影响五份核心切片的原子性判定。
+
 ### 2.3 准入令牌：`manifest.json`
 为保证整套产物的原子性与强一致性，系统在全部领域切片落盘后，原子写入 `manifest.json`：
 1. **一致性校验**：记录切片清单及其 SHA-256 校验和。读取方先验令牌，任何指纹不符即视为产物无效。

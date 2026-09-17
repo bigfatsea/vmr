@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+
+	"vmr/internal/i18n"
 )
 
 // ClusterMember is one Journey candidate within a TaskCluster.
@@ -34,7 +36,7 @@ type TaskCluster struct {
 
 // ComputeTaskClusters groups JourneyIndexRow items by instruction similarity.
 // Heartbeat and noise tasks are excluded. Minimum similarity threshold is 0.45.
-func ComputeTaskClusters(rows []JourneyIndexRow) []TaskCluster {
+func ComputeTaskClusters(rows []JourneyIndexRow, lang i18n.Lang) []TaskCluster {
 	if len(rows) < 2 {
 		return nil
 	}
@@ -103,8 +105,12 @@ func ComputeTaskClusters(rows []JourneyIndexRow) []TaskCluster {
 				})
 			}
 			cheapest, fastest := clusterExtremes(members)
+			anchorTitle := cleanAnchorTitle(group[0].row.Title)
+			if anchorTitle == "" {
+				anchorTitle = i18n.Journey(lang).NoTitle
+			}
 			clusters = append(clusters, TaskCluster{
-				AnchorTitle: cleanAnchorTitle(group[0].row.Title),
+				AnchorTitle: anchorTitle,
 				Size:        len(members),
 				Members:     members,
 				Cheapest:    cheapest,

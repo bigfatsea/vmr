@@ -140,7 +140,7 @@ func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir s
 	w("%s", t.FailedTableHeader)
 	for _, r := range failed {
 		w("| %s | %s | %s/%s | %s | %s | %s |\n",
-			r.TSDisplay, sessTaskCell(r), r.Protocol, orDashModel(r.Model),
+			r.TSDisplay, sessTaskCell(r), r.Protocol, orDash(r.Model),
 			outcomeCell(r), fmtDurMS(r.DurMS), detailCell(r, detailSet))
 	}
 	return os.WriteFile(outPath, []byte(b.String()), 0o600)

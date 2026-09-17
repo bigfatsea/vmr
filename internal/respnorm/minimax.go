@@ -77,7 +77,7 @@ func stripFirstThink(b []byte) ([]byte, bool) {
 	}
 	keep := make([][]byte, 0, len(lines))
 	for i := 0; i < closerIdx; i++ {
-		if bytes.Index(lines[i], contentFieldMarker) < 0 && bytes.Index(lines[i], textFieldMarker) < 0 {
+		if !bytes.Contains(lines[i], contentFieldMarker) && !bytes.Contains(lines[i], textFieldMarker) {
 			keep = append(keep, lines[i])
 		}
 	}

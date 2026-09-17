@@ -154,11 +154,14 @@ func sortedRoles(m map[string]int64) []string {
 			seen[r] = true
 		}
 	}
+	var rest []string
 	for r := range m {
 		if !seen[r] {
-			out = append(out, r)
+			rest = append(rest, r)
 		}
 	}
+	sort.Strings(rest)
+	out = append(out, rest...)
 	return out
 }
 
@@ -178,15 +181,6 @@ func p5095Cell(p50, p95 int64) string {
 // columns) - same shape as p5095Cell but token-scaled, not duration-scaled.
 func tokP5095Cell(p50, p95 int64) string {
 	return fmtutil.FmtTokens(p50) + "/" + fmtutil.FmtTokens(p95)
-}
-
-func sortedKeysInt(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // ---- mermaid charts ----

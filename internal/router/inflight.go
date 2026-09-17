@@ -201,10 +201,6 @@ func InflightHandleFrom(ctx context.Context) *InflightHandle {
 	return h
 }
 
-func inflightHandleFrom(ctx context.Context) *InflightHandle {
-	return InflightHandleFrom(ctx)
-}
-
 // stampSent marks one attempt as sent upstream: sent_at, the attempt number,
 // and the endpoint triple, all overwritten by the next attempt — a request
 // stuck in failover must show the endpoint it is currently waiting on (§5.2).

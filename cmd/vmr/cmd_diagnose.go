@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-09-17, by Sonnet 5
 package main
 
 import (
@@ -20,6 +20,7 @@ func cmdDiagnose(args []string) error {
 	cfgPath := fs.String("c", "config.yaml", "path to config file")
 	noTestRouting := fs.Bool("no-test-routing", false, "skip phase 3 (real connectivity test); only validate config and environment")
 	testTimeout := fs.Duration("test-timeout", 15*time.Second, "per-endpoint timeout for the connectivity test")
+	guardProbes := fs.Bool("guard", false, "run Agent Guard active probes against configured endpoints: credential/steganography security checks (tool-call tampering, invisible-rune injection) plus relay fidelity checks (silent context truncation, reasoning stripping, token usage honesty) -- all send real requests and consume real upstream tokens")
 	jsonOut := fs.Bool("json", false, "print results as a JSON array instead of the human-readable listing")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -28,6 +29,7 @@ func cmdDiagnose(args []string) error {
 		ConfigPath:  *cfgPath,
 		TestRouting: !*noTestRouting,
 		TestTimeout: *testTimeout,
+		GuardProbes: *guardProbes,
 		// Progress always goes to stderr, in both output modes: it's pure
 		// "this is still running" narration, never part of the reported
 		// data, so it can't corrupt -json's stdout even when both streams

@@ -71,22 +71,26 @@ type rec2 struct {
 	clientKey                string
 	endpoint                 string // last successful attempt's endpoint
 	errClass                 string // last attempt's error class (index display)
-	toolDeclBytes            int64
-	toolDeclCount            int
 	toolCalls                []string
 	roleChars                map[string]int64
 	roleTokens               map[string]int64
 	// from ReqInfo
-	sessionID, taskID       string
-	taskSeq, sessSeq        int
-	tags                    []string
-	workloadClass           string
-	compaction              bool
-	summarizes, continuesTo string
-	detailFile              string
-	newInstruction          string
-	path                    string
-	line                    int
+	sessionID, taskID string
+	taskSeq, sessSeq  int
+	workloadClass     string
+	compaction        bool
+	detailFile        string
+	newInstruction    string
+	path              string
+	line              int
+	// guard is audit.Record.Guard carried through verbatim — the
+	// Authoritative Fast Path (ADR-12), nil on every real record today.
+	// guardScan is the Fallback Path's result (guardscan.go), computed
+	// only when guard is nil. guardCollector reads both; nothing else
+	// does.
+	guard           *audit.GuardRecord
+	guardScan       *GuardScanFacts
+	guardScanFailed bool
 }
 
 // diagnosticNormMarker is the subset of NormalizerStream.Applied()'s vocabulary
@@ -129,6 +133,7 @@ type aggState struct {
 
 	stickyCol         *stickyCollector
 	clientEndpointCol *clientEndpointCollector
+	guardCol          *guardCollector
 	pricingSrc        *pricing.Resolver
 
 	// excludeClientTags is P6.4's self-traffic exclusion set — a record
@@ -162,6 +167,7 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 		sessions:          map[string]*SessionRow{},
 		stickyCol:         newStickyCollector(),
 		clientEndpointCol: newClientEndpointCollector(),
+		guardCol:          newGuardCollector(),
 		pricingSrc:        pricingSrc,
 		excludeClientTags: excludeClientTags,
 	}
@@ -360,6 +366,7 @@ func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
 	// after the pass — it needs each session in order.
 	st.stickyCol.add(rc)
 	st.clientEndpointCol.add(rc)
+	st.guardCol.add(rc)
 	// per-request export row
 	st.rep.requests = append(st.rep.requests, buildRequestRow(rc))
 }
@@ -529,6 +536,7 @@ func (st *aggState) finishBuckets(pricingInfo *Pricing, quotas map[string][]Prov
 	rep.ProviderQuotas = buildProviderQuotaRows(rep, quotas, now, st.from, st.to)
 	rep.Compactions = buildCompactions(st.sess)
 	rep.Sticky = st.stickyCol.result()
+	rep.Guard = st.guardCol.result()
 	rep.ClientEndpoints = st.clientEndpointCol.result()
 	if clients, rows := clientEndpointScale(rep.ClientEndpoints); progress != nil && rows > 0 {
 		fmt.Fprintf(progress, "§5.5: %d client(s) x %d endpoint row(s)\n", clients, rows)

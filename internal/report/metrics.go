@@ -9,7 +9,6 @@
 package report
 
 import (
-	"encoding/json"
 	"sort"
 	"strconv"
 
@@ -424,8 +423,8 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 // Build itself makes (aggregate.go), so this is Report2.Efficiency's
 // language-agnostic default: a deterministic baseline Build computes
 // without needing a lang parameter. cmd_report.go overwrites it with the
-// the report's actual display language — see
-// LocalizeEfficiency, below. Kept as its own named function (not an inline
+// report's actual display language — see LocalizeEfficiency, below. Kept
+// as its own named function (not an inline
 // i18n.EN literal at the call site) so aggregate.go's own call site never
 // needs to import internal/i18n itself — see that file's line-count budget
 // note.
@@ -452,30 +451,6 @@ func buildFindingsForJSON(rep *Report2) []Finding {
 // whether (or when) a caller happened to call LocalizeEfficiency first.
 func LocalizeEfficiency(rep *Report2, lang i18n.Lang) {
 	rep.Efficiency = buildFindings(rep, lang)
-}
-
-// ---- per-record extraction helpers (recompute fields ReqInfo keeps
-// unexported: bytes, tool-decl bytes, endpoint, error class) ----
-//
-// bodyBytes (sizing a recorded body) is shared with render.go — same
-// package now, one definition.
-
-// toolDeclInfo returns (count, serializedBytes) of the request's "tools"
-// array. Mirrors what ReqInfo.declBytes captures (unexported).
-func toolDeclInfo(body any) (count int, bytes int64) {
-	m, ok := body.(map[string]any)
-	if !ok {
-		return 0, 0
-	}
-	tools, ok := m["tools"].([]any)
-	if !ok || len(tools) == 0 {
-		return 0, 0
-	}
-	raw, err := json.Marshal(tools)
-	if err != nil {
-		return len(tools), 0
-	}
-	return len(tools), int64(len(raw))
 }
 
 // ---- formatting helpers (shared by render + findings) ----

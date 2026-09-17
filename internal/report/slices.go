@@ -211,6 +211,26 @@ func BuildWorkloadsSlice(r *Report2) WorkloadsSlice {
 	}
 }
 
+// GuardSlice is the macro/guard.json schema (Agent Guard's M2
+// offline consumption): Agent Guard's own dimension, not a re-cut of
+// an existing one, and not one of the five core domain slices above — it
+// is written whenever BuildGuardSlice has something to report (i.e.
+// rep.Guard is non-nil).
+type GuardSlice struct {
+	Summary GuardSummary `json:"summary"`
+}
+
+// BuildGuardSlice projects rep into a GuardSlice, or nil when rep.Guard is
+// nil. Kept separate from the other Build*Slice functions' "always returns
+// a value, even a zero one" convention so WriteMacroSlices can skip
+// writing the file when there is no guard summary.
+func BuildGuardSlice(r *Report2) *GuardSlice {
+	if r == nil || r.Guard == nil {
+		return nil
+	}
+	return &GuardSlice{Summary: *r.Guard}
+}
+
 // BuildContextEfficiencySlice projects rep into ContextEfficiencySlice.
 func BuildContextEfficiencySlice(r *Report2) ContextEfficiencySlice {
 	if r == nil {
@@ -251,6 +271,12 @@ func WriteMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
 	}
 	if err := writeJSONAtomic(macroDir, "context-efficiency.json", BuildContextEfficiencySlice(r)); err != nil {
 		return err
+	}
+	// guard.json is written whenever there is a guard summary to report.
+	if gs := BuildGuardSlice(r); gs != nil {
+		if err := writeJSONAtomic(macroDir, "guard.json", gs); err != nil {
+			return err
+		}
 	}
 
 	return nil

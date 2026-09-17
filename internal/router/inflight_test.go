@@ -168,8 +168,8 @@ func TestInflightRegistry_NilSafe(t *testing.T) {
 	if WithInflightHandle(ctx, nil) != ctx {
 		t.Error("WithInflightHandle(nil) should return original ctx")
 	}
-	if got := inflightHandleFrom(ctx); got != nil {
-		t.Errorf("inflightHandleFrom = %v, want nil", got)
+	if got := InflightHandleFrom(ctx); got != nil {
+		t.Errorf("InflightHandleFrom = %v, want nil", got)
 	}
 }
 

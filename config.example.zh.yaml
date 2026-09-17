@@ -1,4 +1,4 @@
-# Ver 2026-08-09, by Sonnet 5
+# Ver 2026-09-14 23:30, by Sonnet 5
 # vmr 配置文件 —— 完整注解参考。只想先跑起来？改用 config.minimal.yaml
 # （~10 行），需要调某个旋钮时再回这里查。
 # vmr 配置文件 —— 复制为 config.yaml 后按需修改。
@@ -151,6 +151,25 @@ fallback_endpoints:
     - providers: [openrouter2]
       models: [z-ai/glm-5.2]
       priority: 90              # fallback 记录必须显式声明且 > 0——见上面的说明段落
+
+# guard：Agent Guard 双向凭据/入向取证护栏
+# （docs/design/agent-guard-technical-spec-final-2.0.md）。完全不写这个键（如本文件）就是
+# 100% 原始字节保真透传、零代码路径开销。出向干预阻止凭据流向不可信中转站（audit_only
+# 是唯一纯由离线证据校准过的模式，切勿从更激进的模式起步）；入向干预只剥离响应里的隐写
+# Unicode 字符（ADR-15）——从不阻断、从不改变 HTTP 状态码，也不检查工具调用本身：判断
+# 一次工具调用是否安全，是你的 Coding Agent 客户端自己的审批门与沙箱的职责，不是这个
+# 网关的职责，网关永远没有它们掌握的上下文多。凭据/工具调用/隐写字符的深度发现两个
+# 方向都有，走离线的 `vmr analyze`。
+# guard:
+#   trusted_providers: [minimax, deepseek]   # 必须是 providers[] 里真实存在的名字；
+#                                  # 只有当某个虚拟模型的【全部候选端点】都在信任列表内，
+#                                  # 出向扫描才会豁免
+#   outbound:
+#     mode: audit_only            # off | audit_only | block——audit_only 是唯一纯由
+#                                 # 离线证据校准过的模式，切勿从更激进的模式起步。
+#                                 # （此前的 replace/伪名还原模式已移除，更强的姿态是 block）
+#   inbound:
+#     sanitize_invisible_runes: true   # 唯一的入向旋钮——见上方说明
 
 providers:
   # base_url 必须包含 provider 自己完整的 API 版本号段（/v1、/v3，随它怎么叫）——

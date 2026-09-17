@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-16, by Sonnet 5
 
 // Package diagnose implements `vmr diagnose`: config validation, the same
 // config.Check consistency scan `vmr check` runs, and — only once that scan
@@ -32,7 +32,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"vmr/internal/adapter"
 	"vmr/internal/config"
@@ -72,6 +71,7 @@ type Options struct {
 	ConfigPath  string
 	TestRouting bool // Phase 3: send a real minimal request to every endpoint (default true; -no-test-routing clears it)
 	TestTimeout time.Duration
+	GuardProbes bool // Phase 5: active security diagnostic probes (--guard)
 	// Progress, if non-nil, gets one line per Phase 2/3 check as it
 	// completes (plus a short header when each phase starts) — Phase 2/3
 	// are the only phases that dial out and can take multiple seconds, so
@@ -269,6 +269,11 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 		}
 	}
 
+	// Phase 5: active security diagnostic probes (vmr diagnose --guard).
+	if opts.GuardProbes && runNetworkChecks {
+		rep.Results = append(rep.Results, runGuardProbes(ctx, cfg, opts.TestTimeout, onResult, opts.Progress)...)
+	}
+
 	rep.RanAt = time.Now()
 	return rep, nil
 }
@@ -278,23 +283,39 @@ type epKey struct{ protocol, provider, model string }
 // collectEndpointTriples gathers every distinct (protocol, provider, model)
 // triple referenced by any virtual model: testEndpoint needs them to apply
 // the same role rewrite real traffic would get (resolved per provider at
-// the call site) and, on failure, to word its hint correctly.
+// the call site) and, on failure, to word its hint correctly. Also walks
+// cfg.FallbackEndpoints unconditionally -- router.BuildSnapshot only wires
+// a fallback bucket's entries onto a model that already has a same-protocol
+// primary endpoint and hasn't opted out (VirtualModel.Fallback == false),
+// but a provider declared ONLY there (a dedicated disaster-recovery tier
+// with no matching primary endpoint anywhere) would otherwise never appear
+// in any cfg.Models[...].Endpoints walk at all, leaving it completely
+// untested by both the base connectivity check and -guard's probes until
+// the moment failover actually reaches it for the first time.
 func collectEndpointTriples(cfg *config.Config) []epKey {
 	seen := map[epKey]bool{}
 	var keys []epKey
+	add := func(protocol string, eg config.EndpointGroup) {
+		for _, pn := range eg.Providers {
+			for _, mn := range eg.Models {
+				k := epKey{protocol, pn, mn}
+				if !seen[k] {
+					seen[k] = true
+					keys = append(keys, k)
+				}
+			}
+		}
+	}
 	for _, name := range fmtutil.SortedKeys(cfg.Models) {
 		for _, protocol := range fmtutil.SortedKeys(cfg.Models[name].Endpoints) {
 			for _, eg := range cfg.Models[name].Endpoints[protocol] {
-				for _, pn := range eg.Providers {
-					for _, mn := range eg.Models {
-						k := epKey{protocol, pn, mn}
-						if !seen[k] {
-							seen[k] = true
-							keys = append(keys, k)
-						}
-					}
-				}
+				add(protocol, eg)
 			}
+		}
+	}
+	for _, protocol := range fmtutil.SortedKeys(cfg.FallbackEndpoints) {
+		for _, eg := range cfg.FallbackEndpoints[protocol] {
+			add(protocol, eg)
 		}
 	}
 	return keys
@@ -402,7 +423,7 @@ func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, ti
 	default:
 		probeBody, nonce = probe.Request(ep.Model)
 	}
-	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: probeBody, Header: http.Header{}}
+	creq := &core.CanonicalRequest{Model: ep.Model, Stream: false, Raw: probeBody, Header: probe.RequiredHeaders(ep.AdapterType)}
 	req, _, err := ad.BuildRequest(ctx, ep, creq)
 	if err != nil {
 		return Result{Phase: "connect", Target: target, Status: StatusFail, Detail: "build request: " + err.Error()}
@@ -481,13 +502,10 @@ func snippet(body []byte) string {
 	s := strings.TrimSpace(string(body))
 	s = strings.Join(strings.Fields(s), " ") // collapse whitespace/newlines for a one-line detail
 	if len(s) > 120 {
-		// Rune-boundary cut: domestic providers answer with Chinese error
-		// text, and a mid-rune byte slice would print invalid UTF-8.
-		n := 120
-		for n > 0 && !utf8.RuneStart(s[n]) {
-			n--
-		}
-		s = s[:n] + "…"
+		// fmtutil.CapStr does the rune-boundary-safe cut (domestic providers
+		// answer with Chinese error text, and a mid-rune byte slice would
+		// print invalid UTF-8) — the "…" suffix stays local to this call site.
+		s = fmtutil.CapStr(s, 120) + "…"
 	}
 	return s
 }
@@ -582,6 +600,7 @@ var phaseTitles = map[string]string{
 	"env":     "Environment",
 	"connect": "Connectivity",
 	"route":   "Routing",
+	"guard":   "Agent Guard Security Probes",
 }
 
 // FormatTable renders a Report as a fixed-width, grouped listing under one

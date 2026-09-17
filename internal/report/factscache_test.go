@@ -151,7 +151,7 @@ func TestRecordFactsJSONGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"records":[{"line":7,"ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","stream":true,"dur_ms":1234,"ttft_ms":210,"bytes_in":340,"bytes_out":49,"tool_decl_count":1,"tool_decl_bytes":152,"endpoint":"anthropic-messages:prov-a:model-a","client_key":"k1","fallbacks_raw":1,"est_in_fresh":101,"attempts":[{"endpoint":"anthropic-messages:prov-b:model-b","error":"network: dial timeout","error_class":"network","dur_ms":300},{"endpoint":"anthropic-messages:prov-a:model-a","has_response":true,"status":200,"dur_ms":900}]}]}`
+	want := `{"records":[{"line":7,"ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","stream":true,"dur_ms":1234,"ttft_ms":210,"bytes_in":340,"bytes_out":49,"endpoint":"anthropic-messages:prov-a:model-a","client_key":"k1","fallbacks_raw":1,"est_in_fresh":101,"attempts":[{"endpoint":"anthropic-messages:prov-b:model-b","error":"network: dial timeout","error_class":"network","dur_ms":300},{"endpoint":"anthropic-messages:prov-a:model-a","has_response":true,"status":200,"dur_ms":900}]}]}`
 	if string(got) != want {
 		t.Fatalf(`serialized fileFacts shape changed:
 

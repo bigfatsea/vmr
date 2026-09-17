@@ -56,8 +56,8 @@ func (s *Severity) UnmarshalText(text []byte) error {
 
 // Issue is one problem Check finds. Provider/Model scope it for callers
 // that want to annotate a specific rendered line (vmr check) — Field names
-// which one ("api_key" | "timeouts.probe" | "endpoint" | "listen" | "disabled"); all empty
-// means the issue is global. Endpoint carries the full
+// which one ("api_key" | "timeouts.probe" | "endpoint" | "listen" | "disabled" | "fallback");
+// all empty means the issue is global. Endpoint carries the full
 // "protocol/provider/model" key for "endpoint".
 type Issue struct {
 	Provider string   `json:"provider,omitempty"`

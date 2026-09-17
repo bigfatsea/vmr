@@ -1,4 +1,4 @@
-// Ver 2026-08-13 16:39, by Gemini 3.6 Flash
+// Ver 2026-09-16, by Sonnet 5
 package main
 
 import (
@@ -19,6 +19,7 @@ import (
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/fmtutil"
+	"vmr/internal/guard"
 	"vmr/internal/livestats"
 	"vmr/internal/logtee"
 	"vmr/internal/quota"
@@ -139,6 +140,40 @@ func setupQuotaLedger(cfg *config.Config, rt *router.Router, logger *log.Logger)
 	}
 }
 
+// setupGuard builds Agent Guard's online engine (M3.4), only when cfg
+// declares guard: at all — a hot reload that adds one later needs a
+// restart to take effect (same precedent as log_dir). Toggling mode/off
+// on an already-guard-enabled instance IS hot-reload-safe (chatHandler
+// reads the per-request snapshot's Cfg.Guard fresh every time, not this
+// startup-time decision).
+func setupGuard(cfg *config.Config) (*guard.Guard, error) {
+	if cfg.Guard == nil {
+		return nil, nil
+	}
+	eng, err := guard.NewEngine(guard.DefaultRules(), guard.RulesVersion)
+	if err != nil {
+		return nil, err
+	}
+	return guard.NewGuard(eng), nil
+}
+
+// logGuardReloadWarning tells the operator when a hot reload just installed
+// a Snapshot whose guard: settings the running process cannot actually pick
+// up -- setupGuard's *guard.Guard only builds once, at process start
+// (cmdStart), and reload() never rebuilds rt.Guard/WithGuard's target. The
+// one case that fails to take effect live: a startup guard: nil means the
+// engine was never built, so a later reload that adds guard: stays off
+// until restart. Every other change — a mode flip, or removing the guard:
+// block entirely — IS live: applyOutboundGuard/wrapInboundGuard gate on
+// the per-request snapshot's Cfg.Guard, not a startup-time decision, so
+// those need no warning here. Without this, "CONFIG RELOAD OK" would read
+// as "the new guard: settings are live" for the one case where it is not.
+func logGuardReloadWarning(logger *log.Logger, guardActiveAtStartup bool, newCfg *config.Config) {
+	if newCfg.Guard != nil && !guardActiveAtStartup {
+		logger.Printf("WARN guard: config now declares guard: but Agent Guard was off at startup — the online engine only builds once, at process start; stays off until restart")
+	}
+}
+
 func cmdStart(args []string) error {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
@@ -206,6 +241,11 @@ func cmdStart(args []string) error {
 		}
 	}
 
+	vmrGuard, err := setupGuard(cfg)
+	if err != nil {
+		return fmt.Errorf("guard: %w", err)
+	}
+	rt.Guard = vmrGuard // inbound mount (M4, narrowed by ADR-15); WithGuard(vmrGuard) below is the outbound one (M3.4)
 	snap, err := router.BuildSnapshot(cfg)
 	if err != nil {
 		return fmt.Errorf("build routes: %w", err)
@@ -246,6 +286,7 @@ func cmdStart(args []string) error {
 			logger.Printf("log_dir changed: %s -> %s (takes effect on restart; audit keeps writing to the old directory until then)",
 				auditDirInUse, newCfg.LogDir)
 		}
+		logGuardReloadWarning(logger, vmrGuard != nil, newCfg)
 		logConfigSummary(logger, newCfg, newSnap, newIssues)
 	}
 	stopWatch, err := config.Watch(*path, func() { reload("fsnotify") }, func(err error) {
@@ -267,7 +308,7 @@ func cmdStart(args []string) error {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: server.New(rt, auditLog).WithLogTee(tee).WithLiveStats(liveAgg).
-			WithInstance(*path, startTime).Handler(),
+			WithGuard(vmrGuard).WithInstance(*path, startTime).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 		// Close idle keep-alives after 120s so a vanished client can't park a
 		// socket forever. Applies only BETWEEN requests — in-flight requests,

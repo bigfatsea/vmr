@@ -115,9 +115,8 @@ func TestAttemptTokensParityWithQuotaCharge(t *testing.T) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(usageBody))
 	})
-	yaml := oneProviderYAML(u.URL)
 	// Attach a tokens quota so chargeQuota actually bills this provider.
-	yaml = `listen: 127.0.0.1:0
+	yaml := `listen: 127.0.0.1:0
 providers:
   - name: p1
     base_url: {openai-completions: ` + u.URL + `}
