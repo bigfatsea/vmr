@@ -650,3 +650,108 @@ func lenHourly(t *testing.T, body string) int {
 	}
 	return len(out.Hourly)
 }
+
+// TestStatsRecentlyEndedContract pins the /stats recently_ended[] contract
+// (livereload design §3): idle serializes as a present-empty array, a
+// completed request leaves exactly one terminal snapshot (state "ended",
+// ended_at stamped, authoritative final token counts), and inflight[] stays
+// live-only — no ended rows mixed in.
+func TestStatsRecentlyEndedContract(t *testing.T) {
+	u := newJSONUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"model-two","choices":[],"usage":{"prompt_tokens":40,"completion_tokens":20}}`))
+	})
+
+	yaml := `listen: 127.0.0.1:0
+api_keys:
+  - sk-vmr-team-alice
+providers:
+  - name: p1
+    base_url: {openai-completions: ` + u.URL + `}
+    api_keys:
+      prod: sk-upstream-secret-key-123
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [model-two]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt.Install(snap)
+	srv := New(rt, nil)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	getStats := func() statsResponse {
+		req, _ := http.NewRequest("GET", ts.URL+"/stats", nil)
+		req.Header.Set("Authorization", "Bearer sk-vmr-team-alice")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil || res.StatusCode != 200 {
+			t.Fatalf("GET /stats: err=%v status handled by caller", err)
+		}
+		defer res.Body.Close()
+		var s statsResponse
+		if err := json.NewDecoder(res.Body).Decode(&s); err != nil {
+			t.Fatalf("decode /stats: %v", err)
+		}
+		return s
+	}
+
+	// 1. Idle: the field is present and serializes as [] — not null/absent —
+	// so pollers can iterate it unconditionally.
+	idle := getStats()
+	if idle.RecentlyEnded == nil || len(idle.RecentlyEnded) != 0 {
+		t.Fatalf("idle recently_ended = %v, want present and empty", idle.RecentlyEnded)
+	}
+
+	// 2. Complete one request through the real server path.
+	resp, body := chat(t, ts, simpleReq, map[string]string{"Authorization": "Bearer sk-vmr-team-alice"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("chat status = %d, body %s", resp.StatusCode, body)
+	}
+
+	// 3. The completed request appears exactly once as a terminal snapshot.
+	var done statsResponse
+	for i := 0; i < 100; i++ {
+		done = getStats()
+		if len(done.RecentlyEnded) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(done.RecentlyEnded) != 1 {
+		t.Fatalf("recently_ended len = %d, want 1 (%+v)", len(done.RecentlyEnded), done.RecentlyEnded)
+	}
+	e := done.RecentlyEnded[0]
+	if e.State != "ended" {
+		t.Errorf("recently_ended state = %q, want ended", e.State)
+	}
+	if e.Seq == 0 || e.TS == "" {
+		t.Errorf("recently_ended Seq=%d TS=%q must be set", e.Seq, e.TS)
+	}
+	if e.EndedAt == "" {
+		t.Error("recently_ended ended_at must be stamped")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, e.EndedAt); err != nil {
+		t.Errorf("ended_at not RFC3339Nano: %v", err)
+	}
+	if e.VModel != "vm" || e.Protocol != "openai-completions" {
+		t.Errorf("recently_ended identity = %s/%s, want vm/openai-completions", e.Protocol, e.VModel)
+	}
+
+	// 4. inflight[] stays live-only: no ended row may appear there.
+	for _, live := range done.Inflight {
+		if live.State == "ended" {
+			t.Errorf("inflight[] must not carry ended rows: %+v", live)
+		}
+	}
+}

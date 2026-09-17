@@ -32,6 +32,7 @@ type statsResponse struct {
 		Waiting  int64 `json:"waiting"`
 	} `json:"concurrency"`
 	Inflight        []router.InflightEntry     `json:"inflight"`
+	RecentlyEnded   []router.InflightEntry     `json:"recently_ended"`
 	Hourly          []livestats.HourlyRow      `json:"hourly"`
 	Daily           []livestats.HourlyRow      `json:"daily"`
 	Overall         *livestats.WindowBlock     `json:"overall,omitempty"`
@@ -72,9 +73,13 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		resp.Concurrency.InFlight = inf
 		resp.Concurrency.Waiting = wait
 		resp.Inflight = s.rt.Inflight.Snapshot()
+		resp.RecentlyEnded = s.rt.Inflight.Ended()
 	}
 	if resp.Inflight == nil {
 		resp.Inflight = []router.InflightEntry{}
+	}
+	if resp.RecentlyEnded == nil {
+		resp.RecentlyEnded = []router.InflightEntry{}
 	}
 
 	// 2. Livestats completed ledger snapshot (read-cached, snapCacheTTL: a

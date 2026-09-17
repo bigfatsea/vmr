@@ -142,6 +142,109 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 	h.stampSent(3, "p3", "m3", "k3")
 }
 
+func TestInflightRegistry_EndedRing(t *testing.T) {
+	reg := NewInflightRegistry()
+
+	start := time.Now().Add(-2 * time.Second)
+	h, remove := reg.Register(InflightInitials{
+		Protocol: "openai-completions",
+		VModel:   "vm",
+		Stream:   true,
+		Addr:     "127.0.0.1:5000",
+		TS:       start,
+		EstIn:    100,
+	})
+	h.stampSent(1, "p1", "m1", "k1")
+	h.stampChunk(77)
+
+	// remove is idempotent (sync.OnceFunc): the second call must not double-push
+	remove()
+	remove()
+
+	ended := reg.Ended()
+	if len(ended) != 1 {
+		t.Fatalf("ended len = %d, want 1", len(ended))
+	}
+	e := ended[0]
+	if e.Seq != 1 || e.State != "ended" {
+		t.Errorf("ended entry = seq %d state %q, want seq 1 state ended", e.Seq, e.State)
+	}
+	if e.EndedAt == "" {
+		t.Error("ended_at must be stamped at remove time")
+	}
+	endedAt, err := time.Parse(time.RFC3339Nano, e.EndedAt)
+	if err != nil {
+		t.Fatalf("ended_at not RFC3339Nano: %v", err)
+	}
+	if endedAt.Before(start) {
+		t.Errorf("ended_at %v before arrival %v", endedAt, start)
+	}
+	// The terminal snapshot carries the authoritative final values, not the
+	// front-end's last sighting: est_out at the last chunk, plus identity.
+	if e.EstOut != 77 || e.EstIn != 100 {
+		t.Errorf("ended tokens = in %d out %d, want 100/77", e.EstIn, e.EstOut)
+	}
+	if e.Provider != "p1" || e.Model != "m1" || e.KeyLabel != "k1" || e.Attempt != 1 {
+		t.Errorf("ended triple/attempt = %s/%s/%s #%d, want p1/m1/k1 #1", e.Provider, e.Model, e.KeyLabel, e.Attempt)
+	}
+	if e.TS == "" {
+		t.Error("ended entry must retain its arrival ts")
+	}
+
+	// Snapshot stays live-only: the ended entry must not leak into it.
+	if snaps := reg.Snapshot(); len(snaps) != 0 {
+		t.Errorf("Snapshot len after remove = %d, want 0 (live-only plane)", len(snaps))
+	}
+
+	// Ended returns a copy — mutating it must not touch the ring.
+	ended[0].Seq = 999
+	if reg.Ended()[0].Seq != 1 {
+		t.Error("Ended must return a copy of the ring")
+	}
+
+	// Capacity: end endedRingCap more requests; the ring keeps the newest
+	// endedRingCap entries, newest first (seq descending).
+	for i := 0; i < endedRingCap; i++ {
+		_, rm := reg.Register(InflightInitials{Protocol: "openai-completions", VModel: "vm"})
+		rm()
+	}
+	ended = reg.Ended()
+	if len(ended) != endedRingCap {
+		t.Fatalf("ended len = %d, want %d", len(ended), endedRingCap)
+	}
+	if ended[0].Seq != 1+endedRingCap {
+		t.Errorf("newest ended seq = %d, want %d", ended[0].Seq, 1+endedRingCap)
+	}
+	if ended[len(ended)-1].Seq != 2 {
+		t.Errorf("oldest surviving ended seq = %d, want 2", ended[len(ended)-1].Seq)
+	}
+	for i := 1; i < len(ended); i++ {
+		if ended[i-1].Seq <= ended[i].Seq {
+			t.Fatalf("ended not strictly seq-descending: %d then %d", ended[i-1].Seq, ended[i].Seq)
+		}
+	}
+}
+
+func TestInflightRegistry_EndedNilSafeAndEmpty(t *testing.T) {
+	var reg *InflightRegistry
+	ended := reg.Ended()
+	if ended == nil || len(ended) != 0 {
+		t.Errorf("nil reg Ended = %v, want empty non-nil", ended)
+	}
+
+	fresh := NewInflightRegistry()
+	if ended = fresh.Ended(); ended == nil || len(ended) != 0 {
+		t.Errorf("fresh reg Ended = %v, want empty non-nil", ended)
+	}
+
+	// A queued-then-abandoned request (never sent) also lands in the ring.
+	_, remove := fresh.Register(InflightInitials{Protocol: "openai-completions", VModel: "vm"})
+	remove()
+	if ended = fresh.Ended(); len(ended) != 1 || ended[0].State != "ended" || ended[0].SentAt != "" {
+		t.Errorf("abandoned queued entry = %+v, want one ended entry with no sent_at", ended)
+	}
+}
+
 func TestInflightRegistry_NilSafe(t *testing.T) {
 	var reg *InflightRegistry
 	if got := reg.Len(); got != 0 {

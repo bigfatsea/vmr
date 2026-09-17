@@ -441,9 +441,10 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	body := w.Body.String()
 
 	// Adaptive poller fast and idle cadences — drives concurrency vitals,
-	// Live Requests, and Recent Failures (moved back from log.html).
+	// Live Requests, and Recent Failures (moved back from log.html). Fast beat
+	// is 1s (livereload design §4.3).
 	for _, want := range []string{
-		"const LIVE_POLL_FAST_MS = 2000;",
+		"const LIVE_POLL_FAST_MS = 1000;",
 		"const LIVE_POLL_IDLE_MS = 15000;",
 		"function armLivePoll(ms)",
 		"async function livePollTick()",
@@ -457,6 +458,50 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("status.html missing poller element %q", want)
+		}
+	}
+
+	// Live Requests slot rendering (livereload design §4.1): persistent seq
+	// rows merged from inflight[] + recently_ended[], ended rows frozen at
+	// the terminal snapshot, front-end fallback freeze after two missed
+	// polls, no local elapsed timer, and the queue badge wired to the
+	// concurrency payload.
+	for _, want := range []string{
+		"function liveSlotCount(",
+		"const liveState = { rows: new Map(), emptyRow: null };",
+		"function freezeRow(",
+		"rec.missing >= 2",
+		"e.ended_at",
+		`id="live-queued"`,
+		"in queue",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status.html missing live-slot element %q", want)
+		}
+	}
+	// Elapsed is poll-driven only — a per-row tick/setInterval mechanism is
+	// explicitly out (design §4.1). Scope the check to the live-slot code
+	// (between the STALL_S marker and the failures renderer): console.js's
+	// injected countdown clock legitimately uses setInterval.
+	liveCodeStart := strings.Index(body, "const STALL_S = 10;")
+	liveCodeEnd := strings.Index(body, "Render Recent Failures")
+	if liveCodeStart == -1 || liveCodeEnd == -1 || liveCodeStart >= liveCodeEnd {
+		t.Fatal("status.html live-slot code block markers not found")
+	}
+	if strings.Contains(body[liveCodeStart:liveCodeEnd], "setInterval") {
+		t.Errorf("status.html live-slot code must not run a local elapsed timer (setInterval found)")
+	}
+
+	// VMRTween (console.js, injected): rAF-driven number transition with the
+	// recorded value kept off the DOM (WeakMap).
+	for _, want := range []string{
+		"const VMRTween = {",
+		"requestAnimationFrame",
+		"new WeakMap()",
+		"VMRTween.number(td",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status.html missing tween element %q", want)
 		}
 	}
 

@@ -2,7 +2,7 @@
 
 # Live Stats 实时刷新改造：Slot 列表 + 数字动效方案
 
-**状态：设计定稿，待实现。** 本文是 LiveStats 子系统专篇（`docs/VirtualModelRouter_Design_v4_LiveStats.md`）的增补设计，聚焦控制台 Overview 页 Live Requests 区的刷新体验。
+**状态：已实现。** 本文是 LiveStats 子系统专篇（`docs/VirtualModelRouter_Design_v4_LiveStats.md`）的增补设计，聚焦控制台 Overview 页 Live Requests 区的刷新体验。
 
 方案的立足点是：**实时感的瓶颈不在数据管道，在呈现模型。** 现状自适应轮询（忙时 2s / 闲时 15s）的数据延迟本身可以接受，真正的问题是在"行随请求结束突然消失"——用户看到的是一张不断跳变、行凭空出现又凭空蒸发的表。本方案把解决这个问题的主要工作放在呈现层（固定 slot 列表 + 数字动效），数据管道只做一处小改（已结束请求的终态快照），整体轮询维持在 1s。
 

@@ -62,6 +62,63 @@ const MODE_TAG = {
 const modeTag = isStream => MODE_TAG[isStream ? 'stream' : 'json'];
 function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
 
+/* ===================== VMRTween — reusable number transition =====================
+   Page-level tween for any numeric cell whose value moves between refreshes.
+   First sighting of an element (no recorded value yet) drops the number in
+   unchanged — no entrance animation; afterwards each change animates ~500ms
+   ease-out from the currently displayed value to the target, integer-rendered
+   per frame via requestAnimationFrame. An interrupted animation resumes from
+   its mid-flight value, never from the last settled one. The current value
+   lives in a WeakMap keyed by element (never a DOM attribute), which makes
+   the tween inseparable from persistent DOM: an innerHTML rebuild of the
+   container discards the recorded value and the next call degenerates to a
+   plain set. formatter keeps display rules (thousands separators) untouched
+   by the animation. */
+const VMRTween = {
+  DUR_MS: 500,
+  _vals: new WeakMap(),   // el -> last value handed to number()
+  _anims: new WeakMap(),  // el -> { value, raf } while animating
+  number(el, to, opts) {
+    if (!el) return;
+    const fmt = (opts && opts.formatter) || fmtInt;
+    if (typeof requestAnimationFrame !== 'function') {
+      this._vals.set(el, to);
+      el.textContent = fmt(to);
+      return;
+    }
+    const anim = this._anims.get(el);
+    const from = anim ? anim.value : this._vals.get(el);
+    this._vals.set(el, to);
+    if (anim && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(anim.raf);
+    if (from === undefined || from === to) {
+      this._anims.delete(el);
+      el.textContent = fmt(to);
+      return;
+    }
+    const rec = { value: from, raf: 0 };
+    this._anims.set(el, rec);
+    const start = performance.now();
+    const step = now => {
+      const t = Math.min(1, (now - start) / this.DUR_MS);
+      const v = Math.round(from + (to - from) * (1 - Math.pow(1 - t, 3)));
+      rec.value = v;
+      el.textContent = fmt(v);
+      if (t < 1) rec.raf = requestAnimationFrame(step);
+      else this._anims.delete(el);
+    };
+    rec.raf = requestAnimationFrame(step);
+  },
+  // reset forgets an element's recorded value — call when the cell reverts
+  // to a placeholder; the next number() then drops in without animating.
+  reset(el) {
+    if (!el) return;
+    const anim = this._anims.get(el);
+    if (anim && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(anim.raf);
+    this._anims.delete(el);
+    this._vals.delete(el);
+  },
+};
+
 function toast(msg) {
   let t = document.querySelector('.toast');
   if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }

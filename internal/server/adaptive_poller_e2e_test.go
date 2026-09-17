@@ -22,7 +22,9 @@ import (
 //  1. Inactive: concurrency in_flight is 0, inflight list is empty.
 //  2. Active streaming request: in_flight becomes 1, inflight entry appears with
 //     "running", sent_at, first_byte_at, last_byte_at, and monotonically increasing est_out.
-//  3. Completion: inflight list clears instantaneously, in_flight returns to 0.
+//  3. Completion: inflight list clears instantaneously, in_flight returns to 0,
+//     and the request's terminal snapshot (state "ended", ended_at stamped)
+//     shows up in recently_ended[] while inflight[] stays live-only.
 //  4. Unauthenticated server: GET /stats returns 200 without Authorization header.
 //  5. Authenticated server: GET /stats rejects unauthenticated requests with 401.
 func TestAdaptivePoller_E2E(t *testing.T) {
@@ -287,6 +289,33 @@ models:
 	}
 	if len(statsDone.Inflight) != 0 {
 		t.Errorf("statsDone.Inflight length = %d, want 0", len(statsDone.Inflight))
+	}
+
+	// Terminal snapshot contract (livereload design §3): exactly one ended
+	// entry in recently_ended[], matching the seq just observed live, with
+	// the final token count and a stamped ended_at.
+	if len(statsDone.RecentlyEnded) != 1 {
+		t.Fatalf("statsDone.RecentlyEnded length = %d, want 1", len(statsDone.RecentlyEnded))
+	}
+	endedEntry := statsDone.RecentlyEnded[0]
+	if endedEntry.Seq != entry0.Seq {
+		t.Errorf("ended seq = %d, want the live seq %d", endedEntry.Seq, entry0.Seq)
+	}
+	if endedEntry.State != "ended" {
+		t.Errorf("ended state = %q, want ended", endedEntry.State)
+	}
+	if endedEntry.EndedAt == "" {
+		t.Error("ended_at must be stamped")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, endedEntry.EndedAt); err != nil {
+		t.Errorf("ended_at not RFC3339Nano: %v", err)
+	}
+	if endedEntry.EstOut <= 0 {
+		t.Errorf("ended est_out = %d, want the terminal count > 0", endedEntry.EstOut)
+	}
+	if endedEntry.VModel != "chat" || endedEntry.Provider != "p-test-primary" || endedEntry.Model != "gpt-test" {
+		t.Errorf("ended identity = %s/%s/%s, want chat/p-test-primary/gpt-test",
+			endedEntry.VModel, endedEntry.Provider, endedEntry.Model)
 	}
 }
 

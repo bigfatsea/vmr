@@ -104,13 +104,39 @@ class FakeEl {
     this.hidden = false;
     this.value = '';
   }
-  get innerHTML() { return this._html; }
-  set innerHTML(v) { this._html = String(v); }
+  get innerHTML() {
+    if (this.children.length > 0) {
+      return this.children.map(c => {
+        const tag = c.tagName.toLowerCase();
+        return '<' + tag + '>' + (c.innerHTML || c.textContent || '') + '</' + tag + '>';
+      }).join('');
+    }
+    return this._html;
+  }
+  set innerHTML(v) { this.children = []; this._html = String(v); }
   addEventListener() {}
   removeEventListener() {}
-  appendChild(el) { this.children.push(el); return el; }
-  prepend(el) { this.children.unshift(el); return el; }
-  remove() {}
+  appendChild(el) {
+    const idx = this.children.indexOf(el);
+    if (idx >= 0) this.children.splice(idx, 1);
+    this.children.push(el);
+    el.parentNode = this;
+    return el;
+  }
+  prepend(el) {
+    const idx = this.children.indexOf(el);
+    if (idx >= 0) this.children.splice(idx, 1);
+    this.children.unshift(el);
+    el.parentNode = this;
+    return el;
+  }
+  remove() {
+    if (this.parentNode && this.parentNode.children) {
+      const idx = this.parentNode.children.indexOf(this);
+      if (idx >= 0) this.parentNode.children.splice(idx, 1);
+    }
+    this.parentNode = null;
+  }
   get classList() {
     const self = this;
     const list = () => self.className.split(/\s+/).filter(Boolean);
@@ -163,6 +189,13 @@ const VMRAuth = {
   has() { return false; },
   async guard(doFetch) { return doFetch(); },
 };
+
+const requestAnimationFrame = typeof globalThis.requestAnimationFrame === 'function'
+  ? globalThis.requestAnimationFrame
+  : fn => setTimeout(() => fn(Date.now()), 16);
+const cancelAnimationFrame = typeof globalThis.cancelAnimationFrame === 'function'
+  ? globalThis.cancelAnimationFrame
+  : id => clearTimeout(id);
 
 // toast() only ever fires from a caught-error path (refreshAll's / the
 // range-switch handler's own catch) — routing it to stderr turns a
@@ -482,5 +515,177 @@ func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
 		if !strings.Contains(res[c.field], c.want) {
 			t.Errorf("%s: missing %q\ngot: %s", c.field, c.want, res[c.field])
 		}
+	}
+}
+
+// TestConsoleRender_LiveSlotsLifecycle verifies the slot list lifecycle in
+// status.html against a series of simulated poll cycles: initial empty state,
+// active request arrival, token streaming updates, completion freeze from
+// recently_ended[], capacity eviction when requests exceed the slot budget
+// (ensuring evicted DOM nodes are removed from live-body), and fallback freeze.
+func TestConsoleRender_LiveSlotsLifecycle(t *testing.T) {
+	node := requireNode(t)
+	now := time.Now()
+
+	pageJS := extractScriptBody(t, readSourceFile(t, "status.html"))
+	tail := `
+(async () => {
+  const liveBody = document.getElementById('live-body');
+  const runningBadge = document.getElementById('live-running');
+  const queuedBadge = document.getElementById('live-queued');
+  const now = new Date().toISOString();
+  const nowPlus5s = new Date(Date.now() + 5000).toISOString();
+
+  // 1. Initial idle poll: empty row rendered, 0 running, queued hidden
+  renderLive([], [], { limit: 6, waiting: 0 });
+  const idleChildCount = liveBody.children.length;
+  const idleHasEmpty = liveBody.innerHTML.includes('No requests in flight right now');
+  const idleRunning = runningBadge.textContent;
+  const idleQueuedHidden = queuedBadge.hidden;
+
+  // 2. Active request arrives: row created, empty row removed, 1 running, 2 queued
+  const req1 = {
+    seq: 1, state: 'running', protocol: 'anthropic', vmodel: 'coding',
+    stream: true, client_key_tag: 'test-cli', addr: '127.0.0.1',
+    ts: now, sent_at: now, attempt: 1, provider: 'p1', model: 'm1',
+    first_byte_at: now, last_byte_at: now, est_in: 100, est_out: 50
+  };
+  renderLive([req1], [], { limit: 6, waiting: 2 });
+  const liveChildCount = liveBody.children.length;
+  const liveRunning = runningBadge.textContent;
+  const liveQueuedText = queuedBadge.textContent;
+  const liveQueuedHidden = queuedBadge.hidden;
+  const row1Seq = liveBody.children[0].dataset.seq;
+
+  // 3. Streaming progress on req1 (est_out 50 -> 120): persists same tr
+  const trBefore = liveBody.children[0];
+  req1.est_out = 120;
+  renderLive([req1], [], { limit: 6, waiting: 0 });
+  const sameNode = (liveBody.children[0] === trBefore);
+
+  // 4. req1 ends: appears in recently_ended, row frozen with ended badge
+  const ended1 = Object.assign({}, req1, { state: 'ended', ended_at: nowPlus5s });
+  renderLive([], [ended1], { limit: 6, waiting: 0 });
+  const endedRunning = runningBadge.textContent;
+  const endedRowHTML = liveBody.children[0].innerHTML;
+  const hasEndedBadge = endedRowHTML.includes('ended');
+
+  // 5. Overflow capacity: push requests 2..11 (total 11 requests).
+  // With limit: 6, liveSlotCount is 8. Exactly 8 rows must remain in the DOM,
+  // with newest seq (11) at top and lowest surviving seq (4) at bottom;
+  // seqs 1, 2, 3 must be completely removed from liveBody.children.
+  const manyInflight = [];
+  for (let s = 2; s <= 11; s++) {
+    manyInflight.push({
+      seq: s, state: 'running', protocol: 'anthropic', vmodel: 'coding',
+      stream: true, client_key_tag: 'test-cli', addr: '127.0.0.1',
+      ts: now, sent_at: now, attempt: 1, provider: 'p1', model: 'm1',
+      first_byte_at: now, last_byte_at: now, est_in: 100, est_out: 10
+    });
+  }
+  renderLive(manyInflight, [], { limit: 6, waiting: 0 });
+  const slotCount = liveBody.children.length;
+  const topSeq = liveBody.children[0].dataset.seq;
+  const bottomSeq = liveBody.children[liveBody.children.length - 1].dataset.seq;
+  const presentSeqs = Array.from(liveBody.children).map(c => Number(c.dataset.seq));
+
+  // 6. Fallback freeze: req12 appears live, then is absent for 2 polls
+  const req12 = {
+    seq: 12, state: 'running', protocol: 'anthropic', vmodel: 'coding',
+    stream: true, client_key_tag: 'test-cli', addr: '127.0.0.1',
+    ts: now, sent_at: now, attempt: 1, provider: 'p1', model: 'm1',
+    first_byte_at: now, last_byte_at: now, est_in: 100, est_out: 10
+  };
+  renderLive([req12], [], { limit: 6, waiting: 0 });
+  const row12LiveBadge = liveBody.children[0].innerHTML.includes('running');
+  // First missed poll: still running/not ended
+  renderLive([], [], { limit: 6, waiting: 0 });
+  const row12Miss1Badge = liveBody.children[0].innerHTML.includes('running');
+  // Second missed poll: fallback freeze fires, badge becomes ended
+  renderLive([], [], { limit: 6, waiting: 0 });
+  const row12Miss2Ended = liveBody.children[0].innerHTML.includes('ended');
+
+  process.stdout.write(JSON.stringify({
+    idleChildCount,
+    idleHasEmpty,
+    idleRunning,
+    idleQueuedHidden,
+    liveChildCount,
+    liveRunning,
+    liveQueuedText,
+    liveQueuedHidden,
+    row1Seq,
+    sameNode,
+    endedRunning,
+    hasEndedBadge,
+    slotCount,
+    topSeq,
+    bottomSeq,
+    presentSeqs,
+    row12LiveBadge,
+    row12Miss1Badge,
+    row12Miss2Ended,
+  }));
+  process.exit(0);
+})().catch(e => { console.error('HARNESS_ERROR: ' + (e && e.stack || e)); process.exit(1); });
+`
+	src := buildHarness(t, statusFixture(now), statsFixture(now), formattingSliceJS(t), pageJS, tail)
+	out := runNode(t, node, src)
+
+	var res struct {
+		IdleChildCount   int    `json:"idleChildCount"`
+		IdleHasEmpty     bool   `json:"idleHasEmpty"`
+		IdleRunning      string `json:"idleRunning"`
+		IdleQueuedHidden bool   `json:"idleQueuedHidden"`
+		LiveChildCount   int    `json:"liveChildCount"`
+		LiveRunning      string `json:"liveRunning"`
+		LiveQueuedText   string `json:"liveQueuedText"`
+		LiveQueuedHidden bool   `json:"liveQueuedHidden"`
+		Row1Seq          string `json:"row1Seq"`
+		SameNode         bool   `json:"sameNode"`
+		EndedRunning     string `json:"endedRunning"`
+		HasEndedBadge    bool   `json:"hasEndedBadge"`
+		SlotCount        int    `json:"slotCount"`
+		TopSeq           string `json:"topSeq"`
+		BottomSeq        string `json:"bottomSeq"`
+		PresentSeqs      []int  `json:"presentSeqs"`
+		Row12LiveBadge   bool   `json:"row12LiveBadge"`
+		Row12Miss1Badge  bool   `json:"row12Miss1Badge"`
+		Row12Miss2Ended  bool   `json:"row12Miss2Ended"`
+	}
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("harness stdout not JSON: %v\nraw: %s", err, out)
+	}
+
+	if !res.IdleHasEmpty || res.IdleRunning != "0 running" || !res.IdleQueuedHidden {
+		t.Errorf("idle state mismatch: %+v", res)
+	}
+	if res.LiveChildCount != 1 || res.LiveRunning != "1 running" || res.LiveQueuedHidden || res.LiveQueuedText != "2 in queue" {
+		t.Errorf("live state mismatch: %+v", res)
+	}
+	if res.Row1Seq != "1" || !res.SameNode {
+		t.Errorf("persistent node mismatch: seq=%s same=%v", res.Row1Seq, res.SameNode)
+	}
+	if res.EndedRunning != "0 running" || !res.HasEndedBadge {
+		t.Errorf("ended row mismatch: running=%s hasEnded=%v", res.EndedRunning, res.HasEndedBadge)
+	}
+	if res.SlotCount != 8 {
+		t.Errorf("slot capacity cap = %d, want 8 (clamped to limit 6 + 2)", res.SlotCount)
+	}
+	if res.TopSeq != "11" || res.BottomSeq != "4" {
+		t.Errorf("slot ordering mismatch: top=%s bottom=%s, want 11/4", res.TopSeq, res.BottomSeq)
+	}
+	wantSeqs := []int{11, 10, 9, 8, 7, 6, 5, 4}
+	if len(res.PresentSeqs) != len(wantSeqs) {
+		t.Fatalf("present seqs count = %d, want %d: %v", len(res.PresentSeqs), len(wantSeqs), res.PresentSeqs)
+	}
+	for i, s := range wantSeqs {
+		if res.PresentSeqs[i] != s {
+			t.Errorf("presentSeqs[%d] = %d, want %d (all: %v)", i, res.PresentSeqs[i], s, res.PresentSeqs)
+		}
+	}
+	if !res.Row12LiveBadge || !res.Row12Miss1Badge || !res.Row12Miss2Ended {
+		t.Errorf("fallback freeze mismatch: live=%v miss1=%v miss2Ended=%v",
+			res.Row12LiveBadge, res.Row12Miss1Badge, res.Row12Miss2Ended)
 	}
 }

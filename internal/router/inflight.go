@@ -54,7 +54,8 @@ type InflightInitials struct {
 // the host's local offset, and an unstamped one renders as "".
 type InflightEntry struct {
 	Seq          uint64 `json:"seq"`
-	State        string `json:"state"` // "queued" | "running" — derived from sent_at, never stored
+	State        string `json:"state"`              // "queued" | "running" (live rows) | "ended" (terminal snapshot) — never stored on the rec
+	EndedAt      string `json:"ended_at,omitempty"` // remove instant, ended rows only
 	Protocol     string `json:"protocol"`
 	VModel       string `json:"vmodel"`
 	Stream       bool   `json:"stream"`
@@ -103,14 +104,21 @@ type inflightTriple struct {
 	keyLabel string
 }
 
+// endedRingCap bounds the recently-ended ring: comfortably above the
+// console's slot count (12) so the front-end always sees a request's
+// terminal snapshot in its first post-completion poll; ~a few hundred
+// bytes per entry.
+const endedRingCap = 32
+
 // InflightRegistry tracks requests from registration to removal. Every
 // method is nil-safe: a registry that was never wired (Router values built
 // by struct literal in tests) makes Register return a no-op handle and
 // no-op remove, same convention as Router.Quota.
 type InflightRegistry struct {
-	mu  sync.Mutex
-	seq atomic.Uint64
-	m   map[uint64]*inflightRec
+	mu    sync.Mutex
+	seq   atomic.Uint64
+	m     map[uint64]*inflightRec
+	ended []InflightEntry // terminal snapshots, newest last; capped at endedRingCap
 }
 
 // NewInflightRegistry builds an empty registry; Router.New wires one up.
@@ -146,13 +154,48 @@ func (reg *InflightRegistry) Register(in InflightInitials) (*InflightHandle, fun
 	return &InflightHandle{rec: rec}, sync.OnceFunc(func() { reg.remove(rec.seq) })
 }
 
-// remove deletes the entry: a request that leaves by any path (completed,
-// failed, canceled, abandoned while queued) is gone whole — nothing is
-// settled anywhere (§5.4).
+// remove deletes the entry. A request that leaves by any path (completed,
+// failed, canceled, abandoned while queued) is gone whole from the live
+// map; its final snapshot is pushed to the bounded ended ring first — a
+// transient presentation buffer the console's Live Requests slots freeze
+// from (livereload design §3). The ring settles nothing into the
+// completed-time ledger (§5.4's two counting planes stay untouched) and is
+// wiped by process restart.
 func (reg *InflightRegistry) remove(seq uint64) {
 	reg.mu.Lock()
+	rec := reg.m[seq]
 	delete(reg.m, seq)
+	if rec != nil {
+		e := rec.snapshot()
+		e.State = "ended"
+		e.EndedAt = time.Now().Format(time.RFC3339Nano)
+		reg.ended = append(reg.ended, e)
+		if len(reg.ended) > endedRingCap {
+			// Slide the window in place so the backing array stays fixed.
+			copy(reg.ended, reg.ended[len(reg.ended)-endedRingCap:])
+			reg.ended = reg.ended[:endedRingCap]
+		}
+	}
 	reg.mu.Unlock()
+}
+
+// Ended returns the recently-ended terminal snapshots, newest first (seq
+// descending — the wire shape of /stats' recently_ended[]; a live row's
+// seq is always greater, so the front-end's seq merge yields live rows
+// above ended ones). Entries are immutable after push, so the returned
+// copy is a safe snapshot. Empty returns a non-nil slice so the JSON
+// payload serializes [].
+func (reg *InflightRegistry) Ended() []InflightEntry {
+	if reg == nil {
+		return []InflightEntry{}
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	out := make([]InflightEntry, len(reg.ended))
+	for i, e := range reg.ended {
+		out[len(reg.ended)-1-i] = e
+	}
+	return out
 }
 
 // InflightHandle stamps one registered request in place. All methods are
