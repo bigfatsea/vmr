@@ -217,9 +217,20 @@ providers:
     # ——等流量真的跑起来之后，用你自己 `vmr analyze` 的数字（或者
     # /status 的 quota 部分观察几天）去设置 amount，不要用厂商公布的额度。
     # quota:
+    #   # token_weights：对 metric: tokens 档 Limit 的 base(tokens) 求和做逐分量的
+    #   # 缩放——配置在 provider 的 quota 根节点（与 limits 平级），该账号下所有窗口
+    #   # 共享同一套折算比例，无需重复编写。整体不写或某个分量不写均缺省为 1.0（朴素
+    #   # 等权 token 总数）。metric: requests 档 Limit 会自动忽略它。
+    #   # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #
+    #   # model_multipliers：按模型对一次计费的所有分量（包括 requests）整体缩放，
+    #   # 在计费落地那一刻生效。同样配置在 quota 根节点（与 limits 平级）。"*" 是通配
+    #   # 兜底；未具名列出且无通配项的模型缺省按 1.0（不缩放）。
+    #   # model_multipliers: {"*": 1.0, heavy-model: 9}
+    #
     #   limits:
     #     - metric: requests       # 或者：tokens（Credits/金额制套餐换算一次：预算 ÷ 价格，写成
-    #                              # token 数即可——见下面 token_weights/model_multipliers 表达
+    #                              # token 数即可——见上面 token_weights/model_multipliers 表达
     #                              # 按分量/按模型的差异；已经没有 metric: cost 了，见
     #                              # docs/VirtualModelRouter_Design_v4_Quota.md 的"计量"一节）
     #       every: 1min            # N{min,h,d,w,mo}——也可以是 5h、2w、3d
@@ -233,27 +244,6 @@ providers:
     #                              # 计数——可接受写法：YYYY-MM-DD、RFC3339，或者
     #                              # 纯时间 hh:mm[:ss]（仅限 every 是 min/h 的 Limit）
     #       amount: 90000          # 这个窗口的上限，单位是 vmr 自己观测到的口径
-    #
-    #       # token_weights（P2.1）：对 metric: tokens 档 Limit 的 base(tokens) 求和
-    #       # 做逐分量的缩放——P3 起按 Limit 配置（实测发现同一账号的不同窗口未必
-    #       # 共用同一套折算比例）。整体不写，或者某个分量不写，都缺省为 1.0（也
-    #       # 就是最朴素的等权 token 总数）——只在这条 Limit 自己的 metric 就是
-    #       # tokens 时才有意义（也只有这种情况下配置校验才会接受它）。当账号自己
-    #       # Credits 制的折算比例（比如缓存命中读只算新鲜输入的一部分价格）在所
-    #       # 有模型间是统一的时候用它；如果这个比例是*按模型*分化的，把差异写
-    #       # 进下面的 providers[].pricing（供 vmr analyze 估算 $），预算本身依然
-    #       # 用 tokens 表达。
-    #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-    #       # 想在多条窗口间复用同一套，就在第一次出现处锚定、后面别名引用（优先
-    #       # 用它，别用整条目 `<<: *entry` 合并键——那会把 amount/every 也带过去）：
-    #       #   token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-    #       #   # ...后面某条 Limit 上：  token_weights: *tw
-    #
-    #       # model_multipliers（P2.1）：按模型对一次计费的*所有*分量（包括
-    #       # requests）整体缩放，在计费落地的那一刻生效——不是读取时才套用。P3
-    #       # 起同样按 Limit 配置。"*" 是通配兜底，用于任何没有具名列出的模型；
-    #       # 一条既没有具名项也没有 "*" 的 Limit 不缩放（1.0）。
-    #       # model_multipliers: {"*": 1.0, heavy-model: 9}
     #
     #       # models（Scope）：同时决定"这条 Limit 对哪些模型生效"和"这些模型是
     #       # 共享一个池还是各自独立"。不写（上面这个形态）＝这个 provider 下所有

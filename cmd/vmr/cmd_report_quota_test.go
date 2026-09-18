@@ -341,7 +341,7 @@ func tokensQuotaYAML(logDir string) string {
 // scales the sniffed and the degraded halves separately, so a float factor
 // has two independent places to lose precision instead of one.
 func tokensMultiplierQuotaYAML(logDir string) string {
-	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000, model_multipliers: {real-model: 2.5}}]\nmodels:\n  m1:\n    endpoints:\n      openai-completions:\n        - providers: [acct1]\n          models: [real-model]\n"
+	return "listen: 127.0.0.1:0\nlog_dir: " + logDir + "\nproviders:\n  - name: acct1\n    base_url: {openai-completions: https://example.com/v1}\n    api_key: test-key\n    quota:\n      model_multipliers: {real-model: 2.5}\n      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000}]\nmodels:\n  m1:\n    endpoints:\n      openai-completions:\n        - providers: [acct1]\n          models: [real-model]\n"
 }
 
 // writeTokensQuotaJSON is writeQuotaJSON's tokens-metric sibling with a

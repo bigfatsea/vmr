@@ -33,19 +33,20 @@ $$\text{最小化浪费} = \sum (\text{周期结束时未用完的套餐额度})
 额度模型抽象为自包含的 **Limit 规则实体**：
 
 ```yaml
-# 单条 Limit 规则语义
-metric: requests | tokens     # 计量单位：请求次数 或 Token 总量
-every: 1mo                  # 周期长度（如 1min, 5h, 1w, 1mo）
-since: "2026-01-01"         # 周期锚点（可选，缺省自动对齐日历边界）
-amount: 1000000               # 窗口内上限（基于网关可观测口径）
-models: [claude-3-5-sonnet]   # 适用模型（缺省共享，["*"] 为各模型独立池）
-token_weights:                # 四分量折算权重（仅 tokens 有效，缺省全 1.0）
+# Provider Quota 规则语义
+token_weights:                # 四分量折算权重（账号级统一声明，仅 tokens 有效，缺省全 1.0）
   in_fresh: 1.0
   cache_read: 0.1
   cache_write: 1.25
   out: 5.0
-model_multipliers:            # 模型倍率字典（支持 "*" 兜底，缺省 1.0）
+model_multipliers:            # 模型倍率字典（账号级统一声明，支持 "*" 兜底，缺省 1.0）
   claude-3-5-sonnet: 2.0
+limits:
+  - metric: requests | tokens # 计量单位：请求次数 或 Token 总量
+    every: 1mo                # 周期长度（如 1min, 5h, 1w, 1mo）
+    since: "2026-01-01"       # 周期锚点（可选，缺省自动对齐日历边界）
+    amount: 1000000           # 窗口内上限（基于网关可观测口径）
+    models: [claude-3-5-sonnet] # 适用模型（缺省共享，["*"] 为各模型独立池）
 ```
 
 ### 2.1 单次扣减公式
@@ -184,12 +185,12 @@ providers:
   # 场景二：Token 桶 + 缓存加权 + 模型系数
   - name: token-plan
     quota:
+      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+      model_multipliers: {"*": 1.0, "opus-*": 3.0}
       limits:
         - metric: tokens
           every: 1mo
           amount: 500000000
-          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-          model_multipliers: {"*": 1.0, "opus-*": 3.0}
 
   # 场景三：按模型独立限速（Scope 隔离）
   - name: scoped-plan
@@ -217,7 +218,7 @@ providers:
 | --- | --- | --- |
 | **计量范围** | 仅支持 `requests` 与 `tokens` | 价格随时间波动，将货币引入控制面会导致调度行为漂移。货币预算经除法折算为 Token 即可无损表达。 |
 | **分配机制** | 梯队内按 Headroom 贪心排序 | 相比平滑加权轮询（SWRR），无状态贪心天然保持 Prefix Cache 局部性，且无需多节点持久累加器。 |
-| **折算层级** | 挂在 Limit 层级（`token_weights` / `model_multipliers`） | 账号级装不下“短窗速率闸按全量次数、月度账单桶按 Credits 加权”的真实分化需求；按 Limit 声明赋予准确表达力。 |
+| **折算层级** | 统一定义在 Quota 账号级（`token_weights` / `model_multipliers`） | 账号的物理计费规则（Token 四分量加权与模型消耗倍率）是供应商账号的固有属性，同账号下多窗口（短窗闸与长窗桶）天然共享同一套折算口径，置于 Quota 根级避免多 Limit 重复定义与修改遗漏；requests 档 Limit 自动忽略 token_weights。 |
 | **Scope 判定** | `models:` 单字段表达三态（空/`*`/具体列表） | 避免引入独立的 `mode: shared\|per_model` 字段产生与 models 列表矛盾的配置组合。 |
 | **多窗归并** | 桶为效用目标，闸为二值熔断 | 速率闸的松弛度不代表真实经济价值，闸活着不参与抬分，烧断立即沉底，避免短窗余量反向压制长期目标。 |
 | **超额处理** | 软重排沉底，不做本地 429 熔断 | 本地统计包含估算误差，基于估算执行不可逆硬拦截等同于“自制故障”。真正耗尽依赖上游 402/429 触发健康冷却。 |

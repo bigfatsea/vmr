@@ -195,7 +195,9 @@ providers:
     base_url: {openai-completions: `+u.srv.URL+`}
     api_key: k1
     quota:
-      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {cache_read: 0.1}, model_multipliers: {heavy: 2}}]
+      token_weights: {cache_read: 0.1}
+      model_multipliers: {heavy: 2}
+      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000}]
 models:
   vm:
     endpoints:
@@ -243,7 +245,8 @@ providers:
     base_url: {openai-completions: https://example.com}
     api_key: k1
     quota:
-      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000, token_weights: {out: 5.0}}]
+      token_weights: {out: 5.0}
+      limits: [{metric: tokens, every: 1mo, since: 2026-01-01, amount: 1000000}]
 models:
   m1:
     endpoints: {openai-completions: [{providers: [p1], models: [real-model]}]}

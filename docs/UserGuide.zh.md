@@ -391,48 +391,37 @@ providers:
 
 `vmr replay -provider NAME ...` 会按成功（状态码 `< 400`）响应计入同一份额度状态——它是拿真实流量打真实上游账号，所以计费方式和实时流量一致。`-dry-run` 从不计费（本来就没有发出请求）。
 
-**如何查看**：`vmr check` 会打印每个 provider 配置的每一条额度（含每条 Limit 解析出的 `role=`——`bucket` 还是 `gate`——以及周期边界所依据的生效时区，见下面的时区提示）；`/status` 的 `quota` 段和 `vmr status` 会按 Limit 逐条展示——它的 `role`（`bucket` 还是 `gate`，见下文）、实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`）、原始的 fresh/cache_read/cache_write/output 四分量明细，以及配置了的话这条 Limit 自己的 `token_weights`/`model_multipliers`/`models` 子范围；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
+**如何查看**：`vmr check` 会打印每个 provider 配置的每一条额度（含每条 Limit 解析出的 `role=`——`bucket` 还是 `gate`——以及周期边界所依据的生效时区，见下面的时区提示），以及配置了的话该账号生效的 `token_weights` 与 `model_multipliers`；`/status` 的 `quota` 段和 `vmr status` 会按 Limit 逐条展示——它的 `role`（`bucket` 还是 `gate`，见下文）、实时消耗（`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`）、原始的 fresh/cache_read/cache_write/output 四分量明细，以及生效的 `token_weights`/`model_multipliers`/`models` 子范围；响应头 `X-VMR-Route-Reason` 在重排真正改变了排在最前面的端点时会显示 `pick=quota`。
 
 **桶 vs 闸：一个 provider 配多条 Limit 时怎么归并。** 周期**最长**的那条 Limit 是账号的"桶"——它的余量真的是"不用就浪费"，所以桶里有富余会主动抬高分数。其余更短的 Limit 都是"闸"——厂商真实限流的本地代理，而且是二值的：闸活着（`used < amount`）就完全不参与评分（分数由桶单独决定）；一旦用满烧断就把分数归零，直到短窗口重置。闸的 `amount` 应设得比厂商真实限流**紧一点**，让闸在厂商回 429 之前先本地跳闸（一次干净的沉底重排）；余量要同时盖住校准误差和烧断时已在途的请求——余量为零时，sticky 钉住的会话才会真的往烧断闸的上游打并吃到 429。闸烧断的 provider 在窗口重置的瞬间满血复活。只配一条 Limit 时（最常见的写法），它自己就是桶，行为和上文 P1/P2 描述的完全一样。两条 Limit 的周期**并列**时按确定性规则选桶，绝不依赖 YAML 书写顺序：共享池优先为桶（它被全部流量消耗，只有当桶才能给出平滑的降分信号），同类则 `amount` 大者为桶（紧的是保险丝、松的是容量刻度）；`vmr check` 会打印每条 Limit 的 `role=`。限定列表的 per-model Limit（`models: [a, b]`）只为它点名的那几个模型竞争——无论周期多长，它永远不会赢下共享池自己的 `role=`：否则没被它点名的模型会被共享行的错误角色误导，而那正是它们自己路由视角下真正的桶。限定单个具名模型的 Limit 同样能精确算出；只有通配（`models: ["*"]`）或列出多个模型的 Limit，在不同模型下角色本就可能不同，一条静态行装不下——`vmr check` 这里退化为近似，并加一条 note 指向 `/status`/`vmr status` 的实时逐模型角色。
 
 周期边界（以及所有面向人的时间戳）都按 vmr 进程所在服务器的本地时区渲染（`vmr check` 的 `timezone:` 一行会打印出实际生效的值）——容器里如果没设 `TZ`，会悄悄按 UTC 处理，跟你以为的时区可能差好几个小时，且没有其它任何提示，值得部署后检查一下这一行。`since` 建议写 `YYYY-MM-DD`（对齐到本地时区的午夜），或写带显式本地偏移的 RFC3339（`…+08:00`）——用 `Z`/UTC 结尾会把后续每个周期边界锚到那个 UTC 时刻，`2026-08-01T00:00:00Z` 在 UTC+8 上会在本地 08:00 而不是午夜重置。
 
-#### 让数字更精确：`token_weights` 与 `model_multipliers`（P2.1，P3 起改为按 Limit 配置）
+#### 账号级折算：`token_weights` 与 `model_multipliers`
 
 一个普通的 `metric: tokens` Limit 对新鲜输入、缓存读、缓存写、输出四个分量**等权重**计数——对一个纯粹按"总 Token 数"计费的套餐是准确的，但对 Credits 制套餐会**系统性高估**消耗：这类套餐的缓存命中价格往往只是新鲜输入的一个零头（市场实测比例从 5 倍到 120 倍不等）。一个实际只花掉预算 15% 的账号，在等权计数下可能显示为"已耗尽"，被降权，白白浪费掉套餐里没花完的大头。
+
+`token_weights` 和 `model_multipliers` 配置在 provider 的 `quota:` 根节点（与 `limits:` 平级），该账号下配置的所有窗口自动共享同一套折算与倍率规则，无需逐 Limit 重复书写：
 
 ```yaml
 providers:
   - name: plan-d
     quota:
+      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
+        - metric: tokens
+          every: 5h
+          amount: 5000000
         - metric: tokens
           every: 1mo
           amount: 1249000000
-          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-          model_multipliers: {"*": 1.0, heavy-model: 9}
 ```
 
-- **`token_weights`** 在计算 headroom 以及 `/status` 的 `used`/`pct` 时，对 `metric: tokens` Limit 的四个分量重新加权——**按 Limit 配置**（一个 provider 配了几条窗口，就各自写各自的一份；因为实测发现同一账号的不同窗口未必共用同一套折算比例），未写的分量缺省为 `1.0`，且只对自身 `metric` 就是 `tokens` 的 Limit 生效（配在 `requests` 的 Limit 上是加载期错误）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例**也按模型分化**，配合下文的 `model_multipliers` 一起表达按模型的整体缩放——这是一种近似（无法表达"按模型 × 按分量"同时分化的比例），但按模型、按分量的精确费率本来就该是 `vmr analyze` 的事，不是路由控制面的事，见下文[定价与成本估算](#定价与成本估算)。
-- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。P3 起同样**按 Limit 配置**，理由同上。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按（provider、Limit）聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只作用于 `requests`/`tokens` 档（也是仅有的两档）。
+- **`token_weights`** 在计算 headroom 以及 `/status` 的 `used`/`pct` 时，对 `metric: tokens` Limit 的四个分量重新加权，未写的分量缺省为 `1.0`，且作用于该 provider 下所有的 `metric: tokens` Limit（`requests` 档 Limit 会自动忽略它）。当账号的折算比例**在各个模型间统一**时用它；如果折算比例**也按模型分化**，配合下文的 `model_multipliers` 一起表达按模型的整体缩放——这是一种近似（无法表达"按模型 × 按分量"同时分化的比例），但按模型、按分量的精确费率本来就该是 `vmr analyze` 的事，不是路由控制面的事，见下文[定价与成本估算](#定价与成本估算)。
+- **`model_multipliers`** 按实际命中的上游模型，对一次计费的**每个**分量（包括 `requests`）整体缩放，作用于该 provider 下所有的 Limits——`"*"` 是通配兜底，没匹配上具名项也没有通配项时按 `1.0`（不缩放）。和 `token_weights` 不同，它在**计费落地的那一刻**就生效，不是读取时才套用——vmr 内部计数器按（provider、Limit）聚合、不细分到具体模型，读取时已经无法反推某一段计数来自哪个模型。非整数倍率**精确相乘，不取整**（例如 1.5 倍作用在 3 个 token 上算成 4.5，不是 4 也不是 5）——上游账号自己怎么处理小数倍率的取整无法从这里观测到，无论往哪个方向取整都只是把猜测包装成"精确"；而过去（取整前的实现）选择的向上取整方向会带来系统性、且幅度与配置的系数不成比例的多算（2.5 倍 → 每次多算 20%，4.5 倍 → 多算 11.1%，2.9 倍 → 只多算 3.4%）。`model_multipliers` 只作用于 `requests`/`tokens` 档（也是仅有的两档）。
 
 两个字段都不配置时行为不变——`token_weights` 缺省等同于 P1 一直在用的纯等权求和，`model_multipliers` 缺省让每笔计费保持 1 倍。
-
-**在多条窗口间复用同一套权重。** `token_weights`/`model_multipliers` 按设计就是逐 Limit 的——短周期速率闸和长周期账单桶很少共用同一套折算比例——所以没有 provider 级默认值可继承。当多条 Limit 确实要共用一套时，就地锚定字段、别整段重复：
-
-```yaml
-limits:
-  - metric: tokens
-    every: 1d
-    amount: 1000000
-    token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-  - metric: tokens
-    every: 1mo
-    amount: 20000000
-    token_weights: *tw
-```
-
-优先用字段级锚点，别用整条目合并键（`<<: *entry`）：合并键会把 `amount`/`every` 也一并带过去，漏写覆盖就会把某个窗口按错误的数字封顶。（严格 YAML 会拒绝未知的顶层键，所以没法把锚点堆在 `_anchors:` 块里——在字段第一次出现处锚定。）
 
 **`models:` —— 一个字段，三种写法。** `models:` 同时决定"这条 Limit 对哪些模型生效"和"这些模型是共享一个池还是各自独立"：
 

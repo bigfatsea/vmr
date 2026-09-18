@@ -45,18 +45,16 @@ func nonNegativeFinite(v float64) bool {
 // QuotaConfig is one provider's quota declaration — the YAML-shape
 // counterpart of core.QuotaSpec (see config.EndpointGroup -> core.Endpoint
 // for the same "YAML shape / runtime shape are separate types" precedent).
-// P3: one or more Limits, each carrying its own metric/window/Scope/
-// token_weights/model_multipliers — see LimitConfig's doc comment. Only
+// One or more Limits, each carrying its own metric/window/Scope. Only
 // two metrics: requests and tokens — see LimitConfig.validate's "cost" case
 // for why a metric: cost Limit is a load-time error, not a supported value.
 //
-// TokenWeights/ModelMultipliers are declared here purely as a migration
-// trap: P2 shipped them as account-level fields; P3 moved both down into
-// each limits[] entry (see LimitConfig's doc comment for why — a single
-// account-wide ratio stopped holding once an account could carry more than
-// one window). A config still written the old way must fail loudly with a
-// message that names the new location, not a generic "unknown field" —
-// see validateQuota below. Neither field is ever read into Resolved.
+// TokenWeights and ModelMultipliers sit at the provider quota: level (peer to
+// limits:) so that multi-window configurations (e.g. short-term rate gate +
+// monthly budget bucket) share the exact same scaling rules without repetition.
+// TokenWeights applies to every metric: tokens Limit under this provider (and
+// is safely ignored by metric: requests Limits); ModelMultipliers applies to
+// every charge under this provider across all metrics.
 type QuotaConfig struct {
 	Limits           []LimitConfig       `yaml:"limits"`
 	TokenWeights     *TokenWeightsConfig `yaml:"token_weights"`
@@ -81,14 +79,13 @@ type TokenWeightsConfig struct {
 	Out        *float64 `yaml:"out"`
 }
 
-// resolve fills every unset component with core.DefaultTokenWeight and
+// Resolve fills every unset component with core.DefaultTokenWeight and
 // validates every set one is > 0 — see TokenWeightsConfig's doc comment for
 // why 0.0 is rejected rather than silently accepted. tw==nil (token_weights:
 // omitted entirely) resolves to all-default, same as every component being
 // individually unset. fieldPath names this occurrence in error messages
-// (e.g. "quota.limits[0].token_weights") since P3 allows more than one
-// occurrence per provider.
-func (tw *TokenWeightsConfig) resolve(providerName, fieldPath string) (core.TokenWeights, error) {
+// (e.g. "quota.token_weights").
+func (tw *TokenWeightsConfig) Resolve(providerName, fieldPath string) (core.TokenWeights, error) {
 	r := core.NewTokenWeights()
 	if tw == nil {
 		return r, nil
@@ -126,18 +123,11 @@ func (tw *TokenWeightsConfig) resolve(providerName, fieldPath string) (core.Toke
 // live in pricing.go instead, a distinct config surface with no runtime
 // coupling to quota limits at all (see core.PricingSpec's doc comment).
 //
-// Models (Scope), TokenWeights, and ModelMultipliers are per-Limit — P3
-// moved the latter two down from the account-level QuotaConfig fields P2
-// shipped (see docs/VirtualModelRouter_Design_v4_Quota.md's §12.1 revision
-// note on "折算规则的层级"): the original reasoning ("one ratio, shared by
-// every window on the account") only holds as long as every window
-// observed on a real plan shares the same ratio, which stopped being a
-// safe assumption once an account could carry more than one Limit — a
-// short RPM gate and a monthly Credits bucket on the same provider have
-// been seen to weight components differently. Duplicating one fact across
-// every Limit is a real cost (the same "three places changed, only two
-// updated" risk §12.1 flags elsewhere), but it is the honest one here: the
-// alternative (account-level) has already been observed to not hold.
+// Models (Scope) is per-Limit. TokenWeights and ModelMultipliers are declared
+// here purely as a migration trap: they now live at the provider quota: level
+// (peer to limits:) so multiple windows share one set of modifiers. Writing
+// them inside a limits[] entry produces a load-time error naming the new
+// location — see LimitConfig.validate below.
 type LimitConfig struct {
 	Metric           string              `yaml:"metric"`
 	Every            string              `yaml:"every"`
@@ -241,14 +231,20 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 	if qc == nil {
 		return nil
 	}
-	if qc.TokenWeights != nil || len(qc.ModelMultipliers) > 0 {
-		return fmt.Errorf("provider %q: quota.token_weights/quota.model_multipliers are no longer account-level fields — move them into the specific quota.limits[] entry they apply to (see docs/VirtualModelRouter_Design_v4_Quota.md)", providerName)
-	}
 	if len(qc.Limits) == 0 {
 		return fmt.Errorf("provider %q: quota.limits: at least one entry required when quota: is set", providerName)
 	}
+	tw, err := qc.TokenWeights.Resolve(providerName, "quota.token_weights")
+	if err != nil {
+		return err
+	}
+	for _, model := range fmtutil.SortedKeys(qc.ModelMultipliers) {
+		if !positiveFinite(qc.ModelMultipliers[model]) {
+			return fmt.Errorf("provider %q: quota.model_multipliers[%q]: must be a finite number > 0 (got %v)", providerName, model, qc.ModelMultipliers[model])
+		}
+	}
 	for i := range qc.Limits {
-		if err := (&qc.Limits[i]).validate(providerName, i, now); err != nil {
+		if err := (&qc.Limits[i]).validate(providerName, i, now, tw, qc.ModelMultipliers); err != nil {
 			return err
 		}
 	}
@@ -288,8 +284,11 @@ func validateQuota(providerName string, qc *QuotaConfig, now time.Time) error {
 // specification, which treats a silently ignored quota field as the one
 // failure mode this project cannot tolerate (the same fail-fast contract
 // KnownFields already enforces everywhere else in this config).
-func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) error {
+func (lc *LimitConfig) validate(providerName string, idx int, now time.Time, tw core.TokenWeights, mm map[string]float64) error {
 	fieldPrefix := fmt.Sprintf("quota.limits[%d]", idx)
+	if lc.TokenWeights != nil || len(lc.ModelMultipliers) > 0 {
+		return fmt.Errorf("provider %q: %s: token_weights and model_multipliers now belong at the provider quota level (peer to limits:) — move them up to quota.token_weights / quota.model_multipliers to share them across all limits (see docs/VirtualModelRouter_Design_v4_Quota.md)", providerName, fieldPrefix)
+	}
 	switch lc.Metric {
 	case "requests":
 		lc.Resolved.Metric = core.MetricRequests
@@ -323,17 +322,9 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 	if err != nil {
 		return err
 	}
-	tw, err := lc.TokenWeights.resolve(providerName, fieldPrefix+".token_weights")
-	if err != nil {
-		return err
-	}
-	if lc.TokenWeights != nil && lc.Resolved.Metric != core.MetricTokens {
-		return fmt.Errorf("provider %q: %s.token_weights is configured but this Limit's metric is %q, not \"tokens\" — token_weights only affects tokens accounting", providerName, fieldPrefix, lc.Metric)
-	}
-	for _, model := range fmtutil.SortedKeys(lc.ModelMultipliers) {
-		if !positiveFinite(lc.ModelMultipliers[model]) {
-			return fmt.Errorf("provider %q: %s.model_multipliers[%q]: must be a finite number > 0 (got %v)", providerName, fieldPrefix, model, lc.ModelMultipliers[model])
-		}
+	limitTW := core.NewTokenWeights()
+	if lc.Resolved.Metric == core.MetricTokens {
+		limitTW = tw
 	}
 	lc.Resolved = core.Limit{
 		Metric:           lc.Resolved.Metric,
@@ -343,8 +334,8 @@ func (lc *LimitConfig) validate(providerName string, idx int, now time.Time) err
 		Since:            since,
 		Amount:           lc.Amount,
 		Models:           models,
-		TokenWeights:     tw,
-		ModelMultipliers: lc.ModelMultipliers,
+		TokenWeights:     limitTW,
+		ModelMultipliers: mm,
 	}
 	return nil
 }

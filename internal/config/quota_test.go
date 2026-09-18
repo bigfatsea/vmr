@@ -123,10 +123,13 @@ func TestQuota_HappyPath_MinUnit(t *testing.T) {
 	}
 }
 
-func TestQuota_HappyPath_PerLimitTokenWeightsAndScope(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: tokens, every: 1mo, amount: 100000000, token_weights: {cache_read: 0.1, out: 4.0}, models: [heavy-model]}
-  - {metric: requests, every: 1d, amount: 10000, model_multipliers: {"deepseek-r1": 2.0}}`)
+func TestQuota_HappyPath_TokenWeightsAndModelMultipliersSharedAcrossLimits(t *testing.T) {
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1, out: 4.0}
+model_multipliers: {"deepseek-r1": 2.0}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100000000, models: [heavy-model]}
+  - {metric: tokens, every: 5h, amount: 500000}
+  - {metric: requests, every: 1d, amount: 10000}`)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -136,32 +139,43 @@ func TestQuota_HappyPath_PerLimitTokenWeightsAndScope(t *testing.T) {
 	if l0.TokenWeights.CacheRead != 0.1 || l0.TokenWeights.Out != 4.0 {
 		t.Fatalf("limit[0].TokenWeights = %+v, want cache_read=0.1 out=4.0", l0.TokenWeights)
 	}
+	if l0.ModelMultipliers["deepseek-r1"] != 2.0 {
+		t.Fatalf("limit[0].ModelMultipliers = %v, want deepseek-r1=2.0", l0.ModelMultipliers)
+	}
 	if len(l0.Models) != 1 || l0.Models[0] != "heavy-model" {
 		t.Fatalf("limit[0].Models = %v, want [heavy-model]", l0.Models)
 	}
 	l1 := p.Quota.Limits[1].Resolved
+	if l1.TokenWeights.CacheRead != 0.1 || l1.TokenWeights.Out != 4.0 {
+		t.Fatalf("limit[1].TokenWeights = %+v, want cache_read=0.1 out=4.0", l1.TokenWeights)
+	}
 	if l1.ModelMultipliers["deepseek-r1"] != 2.0 {
 		t.Fatalf("limit[1].ModelMultipliers = %v, want deepseek-r1=2.0", l1.ModelMultipliers)
 	}
-}
-
-func TestQuota_Reject_AccountLevelTokenWeights(t *testing.T) {
-	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1}
-limits:
-  - {metric: tokens, every: 1mo, amount: 100}`)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "no longer account-level") {
-		t.Errorf("want account-level token_weights migration error, got %v", err)
+	l2 := p.Quota.Limits[2].Resolved
+	if l2.TokenWeights != core.NewTokenWeights() {
+		t.Fatalf("limit[2].TokenWeights = %+v, want all default 1.0 (requests limit)", l2.TokenWeights)
+	}
+	if l2.ModelMultipliers["deepseek-r1"] != 2.0 {
+		t.Fatalf("limit[2].ModelMultipliers = %v, want deepseek-r1=2.0", l2.ModelMultipliers)
 	}
 }
 
-func TestQuota_Reject_AccountLevelModelMultipliers(t *testing.T) {
-	yaml := withQuotaBlock(`model_multipliers: {"*": 2}
-limits:
-  - {metric: requests, every: 1mo, amount: 100}`)
+func TestQuota_Reject_LimitLevelTokenWeights(t *testing.T) {
+	yaml := withQuotaBlock(`limits:
+  - {metric: tokens, every: 1mo, amount: 100, token_weights: {cache_read: 0.1}}`)
 	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "no longer account-level") {
-		t.Errorf("want account-level model_multipliers migration error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "belong at the provider quota level") {
+		t.Errorf("want limit-level token_weights migration error, got %v", err)
+	}
+}
+
+func TestQuota_Reject_LimitLevelModelMultipliers(t *testing.T) {
+	yaml := withQuotaBlock(`limits:
+  - {metric: requests, every: 1mo, amount: 100, model_multipliers: {"*": 2}}`)
+	_, err := Parse([]byte(yaml))
+	if err == nil || !strings.Contains(err.Error(), "belong at the provider quota level") {
+		t.Errorf("want limit-level model_multipliers migration error, got %v", err)
 	}
 }
 
@@ -275,11 +289,12 @@ func TestQuota_Reject_Rolling(t *testing.T) {
 	}
 }
 
-// --- model_multipliers / token_weights are per-Limit fields (P3) ---
+// --- model_multipliers / token_weights at quota: level ---
 
 func TestQuota_ModelMultipliers_HappyPath(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: requests, every: 1mo, amount: 100, model_multipliers: {"*": 1, heavy-model: 9}}`)
+	yaml := withQuotaBlock(`model_multipliers: {"*": 1, heavy-model: 9}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -296,21 +311,20 @@ func TestQuota_ModelMultipliers_HappyPath(t *testing.T) {
 
 func TestQuota_ModelMultipliers_ZeroOrNegative_Rejected(t *testing.T) {
 	for _, bad := range []string{"0", "-1"} {
-		yaml := withQuotaBlock(`limits:
-  - {metric: requests, every: 1mo, amount: 100, model_multipliers: {heavy-model: ` + bad + `}}`)
+		yaml := withQuotaBlock(`model_multipliers: {heavy-model: ` + bad + `}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`)
 		_, err := Parse([]byte(yaml))
-		if err == nil || !strings.Contains(err.Error(), "model_multipliers") {
+		if err == nil || !strings.Contains(err.Error(), "quota.model_multipliers") {
 			t.Errorf("multiplier=%s: want model_multipliers rejection, got %v", bad, err)
 		}
 	}
 }
 
 func TestQuota_MetricCost_WithModelMultipliers_StillRejectedForMetric(t *testing.T) {
-	// model_multipliers on a metric: cost Limit used to have its own,
-	// more specific rejection; now metric: cost itself is rejected first,
-	// before model_multipliers is even considered.
-	yaml := withQuotaBlock(`limits:
-  - {metric: cost, every: 1mo, amount: 100, model_multipliers: {"*": 2}}`)
+	yaml := withQuotaBlock(`model_multipliers: {"*": 2}
+limits:
+  - {metric: cost, every: 1mo, amount: 100}`)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "metric: cost is no longer supported") {
 		t.Errorf("want metric: cost rejection, got %v", err)
@@ -337,8 +351,9 @@ func TestQuota_TokenWeights_ZeroValueIsNotDefault(t *testing.T) {
 }
 
 func TestQuota_TokenWeights_PartialOverride_RestDefault(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: tokens, every: 1mo, amount: 100, token_weights: {cache_read: 0.1}}`)
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
 	cfg, err := Parse([]byte(yaml))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -352,8 +367,9 @@ func TestQuota_TokenWeights_PartialOverride_RestDefault(t *testing.T) {
 }
 
 func TestQuota_TokenWeights_ExplicitZero_Rejected(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: tokens, every: 1mo, amount: 100, token_weights: {cache_read: 0}}`)
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "token_weights.cache_read") {
 		t.Errorf("want explicit-zero token_weights rejection, got %v", err)
@@ -361,20 +377,33 @@ func TestQuota_TokenWeights_ExplicitZero_Rejected(t *testing.T) {
 }
 
 func TestQuota_TokenWeights_NegativeRejected(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: tokens, every: 1mo, amount: 100, token_weights: {out: -2}}`)
+	yaml := withQuotaBlock(`token_weights: {out: -2}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`)
 	_, err := Parse([]byte(yaml))
 	if err == nil || !strings.Contains(err.Error(), "token_weights.out") {
 		t.Errorf("want negative token_weights rejection, got %v", err)
 	}
 }
 
-func TestQuota_TokenWeights_OnNonTokensLimit_Rejected(t *testing.T) {
-	yaml := withQuotaBlock(`limits:
-  - {metric: requests, every: 1mo, amount: 100, token_weights: {cache_read: 0.1}}`)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), "token_weights is configured but this Limit's metric is") {
-		t.Errorf("want token_weights-on-non-tokens-limit rejection, got %v", err)
+func TestQuota_TokenWeights_OnOnlyRequestsLimits_ParsesOK(t *testing.T) {
+	yaml := withQuotaBlock(`token_weights: {cache_read: 0.1}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`)
+	cfg, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("want token_weights on only requests limits to parse successfully, got error %v", err)
+	}
+	issues := cfg.Check()
+	hasWarn := false
+	for _, iss := range issues {
+		if iss.Field == "quota.token_weights" && iss.Severity == SeverityWarning {
+			hasWarn = true
+			break
+		}
+	}
+	if !hasWarn {
+		t.Errorf("want SeverityWarning issue for quota.token_weights on only requests limits, got %v", issues)
 	}
 }
 
@@ -522,10 +551,12 @@ func TestQuota_Reject_NonFiniteNumbers(t *testing.T) {
   - {metric: requests, every: 1mo, amount: .nan}`, "amount must be a finite number"},
 		{"amount Inf", `limits:
   - {metric: requests, every: 1mo, amount: .inf}`, "amount must be a finite number"},
-		{"model_multipliers NaN", `limits:
-  - {metric: requests, every: 1mo, amount: 100, model_multipliers: {"*": .nan}}`, "model_multipliers"},
-		{"token_weights Inf", `limits:
-  - {metric: tokens, every: 1mo, amount: 100, token_weights: {in_fresh: .inf}}`, "token_weights.in_fresh"},
+		{"model_multipliers NaN", `model_multipliers: {"*": .nan}
+limits:
+  - {metric: requests, every: 1mo, amount: 100}`, "model_multipliers"},
+		{"token_weights Inf", `token_weights: {in_fresh: .inf}
+limits:
+  - {metric: tokens, every: 1mo, amount: 100}`, "token_weights.in_fresh"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

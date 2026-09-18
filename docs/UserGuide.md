@@ -394,25 +394,10 @@ For `metric: tokens`, vmr prefers the upstream's own reported usage (exact) and 
 
 A Limit's `every:` sets its counting window. Supported units: `1min` (or any `Nmin`), `1h`/`24h`, `1d`/`7d`, `1w`/`2w`, `1mo`/`3mo`.
 
-**Checking it**: `vmr check` prints each provider's configured limit(s) (including each Limit's resolved `role=` — `bucket` or `gate` — and the effective timezone period boundaries are computed in, see the timezone note below); `/status`'s `quota` section and `vmr status` show one row per Limit — its `role` (`bucket` or `gate`, see below), live consumption (`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`), the raw fresh/cache-read/cache-write/output breakdown, and — when configured — that Limit's own `token_weights`/`model_multipliers`/`models` scope; a response's `X-VMR-Route-Reason` header shows `pick=quota` when reordering actually changed which endpoint went first.
+**Checking it**: `vmr check` prints each provider's configured limit(s) (including each Limit's resolved `role=` — `bucket` or `gate` — and the effective timezone period boundaries are computed in, see the timezone note below), plus the account's effective `token_weights` and `model_multipliers` if configured; `/status`'s `quota` section and `vmr status` show one row per Limit — its `role` (`bucket` or `gate`, see below), live consumption (`used`/`amount`/`pct`/`headroom`/`period_ends_at`/`estimated_pct`), the raw fresh/cache-read/cache-write/output breakdown, and the effective `token_weights`/`model_multipliers`/`models` scope; a response's `X-VMR-Route-Reason` header shows `pick=quota` when reordering actually changed which endpoint went first.
 
-#### Per-Limit configuration (P2.1, per-Limit since P3)
+#### Scope: `models`
 
-- **`token_weights`** rescales a `metric: tokens` Limit's four components when computing headroom and `/status`'s `used`/`pct` — **per-Limit** (each `limits:` entry has its own; a provider with several windows writes it separately on each one it should affect, since observed plans don't always weight every window the same way), defaults to `1.0` on every component you don't mention, and only takes effect on a Limit whose own `metric` is `tokens` (configuring it on a `requests` Limit is a load-time error). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model too*, combine it with `model_multipliers` (below) for the per-model scale; the combination is an approximation (it can't express a ratio that varies by *both* model and component simultaneously), but a per-model, per-component exact rate is a `vmr analyze` concern, not a routing-control one — see [Pricing (for cost estimates)](#pricing-for-cost-estimates) below.
-- **`model_multipliers`** scales EVERY component of a charge (including requests) by a per-model multiplier at charge time — **per-Limit** (same as `token_weights`). Set it when a provider bills one model at a different tier than another (e.g. Claude 3.5 Sonnet costs 3x Haiku on requests, or a heavier coding model burns tokens faster). `"*"` is a wildcard fallback for unlisted models; omitting both a named model and `"*"` leaves that model unscaled (`1.0`). Valid on `metric: requests` and `metric: tokens` (the only two metrics there are).
-- **Reusing one weight set across windows.** `token_weights`/`model_multipliers` are deliberately per-Limit — a short rate gate and a long billing bucket rarely weight usage the same way — so there is no provider-level default to inherit. When several Limits genuinely do share one set, anchor the field in place rather than retyping it:
-  ```yaml
-  limits:
-    - metric: tokens
-      every: 1d
-      amount: 1000000
-      token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-    - metric: tokens
-      every: 1mo
-      amount: 20000000
-      token_weights: *tw
-  ```
-  Prefer a field-level anchor over a whole-entry merge key (`<<: *entry`): the merge key also copies `amount`/`every`, and a forgotten override then caps the wrong window at the wrong number. (Strict-YAML rejects unknown top-level keys, so you can't stage anchors in a `_anchors:` block — anchor on first use.)
 - **`models` (Scope)** decides BOTH which upstream models a Limit applies to AND whether they share one pool or each get an independent one:
   - **Omitted** (the default): every model on this provider shares one pool. Unchanged from P2.
   - **`models: ["*"]`**: every model on this provider gets its OWN independent pool — e.g. an account-level 60/min RPM limit where each model has its own 60/min gate instead of fighting over a shared 60/min.
@@ -424,26 +409,31 @@ A Limit's `every:` sets its counting window. Supported units: `1min` (or any `Nm
 
 Period boundaries (and every other human-facing timestamp) render in the server's local timezone (`vmr check`'s `timezone:` line shows exactly what that resolves to) — a container with `TZ` unset silently uses UTC, which can be several hours off from what you'd expect with no other symptom, so it's worth checking that line once after deploying. Write `since` as `YYYY-MM-DD` (anchored to local-timezone midnight) or an RFC3339 stamp carrying an explicit local offset (`…+08:00`) — a `Z`/UTC stamp anchors every later boundary to that UTC instant, so `2026-08-01T00:00:00Z` resets at 08:00 local in UTC+8, not at midnight.
 
-#### Making the numbers precise: `token_weights` and `model_multipliers` (P2.1, per-Limit since P3)
+#### Provider-level scaling: `token_weights` and `model_multipliers`
 
 A plain `metric: tokens` Limit counts fresh input, cache-read, cache-write, and output tokens with **equal weight** — accurate for a straightforward "total tokens" plan, but it *overestimates* consumption on a Credits-style plan where a cache hit is billed at a fraction of a fresh token's price (observed in the market anywhere from 5x to 120x cheaper). An account that's actually only 15% through its real budget can show as "exhausted" under equal weighting, get deprioritized, and waste the unused majority of a plan you already paid for.
+
+Both `token_weights` and `model_multipliers` sit at the provider `quota:` level (peer to `limits:`) so all windows configured for that provider share the exact same scaling definitions without repetition:
 
 ```yaml
 providers:
   - name: plan-d
     quota:
+      token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+      model_multipliers: {"*": 1.0, heavy-model: 9}
       limits:
+        - metric: tokens
+          every: 5h
+          amount: 5000000
         - metric: tokens
           every: 1mo
           amount: 1249000000
-          token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-          model_multipliers: {"*": 1.0, heavy-model: 9}
 ```
 
-- **`token_weights`** rescales a `metric: tokens` Limit's four components when computing headroom and `/status`'s `used`/`pct` — **per-Limit** (each `limits:` entry has its own; a provider with several windows writes it separately on each one it should affect, since observed plans don't always weight every window the same way), defaults to `1.0` on every component you don't mention, and only takes effect on a Limit whose own `metric` is `tokens` (configuring it on a `requests` Limit is a load-time error). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model too*, combine it with `model_multipliers` (below) for the per-model scale; the combination is an approximation (it can't express a ratio that varies by *both* model and component simultaneously), but a per-model, per-component exact rate is a `vmr analyze` concern, not a routing-control one — see [Pricing (for cost estimates)](#pricing-for-cost-estimates) below.
-- **`model_multipliers`** scales *every* component of a charge (including `requests`) by which upstream model actually got hit — `"*"` is a wildcard fallback, an unmatched model with no wildcard is unscaled (`1.0`). Also **per-Limit** since P3, same reasoning as `token_weights`. Unlike `token_weights`, this is applied **the moment the charge is recorded**, not when it's later read back — vmr's internal counters aggregate per (provider, Limit), not per model, so there'd be no way to retroactively figure out which slice of a later read came from which model. A non-integer multiplier scales *exactly* — no rounding (e.g. 1.5x of 3 tokens charges as 4.5, not 4 or 5) — since how a real upstream account itself rounds a fractional multiplier isn't observable from here, rounding one way or the other would just be a guess dressed as precision, and the direction it happened to round in the past (up) compounded into a systematic, config-value-dependent overcharge (2.5x → +20% per charge, 4.5x → +11.1%, 2.9x → +3.4% — nowhere near proportional to how far the value is from an integer).
+- **`token_weights`** rescales a `metric: tokens` Limit's four components when computing headroom and `/status`'s `used`/`pct`, defaults to `1.0` on every component you don't mention, and applies to every `metric: tokens` Limit on this provider (safely ignored by `metric: requests` Limits). This is the right tool when the account's discount ratio is **uniform across all its models** — if it instead varies *by model too*, combine it with `model_multipliers` (below) for the per-model scale; the combination is an approximation (it can't express a ratio that varies by *both* model and component simultaneously), but a per-model, per-component exact rate is a `vmr analyze` concern, not a routing-control one — see [Pricing (for cost estimates)](#pricing-for-cost-estimates) below.
+- **`model_multipliers`** scales *every* component of a charge (including `requests`) by which upstream model actually got hit — applied at charge time across all Limits on this provider. `"*"` is a wildcard fallback, an unmatched model with no wildcard is unscaled (`1.0`). Unlike `token_weights`, this is applied **the moment the charge is recorded**, not when it's later read back — vmr's internal counters aggregate per (provider, Limit), not per model, so there'd be no way to retroactively figure out which slice of a later read came from which model. A non-integer multiplier scales *exactly* — no rounding (e.g. 1.5x of 3 tokens charges as 4.5, not 4 or 5) — since how a real upstream account itself rounds a fractional multiplier isn't observable from here, rounding one way or the other would just be a guess dressed as precision, and the direction it happened to round in the past (up) compounded into a systematic, config-value-dependent overcharge (2.5x → +20% per charge, 4.5x → +11.1%, 2.9x → +3.4% — nowhere near proportional to how far the value is from an integer).
 
-Neither field changes anything for a Limit that doesn't configure it — `token_weights` unset defaults to the exact equal-weighted sum P1 always used, and `model_multipliers` unset leaves every charge at 1x.
+Neither field changes anything for an account that doesn't configure it — `token_weights` unset defaults to the exact equal-weighted sum P1 always used, and `model_multipliers` unset leaves every charge at 1x.
 
 **`models:` — three shapes, one field.** `models:` decides BOTH which upstream models a Limit applies to AND whether they share one pool or each get an independent one:
 

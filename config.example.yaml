@@ -251,9 +251,22 @@ providers:
     # numbers (or a few days of /status's quota section) once traffic is
     # flowing, not from the vendor's published quota.
     # quota:
+    #   # token_weights: per-component scaling for metric: tokens Limits' base(tokens) sum
+    #   # — configured at the provider quota level (peer to limits:) so all windows share
+    #   # the exact same scaling ratio without repetition. Defaults to 1.0 on every component
+    #   # (a plain equal-weighted total token count) when omitted entirely, or on any
+    #   # component you don't mention. Ignored by metric: requests Limits.
+    #   # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
+    #
+    #   # model_multipliers: per-model scaling applied to EVERY component of a charge
+    #   # (including requests), at the moment the charge is recorded — not at read time.
+    #   # Also at the provider quota level (peer to limits:). "*" is a wildcard fallback
+    #   # for any model not named explicitly; unlisted models default to 1.0 (unscaled).
+    #   # model_multipliers: {"*": 1.0, heavy-model: 9}
+    #
     #   limits:
     #     - metric: requests       # or: tokens (a Credits/money-style plan converts once: budget ÷ price,
-    #                              # written as a token amount — see token_weights/model_multipliers below
+    #                              # written as a token amount — see token_weights/model_multipliers above
     #                              # for expressing per-component/per-model differences; there is no
     #                              # metric: cost — see docs/VirtualModelRouter_Design_v4_Quota.md's Metering section)
     #       every: 1min            # N{min,h,d,w,mo} — also: 5h, 2w, 3d
@@ -269,32 +282,6 @@ providers:
     #                              # accepted forms: YYYY-MM-DD, RFC3339, or a
     #                              # bare hh:mm[:ss] for min/h Limits only
     #       amount: 90000          # this window's cap, in vmr's own observed unit
-    #
-    #       # token_weights (P2.1): per-component scaling for a metric: tokens
-    #       # Limit's base(tokens) sum — per-Limit since P3 (a provider's
-    #       # several windows aren't guaranteed to share one ratio in
-    #       # practice). Defaults to 1.0 on every component (a plain equal-
-    #       # weighted total token count) when omitted entirely, or on any
-    #       # component you don't mention — only meaningful (and only accepted
-    #       # by config validation) on a Limit whose own metric is tokens.
-    #       # Use this for a Credits-style account whose discount ratio (e.g.
-    #       # cache reads cost a fraction of fresh input) is uniform across
-    #       # all its models; if the ratio instead varies BY MODEL, price the
-    #       # difference in providers[].pricing (below) for vmr analyze's $
-    #       # estimates, and express the budget itself in tokens here.
-    #       # token_weights: {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-    #       # To reuse one set across several windows, anchor the field on its
-    #       # first use and alias it later (prefer this over a whole-entry
-    #       # `<<: *entry` merge key, which also copies amount/every):
-    #       #   token_weights: &tw {in_fresh: 1.0, cache_read: 0.1, cache_write: 1.25, out: 4.0}
-    #       #   # ...then on a later Limit:  token_weights: *tw
-    #
-    #       # model_multipliers (P2.1): per-model scaling applied to EVERY
-    #       # component of a charge (including requests), at the moment the
-    #       # charge is recorded — not at read time. Also per-Limit since P3.
-    #       # "*" is a wildcard fallback for any model not named explicitly;
-    #       # a Limit with neither a named nor a "*" entry is unscaled (1.0).
-    #       # model_multipliers: {"*": 1.0, heavy-model: 9}
     #
     #       # models (Scope): decides BOTH which upstream models this Limit
     #       # applies to AND whether they share one pool or each get an

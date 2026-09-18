@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/url"
 
+	"vmr/internal/core"
 	"vmr/internal/fmtutil"
 )
 
@@ -174,6 +175,23 @@ func isLoopbackOrPrivateHost(host string) bool {
 func (c *Config) checkProviders() []Issue {
 	var issues []Issue
 	for _, p := range c.Providers {
+		if p.Quota != nil && p.Quota.TokenWeights != nil {
+			hasTokens := false
+			for _, l := range p.Quota.Limits {
+				if l.Resolved.Metric == core.MetricTokens {
+					hasTokens = true
+					break
+				}
+			}
+			if !hasTokens {
+				issues = append(issues, Issue{
+					Provider: p.Name,
+					Field:    "quota.token_weights",
+					Severity: SeverityWarning,
+					Message:  fmt.Sprintf("provider %q: quota.token_weights is configured, but no \"tokens\" metric limits are defined; token_weights has no effect", p.Name),
+				})
+			}
+		}
 		if p.Disabled {
 			continue
 		}
