@@ -332,6 +332,8 @@ providers:
   #   api_key: ${DASHSCOPE_PLAN_KEY}
   #   role_map: {developer: system}
   #   # sticky_ttl: 2h
+  #   # concurrency: 5           # 最大在途并发请求数（0 = 不限）
+  #   # concurrency_queue: 3s    # 仅对 Sticky 会话生效的排队等待超时（默认 3s；0s = 不排队立即跳过）
 
 models:
   coding:

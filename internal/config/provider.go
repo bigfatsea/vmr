@@ -10,9 +10,13 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"vmr/internal/core"
 )
+
+// DefaultConcurrencyQueue is the default wait timeout for sticky sessions when concurrency > 0.
+const DefaultConcurrencyQueue = 3 * time.Second
 
 // unknownProtocolHint appends a targeted fix when a rejected protocol name is
 // one of the two renamed in the 2026-08 enum unification ("openai" ->
@@ -110,6 +114,14 @@ type Provider struct {
 	// hours to days, vs. the 5-10 minute window the global default
 	// calibrates to). nil = inherit the global ttl.sticky.
 	StickyTTL *Duration `yaml:"sticky_ttl"`
+
+	// Concurrency bounds the maximum concurrent in-flight requests dispatched
+	// to this provider account (0 = unlimited).
+	Concurrency int `yaml:"concurrency"`
+
+	// ConcurrencyQueue sets the queue-wait timeout for sticky requests when
+	// concurrency is saturated (defaults to 3s when Concurrency > 0; 0 = no wait, fast-skip).
+	ConcurrencyQueue *Duration `yaml:"concurrency_queue"`
 }
 
 // baseURLCredentialKeys is the fixed blacklist of query-parameter names whose

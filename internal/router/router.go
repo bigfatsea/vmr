@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-20 11:58, by Sonnet 5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -55,6 +55,9 @@ type Router struct {
 	// field never having existed.
 	Guard *guard.Guard
 
+	// ProviderLimiters gates in-flight concurrency per provider account.
+	ProviderLimiters *ProviderLimiterRegistry
+
 	snap atomic.Pointer[Snapshot]
 
 	// ctx is the root lifecycle context, written once at startup
@@ -73,7 +76,13 @@ type Router struct {
 }
 
 func New(logger *log.Logger) *Router {
-	rt := &Router{Health: health.New(), Sticky: sticky.New(), Inflight: NewInflightRegistry(), Logger: logger}
+	rt := &Router{
+		Health:           health.New(),
+		Sticky:           sticky.New(),
+		Inflight:         NewInflightRegistry(),
+		ProviderLimiters: NewProviderLimiterRegistry(),
+		Logger:           logger,
+	}
 	rt.SetContext(context.Background())
 	return rt
 }
@@ -164,7 +173,11 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 	attempts := 0
 	var last *upstreamError
 	var trail failoverTrail
+	stickyEscaped := false
 	for _, ep := range cs.endpoints {
+		if r.Context().Err() != nil {
+			break
+		}
 		if snap.Cfg.MaxAttempts > 0 && attempts >= snap.Cfg.MaxAttempts {
 			break
 		}
@@ -180,15 +193,37 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 		if !rt.Health.Acquire(ep.HealthKey(), time.Now()) {
 			continue
 		}
+		isStickyHit := (cs.stickyEPKey != "" && ep.HealthKey() == cs.stickyEPKey)
+		releaseSlot, waited, timedOut, ok := rt.acquireProviderSlot(r.Context(), ep, isStickyHit)
+		if !ok {
+			rt.Health.ReportNeutral(ep.HealthKey())
+			if r.Context().Err() != nil {
+				break
+			}
+			trail.addBusy(ep, timedOut, waited)
+			if isStickyHit {
+				stickyEscaped = true
+			}
+			continue
+		}
+		// Always reset, not just when waited > 0: an earlier candidate's wait
+		// must not leak onto this candidate's attempt if this one didn't wait
+		// (WithWait(0).String() omits conc_waited, matching that case).
+		w.Header().Set("X-VMR-Route-Reason", cs.reason.WithWait(waited).String())
 		attempts++
 		trail.apply(w.Header()) // failures so far — the attempt about to run writes the headers itself if it succeeds
-		done, uerr, success := rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
+		done, uerr, success := func() (bool, *upstreamError, bool) {
+			if releaseSlot != nil {
+				defer releaseSlot()
+			}
+			return rt.tryOne(w, r, creq, ep, snap, attempts, start, rec)
+		}()
 		if done {
 			if success && cs.stickyKey != "" {
-				// Every successful completion moves the pointer — including
-				// a failover success — so it always follows wherever the
-				// conversation's cache is actually warm.
-				rt.Sticky.Set(cs.stickyKey, ep.HealthKey())
+				// Move sticky pointer only if we did not escape due to concurrency saturation.
+				if !stickyEscaped {
+					rt.Sticky.Set(cs.stickyKey, ep.HealthKey())
+				}
 			}
 			return
 		}
@@ -204,8 +239,10 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 		}
 	}
 	trail.apply(w.Header()) // every candidate failed: the all-failed branch below writes the response
+	rt.handleAllFailed(w, r, creq, cs, last, attempts, start, rec, trail)
+}
 
-	// All candidates failed or none were available.
+func (rt *Router) handleAllFailed(w http.ResponseWriter, r *http.Request, creq *core.CanonicalRequest, cs candidateSet, last *upstreamError, attempts int, start time.Time, rec *audit.Record, trail failoverTrail) {
 	if last != nil {
 		// Returns the last upstream error verbatim (status and headers)
 		// (Retry-After included) and body — so the client sees exactly
@@ -216,7 +253,7 @@ func (rt *Router) ServeWithSnap(w http.ResponseWriter, r *http.Request, creq *co
 		w.Write(last.body)
 	} else {
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
-		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(creq, cs.reason, attempts, cs.healthOK))
+		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(r.Context().Err(), creq, cs.reason, attempts, cs.healthOK, trail))
 	}
 	rt.Telemetry.RecordOutcome(false, r.Context().Err() != nil)
 	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)

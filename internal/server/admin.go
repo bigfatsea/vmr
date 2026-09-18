@@ -47,6 +47,8 @@ type (
 		Headroom         *float64 `json:"headroom,omitempty"`
 		Capabilities     []string `json:"capabilities"`
 		MaxContextTokens int64    `json:"max_context_tokens"`
+		Concurrency      int      `json:"concurrency,omitempty"`
+		ConcurrencyQueue string   `json:"concurrency_queue,omitempty"`
 	}
 	modelStatus struct {
 		ID               string           `json:"id"`
@@ -149,11 +151,16 @@ func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry, qs [
 						seen[c], caps = true, append(caps, c)
 					}
 				}
+				qQueue := ""
+				if ep.Concurrency > 0 && ep.ConcurrencyQueue > 0 {
+					qQueue = ep.ConcurrencyQueue.String()
+				}
 				eps[i] = endpointStatus{
 					Endpoint: ep.Name(), Protocol: p, Priority: ep.Priority,
 					Provider: ep.Provider, KeyLabel: ep.KeyLabel, Model: ep.Model, FromFallback: ep.FromFallback,
 					Headroom: endpointHeadroom(ep, qs),
 					Status:   h.Status(ep.HealthKey(), now), Capabilities: all, MaxContextTokens: ep.MaxContextTokens,
+					Concurrency: ep.Concurrency, ConcurrencyQueue: qQueue,
 				}
 			}
 			sort.Strings(caps)

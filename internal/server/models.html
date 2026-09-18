@@ -50,27 +50,15 @@ const consoleApi = mountConsole({
   refresh: 'countdown',
 });
 
+// modelColorMap memoizes modelColor's hash so repeated lookups skip the
+// per-character loop — it is never cleared or reassigned, since the hue it
+// caches must depend only on the model name, not on which other models
+// happen to be visible in this poll (see modelColor).
 let modelColorMap = new Map();
 
-function updateModelPalette(statusData, statsData) {
-  const models = new Set();
-  (statusData && statusData.models || []).forEach(m => {
-    (m.endpoints || []).forEach(ep => { if (ep.model) models.add(ep.model); });
-  });
-  (statsData && statsData.by_provider_model || []).forEach(r => { if (r.model) models.add(r.model); });
-  (statusData && statusData.quota || []).forEach(q => {
-    (q.models || []).forEach(m => { if (m) models.add(m); });
-  });
-
-  const sorted = Array.from(models).sort((a, b) => a.localeCompare(b));
-  modelColorMap.clear();
-  const total = sorted.length;
-  sorted.forEach((m, idx) => {
-    const hue = total > 0 ? Math.round((idx / total) * 360) : 0;
-    modelColorMap.set(m, `hsl(${hue}, 70%, 62%)`);
-  });
-}
-
+// modelColor derives the hue purely from a hash of the model name, so the
+// same name always renders the same color everywhere — regardless of poll
+// timing or which other models are currently visible.
 function modelColor(model) {
   if (!model) return '';
   if (modelColorMap.has(model)) return modelColorMap.get(model);
@@ -403,17 +391,23 @@ function renderModels(modelsList, statsData) {
       const fullTitle = `${ep.provider} : ${ep.model}`;
       const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
 
-      // Per-endpoint facts — context window and capabilities are resolved per
-      // (provider, upstream model) against model_defaults, so endpoints under
-      // one virtual model can legitimately differ here. The context size (a
-      // capacity number) and capability tags (feature labels) get two
-      // different visual treatments instead of one slash-joined string.
+      // Per-endpoint facts — context window, capabilities, and concurrency
+      // are resolved per (provider, upstream model) against model_defaults
+      // and providers configuration, so endpoints under one virtual model can
+      // legitimately differ here.
       const ctxSize = ep.max_context_tokens > 0
         ? `<span class="badge b-dim tight">${fmtKMG(ep.max_context_tokens)}</span>`
         : '';
+      const concBadge = ep.concurrency > 0
+        ? `<span class="badge b-purple tight" title="Provider concurrency limit: ${ep.concurrency}${ep.concurrency_queue ? ', queue timeout: ' + esc(ep.concurrency_queue) : ''}">⚡ ${ep.concurrency}${ep.concurrency_queue ? `<span class="dim"> (${esc(ep.concurrency_queue)})</span>` : ''}</span>`
+        : '';
       const capsText = (ep.capabilities || []).map(c => esc(c)).join(' · ');
-      const ctxCell = (ctxSize || capsText)
-        ? `<span title="${esc(fullTitle)} context window / capabilities">${ctxSize}${ctxSize && capsText ? ' ' : ''}${capsText ? `<span class="dim">${capsText}</span>` : ''}</span>`
+      const ctxParts = [];
+      if (concBadge) ctxParts.push(concBadge);
+      if (ctxSize) ctxParts.push(ctxSize);
+      if (capsText) ctxParts.push(`<span class="dim">${capsText}</span>`);
+      const ctxCell = ctxParts.length > 0
+        ? `<span title="${esc(fullTitle)} concurrency / context window / capabilities">${ctxParts.join(' ')}</span>`
         : '<span class="dim">—</span>';
 
       const hr = ep.headroom;
@@ -479,9 +473,6 @@ async function refreshAll() {
     const inst = statusData.instance || {};
     consoleApi.setUptime('up ' + (inst.uptime || fmtDur(inst.uptime_seconds || 0)));
     consoleApi.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
-
-    // Palette
-    updateModelPalette(statusData, statsData);
 
     // Render sections
     renderQuota(statusData.quota || [], statusData.models || [], statsData);

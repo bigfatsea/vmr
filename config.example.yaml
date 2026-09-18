@@ -394,6 +394,8 @@ providers:
   #   api_key: ${DASHSCOPE_PLAN_KEY}
   #   role_map: {developer: system}
   #   # sticky_ttl: 2h
+  #   # concurrency: 5           # max concurrent in-flight requests (0 = unlimited)
+  #   # concurrency_queue: 3s    # queue-wait timeout for sticky sessions (defaults to 3s; 0s = fast-skip)
 
 models:
   coding:

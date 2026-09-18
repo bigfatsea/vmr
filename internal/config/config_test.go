@@ -394,6 +394,80 @@ func TestMaxConcurrencyNegativeRejected(t *testing.T) {
 	}
 }
 
+func TestProviderConcurrencyValidation(t *testing.T) {
+	t.Setenv("VMR_TEST_KEY", "sk-test-123")
+	// Negative concurrency
+	yamlNeg := strings.Replace(validYAML, "name: p1", "name: p1\n    concurrency: -2", 1)
+	_, err := Parse([]byte(yamlNeg))
+	if err == nil || !strings.Contains(err.Error(), "concurrency must be >= 0") {
+		t.Errorf("want negative concurrency rejection, got %v", err)
+	}
+
+	// ConcurrencyQueue exceeds 30s
+	yamlQueueExceed := strings.Replace(validYAML, "name: p1", "name: p1\n    concurrency: 5\n    concurrency_queue: 45s", 1)
+	_, err = Parse([]byte(yamlQueueExceed))
+	if err == nil || !strings.Contains(err.Error(), "exceeds 30s ceiling") {
+		t.Errorf("want queue exceeds ceiling rejection, got %v", err)
+	}
+
+	// ConcurrencyQueue with concurrency == 0
+	yamlQueueZeroConc := strings.Replace(validYAML, "name: p1", "name: p1\n    concurrency_queue: 5s", 1)
+	_, err = Parse([]byte(yamlQueueZeroConc))
+	if err == nil || !strings.Contains(err.Error(), "concurrency_queue requires concurrency > 0") {
+		t.Errorf("want concurrency_queue requires concurrency > 0 rejection, got %v", err)
+	}
+
+	// Valid concurrency and queue
+	yamlValid := strings.Replace(validYAML, "name: p1", "name: p1\n    concurrency: 8\n    concurrency_queue: 5s", 1)
+	cfg, err := Parse([]byte(yamlValid))
+	if err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok {
+		t.Fatal("p1 not found")
+	}
+	if p.Concurrency != 8 {
+		t.Errorf("got concurrency %d, want 8", p.Concurrency)
+	}
+	if p.ConcurrencyQueue == nil || p.ConcurrencyQueue.D() != 5*time.Second {
+		t.Errorf("got concurrency_queue %v, want 5s", p.ConcurrencyQueue)
+	}
+
+	// api_keys expansion inherits concurrency settings
+	yamlAPIKeys := `
+listen: 127.0.0.1:9900
+providers:
+  - name: multi
+    base_url: {openai-completions: https://api.example.com/v1}
+    api_keys: {k1: sk-1, k2: sk-2}
+    concurrency: 4
+    concurrency_queue: 2s
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [multi]
+          models: [real-model]
+`
+	cfgMulti, err := Parse([]byte(yamlAPIKeys))
+	if err != nil {
+		t.Fatalf("unexpected api_keys parse error: %v", err)
+	}
+	for _, childName := range []string{"multi-k1", "multi-k2"} {
+		child, ok := cfgMulti.ProviderByName(childName)
+		if !ok {
+			t.Fatalf("child provider %q not found", childName)
+		}
+		if child.Concurrency != 4 {
+			t.Errorf("child %s concurrency = %d, want 4", childName, child.Concurrency)
+		}
+		if child.ConcurrencyQueue == nil || child.ConcurrencyQueue.D() != 2*time.Second {
+			t.Errorf("child %s concurrency_queue = %v, want 2s", childName, child.ConcurrencyQueue)
+		}
+	}
+}
+
 // TestAuditRetentionDefaultsTo90Days: the old "absent = keep forever" default
 // is gone — retention now defaults to a finite 90d, because a default that
 // silently reverts to never-deleting is a disk-full trap (see

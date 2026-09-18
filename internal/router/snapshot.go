@@ -242,6 +242,12 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			}
 			effCapabilities := resolveModelCapabilities(m, cfg.ModelDefaults, providerName, upstreamModel)
 			effMaxContextTokens := resolveModelMaxContextTokens(m, cfg.ModelDefaults, providerName, upstreamModel)
+			queueWait := config.DefaultConcurrencyQueue
+			if p.ConcurrencyQueue != nil {
+				queueWait = p.ConcurrencyQueue.D()
+			} else if p.Concurrency == 0 {
+				queueWait = 0
+			}
 			ep := &core.Endpoint{
 				Provider:         providerName,
 				AdapterType:      protocol,
@@ -257,6 +263,8 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 				FromFallback:     fromFallback,
 				StickyTTL:        stickyTTL,
 				Quota:            quotaSpecs[providerName],
+				Concurrency:      p.Concurrency,
+				ConcurrencyQueue: queueWait,
 			}
 			// Precompute HealthKey()/Name() once, here, before ep is
 			// ever reachable from a concurrently-read Snapshot (see
@@ -413,6 +421,9 @@ func (rt *Router) Install(s *Snapshot) {
 		}
 	}
 	rt.installLimiter(s.Cfg.MaxConcurrency)
+	if rt.ProviderLimiters != nil {
+		rt.ProviderLimiters.Install(s.Cfg.Providers)
+	}
 	old := rt.snap.Swap(s)
 	// Prune AFTER the swap, not before: once the new snapshot is live every
 	// new Charge keys buckets by the new config, so Prune removes exactly

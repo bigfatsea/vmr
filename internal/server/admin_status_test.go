@@ -1,4 +1,4 @@
-// Ver 2026-08-24, by ox-alpha
+// Ver 2026-09-20 11:58, by Sonnet 5
 
 // The /status models array is a cross-surface contract: cmd/vmr's
 // statusResponse and status.html's renderModels are both hand-written
@@ -496,5 +496,61 @@ func TestAdminStatus_HeadroomOmittedWithoutQuota(t *testing.T) {
 	}
 	if ep.Headroom != nil {
 		t.Fatalf("headroom = %v, want the key absent for an unmetered account", *ep.Headroom)
+	}
+}
+
+// TestAdminStatus_EndpointConcurrency verifies that provider-level concurrency
+// and concurrency_queue are reflected on endpoint rows in statusModels.
+func TestAdminStatus_EndpointConcurrency(t *testing.T) {
+	yaml := `
+listen: 127.0.0.1:0
+providers:
+  - name: p1
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: k1
+    concurrency: 8
+    concurrency_queue: 5s
+  - name: p2
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: k2
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [m1]}
+        - {providers: [p2], models: [m2]}
+`
+	cfg, err := config.Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := router.BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := router.New(nil)
+	rt.Install(snap)
+
+	out := fetchStatusRaw(t, rt)
+	var models []struct {
+		Endpoints []struct {
+			Endpoint         string `json:"endpoint"`
+			Concurrency      int    `json:"concurrency"`
+			ConcurrencyQueue string `json:"concurrency_queue"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal(out["models"], &models); err != nil {
+		t.Fatal(err)
+	}
+	if len(models) == 0 || len(models[0].Endpoints) != 2 {
+		t.Fatalf("expected 1 model with 2 endpoints, got %+v", models)
+	}
+	ep1 := models[0].Endpoints[0]
+	if ep1.Concurrency != 8 || ep1.ConcurrencyQueue != "5s" {
+		t.Errorf("ep1: got concurrency=%d queue=%q, want 8 and 5s", ep1.Concurrency, ep1.ConcurrencyQueue)
+	}
+	ep2 := models[0].Endpoints[1]
+	if ep2.Concurrency != 0 || ep2.ConcurrencyQueue != "" {
+		t.Errorf("ep2: got concurrency=%d queue=%q, want 0 and empty", ep2.Concurrency, ep2.ConcurrencyQueue)
 	}
 }

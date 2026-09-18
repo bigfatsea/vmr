@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-17, by Sonnet 5 -->
+<!-- Ver 2026-09-20 11:58, by Sonnet 5 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -40,6 +40,7 @@
 - **`ReleaseProbe` 与 `ReportNeutral` 行为相同但保留为两个方法**：前者是「名额先还、健康结论稍后再报」（`forwardSuccess` 在流真正跑完前用它），后者是「这次结果对健康没有信息量，到此为止」。合一会让 `forwardSuccess` 的调用点读起来像已经下了终局结论，而它恰恰还没有。
 - **探针成功只做衰减（`fails--`），真实流量成功才清零**：探针是 `max_tokens=300` 的小请求，对限流/上下文受压端点的成功率系统性高于真实的 20 万 token 请求——用最容易通过的信号解除对最容易失败流量的保护，正是 429→5s 冷却→探针成功→满额流量→429 的循环成因。由 `TestFlappingEndpointKeepsBackoff` 钉死的保证是「探针成功与真实失败交替时，深度永不回落到最浅档」；`fails>0` 期间对真实流量恒 `available=false`（last-resort 释放是唯一例外，见 §2.85）。**已知残留**：连续探针成功可把 `fails` 衰减到 0 并把端点放回常规池原优先级，对「慢而未死」的灰区上游构成池级振荡循环（transient 首档 5s 只降频）；根除方案登记在 §2.99，待触发。
 - **退避冷却带 ±10% 抖动，且抖动也作用于已封顶的值**：封顶端点整点齐射正是抖动要防的场景，因此结果可超名义 cap 至多 10%。**例外**：`Retry-After` 路径不抖——那是上游指定的节奏，不是我们的估计。
+- **Sticky 会话因并发饱和超时借道逃逸成功后，不改写 Sticky 指针（临时避峰不毁缓存），而非切向新端点**：当粘性端点 A 所在 Provider 并发满载且排队超时（`concurrency_queue`）后，请求会 failover 逃逸至备用端点 B 成功执行。此时系统刻意**不改写**会话的 Sticky 内存指针（`stickyEscaped` 保证指针仍留在 A）。**取舍考量**：若改写指针至 B，会导致后续轮次永久倒向 B，使此前在 A 上投入大量 token 建立的深层上下文 Prompt Cache 完全作废；而不改写指针能让后续轮次在 A 并发恢复后继续回流命中旧缓存。**潜在代价与边界**：若该轮请求在 B 上产生了显著的上下文增量（如长工具输出），第 3 轮回到 A 时，A 上仅有第 1 轮的旧缓存片段，新增部分需重新计算；且若 A 的并发持续饱和，后续轮次会连续发生排队等待。对于 DeepSeek 等长缓存生命周期上游，不改写的收益远大于改写；若后续在特定短缓存场景有强诉求，可通过端到端真实缓存命中率指标评估动态重绑指针机制。
 - **后台探针按 requests 口径计 1，对 token 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
 - **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）成为 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：那里没有 flock，`acquireDirLock` 是 no-op——唯一临时文件名仍保证归档不被交错写坏，但双进程的其余后果依然可能发生。用 pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/livestats` 自带一把**独立**的同机制 flock（`.vmr-stats.lock`），因为它不寄生 audit：`-audit=false` 时 audit 锁根本不存在，而"不留正文仍要监控"是一等场景——第二个实例的 livestats 拿不到锁就降级为纯内存（不写 slim/rollup），不污染首个实例的归档。`internal/quota` 同理自带独立的 `.vmr-quota.lock`——由 `Flush` 惰性获取；只读加载 `Load()` 不受锁阻碍，确保 `vmr replay` 或第二个实例可在服务在线时正常读取配额初始账本并内存化运行；拿不到锁（另一进程持有）时 `Flush` 直接返回该错误（`dirty` 因此保持置位，`StartFlusher` 的去重日志会照常报出），Charge/Used 仍纯内存工作。三把锁（audit/livestats/quota）各自独立生效，互不代理，`-audit=false` 时也都不受影响。
 - **`HealthKey` 取 SHA-256 前 4 字节**：单实例端点规模下碰撞概率可忽略。
@@ -523,6 +524,20 @@
 - **现状**：`processImage` 用 `cfg.Width*cfg.Height > maxDecodePixels` 挡炸弹（两值是 `int`）；32-bit 平台两值接近 `int32` 上限时乘积回绕成小值绕过守卫。
 - **为什么非活跃**：Go `image/png` 把 IHDR 宽高钳在 `int32`，64-bit（唯一 CI/目标平台）乘积 ≤ (2³¹)² < `int64` 上限，不可能溢出。
 - **修法（触发时）**：`int64(cfg.Width) * int64(cfg.Height)`，一行。**触发条件**：32-bit 成为受支持的构建/部署目标。
+
+#### 2.177 [低，登记待触发] Provider 并发限流热重载：容量/排队时长变化时旧信号量在途请求与新信号量短暂叠加
+
+- **现状**：`ProviderLimiterRegistry.Install`（`internal/router/provider_limiter.go`）发现某 provider 的 `concurrency`/`concurrency_queue` 与已安装的旧 `ProviderLimiter` 不一致时，直接用 `NewProviderLimiter` 换一个全新对象，不复用也不迁移旧对象。旧对象上仍在途的 in-flight 请求持有的 release 闭包只绑定旧信号量，释放时只减旧对象的计数；新请求全部走新信号量。热重载后到旧请求跑完这段过渡期内，该 provider 的真实上游并发 = 旧信号量残留的 in-flight + 新信号量已接纳的 in-flight，可能短暂超过刚调低的新 cap。
+- **为什么待定**：触发面窄——需要运维方在该 provider 有大量长耗时请求在途时手动调低其并发上限；过渡期随旧请求自然结束自愈，不会持续放大或积累。真要根治需要新旧信号量共享计数/排空的额外机制，复杂度和当前风险不成比例。
+- **可能方案（触发时）**：让容量收紧时的旧 `ProviderLimiter` 转入只减不增的"draining"状态，新请求一律路由到新对象；或至少把新旧对象的 `inFlight` 汇总进 `/stats`，让运维能看到过渡期的真实叠加值。
+- **触发条件**：真实运维报告在调低某 provider 并发上限后，短时间内观察到该上游侧限流/429 明显增多。
+
+#### 2.178 [低，登记待触发] `failoverTrail.allBusy()` 无法区分"并发闸门 busy"与"health 单飞竞争跳过"，503 消息可能误导
+
+- **现状**：`Serve` 循环（`internal/router/router.go`）里 `rt.Health.Acquire(ep.HealthKey(), ...)` 失败时（半开端点的单飞名额被另一后台探针占住）直接 `continue`，不写入 `trail`；`allBusy()`（`internal/router/routehdr.go`）因此只看得到真正命中并发闸门的 `busy`/`busy_timeout` 条目。若一轮候选里既有因 health 单飞竞争跳过的端点、又有其余候选因并发闸门耗尽，`allBusy()` 仍返回 true，`noCandidatesMessage` 给出的"全部候选都因并发限制 busy"措辞会掩盖其中至少一个其实是 health 竞争问题这一事实。
+- **影响面**：仅诊断消息措辞层面，不影响 503 状态码或实际路由/failover 行为；且需要两种窄场景（半开单飞竞争 + 其他候选并发耗尽）同轮命中才会出现。
+- **为什么待定**：给 health 竞争跳过也记一笔 trail 需要设计新的条目形态（避免和真正的 busy 混淆，也要避免把正常的探针单飞竞争渲染成 `X-VMR-Failover` 里看起来异常的一项），成本与当前触发概率不成比例。
+- **触发条件**：真实运维反馈 503 消息与实际候选状态明显对不上（例如日志显示某端点本身健康、只是被探针占位，而消息说它 busy）。
 
 ### F. 工程工具与运维入口
 

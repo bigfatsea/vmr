@@ -1,4 +1,4 @@
-// Ver 2026-07-28 15:05, by Opus 5
+// Ver 2026-09-20 11:58, by Sonnet 5
 
 // Real-time routing feedback on the response itself: why this endpoint was
 // picked, and what the endpoints tried before it did wrong.
@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"vmr/internal/core"
 )
@@ -29,14 +30,20 @@ import (
 // routeReason describes how the candidate list for one request was arrived
 // at. Every field is a count the failover loop already had on hand.
 type routeReason struct {
-	total          int    // endpoints configured for this virtual model
-	healthOK       int    // survived the health filter
-	afterCond      int    // survived hard capability conditions
-	ctxFallback    bool   // every declared context window looked too small; fell back
-	healthFallback bool   // every endpoint was cooling/half-open; released the shallowest-backoff one as a last resort
-	quota          bool   // Quota-Aware Routing's reorderByQuota actually moved the front candidate
-	sticky         bool   // a sticky pointer reordered the list
-	pin            string // pinned routing (X-VMR-Provider/X-VMR-Target-Model) narrows candidates; empty = none
+	total          int           // endpoints configured for this virtual model
+	healthOK       int           // survived the health filter
+	afterCond      int           // survived hard capability conditions
+	ctxFallback    bool          // every declared context window looked too small; fell back
+	healthFallback bool          // every endpoint was cooling/half-open; released the shallowest-backoff one as a last resort
+	quota          bool          // Quota-Aware Routing's reorderByQuota actually moved the front candidate
+	sticky         bool          // a sticky pointer reordered the list
+	pin            string        // pinned routing (X-VMR-Provider/X-VMR-Target-Model) narrows candidates; empty = none
+	concWaited     time.Duration // queue wait spent at provider concurrency gate
+}
+
+func (rr routeReason) WithWait(d time.Duration) routeReason {
+	rr.concWaited = d
+	return rr
 }
 
 // String renders only what actually happened: the overwhelmingly common
@@ -75,6 +82,9 @@ func (rr routeReason) String() string {
 	if rr.healthFallback {
 		parts = append(parts, "health_fallback=1")
 	}
+	if rr.concWaited > 0 {
+		parts = append(parts, "conc_waited="+fmtDur(rr.concWaited))
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -94,10 +104,37 @@ func (ft *failoverTrail) add(ep *core.Endpoint, status int) {
 	*ft = append(*ft, headerSafe(ep.Provider)+"/"+headerSafe(ep.Model)+":"+what)
 }
 
+func (ft *failoverTrail) addBusy(ep *core.Endpoint, timedOut bool, waited time.Duration) {
+	what := "busy"
+	if timedOut {
+		what = "busy_timeout(" + fmtDur(waited) + ")"
+	}
+	*ft = append(*ft, headerSafe(ep.Provider)+"/"+headerSafe(ep.Model)+":"+what)
+}
+
 func (ft failoverTrail) apply(h http.Header) {
 	if len(ft) > 0 {
 		h.Set("X-VMR-Failover", strings.Join(ft, ", "))
 	}
+}
+
+// allBusy returns true if the trail contains at least one entry and every entry
+// represents a concurrency gate rejection (busy or busy_timeout).
+func (ft failoverTrail) allBusy() bool {
+	if len(ft) == 0 {
+		return false
+	}
+	for _, entry := range ft {
+		colon := strings.LastIndexByte(entry, ':')
+		if colon < 0 {
+			return false
+		}
+		what := entry[colon+1:]
+		if what != "busy" && !strings.HasPrefix(what, "busy_timeout(") {
+			return false
+		}
+	}
+	return true
 }
 
 // headerSafe strips anything that can't appear in a header value. Provider
@@ -115,16 +152,25 @@ func headerSafe(s string) string {
 }
 
 // noCandidatesMessage explains why a request reached Serve's all-failed
-// branch with nothing to try. Cases are ordered by specificity: a pin that
-// matched nothing is the most precise thing to say (the operator asked for
-// a specific provider/target model this model doesn't serve, or that's
-// currently unhealthy); next, health had candidates but a condition
-// rejected every one of them (name which — see
-// docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
-// section); only then the generic "nothing was ever available".
-func noCandidatesMessage(creq *core.CanonicalRequest, reason routeReason, attempts int, healthOK []*core.Endpoint) string {
+// branch with nothing to try. Cases are ordered by specificity: client
+// cancellation before an attempt ran is first; next, failed attempts; next,
+// all surviving candidates were busy at their provider concurrency gate
+// (or the pinned endpoint was busy); next, a pin that matched nothing;
+// next, health had candidates but a condition rejected every one of them
+// (name which — see docs/VirtualModelRouter_Design_v4_Core.md's Condition-based
+// Routing section); only then the generic "nothing was ever available".
+func noCandidatesMessage(rCtxErr error, creq *core.CanonicalRequest, reason routeReason, attempts int, healthOK []*core.Endpoint, trail failoverTrail) string {
+	if rCtxErr != nil && attempts == 0 {
+		return fmt.Sprintf("request canceled by client for model %q", creq.Model)
+	}
 	if attempts > 0 {
 		return fmt.Sprintf("all %d attempt(s) for model %q failed before an upstream response (network or build errors); see vmr logs", attempts, creq.Model)
+	}
+	if trail.allBusy() {
+		if reason.pin != "" {
+			return fmt.Sprintf("pinned endpoint (pin=%s) for model %q is busy (provider concurrency limit reached)", reason.pin, creq.Model)
+		}
+		return fmt.Sprintf("all candidate endpoints for model %q are busy (provider concurrency limit reached)", creq.Model)
 	}
 	if reason.pin != "" {
 		return fmt.Sprintf("pinned request (pin=%s) matched no available endpoint for model %q", reason.pin, creq.Model)

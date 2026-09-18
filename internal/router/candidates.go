@@ -19,13 +19,14 @@ import (
 
 // candidateSet is what buildCandidates hands the failover loop: the ordered
 // endpoints to try, the subset that passed the health filter (for the
-// no-candidates message), the routing reason trail, and the sticky key ("" =
-// this conversation isn't sticky or has no fingerprint).
+// no-candidates message), the routing reason trail, the sticky key ("" =
+// this conversation isn't sticky or has no fingerprint), and the sticky endpoint key ("" = none).
 type candidateSet struct {
-	endpoints []*core.Endpoint
-	healthOK  []*core.Endpoint
-	reason    routeReason
-	stickyKey string
+	endpoints   []*core.Endpoint
+	healthOK    []*core.Endpoint
+	reason      routeReason
+	stickyKey   string
+	stickyEPKey string
 }
 
 // buildCandidates runs the selection pipeline that decides which endpoints
@@ -107,6 +108,7 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 	// unhealthy or fails a hard condition this turn is never resurrected
 	// just because it was the sticky pick last time.
 	var stickyKey string
+	var stickyEPKey string
 	if route.Sticky {
 		if sysHash, firstMsgHash, ok := adapter.SessionFingerprint(creq.Raw, protocol); ok {
 			// ClientKeyTag is carried on the request itself (set by the
@@ -119,11 +121,12 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 				if ep := findByHealthKey(candidates, epKey); ep != nil && time.Since(lastUsed) < ep.StickyTTL {
 					moveToFront(candidates, ep)
 					reason.sticky = true
+					stickyEPKey = ep.HealthKey()
 				}
 			}
 		}
 	}
-	return candidateSet{endpoints: candidates, healthOK: healthOK, reason: reason, stickyKey: stickyKey}
+	return candidateSet{endpoints: candidates, healthOK: healthOK, reason: reason, stickyKey: stickyKey, stickyEPKey: stickyEPKey}
 }
 
 // healthFilter runs the health-availability filter over endpoints and

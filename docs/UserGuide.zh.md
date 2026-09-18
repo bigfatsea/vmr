@@ -343,7 +343,11 @@ models:
 - **`sticky_ttl` 是 provider 级的，不是模型级的**——缓存寿命是上游厂商基础设施的属性（Anthropic/OpenAI/MiniMax 大约 5-10 分钟；DeepSeek 数小时到数天），所以一个 provider 声明一次自己的窗口，它名下所有端点自动继承。全局 `ttl.sticky`（默认 10 分钟；`0`/不写 = 默认）是没有显式覆盖的 provider 的兜底值。按 provider 而非按模型声明，也让多账号端点组保持可用：`providers: [openrouter, deepseek]` 在同一条 try-order entry 内也各自保留自己的 TTL。
 - **`ttl.sticky` 与 provider 级 `sticky_ttl` 都不能超过 24 小时**——粘性注册表自己会在一条记录闲置 24 小时后把它从内存里清掉，不管端点自己声明的 TTL 是多少，所以写一个更长的值能加载成功，但会悄悄失效。`vmr check`/`vmr start`/热加载都会拒绝这类配置，并在报错里点名是哪个 provider。
 - 亲和性只会在已经通过健康检查和条件过滤的端点里重新排序——一个之后变得不健康、或者不再满足某项必要能力的端点，不会仅仅因为它是上次的粘性选择就被复活。
-- 每次成功完成请求（含 failover 后的成功）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
+- 每次成功完成请求（含 failover 后的成功，因并发饱和临时逃逸的调用除外）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
+- **Provider 级并发门控（`concurrency` 与 `concurrency_queue`）**：限制发往单个 Provider 账号的实时在途并发请求数（如 `concurrency: 5`）。当该 Provider 槽位满载时：
+  - *全新会话（未命中 Sticky）*：立即跳过（Fast-Skip）尝试下一个候选 Provider，零延迟且主动让出并发槽位，最大化整体吞吐；
+  - *粘性会话（命中 Sticky）*：在内存中排队缓冲等待，等待上限为 `concurrency_queue`（配了 concurrency 时默认 3s，上限 30s；0s = 不排队立即跳过），吸收并发尖峰以保护上游 Prompt Cache。若排队超时仍未空出，请求安全逃逸到备用 Provider，且该临时避峰调用**不改写** Sticky 注册表指针，保护后续会话仍能回流主端点。若排队中客户端主动断开，立即中止 failover 调度，不向下游盲目探测；
+  - *全候选满载*：若该模型名下所有可用候选端点均已打满并发，快速失败并明确返回 503 `vmr_no_candidates`（指出上游并发已达上限，而非误报条件不匹配）。
 
 完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文报表半区的离线会话分组是两套独立实现）：`docs/VirtualModelRouter_Design_v4_Core.md`「Sticky Model」一节。
 

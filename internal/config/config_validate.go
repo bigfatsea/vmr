@@ -172,6 +172,20 @@ func (c *Config) validateProviders(quotaNow time.Time) error {
 			p.RoleMap = nil
 			c.Providers[i].RoleMap = nil
 		}
+		if p.Concurrency < 0 {
+			return fmt.Errorf("provider %q: concurrency must be >= 0 (got %d)", p.Name, p.Concurrency)
+		}
+		if p.ConcurrencyQueue != nil {
+			if p.ConcurrencyQueue.D() < 0 {
+				return fmt.Errorf("provider %q: concurrency_queue must be >= 0 (got %s)", p.Name, p.ConcurrencyQueue.D())
+			}
+			if p.ConcurrencyQueue.D() > 30*time.Second {
+				return fmt.Errorf("provider %q: concurrency_queue %s exceeds 30s ceiling", p.Name, p.ConcurrencyQueue.D())
+			}
+			if p.Concurrency == 0 && p.ConcurrencyQueue.D() > 0 {
+				return fmt.Errorf("provider %q: concurrency_queue requires concurrency > 0", p.Name)
+			}
+		}
 		if err := validateQuota(p.Name, p.Quota, quotaNow); err != nil {
 			return err
 		}

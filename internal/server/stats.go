@@ -31,16 +31,17 @@ type statsResponse struct {
 		InFlight int64 `json:"in_flight"`
 		Waiting  int64 `json:"waiting"`
 	} `json:"concurrency"`
-	Inflight        []router.InflightEntry         `json:"inflight"`
-	RecentlyEnded   []router.InflightEntry         `json:"recently_ended"`
-	Hourly          []livestats.HourlyRow          `json:"hourly"`
-	Daily           []livestats.HourlyRow          `json:"daily"`
-	Overall         *livestats.WindowBlock         `json:"overall,omitempty"`
-	RecentRequests  []livestats.RecentRequestEntry `json:"recent_requests"`
-	RecentErrors    []livestats.RecentErrorRow     `json:"recent_errors"`
-	ByProviderModel []livestats.ProviderRow        `json:"by_provider_model"`
-	ByClientKeyTag  []livestats.DimensionRow       `json:"by_client_key_tag"`
-	ByKeyLabel      []livestats.DimensionRow       `json:"by_key_label"`
+	ProvidersConcurrency map[string]router.ProviderConcurrencyStats `json:"providers_concurrency,omitempty"`
+	Inflight             []router.InflightEntry                     `json:"inflight"`
+	RecentlyEnded        []router.InflightEntry                     `json:"recently_ended"`
+	Hourly               []livestats.HourlyRow                      `json:"hourly"`
+	Daily                []livestats.HourlyRow                      `json:"daily"`
+	Overall              *livestats.WindowBlock                     `json:"overall,omitempty"`
+	RecentRequests       []livestats.RecentRequestEntry             `json:"recent_requests"`
+	RecentErrors         []livestats.RecentErrorRow                 `json:"recent_errors"`
+	ByProviderModel      []livestats.ProviderRow                    `json:"by_provider_model"`
+	ByClientKeyTag       []livestats.DimensionRow                   `json:"by_client_key_tag"`
+	ByKeyLabel           []livestats.DimensionRow                   `json:"by_key_label"`
 }
 
 // parseRangeTail resolves ?range= to the hourly tail it selects
@@ -75,6 +76,9 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 		resp.Concurrency.Limit = lim
 		resp.Concurrency.InFlight = inf
 		resp.Concurrency.Waiting = wait
+		if s.rt.ProviderLimiters != nil {
+			resp.ProvidersConcurrency = s.rt.ProviderLimiters.Snapshot()
+		}
 		resp.Inflight = s.rt.Inflight.Snapshot()
 		resp.RecentlyEnded = s.rt.Inflight.Ended()
 	}

@@ -43,7 +43,8 @@
 #failures-chev{display:inline-block;transition:transform .15s;color:var(--text-muted);font-size:11px}
 #failures-head.open #failures-chev{transform:rotate(90deg)}
 
-/* Upstream model name coloring — hue assigned by alphabetical rank */
+/* Upstream model name coloring — hue is a hash of the model name (see
+   modelColor in the script below), applied inline via style="color:...". */
 
 /* Ended requests gray out — the row froze at its terminal snapshot and is
    waiting to be pushed out of the slot capacity */
@@ -219,27 +220,17 @@ let failFilter = null;
 
 const RANGE_BTNS = ['12h', '24h', '3d', '7d'];
 
+// modelColorMap memoizes modelColor's hash so repeated lookups skip the
+// per-character loop — it is never cleared or reassigned, since the hue it
+// caches must depend only on the model name, not on which other models
+// happen to be visible in this poll (see modelColor).
 let modelColorMap = new Map();
 
-function updateModelPalette(statusData, statsData) {
-  const models = new Set();
-  (statusData && statusData.models || []).forEach(m => {
-    (m.endpoints || []).forEach(ep => { if (ep.model) models.add(ep.model); });
-  });
-  (statsData && statsData.by_provider_model || []).forEach(r => { if (r.model) models.add(r.model); });
-  (statsData && statsData.recent_requests || []).forEach(r => { if (r.model) models.add(r.model); });
-  (statsData && statsData.recent_errors || []).forEach(f => { if (f.model) models.add(f.model); });
-  (statsData && statsData.inflight || []).forEach(e => { if (e.model) models.add(e.model); });
-
-  const sorted = Array.from(models).sort((a, b) => a.localeCompare(b));
-  modelColorMap.clear();
-  const total = sorted.length;
-  sorted.forEach((m, idx) => {
-    const hue = total > 0 ? Math.round((idx / total) * 360) : 0;
-    modelColorMap.set(m, `hsl(${hue}, 70%, 62%)`);
-  });
-}
-
+// modelColor derives the hue purely from a hash of the model name, so the
+// same name always renders the same color everywhere — regardless of poll
+// timing or which other models are currently visible. A frozen (ended) row's
+// color must never drift after the row painted, so this cannot depend on
+// any set of "currently known models".
 function modelColor(model) {
   if (!model) return '';
   if (modelColorMap.has(model)) return modelColorMap.get(model);
@@ -605,7 +596,7 @@ function freezeRow(rec, e, nowMs) {
   paintTokCell(c[9], e.est_out || 0, 'compressed response body — output tokens cannot be counted');
 }
 
-function renderLive(inflightList, endedList, conc) {
+function renderLive(inflightList, endedList, conc, provConc) {
   const body = document.getElementById('live-body');
   const nowMs = Date.now();
   const inflight = inflightList || [];
@@ -616,8 +607,30 @@ function renderLive(inflightList, endedList, conc) {
 
   const queuedBadge = document.getElementById('live-queued');
   const waiting = (conc && conc.waiting) || 0;
-  queuedBadge.hidden = waiting <= 0;
-  queuedBadge.textContent = `${waiting} in queue`;
+  let provWaiting = 0;
+  const provWaitParts = [];
+  if (provConc) {
+    for (const [p, pc] of Object.entries(provConc)) {
+      if (pc && pc.waiting > 0) {
+        provWaiting += pc.waiting;
+        provWaitParts.push(`${p}: ${pc.waiting}`);
+      }
+    }
+  }
+
+  if (waiting > 0) {
+    queuedBadge.hidden = false;
+    let text = `${waiting} in queue`;
+    if (provWaitParts.length > 0) {
+      text += ` (${provWaitParts.join(', ')})`;
+    }
+    queuedBadge.textContent = text;
+  } else if (provWaiting > 0) {
+    queuedBadge.hidden = false;
+    queuedBadge.textContent = `${provWaitParts.join(', ')} queued`;
+  } else {
+    queuedBadge.hidden = true;
+  }
 
   const slots = liveSlotCount(conc && conc.limit);
   const bySeq = new Map();
@@ -1261,13 +1274,18 @@ async function livePollTick() {
     }
     const data = await resp.json();
     lastLiveStats = data;
-    updateModelPalette(null, data);
     renderConcurrencyVitals(data.concurrency || {});
-    renderLive(data.inflight || [], data.recently_ended || [], data.concurrency || {});
+    renderLive(data.inflight || [], data.recently_ended || [], data.concurrency || {}, data.providers_concurrency);
     renderFailures(data.recent_errors || []);
     const conc = data.concurrency || {};
+    let provWaiting = 0;
+    if (data.providers_concurrency) {
+      for (const pc of Object.values(data.providers_concurrency)) {
+        if (pc && pc.waiting > 0) provWaiting += pc.waiting;
+      }
+    }
     const busy = (data.inflight || []).length > 0 ||
-                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
+                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0 || provWaiting > 0;
     armLivePoll(busy ? LIVE_POLL_FAST_MS : LIVE_POLL_IDLE_MS);
   } catch (_) {
     // Transient failure (vmr restarting, laptop asleep): back off silently —
@@ -1312,20 +1330,23 @@ async function refreshAll() {
     consoleApi.setUptime('up ' + (inst.uptime || fmtDur(inst.uptime_seconds || 0)));
     consoleApi.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
 
-    // Palette
-    updateModelPalette(statusData, statsData);
-
     // Render sections
     renderVitalsAndSysline(statusData, statsData);
-    renderLive(statsData.inflight || [], statsData.recently_ended || [], statsData.concurrency || {});
+    renderLive(statsData.inflight || [], statsData.recently_ended || [], statsData.concurrency || {}, statsData.providers_concurrency);
     renderFailures(statsData.recent_errors || []);
     renderPerf(statsData.recent_requests || [], perfBasis);
     renderChart(currentRange, statsData.hourly || []);
     renderUsage(statsData.hourly || [], currentRange);
 
     const conc = statsData.concurrency || {};
+    let provWaiting = 0;
+    if (statsData.providers_concurrency) {
+      for (const pc of Object.values(statsData.providers_concurrency)) {
+        if (pc && pc.waiting > 0) provWaiting += pc.waiting;
+      }
+    }
     const busy = (statsData.inflight || []).length > 0 ||
-                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0;
+                 (conc.in_flight || 0) > 0 || (conc.waiting || 0) > 0 || provWaiting > 0;
     armLivePoll(busy ? LIVE_POLL_FAST_MS : LIVE_POLL_IDLE_MS);
 
   } catch (err) {

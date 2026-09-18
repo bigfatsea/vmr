@@ -193,6 +193,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 * **指纹算法**：分别计算 System Prompt 与首条非系统消息的内容哈希作为联合亲和键，代价恒定且不随会话增长膨胀。
 * **有效性解耦**：亲和有效性遵循 Provider 级配置的 TTL；内存注册表采用 24 小时兜底淘汰防止内存泄露。
 * **亲和置顶**：仅作用于已通过健康与准入过滤的候选，绝不复活故障端点。
+* **并发饱和避峰保护**：当粘性端点所在 Provider 并发满载且排队超时逃逸到备用端点成功时，不改写粘性指针（临时避峰借道），保护后续轮次继续回流原端点。
 
 ### 6.5 额度感知重排（Quota Pacing）
 针对按周期计费的套餐账号，通过 Headroom 余量比进行配速调度。紧随策略多键排序之后，仅在同一优先级梯队内部调整顺序，不越级、不淘汰。完整机制见 `docs/VirtualModelRouter_Design_v4_Quota.md`。
@@ -215,9 +216,23 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ## 8. 并发闸（Concurrency Limiter）
 
+系统提供两层正交的并发控制体系：全局入向门控与 Provider 级会话感知并发控制。
+
+### 8.1 全局并发闸（Global Limiter）
 可选的全局并发上限（`max_concurrency`）：
 * 获取时机位于请求体缓冲完成之后，慢客户端上传不占并发槽位，闸保护的是 CPU 计算与上游网络往返。
 * 超限请求在内存中挂起等待，客户端主动断开时立即出队注销。
+
+### 8.2 Provider 级并发控制与会话感知分层调度（Provider Concurrency）
+针对上游供应商对账号级并发的硬性限制，在 `providers[]` 层级支持独立配置最大在途请求数（`concurrency`）与排队等待时长（`concurrency_queue`，默认 3s，上限 30s）：
+* **租约信号量契约**：仅在真正向物理上游发起网络调用前获取（Acquire），通过 `defer` 保证无论请求正常完成、SSE 流式中断、客户端取消还是 Panic，槽位百分之百归还，杜绝泄漏。
+* **会话感知分层调度**：
+  * **全新会话（未命中 Sticky）**：上游无缓存资产，目标 Provider 并发打满时**快速跳过（Fast-Skip）**，零等待尝试下一个可用候选 Provider，盘活备用算力；
+  * **粘性会话（命中 Sticky）**：上游拥有宝贵的 Prompt Cache，目标 Provider 满载时进入内存微排队（等待至 `concurrency_queue`），吸收并发短峰保全缓存；排队中若客户端主动断开连接，立即中止调度循环，杜绝向备选端点做无效探测，且不把断开误归为超时；
+  * **临时逃逸不污染指针**：Sticky 请求排队超时逃逸至备用 Provider 成功返回时，**不改写** Sticky 内存指针，后续请求依然优先回流原端点续用缓存。
+* **全候选满载诊断**：当某模型的所有可用候选端点均因并发打满而被跳过时，返回明确的 503 `vmr_no_candidates` 诊断信息（`all candidate endpoints for model <name> are busy (provider concurrency limit reached)`），避免误导为条件过滤拒绝。
+* **热重载平滑复用**：配置热重载时，参数未变更的 Provider 保持活体信号量实例，在途请求平滑排水。
+* **可观测性**：响应头 `X-VMR-Route-Reason` 记录排队耗时（`conc_waited=...`），`X-VMR-Failover` 记录并发饱和跳过（`busy` / `busy_timeout`），`/stats` 实时暴露 `providers_concurrency` 水位。
 
 ---
 

@@ -202,6 +202,11 @@ type Endpoint struct {
 	// by the LiveStats slim/rollup files. Display label, never a secret.
 	KeyLabel string
 
+	// Concurrency is the max concurrent requests allowed to the backing provider account (0 = unlimited).
+	Concurrency int
+	// ConcurrencyQueue is the queue-wait timeout for sticky requests when the provider is saturated (0 = no wait).
+	ConcurrencyQueue time.Duration
+
 	// healthKey/name cache HealthKey()/Name()'s result. Both are pure
 	// functions of the exported fields above and every Endpoint is
 	// immutable once constructed, so BuildSnapshot computes them exactly

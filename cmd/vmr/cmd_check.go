@@ -279,6 +279,13 @@ func printProviders(w io.Writer, cfg *config.Config) {
 		if p.StickyTTL != nil {
 			fmt.Fprintln(w, checkLine(2, "sticky_ttl", p.StickyTTL.D().String()))
 		}
+		if p.Concurrency > 0 {
+			qWait := config.DefaultConcurrencyQueue.String()
+			if p.ConcurrencyQueue != nil {
+				qWait = p.ConcurrencyQueue.D().String()
+			}
+			fmt.Fprintln(w, checkLine(2, "concurrency", fmt.Sprintf("%d (queue: %s)", p.Concurrency, qWait)))
+		}
 		printProviderQuota(w, cfg, p)
 		printProviderPricing(w, p)
 	}
