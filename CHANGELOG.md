@@ -21,6 +21,12 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+### Changed
+- **Console Models & Status UI Formatting Consistency**:
+  - In `/models.html` ("Virtual Models & Endpoint Topology"), renamed column `Virtual Model` to `Name`, renamed column `Provider : Model` to `Provider & Model`, formatted cell values as `provider:model` without spaces, and switched capability tag separator from middots (` · `) to slashes (`/`).
+  - In `/status.html`, renamed `Provider : Model` to `Provider & Model` across all tables (Live Requests, Performance, Usage by Provider & Model, and Recent Failures), and formatted values as `provider:model` without spaces.
+  - In `/help.html` and `/help.zh.html`, aligned model card capability lists to use slash separators (`/`).
+
 ## [0.7.1] - 2026-09-21
 
 ### Changed

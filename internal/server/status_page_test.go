@@ -598,7 +598,7 @@ func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
 		"<th>State</th>",
 		">Elapsed</th>",
 		"<th>Caller</th><th>Model</th>",
-		"<th>Provider : Model</th>",
+		"<th>Provider &amp; Model</th>",
 		">Attempts</th>",
 		">TTFT</th>",
 	} {

@@ -95,7 +95,7 @@
         <th>State</th>
         <th class="num" title="Time since the request arrived at vmr (includes queueing)">Elapsed</th>
         <th>Caller</th><th>Model</th>
-        <th>Provider : Model</th>
+        <th>Provider &amp; Model</th>
         <th class="num" title="Current attempt number — anything above 1 means a failover already happened">Attempts</th>
         <th class="num" title="Time to the first response chunk from the upstream. A streaming request whose last chunk is over 5s old is flagged as stalled.">TTFT</th>
         <th class="num" title="Estimated input tokens (from the request body)">Tok in <span class="dim">est</span></th>
@@ -120,7 +120,7 @@
   <div class="table-wrap">
     <table class="c">
       <thead><tr>
-        <th>Provider : Model</th>
+        <th>Provider &amp; Model</th>
         <th class="num" title="Successful requests in the selected window, sorted descending. Endpoints with no requests in this window are hidden.">Requests</th>
         <th class="num" title="Total prompt tokens over the window (fresh + cache_write + cache_read), and what share of that was a cache hit">Tok in (hit %)</th>
         <th class="num" title="Output tokens over the window">Tok out</th>
@@ -156,7 +156,7 @@
     </div>
     <div class="table-wrap">
       <table class="c">
-        <thead><tr><th>Provider : Model</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num" title="Total prompt tokens in the window (fresh + cache_write + cache_read), and what share of that was a cache hit">Tok in (hit %)</th><th class="num">Tok out</th><th class="num" title="Average output-token generation throughput across the window: tokens.out / (dur_ms - ttft_ms) for streamed rows, tokens.out / dur_ms otherwise">Tok OUT/s</th><th class="num col-share" title="Share of total token volume (in+cw+cr+out) across all rows in this window — each token counted equally regardless of cost, so a cache-heavy row's share looks larger than its actual cost">Tok Share</th></tr></thead>
+        <thead><tr><th>Provider &amp; Model</th><th class="num">Req <span class="dim">ok / err</span></th><th class="num" title="Total prompt tokens in the window (fresh + cache_write + cache_read), and what share of that was a cache hit">Tok in (hit %)</th><th class="num">Tok out</th><th class="num" title="Average output-token generation throughput across the window: tokens.out / (dur_ms - ttft_ms) for streamed rows, tokens.out / dur_ms otherwise">Tok OUT/s</th><th class="num col-share" title="Share of total token volume (in+cw+cr+out) across all rows in this window — each token counted equally regardless of cost, so a cache-heavy row's share looks larger than its actual cost">Tok Share</th></tr></thead>
         <tbody id="usage-key"></tbody>
         <tfoot id="usage-key-foot"></tfoot>
       </table>
@@ -190,7 +190,7 @@
         <thead><tr>
           <th class="num" title="Arrival time of the request (vmr server time)">When</th>
           <th>Model</th><th>Caller</th>
-          <th>Provider : Model</th>
+          <th>Provider &amp; Model</th>
           <th class="num" title="Attempts made before the request was given up on">Att</th>
           <th>Outcome</th>
           <th class="num" title="Client-view total duration">Dur</th>
@@ -543,8 +543,8 @@ function attemptCellHTML(n) {
 
 function endpointCellHTML(e) {
   if (!e.provider) return '<span class="dim" title="Request waiting for upstream selection">— routing</span>';
-  const full = `${e.provider} : ${e.model || ''}`;
-  return `<span class="ep" title="${esc(full)}">${esc(e.provider)} : ${e.model ? modelSpan(e.model) : '—'}</span>`;
+  const full = `${e.provider}:${e.model || ''}`;
+  return `<span class="ep" title="${esc(full)}">${esc(e.provider)}:${e.model ? modelSpan(e.model) : '—'}</span>`;
 }
 
 // paintTokCell routes a token cell through the shared tween when a value
@@ -754,8 +754,8 @@ function renderFailures(failuresList) {
 
   function endpointFailCell(f) {
     if (!f.provider) return '<span class="dim" title="Request aborted before forwarding">— never forwarded</span>';
-    const full = `${f.provider} : ${f.model || ''}`;
-    return `<span class="ep" title="${esc(full)}">${esc(f.provider)} : ${f.model ? modelSpan(f.model) : '—'}</span>`;
+    const full = `${f.provider}:${f.model || ''}`;
+    return `<span class="ep" title="${esc(full)}">${esc(f.provider)}:${f.model ? modelSpan(f.model) : '—'}</span>`;
   }
 
   body.innerHTML = filtered.map(f => {
@@ -859,8 +859,8 @@ function renderPerf(recentRequests, basis) {
   });
 
   body.innerHTML = rows.map(r => {
-    const pk = `${r.provider} : ${r.model}`;
-    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)} : ${modelSpan(r.model)}</span>`;
+    const pk = `${r.provider}:${r.model}`;
+    const epCell = `<span class="ep" title="${esc(pk)}">${esc(r.provider)}:${modelSpan(r.model)}</span>`;
     const nCell = fmtInt(r.n);
 
     const promptTotal = r.fresh + r.cw + r.cr;
@@ -1165,7 +1165,7 @@ function renderUsage(hourlyRows, rangeKey) {
         const share = total(r) / sum * 100;
         let nameCell;
         if (r.model) {
-          nameCell = `${esc(r.name)} : ${modelSpan(r.model)}`;
+          nameCell = `${esc(r.name)}:${modelSpan(r.model)}`;
         } else if (isProvider && r.name === '—') {
           nameCell = '<span class="ep t-dim" title="Requests failed before routing (client error, auth, or no available candidates)">(gateway / unrouted)</span>';
         } else {

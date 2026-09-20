@@ -388,11 +388,11 @@ function renderModels(modelsList, statsData) {
         ? '<span class="pri pri-fb" title="Fallback endpoint — tried after model priorities are exhausted">FB</span>'
         : `<span class="pri ${ep.priority === 0 ? 'pri-0' : (ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n'))}">P${ep.priority}</span>`;
 
-      const fullTitle = `${ep.provider} : ${ep.model}`;
+      const fullTitle = `${ep.provider}:${ep.model}`;
       const concBadge = ep.concurrency > 0
         ? `<span class="badge b-purple tight" title="Provider concurrency limit: ${ep.concurrency}${ep.concurrency_queue ? ', queue timeout: ' + esc(ep.concurrency_queue) : ''}">⚡ ${ep.concurrency}${ep.concurrency_queue ? `<span class="dim"> (${esc(ep.concurrency_queue)})</span>` : ''}</span>`
         : '';
-      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>${concBadge ? ' ' + concBadge : ''}`;
+      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)}:${modelSpan(ep.model)}</span>${concBadge ? ' ' + concBadge : ''}`;
 
       // Per-endpoint facts — context window and capabilities
       // are resolved per (provider, upstream model) against model_defaults
@@ -401,7 +401,7 @@ function renderModels(modelsList, statsData) {
       const ctxSize = ep.max_context_tokens > 0
         ? `<span class="badge b-dim tight">${fmtKMG(ep.max_context_tokens)}</span>`
         : '';
-      const capsText = (ep.capabilities || []).map(c => esc(c)).join(' · ');
+      const capsText = (ep.capabilities || []).map(c => esc(c)).join('/');
       const ctxParts = [];
       if (ctxSize) ctxParts.push(ctxSize);
       if (capsText) ctxParts.push(`<span class="dim">${capsText}</span>`);
@@ -437,8 +437,8 @@ function renderModels(modelsList, statsData) {
       <div class="table-wrap">
         <table class="c">
           <thead><tr>
-            <th>Virtual Model</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
-            <th>Provider : Model</th><th>Health</th>
+            <th>Name</th><th class="num" title="Priority tier — candidates are tried in tier order; FB = fallback">PRI</th>
+            <th>Provider &amp; Model</th><th>Health</th>
             <th class="num" title="Account-level quota headroom (shared by every endpoint on the same account)">Headroom</th>
             <th class="num" title="Requests this endpoint served over the last 24h, and their share of this virtual model's requests">Req 24h</th>
             <th>Context / Capabilities</th>

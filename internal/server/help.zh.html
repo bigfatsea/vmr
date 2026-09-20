@@ -520,7 +520,7 @@ function renderModels(data) {
       return '<span class="badge ' + def.badge + '">' + esc(p) + '</span>';
     }).join(' ');
     const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : '不限制';
-    const caps = m.caps.size ? Array.from(m.caps).join(' · ') : '不限制';
+    const caps = m.caps.size ? Array.from(m.caps).join('/') : '不限制';
     // Both are aggregated across every endpoint behind this virtual model —
     // the largest context window and the union of capabilities — not a
     // promise that any single endpoint has all of them at once; a request

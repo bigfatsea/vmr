@@ -472,10 +472,13 @@ func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
 
 	checks := []struct{ field, want string }{
 		{"liveBody", "glm-5.3-flash"},
+		{"liveBody", "bai_free:<span"},
 		{"failBody", "upstream_5xx"},
 		{"perfBody", "glm-5.3-flash"},
+		{"perfBody", "bai_free:<span"},
 		{"chart", "<svg"},
 		{"usageKey", "glm-5.3-flash"},
+		{"usageKey", "bai_free:<span"},
 		{"usageKey", "gateway / unrouted"},
 		{"usageCaller", "cli-default"},
 		{"vReq", "7d"},
@@ -484,6 +487,11 @@ func TestConsoleRender_OverviewNoRuntimeError(t *testing.T) {
 	for _, c := range checks {
 		if !strings.Contains(res[c.field], c.want) {
 			t.Errorf("%s: missing %q\ngot: %s", c.field, c.want, res[c.field])
+		}
+	}
+	for _, field := range []string{"liveBody", "perfBody", "usageKey"} {
+		if strings.Contains(res[field], "bai_free : ") {
+			t.Errorf("%s should not contain space in provider:model value, got: %s", field, res[field])
 		}
 	}
 }
@@ -518,10 +526,13 @@ func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
 
 	checks := []struct{ field, want string }{
 		{"modelsBody", "Anthropic Messages (/v1/messages)"},
+		{"modelsBody", "<th>Name</th>"},
+		{"modelsBody", "<th>Provider &amp; Model</th>"},
 		{"modelsBody", `<span class="t-strong">agent</span>`},
+		{"modelsBody", "bai_free:<span"},
 		{"modelsBody", "glm-5.3-flash"},
 		{"modelsBody", "512K"},
-		{"modelsBody", "text"},
+		{"modelsBody", "text/tools/thinking"},
 		{"quotaBody", "volc_token_plan"},
 	}
 	for _, c := range checks {
@@ -531,6 +542,9 @@ func TestConsoleRender_ModelsPageNoRuntimeError(t *testing.T) {
 	}
 	if strings.Contains(res["modelsBody"], "anthropic:") {
 		t.Errorf("modelsBody should not contain protocol prefix in virtual model cell, got: %s", res["modelsBody"])
+	}
+	if strings.Contains(res["modelsBody"], "bai_free : ") {
+		t.Errorf("modelsBody should not contain space in provider:model value, got: %s", res["modelsBody"])
 	}
 }
 
