@@ -14,13 +14,14 @@ import (
 	"sync"
 )
 
-//go:embed assets/console.css assets/console.js
+//go:embed assets/console.css assets/console.js assets/vmr-logo.svg
 var consoleAssets embed.FS
 
 var (
 	consoleAssetsOnce sync.Once
 	consoleCSS        []byte
 	consoleJS         []byte
+	consoleLogoSVG    []byte
 )
 
 func loadConsoleAssets() {
@@ -28,7 +29,14 @@ func loadConsoleAssets() {
 		// embed guarantees presence; a failure here is a build-time bug
 		consoleCSS, _ = consoleAssets.ReadFile("assets/console.css")
 		consoleJS, _ = consoleAssets.ReadFile("assets/console.js")
+		consoleLogoSVG, _ = consoleAssets.ReadFile("assets/vmr-logo.svg")
 	})
+}
+
+// LogoSVG returns the embedded SVG bytes of the VMR brand logo.
+func LogoSVG() []byte {
+	loadConsoleAssets()
+	return consoleLogoSVG
 }
 
 // Injection markers a page carries where the shared asset belongs.

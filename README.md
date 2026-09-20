@@ -1,7 +1,7 @@
 <!-- Ver 2026-09-12 18:00, by pi -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative, flight recorder, agent audit, request replay -->
 
-# vmr — Zero-Instrumentation Router & Flight Recorder for AI Agents
+# <img src="docs/vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — Zero-Instrumentation Router & Flight Recorder for AI Agents
 
 **vmr** is a single-binary router and flight recorder for AI agents that run unattended. One stable virtual model name (`coding`, `claude`, `agent`) hides every provider, key, and failover rule behind it — point any OpenAI/Anthropic-compatible client's `base_url` at vmr and you're done, **zero SDK modifications or code instrumentation required**.
 

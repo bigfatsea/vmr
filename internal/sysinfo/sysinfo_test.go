@@ -8,6 +8,10 @@ import (
 )
 
 func TestReadMemAlloc(t *testing.T) {
+	// Allocate a slice on the heap and keep it alive so metrics always observe non-zero heap objects.
+	buf := make([]byte, 64*1024)
+	runtime.KeepAlive(buf)
+
 	heapAlloc, sys := ReadMemAlloc()
 	if heapAlloc == 0 {
 		t.Errorf("ReadMemAlloc() heapAlloc = 0, want > 0")

@@ -2,6 +2,7 @@
 package server
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -616,5 +617,31 @@ func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
 	// Traffic range buttons: 12h, 24h, 3d, 7d
 	if !strings.Contains(body, "const RANGE_BTNS = ['12h', '24h', '3d', '7d'];") {
 		t.Errorf("status.html missing RANGE_BTNS with 12h")
+	}
+}
+
+func TestServer_LogoEndpoints(t *testing.T) {
+	srv := New(nil, nil)
+	handler := srv.Handler()
+
+	paths := []string{"/favicon.ico", "/vmr-logo.svg", "/assets/vmr-logo.svg"}
+	for _, p := range paths {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, p, nil)
+		handler.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s returned status %d, want %d", p, rec.Code, http.StatusOK)
+		}
+		ct := rec.Header().Get("Content-Type")
+		if !strings.HasPrefix(ct, "image/svg+xml") {
+			t.Errorf("%s Content-Type = %q, want image/svg+xml", p, ct)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte("<svg")) {
+			t.Errorf("%s body missing <svg tag", p)
+		}
+		if !bytes.Equal(rec.Body.Bytes(), LogoSVG()) {
+			t.Errorf("%s body does not match LogoSVG()", p)
+		}
 	}
 }

@@ -333,7 +333,7 @@ function mountConsole(opts) {
   header.innerHTML = `
     <div class="hd-inner${full ? ' full' : ''}">
       <a class="brand" href="/status.html">
-        <svg height="22" width="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#161b22"/><path d="M8 8l8 13 8-13" fill="none" stroke="#58a6ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg height="22" width="19" viewBox="0 0 400 460"><path d="M 50 50 L 200 146 L 350 50 L 350 122 L 200 218 L 50 122 Z" fill="#0C4356"/><path d="M 50 146 L 200 242 L 350 146 L 350 218 L 200 314 L 50 218 Z" fill="#00A3AB"/><path d="M 50 242 L 200 338 L 350 242 L 350 314 L 200 410 L 50 314 Z" fill="#FF6600"/></svg>
         <b>VMR</b>
       </a>
       <nav class="hd-nav">

@@ -1,6 +1,6 @@
 <!-- Ver 2026-09-20 23:41, by Sonnet 5 -->
 
-# vmr — User Guide
+# <img src="vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — User Guide
 
 English | [简体中文](UserGuide.zh.md)
 

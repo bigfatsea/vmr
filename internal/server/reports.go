@@ -58,15 +58,13 @@ var reportsContentTypes = map[string]string{
 	".json":  "application/json",
 	".jsonl": "application/jsonl",
 	".md":    "text/markdown; charset=utf-8",
+	".svg":   "image/svg+xml",
 }
 
-// isReportsSkeleton reports whether name is a dashboard skeleton page.
-// Skeleton pages carry zero business data (same contract as status.html —
-// the page's JS fetches the data and prompts for credentials itself), so
-// they are served unauthenticated; every data-bearing extension requires a
-// valid API key.
+// isReportsSkeleton reports whether name is an unauthenticated static asset
+// (dashboard skeleton page or static SVG asset). These carry zero business data.
 func isReportsSkeleton(name string) bool {
-	return strings.HasSuffix(name, ".html")
+	return strings.HasSuffix(name, ".html") || strings.HasSuffix(name, ".svg")
 }
 
 // mountReports registers /reports and /reports/ unconditionally. Whether

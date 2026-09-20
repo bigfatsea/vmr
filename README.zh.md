@@ -1,7 +1,7 @@
 <!-- Ver 2026-09-12 18:00, by pi -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代, 黑匣子, 审计重放, 行为剖面 -->
 
-# vmr — 无侵入透明路由器与 AI Agent 全生命周期黑匣子
+# <img src="docs/vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — 无侵入透明路由器与 AI Agent 全生命周期黑匣子
 
 **vmr** 是一个单二进制的、给无人值守 Agent 用的透明路由器与黑匣子。一个稳定的虚拟模型名字（`coding`、`claude`、`agent`）把供应商、Key、故障切换规则全部藏在身后——把任意 OpenAI/Anthropic 兼容客户端的 `base_url` 指向 vmr 即可，**无需任何 SDK 修改或代码埋点**。
 

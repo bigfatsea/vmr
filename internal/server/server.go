@@ -83,8 +83,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /help.zh.html", s.helpPageZH)
 	mux.HandleFunc("GET /log", s.auth(s.adminLog))
 	mux.HandleFunc("GET /log.html", s.logPage)
+	mux.HandleFunc("GET /favicon.ico", s.logoIcon)
+	mux.HandleFunc("GET /vmr-logo.svg", s.logoIcon)
+	mux.HandleFunc("GET /assets/vmr-logo.svg", s.logoIcon)
 	s.mountReports(mux)
 	return mux
+}
+
+// logoIcon serves the embedded VMR brand logo SVG for favicon and logo
+// references. Unauthenticated and publicly cacheable.
+func (s *Server) logoIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(LogoSVG())
 }
 
 // health is the unauthenticated liveness endpoint: it answers "is this
