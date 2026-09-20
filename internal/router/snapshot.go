@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-20 23:41, by Sonnet 5
 
 // Snapshot construction and installation: turning a validated config.Config
 // into the immutable, atomically-swappable routing table Serve reads. Split
@@ -23,6 +23,10 @@ import (
 // there is no "protocol" value here that could disagree with where the route
 // lives.
 type ModelRoute struct {
+	// Dims is the same chain for every route in a Snapshot (see
+	// BuildSnapshot) — carried per-route rather than package-level so
+	// quota.go's reorderByQuota/sameTier stay decoupled from where the
+	// chain comes from.
 	Dims      []strategy.Dimension
 	Endpoints []*core.Endpoint
 
@@ -130,11 +134,16 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	// provider); quota registry Prune drops the stranded bucket on install.
 	enabled := enabledProviders(cfg.Providers)
 	quotaSpecs := BuildQuotaSpecsDisabled(cfg.Providers, enabled)
+	// Every virtual model orders candidates the same way — priority is the
+	// only registered Dimension (docs/VirtualModelRouter_Design_v4_Strategy.md's
+	// "为什么是配速而不是负载均衡" section is why a second, traffic-splitting
+	// one was evaluated and rejected, not merely unimplemented) — so the
+	// chain is built once here rather than per model.
+	dims, err := strategy.Build([]string{"priority"})
+	if err != nil {
+		return nil, fmt.Errorf("building default strategy dimensions: %w", err)
+	}
 	for name, m := range cfg.Models {
-		dims, err := strategy.Build(m.Strategy)
-		if err != nil {
-			return nil, fmt.Errorf("model %q: %w", name, err)
-		}
 		sticky := m.Sticky == nil || *m.Sticky
 		fallbackOK := m.Fallback == nil || *m.Fallback
 		routes := map[string]*ModelRoute{} // protocol -> this model's route for that protocol
@@ -240,8 +249,8 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, protocol)
 			}
-			effCapabilities := resolveModelCapabilities(m, cfg.ModelDefaults, providerName, upstreamModel)
-			effMaxContextTokens := resolveModelMaxContextTokens(m, cfg.ModelDefaults, providerName, upstreamModel)
+			effCapabilities := resolveModelCapabilities(cfg.ModelDefaults, providerName, upstreamModel)
+			effMaxContextTokens := resolveModelMaxContextTokens(cfg.ModelDefaults, providerName, upstreamModel)
 			queueWait := config.DefaultConcurrencyQueue
 			if p.ConcurrencyQueue != nil {
 				queueWait = p.ConcurrencyQueue.D()
@@ -342,16 +351,12 @@ func enabledProviders(providers []config.Provider) map[string]bool {
 	return out
 }
 
-// resolveModelCapabilities resolves capabilities for a (provider, model) under
-// virtual model m by consulting:
-// 1. Virtual model explicit override
-// 2. model_defaults[model] exact match (if provider matches and non-empty)
-// 3. model_defaults["*"] wildcard fallback (if provider matches and non-empty)
-// 4. nil (unconstrained)
-func resolveModelCapabilities(m config.VirtualModel, defaults map[string]config.ModelDefaultEntry, provider, model string) []string {
-	if len(m.Capabilities) > 0 {
-		return m.Capabilities
-	}
+// resolveModelCapabilities resolves capabilities for a (provider, model) by
+// consulting:
+// 1. model_defaults[model] exact match (if provider matches and non-empty)
+// 2. model_defaults["*"] wildcard fallback (if provider matches and non-empty)
+// 3. nil (unconstrained)
+func resolveModelCapabilities(defaults map[string]config.ModelDefaultEntry, provider, model string) []string {
 	if entry, ok := defaults[model]; ok && providerMatches(entry.Providers, provider) && len(entry.Capabilities) > 0 {
 		return entry.Capabilities
 	}
@@ -361,16 +366,12 @@ func resolveModelCapabilities(m config.VirtualModel, defaults map[string]config.
 	return nil
 }
 
-// resolveModelMaxContextTokens resolves context window ceiling for a (provider, model)
-// under virtual model m by consulting:
-// 1. Virtual model explicit override (> 0)
-// 2. model_defaults[model] exact match (if provider matches and > 0)
-// 3. model_defaults["*"] wildcard fallback (if provider matches and > 0)
-// 4. 0 (unconstrained)
-func resolveModelMaxContextTokens(m config.VirtualModel, defaults map[string]config.ModelDefaultEntry, provider, model string) int64 {
-	if m.MaxContextTokens > 0 {
-		return m.MaxContextTokens
-	}
+// resolveModelMaxContextTokens resolves context window ceiling for a
+// (provider, model) by consulting:
+// 1. model_defaults[model] exact match (if provider matches and > 0)
+// 2. model_defaults["*"] wildcard fallback (if provider matches and > 0)
+// 3. 0 (unconstrained)
+func resolveModelMaxContextTokens(defaults map[string]config.ModelDefaultEntry, provider, model string) int64 {
 	if entry, ok := defaults[model]; ok && providerMatches(entry.Providers, provider) && entry.MaxContextTokens > 0 {
 		return entry.MaxContextTokens
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-20 23:41, by Sonnet 5
 package main
 
 import (
@@ -404,17 +404,6 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 		}
 		m := cfg.Models[name]
 		fmt.Fprintln(w, name+":")
-		caps := "(unconstrained)"
-		if len(m.Capabilities) > 0 {
-			caps = strings.Join(m.Capabilities, ",")
-		}
-		fmt.Fprintln(w, checkLine(2, "capabilities", caps))
-		tokens := "(unconstrained)"
-		if m.MaxContextTokens > 0 {
-			tokens = fmt.Sprintf("%d", m.MaxContextTokens)
-		}
-		fmt.Fprintln(w, checkLine(2, "max_context_tokens", tokens))
-		fmt.Fprintln(w, checkLine(2, "strategy", strings.Join(m.Strategy, ",")))
 		sticky := m.Sticky == nil || *m.Sticky
 		fmt.Fprintln(w, checkLine(2, "sticky", fmt.Sprintf("%v", sticky)))
 		if sticky {
@@ -437,19 +426,17 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			for _, ep := range route.EffectiveOrder() {
 				key := ep.Provider + "/" + ep.Model
 				var parts []string
-				// The model header above only shows the virtual model's own
-				// declared capabilities/max_context_tokens. When the model
-				// itself is unconstrained, the endpoint's actually-effective
-				// value comes from model_defaults instead (see
-				// router.resolveModelCapabilities/resolveModelMaxContextTokens)
-				// and would otherwise be invisible from this output — but
-				// skip it when it's just the "*" wildcard baseline shared by
-				// most endpoints (an exact model_defaults match, which is
-				// what actually differentiates this endpoint, still shows).
-				if len(m.Capabilities) == 0 && len(ep.Capabilities) > 0 && !slices.Equal(ep.Capabilities, wildcard.Capabilities) {
+				// capabilities/max_context_tokens live only in model_defaults
+				// (see router.resolveModelCapabilities/resolveModelMaxContextTokens),
+				// so an endpoint's actually-effective value is otherwise
+				// invisible from this output — but skip it when it's just the
+				// "*" wildcard baseline shared by most endpoints (an exact
+				// model_defaults match, which is what actually differentiates
+				// this endpoint, still shows).
+				if len(ep.Capabilities) > 0 && !slices.Equal(ep.Capabilities, wildcard.Capabilities) {
 					parts = append(parts, "capabilities="+strings.Join(ep.Capabilities, ","))
 				}
-				if m.MaxContextTokens == 0 && ep.MaxContextTokens > 0 && ep.MaxContextTokens != wildcard.MaxContextTokens {
+				if ep.MaxContextTokens > 0 && ep.MaxContextTokens != wildcard.MaxContextTokens {
 					parts = append(parts, fmt.Sprintf("max_context_tokens=%d", ep.MaxContextTokens))
 				}
 				if len(ep.RoleMap) > 0 {

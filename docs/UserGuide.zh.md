@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-16, by Sonnet 5 -->
+<!-- Ver 2026-09-20 23:41, by Sonnet 5 -->
 
 # vmr — 用户指南
 
@@ -15,7 +15,7 @@
   - [上游代理](#上游代理)
   - [base_url 与 API 版本号](#base_url-与-api-版本号)
   - [角色改写 role_map](#角色改写-role_map)
-  - [端点尝试顺序 priority 与 strategy](#端点尝试顺序-priority-与-strategy)
+  - [端点尝试顺序 priority](#端点尝试顺序-priority)
   - [多 Provider 端点组与全局兜底](#多-provider-端点组与全局兜底)
   - [临时下线一个 provider](#临时下线一个-provider)
   - [环境变量](#环境变量)
@@ -142,9 +142,9 @@ vmr 在初始化时预计算每个 provider 的完整上游 URL——直接把�
 
 有些 OpenAI 兼容 provider 会拒绝它上游不认识的 role——典型场景是 OpenAI 为 o1/o3 系列模型引入的 `developer` role，部分网关（如 DashScope/千问）会直接拒收。在 provider 自己身上写 `role_map: {developer: system}`（即 `providers[].role_map`），vmr 会在请求发往上游之前，把顶层 `messages` 数组（若这条 entry 在 `openai-responses` key 下，则是顶层 `input` 数组）里匹配到的 `"role"` 值原地改写，客户端完全不用改。它是一个纯粹的旧→新字符串映射，只作用于列出的那几个 role——请求的其余每一个字节（键序、空白、未知字段、消息内容）原样透传，跟 `RewriteModel` 改写 model 字段用的是同一套字节级拼接手法。挂在 provider 一级声明一次即可：它修复的 role 拒收是该 provider 的 API 实现属性，不属于任何某个虚拟模型——该账号名下的所有端点自动继承。某个模型如果从不发送被映射的那个 role，配不配 `role_map` 对它没有影响。不配置（或留空）`role_map` 的 provider 保持默认行为：所有 role 原样通过。空白 role 名、空白目标值、自映射（`system: system`）、以及首尾带空白的 role 名都在加载时直接拒绝——匹配是精确字符串比较，带空白的名字要么永远匹配不上、要么改写出网关拒收的 role，且两种失败在运行时都不会有任何提示。
 
-### 端点尝试顺序 priority 与 strategy
+### 端点尝试顺序 priority
 
-`endpoints:` 下每条 entry 都可以写 `priority: N`（整数，缺省 0）；端点按 priority 升序排列后再尝试，打平的情况（最常见——没人去设它）保持配置文件里的原始顺序，因为排序是稳定的。实际用法就是：把端点按你想要的尝试顺序列出来就够了；只有想在不重排列表本身的前提下调整顺序时，才需要显式写 `priority`。`priority` 是虚拟模型 `strategy` 列表里的一个维度（`strategy: [priority]` 是缺省值，截至本文写作时也是唯一实际注册的排序维度——这个列表暂时没有别的可加），所以绝大多数配置都用不上 `strategy`。
+`endpoints:` 下每条 entry 都可以写 `priority: N`（整数，缺省 0）；端点按 priority 升序排列后再尝试，打平的情况（最常见——没人去设它）保持配置文件里的原始顺序，因为排序是稳定的。实际用法就是：把端点按你想要的尝试顺序列出来就够了；只有想在不重排列表本身的前提下调整顺序时，才需要显式写 `priority`。除了 `priority`，没有别的配置旋钮能改变端点排序方式——按权重轮询这类主动分流的方案是经过评估、从原则上否掉的，不是没来得及实现：把流量主动撒开到多个本来健康的端点上会牺牲 Prompt Cache 局部性，而这正是本项目要优化的方向（见 `docs/VirtualModelRouter_Design_v4_Strategy.md`"为什么是配速而不是负载均衡"一节）。
 
 ### 多 Provider 端点组与全局兜底
 
@@ -291,14 +291,16 @@ models:
           models: [deepseek-chat]
 
   cheap:
-    max_context_tokens: 128000          # 虚拟模型层显式覆盖：降级上下文窗口上限
+    # 和 "agent" 用的是同一个 MiniMax-M3 端点——解析出来的 capabilities/
+    # max_context_tokens 完全一致，因为这两个字段只有 model_defaults 一个来源，
+    # 虚拟模型层没有自己的覆盖旋钮
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
 ```
 
-`capabilities` 与 `max_context_tokens` 在顶层 `model_defaults` 中按真实模型名统一声明，支持可选的 `"*"` 通配兜底。两个字段按维度独立回退：一条仅声明了 `max_context_tokens` 的条目，其 `capabilities` 仍继续向 `"*"`（或不限制）回退。虚拟模型层可以显式覆盖任意维度（如上面的 `cheap` 将 MiniMax-M3 的上下文上限降级为 128k，但依然继承其多模态能力）。
+`capabilities` 与 `max_context_tokens` 在顶层 `model_defaults` 中按真实模型名统一声明——这是唯一的声明处，支持可选的 `"*"` 通配兜底。两个字段按维度独立回退：一条仅声明了 `max_context_tokens` 的条目，其 `capabilities` 仍继续向 `"*"`（或不限制）回退。
 
 两个字段缺省即**不限制**：完全不写 `model_defaults` 块、或者某个模型在表中查无匹配，视为支持一切能力且无上下文限制——现有不使用此特性的配置文件行为完全不变。端点的生效能力集合一旦非空就是穷尽式的（把它真正支持的能力全部列出来，不是只列你想让 vmr 检查的那几个）。
 
@@ -346,7 +348,7 @@ models:
 - 每次成功完成请求（含 failover 后的成功，因并发饱和临时逃逸的调用除外）都会更新粘性指针，所以它始终跟随对话实际生效的缓存所在——一个过时的指针会在下一次成功请求时自动纠正，不需要额外的失效检测逻辑。
 - **Provider 级并发门控（`concurrency` 与 `concurrency_queue`）**：限制发往单个 Provider 账号的实时在途并发请求数（如 `concurrency: 5`）。当该 Provider 槽位满载时：
   - *全新会话（未命中 Sticky）*：立即跳过（Fast-Skip）尝试下一个候选 Provider，零延迟且主动让出并发槽位，最大化整体吞吐；
-  - *粘性会话（命中 Sticky）*：在内存中排队缓冲等待，等待上限为 `concurrency_queue`（配了 concurrency 时默认 3s，上限 30s；0s = 不排队立即跳过），吸收并发尖峰以保护上游 Prompt Cache。若排队超时仍未空出，请求安全逃逸到备用 Provider，且该临时避峰调用**不改写** Sticky 注册表指针，保护后续会话仍能回流主端点。若排队中客户端主动断开，立即中止 failover 调度，不向下游盲目探测；
+  - *粘性会话（命中 Sticky）*：在内存中排队缓冲等待，等待上限为 `concurrency_queue`（配了 concurrency 时默认 10s，上限 30s；0s = 不排队立即跳过），吸收并发尖峰以保护上游 Prompt Cache。若排队超时仍未空出，请求安全逃逸到备用 Provider，且该临时避峰调用**不改写** Sticky 注册表指针，保护后续会话仍能回流主端点。若排队中客户端主动断开，立即中止 failover 调度，不向下游盲目探测；
   - *全候选满载*：若该模型名下所有可用候选端点均已打满并发，快速失败并明确返回 503 `vmr_no_candidates`（指出上游并发已达上限，而非误报条件不匹配）。
 
 完整设计（身份信号的取舍、TTL 默认值背后的调研、为什么这里的指纹和下文报表半区的离线会话分组是两套独立实现）：`docs/VirtualModelRouter_Design_v4_Core.md`「Sticky Model」一节。

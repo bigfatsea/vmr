@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-09-20 23:53, by Sonnet 5
 
 // Package core defines shared domain entities (Endpoint, CanonicalRequest, RequestFacts,
 // PricingSpec, QuotaSpec) and zero-dependency domain helpers used across routing and analytics.
@@ -166,17 +166,16 @@ type Endpoint struct {
 
 	// Capabilities is a free-form allowlist (e.g. "image", "tools",
 	// "thinking") — the *effective* set actually used for condition
-	// routing, resolved at BuildSnapshot time: virtual model override if
-	// non-empty, else config.ModelDefaults lookup (exact model key, then
-	// "*"), else unconstrained (empty/nil). Empty/nil means unconstrained —
-	// every capability is assumed supported. Once non-empty it is exhaustive:
-	// a capability the endpoint actually supports but omits here is treated
-	// as unsupported.
+	// routing, resolved at BuildSnapshot time from config.ModelDefaults
+	// alone (exact model key, then "*"), else unconstrained (empty/nil).
+	// Empty/nil means unconstrained — every capability is assumed
+	// supported. Once non-empty it is exhaustive: a capability the
+	// endpoint actually supports but omits here is treated as unsupported.
 	Capabilities []string
 	// MaxContextTokens is the effective, already-resolved context-window
-	// ceiling in tokens, resolved at BuildSnapshot time: virtual model
-	// override if >0, else config.ModelDefaults lookup (exact model key,
-	// then "*"), else unconstrained (0). 0 means unconstrained.
+	// ceiling in tokens, resolved at BuildSnapshot time from
+	// config.ModelDefaults alone (exact model key, then "*"), else
+	// unconstrained (0). 0 means unconstrained.
 	MaxContextTokens int64
 	// FromFallback marks an endpoint injected from config.Config.
 	// FallbackEndpoints rather than the model's own Endpoints —

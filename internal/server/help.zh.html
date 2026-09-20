@@ -522,8 +522,13 @@ function renderModels(data) {
     }).join(' ');
     const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : '不限制';
     const caps = m.caps.size ? Array.from(m.caps).join(' · ') : '不限制';
+    // Both are aggregated across every endpoint behind this virtual model —
+    // the largest context window and the union of capabilities — not a
+    // promise that any single endpoint has all of them at once; a request
+    // routes to whichever endpoint actually supports what it needs.
     return '<div class="mrow"><b>' + esc(m.id) + '</b> ' + badges +
-      ' <span class="t-dim">· ' + esc(ctx) + ' · ' + esc(caps) + '</span></div>';
+      ' <span class="t-dim">· <span title="该虚拟模型所有 endpoint 中最大的 max_context_tokens">' + esc(ctx) + '</span>' +
+      ' · <span title="该虚拟模型所有 endpoint 能力的并集——不代表每个 endpoint 都同时具备；实际路由会挑选真正支持该请求所需能力的 endpoint">' + esc(caps) + '</span></span></div>';
   }).join('');
 }
 

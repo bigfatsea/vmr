@@ -1,4 +1,4 @@
-# Ver 2026-09-14 23:30, by Sonnet 5
+# Ver 2026-09-20 23:41, by Sonnet 5
 # vmr config — the fully annotated reference. Just want to get running?
 # Copy config.minimal.yaml instead (~10 lines) and come back here for a knob.
 # vmr config — copy to config.yaml and adjust.
@@ -11,9 +11,7 @@
 # the same account (same api_key, same proxy policy) can back several
 # surfaces from one entry instead of being declared multiple times.
 #
-# models is keyed by virtual-model name only. A virtual model's own top-level
-# `capabilities`/`max_context_tokens` are explicit overrides that take
-# precedence over `model_defaults` (see model_defaults below). A model's
+# models is keyed by virtual-model name only. A model's
 # `endpoints:` is itself keyed by protocol (the same key set as base_url
 # above — POST /v1/chat/completions for "openai-completions", POST /v1/messages
 # for "anthropic-messages", POST /v1/responses for "openai-responses"), and
@@ -25,8 +23,9 @@
 # pair expands into its own independent, individually health-tracked
 # endpoint, outer loop over models, inner loop over providers.
 # Capabilities and context ceilings are declared centrally in `model_defaults:`
-# for each real upstream model (with an optional "*" wildcard); a virtual model
-# can explicitly override either dimension (e.g. downgrading a model's window).
+# for each real upstream model (with an optional "*" wildcard) — that's the
+# only place they're declared; a virtual model has no capabilities/
+# max_context_tokens knob of its own to override them with.
 # A virtual model name can mix protocols: give it one bucket under
 # endpoints: openai-completions and another under endpoints: anthropic-messages
 # (or openai-responses), and it becomes reachable — with potentially different
@@ -395,12 +394,12 @@ providers:
   #   role_map: {developer: system}
   #   # sticky_ttl: 2h
   #   # concurrency: 5           # max concurrent in-flight requests (0 = unlimited)
-  #   # concurrency_queue: 3s    # queue-wait timeout for sticky sessions (defaults to 3s; 0s = fast-skip)
+  #   # concurrency_queue: 10s   # queue-wait timeout for sticky sessions (defaults to 10s; 0s = fast-skip)
 
 models:
   coding:
-    # strategy defaults to [priority] — priority is currently the only
-    # dimension implemented, so this list has nothing else to name yet.
+    # Endpoints try in priority order; there's no config knob to change
+    # ordering beyond that (see docs/UserGuide.md's "Endpoint try-order").
     # Endpoints below have no explicit priority — ties (everyone defaults
     # to 0) keep this file order, so listing them in the order you want
     # them tried is enough.
@@ -421,7 +420,6 @@ models:
           models: [deepseek-v4-pro]
 
   cheap:
-    max_context_tokens: 128000  # explicit virtual model override: downgrade context window
     # image_downscale: 0        # per-model override example: force this model
                                  # to skip downscaling even if the global
                                  # setting above is on (omit to inherit it)

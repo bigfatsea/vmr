@@ -1,4 +1,4 @@
-// Ver 2026-09-05, by Pkg-D
+// Ver 2026-09-20 23:41, by Sonnet 5
 package router
 
 import (
@@ -34,10 +34,7 @@ type legacyEndpointGroup struct {
 }
 
 type legacyVirtualModel struct {
-	Strategy            []string              `yaml:"strategy"`
 	Endpoints           []legacyEndpointGroup `yaml:"endpoints"`
-	Capabilities        []string              `yaml:"capabilities"`
-	MaxContextTokens    int64                 `yaml:"max_context_tokens"`
 	Sticky              *bool                 `yaml:"sticky"`
 	Fallback            *bool                 `yaml:"fallback"`
 	ImageDownscaleMaxPx *int                  `yaml:"image_downscale"`
@@ -63,9 +60,6 @@ func (l *legacyConfig) toNew(t *testing.T) *config.Config {
 	cfg.Models = map[string]config.VirtualModel{}
 	for name, lm := range l.Models {
 		m := config.VirtualModel{
-			Strategy:            lm.Strategy,
-			Capabilities:        lm.Capabilities,
-			MaxContextTokens:    lm.MaxContextTokens,
 			Sticky:              lm.Sticky,
 			Fallback:            lm.Fallback,
 			ImageDownscaleMaxPx: lm.ImageDownscaleMaxPx,
@@ -111,8 +105,6 @@ providers:
     api_key: k3
 models:
   agent:
-    capabilities: [text, tools]
-    max_context_tokens: 256000
     endpoints:
       - protocol: openai-completions
         providers: [p1, p2]
@@ -164,8 +156,6 @@ providers:
     api_key: k3
 models:
   agent:
-    capabilities: [text, tools]
-    max_context_tokens: 256000
     endpoints:
       openai-completions:
         - providers: [p1, p2]

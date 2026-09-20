@@ -1,9 +1,17 @@
-// Ver 2026-07-24 12:00, by Sonnet 5
+// Ver 2026-09-20 23:38, by Sonnet 5
 
 // Package strategy implements scheduling as filter + stable multi-key sort.
-// Every scheduling behavior (priority, weight, round_robin, …) is just a
-// Dimension; combining them is list concatenation in config, and the router's
-// main loop never changes.
+// Every scheduling behavior is just a Dimension; combining several would be
+// list concatenation, and the router's main loop would never change. Only
+// priority is registered today — traffic-splitting dimensions (weight,
+// round_robin) were evaluated and rejected on principle, not merely
+// unimplemented (see docs/VirtualModelRouter_Design_v4_Strategy.md's "为什么
+// 是配速而不是负载均衡" section: spreading traffic across otherwise-healthy
+// endpoints costs Prompt Cache locality, which this project optimizes for).
+// A deterministic, non-splitting dimension (e.g. cost- or latency-based
+// tie-breaking) isn't ruled out by that reasoning and would slot in the same
+// way. There is no config surface to select or combine dimensions — every
+// virtual model gets the same chain (see router.BuildSnapshot).
 package strategy
 
 import (

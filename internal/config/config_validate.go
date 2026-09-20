@@ -1,4 +1,4 @@
-// Ver 2026-08-30, by Sonnet 5
+// Ver 2026-09-20 23:41, by Sonnet 5
 
 package config
 
@@ -12,7 +12,6 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
-	"vmr/internal/strategy"
 )
 
 // validateBasic performs structural and top-level scalar validation: listen
@@ -226,23 +225,8 @@ func (c *Config) validateModels() error {
 		if len(m.Endpoints) == 0 {
 			return fmt.Errorf("model %q: no endpoints", name)
 		}
-		// Reject an unknown strategy dimension at load time, not later at
-		// snapshot-build (strategy.Build is the single source of truth for
-		// what's registered), symmetric with pricing rate resolution being
-		// strict at load. A typo'd dimension name otherwise parses cleanly
-		// and only fails once `vmr start` builds the routing table — a load
-		// error here catches it in `vmr check`'s no-network validate path too.
-		if _, err := strategy.Build(m.Strategy); err != nil {
-			return fmt.Errorf("model %q: %w", name, err)
-		}
-		if m.MaxContextTokens < 0 {
-			return fmt.Errorf("model %q: max_context_tokens must be >= 0", name)
-		}
 		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
 			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)
-		}
-		if err := validateCapabilities(fmt.Sprintf("model %q: capabilities", name), m.Capabilities); err != nil {
-			return err
 		}
 		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
 			groups := m.Endpoints[protocol]

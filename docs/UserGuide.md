@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-16, by Sonnet 5 -->
+<!-- Ver 2026-09-20 23:41, by Sonnet 5 -->
 
 # vmr — User Guide
 
@@ -15,7 +15,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Upstream proxy](#upstream-proxy)
   - [base_url and API versions](#base_url-and-api-versions)
   - [Role remapping (role_map)](#role-remapping-role_map)
-  - [Endpoint try-order (priority and strategy)](#endpoint-try-order-priority-and-strategy)
+  - [Endpoint try-order (priority)](#endpoint-try-order-priority)
   - [Multi-provider endpoint groups and global fallbacks](#multi-provider-endpoint-groups-and-global-fallbacks)
   - [Temporarily disabling a provider](#temporarily-disabling-a-provider)
   - [Environment variables](#environment-variables)
@@ -143,9 +143,9 @@ vmr pre-computes each provider's complete upstream URL at initialization by appe
 
 Some OpenAI-compatible providers reject roles their upstream doesn't recognize — the canonical case is the `developer` role OpenAI introduced for o1/o3-series models, which some gateways (e.g. DashScope/Qianwen) reject outright. `role_map: {developer: system}` on the provider itself (`providers[].role_map`) rewrites matching `"role"` values inside the top-level `messages` array (or, for an endpoint under the `openai-responses` key, the top-level `input` array) before the request leaves vmr, with no client-side change needed. It's a plain old→new string map, applied only to the exact roles listed — every other byte of the request (key order, whitespace, unknown fields, message content) passes through untouched, the same byte-splice approach `RewriteModel` uses for the model field. Declared once per provider, since the role rejection it repairs is a property of that provider's API implementation, not of any one virtual model — every endpoint backed by the account inherits it. A model that never sends the mapped role is unaffected either way. Omit `role_map` (or leave it empty) for a provider whose upstream accepts every role as-is — the default. Blank role names, blank targets, self-mappings (`system: system`), and names padded with surrounding whitespace are rejected at load — matching is an exact string compare, so a padded name can never match (or rewrites to a role the gateway rejects), and neither failure surfaces any hint at runtime.
 
-### Endpoint try-order (priority and strategy)
+### Endpoint try-order (priority)
 
-Each entry under `endpoints:` can set `priority: N` (an int, default 0); endpoints sort by ascending priority before being tried, and ties (the common case — nobody sets it) keep config-file order because the sort is stable. In practice this means just listing endpoints in the order you want them tried is enough; reach for an explicit `priority` only when you want to reorder without reshuffling the list itself. `priority` is one dimension in a virtual model's `strategy` list (`strategy: [priority]` is the default and, as of this writing, the only ordering dimension actually registered — there's nothing else to add to that list yet), so most configs never need to set `strategy` at all.
+Each entry under `endpoints:` can set `priority: N` (an int, default 0); endpoints sort by ascending priority before being tried, and ties (the common case — nobody sets it) keep config-file order because the sort is stable. In practice this means just listing endpoints in the order you want them tried is enough; reach for an explicit `priority` only when you want to reorder without reshuffling the list itself. There is no config knob to change *how* endpoints order beyond `priority` — a traffic-splitting alternative (weight-based round robin) was evaluated and rejected on principle, not merely left unimplemented: spreading traffic across otherwise-healthy endpoints costs Prompt Cache locality, which this project optimizes for instead (see `docs/VirtualModelRouter_Design_v4_Strategy.md`'s "为什么是配速而不是负载均衡" section).
 
 ### Multi-provider endpoint groups and global fallbacks
 
@@ -291,14 +291,16 @@ models:
           models: [deepseek-chat]
 
   cheap:
-    max_context_tokens: 128000          # explicit virtual model override: downgrade ceiling
+    # same MiniMax-M3 endpoint as "agent" — resolves to the exact same
+    # capabilities/max_context_tokens, because both fields live only in
+    # model_defaults; a virtual model has no override of its own
     endpoints:
       openai-completions:
         - providers: [minimax]
           models: [MiniMax-M3]
 ```
 
-`capabilities` and `max_context_tokens` are declared centrally in `model_defaults` by real model name, with an optional `"*"` wildcard fallback. Both dimensions fall back independently: an entry specifying only `max_context_tokens` inherits `capabilities` from `"*"` (or unconstrained). A virtual model can explicitly override either dimension (e.g. `cheap` above downgrades the context ceiling to 128k while keeping MiniMax-M3's multimodal capabilities).
+`capabilities` and `max_context_tokens` are declared centrally in `model_defaults` by real model name — the only place either is declared — with an optional `"*"` wildcard fallback. Both dimensions fall back independently: an entry specifying only `max_context_tokens` inherits `capabilities` from `"*"` (or unconstrained).
 
 Both fields default to **unconstrained**: omitting `model_defaults` entirely, or having no matching entry for a model, treats it as supporting all capabilities with an unlimited context window — existing configs without these fields behave exactly as before. Once an endpoint's effective capability set is non-empty it's exhaustive (list everything it actually supports, not just what you want checked).
 
@@ -346,7 +348,7 @@ models:
 - The pointer moves on every successful completion, including a failover success (except for temporary bypasses due to concurrency saturation), so it always follows wherever the conversation's cache is actually warm — a stale pointer self-corrects on the next successful turn, no separate invalidation logic needed.
 - **Provider concurrency gate (`concurrency` and `concurrency_queue`)**: limits in-flight requests dispatched to an individual upstream provider account (e.g. `concurrency: 5`). When a provider is saturated:
   - *New sessions (non-sticky)* fast-skip immediately to the next candidate provider without wait, maximizing overall throughput and reducing latency.
-  - *Sticky sessions* buffer-wait in memory up to `concurrency_queue` (defaults to 3s when concurrency is configured; up to 30s; 0s disables queueing) to protect prompt cache locality. If the queue timeout expires, the request fails over to the next candidate; temporary concurrency bypasses do not overwrite the session's sticky pointer. If a client disconnects while queued, failover halts immediately without probing subsequent providers.
+  - *Sticky sessions* buffer-wait in memory up to `concurrency_queue` (defaults to 10s when concurrency is configured; up to 30s; 0s disables queueing) to protect prompt cache locality. If the queue timeout expires, the request fails over to the next candidate; temporary concurrency bypasses do not overwrite the session's sticky pointer. If a client disconnects while queued, failover halts immediately without probing subsequent providers.
   - *All candidates saturated*: if every eligible candidate is busy, the request fails fast with an explicit 503 `vmr_no_candidates` error stating that provider concurrency limits have been reached.
 
 Full design (identity choice, TTL research behind the defaults, why this fingerprint is a separate implementation from the report half's offline session grouping below): `docs/VirtualModelRouter_Design_v4_Core.md`, "Sticky Model" section.

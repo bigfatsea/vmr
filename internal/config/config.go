@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-20 23:41, by Sonnet 5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -98,7 +98,6 @@ type EndpointGroup struct {
 // reachable only from its own protocol's ingress (POST /v1/chat/completions
 // vs POST /v1/messages); see BuildSnapshot.
 type VirtualModel struct {
-	Strategy []string `yaml:"strategy"`
 	// Endpoints is keyed by ingress protocol (same key space as
 	// Provider.BaseURL, validated against the adapter registry), each holding
 	// that protocol's try-order groups in config order. Keyed by protocol —
@@ -108,16 +107,6 @@ type VirtualModel struct {
 	// while the order within a bucket is the try-order.
 	Endpoints           map[string][]EndpointGroup `yaml:"endpoints"`
 	ImageDownscaleMaxPx *int                       `yaml:"image_downscale"`
-
-	// Capabilities and MaxContextTokens are optional explicit overrides for
-	// this virtual model, taking precedence over model_defaults (see
-	// ModelDefaultEntry). Both default to "unconstrained" (empty/0) when
-	// absent from both here and model_defaults. These override model_defaults
-	// per dimension independently: an explicit setting here replaces that
-	// field's value for every endpoint under this model (e.g. allowing a
-	// "cheap" virtual model to downgrade a large backing model's window).
-	Capabilities     []string `yaml:"capabilities"`
-	MaxContextTokens int64    `yaml:"max_context_tokens"`
 
 	// Sticky enables session-affinity routing for this virtual model (see
 	// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section). A *bool,
@@ -541,16 +530,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Timeouts.StreamIdle <= 0 {
 		c.Timeouts.StreamIdle = Duration(DefaultIdleTimeout)
-	}
-	for name, m := range c.Models {
-		changed := false
-		if len(m.Strategy) == 0 {
-			m.Strategy = []string{"priority"}
-			changed = true
-		}
-		if changed {
-			c.Models[name] = m
-		}
 	}
 	c.applyGuardDefaults()
 }

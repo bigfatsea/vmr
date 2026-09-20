@@ -199,11 +199,10 @@ models:
 	}
 }
 
-// TestCmdCheck_ModelCapabilitiesAndContext locks in that a virtual model
-// declaring capabilities/max_context_tokens renders them in the "=== Models ==="
-// section, and an endpoint renders a bare "- p=N. provider/model:" with nothing
-// after the colon when it carries no role_map/sticky_ttl overrides.
-func TestCmdCheck_ModelCapabilitiesAndContext(t *testing.T) {
+// TestCmdCheck_EndpointBareLabelWithNoOverrides locks in that an endpoint
+// with no role_map/sticky_ttl/capabilities/max_context_tokens to report
+// renders a bare "- p=N. provider/model:" with nothing after the colon.
+func TestCmdCheck_EndpointBareLabelWithNoOverrides(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
 providers:
@@ -212,33 +211,23 @@ providers:
     api_key: test-key
 models:
   m1:
-    capabilities: [text, tools]
-    max_context_tokens: 128000
     endpoints:
       openai-completions:
         - providers: [p1]
           models: [real-model]
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, checkLine(2, "capabilities", "text,tools")) {
-		t.Errorf("model capabilities not rendered:\n%s", out)
-	}
-	if !strings.Contains(out, checkLine(2, "max_context_tokens", "128000")) {
-		t.Errorf("model max_context_tokens not rendered:\n%s", out)
-	}
 	if !strings.Contains(out, "- p=0. p1/real-model:\n") {
 		t.Errorf("endpoint should render a bare label with nothing after the colon:\n%s", out)
 	}
 }
 
 // TestCmdCheck_EndpointShowsModelDefaultsResolution covers the observability
-// this output lost when EndpointGroup.Capabilities/MaxContextTokens were
-// removed in favor of model_defaults (config shape 2026-09, E.1/E.2): when
-// the virtual model itself declares nothing (unconstrained), an endpoint
-// whose capabilities/max_context_tokens actually resolve from model_defaults
-// must render that resolved value on its own line — otherwise there is no
-// way to see from `vmr check` alone what a given endpoint is really capable
-// of.
+// this output would otherwise lose: capabilities/max_context_tokens live
+// only in model_defaults now, so an endpoint whose values actually resolve
+// from there must render that resolved value on its own line — otherwise
+// there is no way to see from `vmr check` alone what a given endpoint is
+// really capable of.
 func TestCmdCheck_EndpointShowsModelDefaultsResolution(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
@@ -263,37 +252,6 @@ models:
 	}
 	if !strings.Contains(out, "max_context_tokens=512000") {
 		t.Errorf("endpoint should show its model_defaults-resolved max_context_tokens:\n%s", out)
-	}
-}
-
-// TestCmdCheck_EndpointHidesResolutionWhenModelDeclaresItsOwn is the
-// negative counterpart: when the virtual model already declares
-// capabilities/max_context_tokens explicitly (shown once in the model
-// header), every endpoint resolves to that same value — repeating it on
-// every endpoint line would be pure noise, not a gap.
-func TestCmdCheck_EndpointHidesResolutionWhenModelDeclaresItsOwn(t *testing.T) {
-	path := writeTempFile(t, "config.yaml", `
-listen: 127.0.0.1:0
-providers:
-  - name: p1
-    base_url: {openai-completions: https://example.com/v1}
-    api_key: test-key
-model_defaults:
-  real-model:
-    capabilities: [text, image]
-    max_context_tokens: 512000
-models:
-  m1:
-    capabilities: [text, tools]
-    max_context_tokens: 128000
-    endpoints:
-      openai-completions:
-        - providers: [p1]
-          models: [real-model]
-`)
-	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if strings.Contains(out, "capabilities=text,image") || strings.Contains(out, "max_context_tokens=512000") {
-		t.Errorf("endpoint should not repeat the model's own declared values:\n%s", out)
 	}
 }
 

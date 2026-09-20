@@ -160,6 +160,10 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://p1.example.com, anthropic-messages: https://p1.example.com}, api_key: k1}
   - {name: fb, base_url: {openai-completions: https://fb.example.com}, api_key: kfb}
+model_defaults:
+  "*":
+    capabilities: [text, tools]
+    max_context_tokens: 128000
 fallback_endpoints:
   openai-completions:
     - providers: [fb]
@@ -167,8 +171,6 @@ fallback_endpoints:
       priority: 90
 models:
   openai_only:
-    capabilities: [text, tools]
-    max_context_tokens: 128000
     endpoints:
       openai-completions:
         - {providers: [p1], models: [own-model]}
@@ -247,11 +249,12 @@ func TestBuildSnapshot_Fallback_OptOut(t *testing.T) {
 	}
 }
 
-// TestBuildSnapshot_Fallback_InheritsModelCapabilitiesBase pins that a
-// fallback entry merges against the SAME virtual model's own base
-// capabilities/max_context_tokens as an ordinary endpoint-group would —
-// there's no separate "fallback base", it's whichever model it attached to.
-func TestBuildSnapshot_Fallback_InheritsModelCapabilitiesBase(t *testing.T) {
+// TestBuildSnapshot_Fallback_ResolvesModelDefaultsLikeAnyEndpoint pins that
+// an injected fallback entry resolves capabilities/max_context_tokens
+// through the exact same model_defaults chain as an ordinary endpoint-group
+// would — there's no separate "fallback base" or special-cased inheritance,
+// it's whichever (provider, model) it attached to.
+func TestBuildSnapshot_Fallback_ResolvesModelDefaultsLikeAnyEndpoint(t *testing.T) {
 	cfg, err := config.Parse([]byte(fallbackSnapYAML))
 	if err != nil {
 		t.Fatal(err)
@@ -263,10 +266,10 @@ func TestBuildSnapshot_Fallback_InheritsModelCapabilitiesBase(t *testing.T) {
 	eps := snap.Models["openai-completions"]["openai_only"].Endpoints
 	fb := eps[1]
 	if fb.MaxContextTokens != 128000 {
-		t.Errorf("fallback endpoint MaxContextTokens = %d, want 128000 (inherited from openai_only's base)", fb.MaxContextTokens)
+		t.Errorf("fallback endpoint MaxContextTokens = %d, want 128000 (model_defaults wildcard)", fb.MaxContextTokens)
 	}
 	if len(fb.Capabilities) != 2 {
-		t.Errorf("fallback endpoint Capabilities = %v, want the model's [text, tools] base", fb.Capabilities)
+		t.Errorf("fallback endpoint Capabilities = %v, want the model_defaults wildcard's [text, tools]", fb.Capabilities)
 	}
 }
 

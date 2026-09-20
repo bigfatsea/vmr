@@ -161,10 +161,9 @@ models:
 	}
 }
 
-// TestBuildSnapshotResolvesModelDefaultsAndOverrides tests the three-tier
-// priority (virtual model override > exact model default > wildcard "*")
-// and per-field independent fallback.
-func TestBuildSnapshotResolvesModelDefaultsAndOverrides(t *testing.T) {
+// TestBuildSnapshotResolvesModelDefaults tests the two-tier priority (exact
+// model default > wildcard "*") and per-field independent fallback.
+func TestBuildSnapshotResolvesModelDefaults(t *testing.T) {
 	yaml := `
 listen: 127.0.0.1:0
 model_defaults:
@@ -192,12 +191,6 @@ models:
           models: [partial-model]
         - providers: [p1]
           models: [unknown-model]
-  cheap:
-    max_context_tokens: 128000
-    endpoints:
-      openai-completions:
-        - providers: [p1]
-          models: [MiniMax-M3]
 `
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
@@ -247,17 +240,6 @@ models:
 	}
 	if !ep3.HasCapability("text") || !ep3.HasCapability("tools") {
 		t.Error("ep3 should have text, tools from wildcard")
-	}
-
-	// cheap model overrides max_context_tokens to 128000
-	cheapEps := snap.Models["openai-completions"]["cheap"].Endpoints
-	cheapEp := cheapEps[0]
-	if cheapEp.MaxContextTokens != 128000 {
-		t.Errorf("cheapEp MaxContextTokens = %d, want 128000 (virtual model override)", cheapEp.MaxContextTokens)
-	}
-	// cheapEp capabilities still come from MiniMax-M3 exact match
-	if !cheapEp.HasCapability("image") {
-		t.Error("cheapEp should still inherit capabilities from model_defaults exact match")
 	}
 }
 

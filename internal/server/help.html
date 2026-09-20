@@ -86,8 +86,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
       <tbody>
         <tr>
           <td class="t-dim">models</td>
-          <td id="help-models"><span class="t-dim">loading…</span></td>
-          <td class="hint" class="t-right">a virtual model only answers on its own protocol</td>
+          <td id="help-models" colspan="2"><span class="t-dim">loading…</span></td>
         </tr>
         <tr>
           <td class="t-dim">auth</td>
@@ -525,8 +524,13 @@ function renderModels(data) {
     }).join(' ');
     const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : 'unconstrained';
     const caps = m.caps.size ? Array.from(m.caps).join(' · ') : 'unconstrained';
+    // Both are aggregated across every endpoint behind this virtual model —
+    // the largest context window and the union of capabilities — not a
+    // promise that any single endpoint has all of them at once; a request
+    // routes to whichever endpoint actually supports what it needs.
     return '<div class="mrow"><b>' + esc(m.id) + '</b> ' + badges +
-      ' <span class="t-dim">· ' + esc(ctx) + ' · ' + esc(caps) + '</span></div>';
+      ' <span class="t-dim">· <span title="Largest max_context_tokens across this model\'s endpoints">' + esc(ctx) + '</span>' +
+      ' · <span title="Union of capabilities across this model\'s endpoints — not every endpoint necessarily has every one; routing picks whichever endpoint actually supports what a request needs">' + esc(caps) + '</span></span></div>';
   }).join('');
 }
 

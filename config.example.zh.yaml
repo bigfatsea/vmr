@@ -1,4 +1,4 @@
-# Ver 2026-09-14 23:30, by Sonnet 5
+# Ver 2026-09-20 23:41, by Sonnet 5
 # vmr 配置文件 —— 完整注解参考。只想先跑起来？改用 config.minimal.yaml
 # （~10 行），需要调某个旋钮时再回这里查。
 # vmr 配置文件 —— 复制为 config.yaml 后按需修改。
@@ -10,10 +10,7 @@
 # 分 key，所以同一个账号（同一个 api_key、同一条代理策略）可以从一条记录同时
 # 支撑多个接入面，不需要重复声明多条。
 #
-# models 只按虚拟模型名分 key。一个虚拟模型自己顶层的 `capabilities`/
-# `max_context_tokens` 是它下面每个候选端点共享的*基线*——只写一次，不用在每个
-# models 仅以虚拟模型名为 key。虚拟模型顶层的 `capabilities`/`max_context_tokens`
-# 为显式覆盖，优先级高于 `model_defaults`（见下文 model_defaults）。一个模型的
+# models 只按虚拟模型名分 key。一个模型的
 # `endpoints:` 本身按协议作 key（和上面 base_url 的 key 同一套——POST /v1/chat/completions
 # 对应 "openai-completions"，POST /v1/messages 对应 "anthropic-messages"，POST /v1/responses
 # 对应 "openai-responses"），每个协议 key 下的一条记录是一个 try-order 候选：一个或多个
@@ -22,7 +19,8 @@
 # priority——每个 (provider, model) 对
 # 都会展开成各自独立、单独做健康跟踪的端点，外层按 models 循环、内层按
 # providers 循环。上游真实模型的能力与上下文上限集中在顶层 `model_defaults:`
-# 统一声明（支持可选的 "*" 通配）；虚拟模型层可以显式覆盖任意维度（如对模型窗口进行降级）。
+# 统一声明（支持可选的 "*" 通配）——这是唯一的声明处；虚拟模型层没有自己的
+# capabilities/max_context_tokens 旋钮可以覆盖它们。
 # 同一个虚拟模型名可以混合协议：在 endpoints: 下同时给
 # openai-completions 和 anthropic-messages（或 openai-responses）两个协议桶，它就能同时从
 # 这几种入口协议访问到——各自可能有不同
@@ -333,12 +331,12 @@ providers:
   #   role_map: {developer: system}
   #   # sticky_ttl: 2h
   #   # concurrency: 5           # 最大在途并发请求数（0 = 不限）
-  #   # concurrency_queue: 3s    # 仅对 Sticky 会话生效的排队等待超时（默认 3s；0s = 不排队立即跳过）
+  #   # concurrency_queue: 10s   # 仅对 Sticky 会话生效的排队等待超时（默认 10s；0s = 不排队立即跳过）
 
 models:
   coding:
-    # strategy 默认是 [priority]——priority 目前是唯一实现的维度，所以这个
-    # 列表暂时没有别的可以写。
+    # 端点按 priority 顺序尝试；除此之外没有别的配置旋钮能改排序方式
+    # （见 docs/UserGuide.zh.md"端点尝试顺序 priority"一节）。
     # 下面这些端点都没有显式写 priority——都缺省是 0，打平的情况下按本文件里
     # 出现的顺序排列，所以只要按你想尝试的顺序把它们列出来就够了。
     #
@@ -356,7 +354,6 @@ models:
           models: [deepseek-v4-pro]
 
   cheap:
-    max_context_tokens: 128000  # 虚拟模型层显式覆盖：降级上下文窗口
     # image_downscale: 0        # 按模型覆盖的示例：强制这个模型跳过缩图，即使
                                  # 上面全局设置是开着的（不写就继承全局设置）
     # sticky: false              # 对确实是一次性交互、没有多轮价值需要保护的模型，

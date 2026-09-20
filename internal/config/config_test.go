@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-20 23:41, by Sonnet 5
 package config
 
 import (
@@ -47,9 +47,6 @@ func TestParseDefaultsAndEnvExpansion(t *testing.T) {
 	}
 	if cfg.Timeouts.Connect.D() != 10*time.Second {
 		t.Errorf("default connect timeout: %v", cfg.Timeouts.Connect.D())
-	}
-	if got := cfg.Models["m1"].Strategy; len(got) != 1 || got[0] != "priority" {
-		t.Errorf("default strategy: %v", got)
 	}
 	if cfg.Timeouts.Probe.D() != DefaultProbeTimeout {
 		t.Errorf("default timeouts.probe: got %v, want %v", cfg.Timeouts.Probe.D(), DefaultProbeTimeout)
@@ -769,35 +766,29 @@ func TestEmptySections(t *testing.T) {
 // docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing and
 // Sticky Model sections) ---
 
-// TestVirtualModelCapabilitiesAndMaxContextTokensParsed locks in the
-// model-level override fields (VirtualModel.Capabilities/MaxContextTokens) —
-// which take precedence over model_defaults at BuildSnapshot time.
-func TestVirtualModelCapabilitiesAndMaxContextTokensParsed(t *testing.T) {
+// TestVirtualModelCapabilitiesFieldRejected and
+// TestVirtualModelMaxContextTokensFieldRejected pin that capabilities/context
+// ceilings live only in model_defaults now — a model-level override field
+// (once VirtualModel.Capabilities/MaxContextTokens) was removed because a
+// forced per-virtual-model downgrade had no real use once model_defaults
+// could already declare per-real-model differences; strict YAML
+// (KnownFields) turns a config still writing the old field into a load
+// error, not a silent no-op, matching the same migration pattern
+// TestEndpointGroup_CapabilitiesOrMaxContextTokensRejected already pins for
+// the endpoint-group level.
+func TestVirtualModelCapabilitiesFieldRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:",
-		"  m1:\n    capabilities: [text, tools]\n    max_context_tokens: 128000\n    endpoints:", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := cfg.Models["m1"]
-	want := []string{"text", "tools"}
-	if len(m.Capabilities) != len(want) {
-		t.Fatalf("Capabilities = %v, want %v", m.Capabilities, want)
-	}
-	for i, c := range want {
-		if m.Capabilities[i] != c {
-			t.Errorf("Capabilities[%d] = %q, want %q", i, m.Capabilities[i], c)
-		}
-	}
-	if m.MaxContextTokens != 128000 {
-		t.Errorf("MaxContextTokens = %d, want 128000", m.MaxContextTokens)
+		"  m1:\n    capabilities: [text, tools]\n    endpoints:", 1)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("models.<name>.capabilities must be rejected as an unknown field — declare it in model_defaults instead")
 	}
 }
 
-func TestVirtualModelMaxContextTokensNegativeRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:", "  m1:\n    max_context_tokens: -1\n    endpoints:", 1)
+func TestVirtualModelMaxContextTokensFieldRejected(t *testing.T) {
+	yaml := strings.Replace(validYAML, "  m1:\n    endpoints:",
+		"  m1:\n    max_context_tokens: 128000\n    endpoints:", 1)
 	if _, err := Parse([]byte(yaml)); err == nil {
-		t.Error("negative model-level max_context_tokens must be rejected at load, not silently clamped")
+		t.Error("models.<name>.max_context_tokens must be rejected as an unknown field — declare it in model_defaults instead")
 	}
 }
 
@@ -1030,39 +1021,19 @@ func TestProviderNameLegalCharsAccepted(t *testing.T) {
 	}
 }
 
-// --- VE4: validate model strategy names at load time ---
-
-// TestModelStrategyUnknownDimensionRejected pins the load-time strategy
-// check: a typo'd dimension name parses cleanly, but the snapshot-build
-// path (which used to be the only thing catching it) is bypassed by
-// `vmr check`'s no-network validate-only path, so a typo could silently
-// load and only surface when the snapshot builder trips. Now caught here.
-func TestModelStrategyUnknownDimensionRejected(t *testing.T) {
-	yaml := strings.Replace(validYAML, "    endpoints:", "    strategy: [prioity]\n    endpoints:", 1)
-	_, err := Parse([]byte(yaml))
-	if err == nil || !strings.Contains(err.Error(), `model "m1"`) || !strings.Contains(err.Error(), `"prioity"`) {
-		t.Fatalf("want error naming the model and the bad dimension, got %v", err)
-	}
-}
-
-// TestModelStrategyValidDimensionAccepted: explicit ["priority"] still
-// loads (it was the documented default, applied by applyDefaults when
-// unset; explicit declaration must round-trip identically).
-func TestModelStrategyValidDimensionAccepted(t *testing.T) {
+// TestModelStrategyFieldRejected pins that `models.<name>.strategy` is no
+// longer a valid field — priority is the only Dimension ever registered and
+// a second, traffic-splitting one was evaluated and rejected on principle
+// (docs/VirtualModelRouter_Design_v4_Strategy.md's "为什么是配速而不是负载均衡"
+// section), so there was never a real choice for this field to make;
+// router.BuildSnapshot now builds the fixed ["priority"] chain internally.
+// Strict YAML (KnownFields) turns a config still writing it into a load
+// error, matching the same migration pattern already pinned for capabilities/
+// max_context_tokens at this level.
+func TestModelStrategyFieldRejected(t *testing.T) {
 	yaml := strings.Replace(validYAML, "    endpoints:", "    strategy: [priority]\n    endpoints:", 1)
-	if _, err := Parse([]byte(yaml)); err != nil {
-		t.Fatalf("explicit strategy: [priority] should still validate: %v", err)
-	}
-}
-
-// TestModelStrategyUnsetInheritsDefault covers the spec's third
-// acceptance bullet — `m.strategy: []` (omitted) keeps the existing
-// default behavior. The existing TestParseDefaultsAndEnvExpansion already
-// pins this at the parsed-Struct level; this one is the
-// load-doesn't-error reading of the same fact.
-func TestModelStrategyUnsetInheritsDefault(t *testing.T) {
-	if _, err := Parse([]byte(validYAML)); err != nil {
-		t.Fatalf("default (omitted) strategy should keep validating: %v", err)
+	if _, err := Parse([]byte(yaml)); err == nil {
+		t.Error("models.<name>.strategy must be rejected as an unknown field")
 	}
 }
 
