@@ -336,7 +336,7 @@ func TestStatsJSONContract(t *testing.T) {
 	}}
 	resp.ByProviderModel = []livestats.ProviderRow{{
 		Provider: "p1", KeyLabel: "main", Model: "m1", OK: 5,
-		Tokens: livestats.TokenCounts{In: 100, Out: 60}, Last10: wb, Last100: wb,
+		Tokens: livestats.TokenCounts{In: 100, Out: 60},
 	}}
 	resp.ByKeyLabel = []livestats.DimensionRow{{Value: "main", OK: 5, Count: 5}}
 	resp.ByClientKeyTag = resp.ByKeyLabel
@@ -353,7 +353,7 @@ func TestStatsJSONContract(t *testing.T) {
 		`"toks_p50":`, `"toks_p10":`, `"n":43`, `"tokens":`,
 		`"key_label":`, `"overall":`, `"recent_requests":`, `"recent_errors":`,
 		`"attempt":2`, `"error_class":"upstream_5xx"`, `"status":502`,
-		`"value":`, `"counters":`, `"last_100":`,
+		`"value":`, `"counters":`,
 	} {
 		if !strings.Contains(js, key) {
 			t.Errorf("statsResponse JSON missing a key the dashboard reads: %s", key)

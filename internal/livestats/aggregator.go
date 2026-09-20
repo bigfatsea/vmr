@@ -9,8 +9,8 @@ import (
 )
 
 // Aggregator is the completion-time ledger (§3.4/§4): in-memory counters for
-// the current hour, the rollup history's memory image, the per-endpoint
-// performance rings, and the recent_errors ring — plus the current hour's
+// the current hour, the rollup history's memory image, the global
+// performance ring, and the recent_errors ring — plus the current hour's
 // slim file handle. One mutex covers all memory state and the file append
 // (§4.3: one lock per request, coarse by design); Record never blocks on
 // anything but that mutex and the file write.
@@ -23,7 +23,6 @@ type Aggregator struct {
 	lock       *os.File  // advisory dir lock (.vmr-stats.lock); held for the aggregator's lifetime
 	rollup     map[time.Time]map[dimsKey]Counters
 	cur        map[dimsKey]Counters
-	rings      map[ringKey]*ring
 	globalRing *globalRing
 
 	// recentErrs is the recent_errors ring (§8.1): the last recentErrCap
@@ -68,7 +67,6 @@ func NewAt(dir string, now func() time.Time) (*Aggregator, error) {
 		now:        now,
 		rollup:     make(map[time.Time]map[dimsKey]Counters),
 		cur:        make(map[dimsKey]Counters),
-		rings:      make(map[ringKey]*ring),
 		globalRing: &globalRing{},
 	}
 	if err := a.recover(now()); err != nil {
@@ -124,11 +122,10 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 
 	// Step 3: read the current hour's slim file if it exists, rebuilding
-	// current-hour counters and rings (per-key rings take the last ≤100 entries
-	// each, the global ring the last ≤300 across all keys).
+	// current-hour counters and global ring (the global ring keeps the last ≤300 across all keys).
 	slimFile := filepath.Join(a.dir, hourFileName(a.hour))
 	if f, err := os.Open(slimFile); err == nil {
-		rebuildCurrentHour(f, a.cur, a.rings, a.globalRing)
+		rebuildCurrentHour(f, a.cur, a.globalRing)
 		f.Close()
 	}
 
@@ -144,9 +141,8 @@ func (a *Aggregator) recover(now time.Time) error {
 }
 
 // rebuildCurrentHour feeds a current-hour slim's rows into the counter map
-// and the rings (rings naturally keep the last ≤100 entries per key, and the
-// global ring keeps the last ≤300 across all keys).
-func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]*ring, gr *globalRing) {
+// and the global ring (the global ring keeps the last ≤300 across all keys).
+func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, gr *globalRing) {
 	_ = readJSONL(f, func(line []byte) error {
 		var row slimRow
 		if json.Unmarshal(line, &row) != nil {
@@ -161,7 +157,6 @@ func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, rings map[ringKey]
 		c := cur[key]
 		c.addSample(s)
 		cur[key] = c
-		addRing(rings, s)
 		addGlobalRing(gr, s)
 		return nil
 	})
@@ -236,7 +231,6 @@ func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 	c := a.cur[key]
 	c.addSample(s)
 	a.cur[key] = c
-	addRing(a.rings, s)
 	addGlobalRing(a.globalRing, s)
 	a.recentErrs = bookRecentError(a.recentErrs, s)
 
@@ -286,7 +280,6 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 	c := a.rollup[hour][key]
 	c.addSample(s)
 	a.rollup[hour][key] = c
-	addRing(a.rings, s)
 	addGlobalRing(a.globalRing, s)
 	a.recentErrs = bookRecentError(a.recentErrs, s)
 
@@ -315,24 +308,6 @@ func bookRecentError(ring []Sample, s Sample) []Sample {
 		ring = ring[len(ring)-recentErrCap:]
 	}
 	return ring
-}
-
-// addRing applies the ring admission rule (§4.2): ok + forwarded + measured
-// TTFT only. Stream and non-stream samples share the same ring. Gates on
-// Forwarded explicitly, not on Provider=="" — a failed sample now carries
-// the terminal attempt's Provider/Model for grouping purposes, so Provider
-// alone no longer implies forwarded.
-func addRing(rings map[ringKey]*ring, s Sample) {
-	if s.Outcome != OutcomeOK || !s.Forwarded || s.TTFTMS == 0 {
-		return
-	}
-	k := ringKey{s.Provider, s.KeyLabel, s.Model}
-	r := rings[k]
-	if r == nil {
-		r = &ring{}
-		rings[k] = r
-	}
-	r.add(ringEntry{ts: s.TS, durMS: s.DurMS, ttftMS: s.TTFTMS, stream: s.Stream, tokens: s.Tokens})
 }
 
 // rollHourLocked closes the open hour: roll slim files older than newHour

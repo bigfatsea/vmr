@@ -107,7 +107,7 @@
 
   <!-- ============ performance ============ -->
   <div class="section-head" id="perf">Performance by Provider &amp; Model
-    <span class="count">Empty rows are hidden; all columns share one window, sized by Requests</span>
+    <span class="count">Empty rows are hidden; window selects the most recent requests across all endpoints</span>
     <span class="spacer"></span>
     <span class="seg">
       <span class="seg-label">window</span>
@@ -121,7 +121,7 @@
     <table class="c">
       <thead><tr>
         <th>Provider : Model</th>
-        <th class="num" title="Successful requests in the window. Fewer than the window size simply means this row has not served that many yet — the ring only keeps ok samples.">Requests</th>
+        <th class="num" title="Successful requests in the selected window, sorted descending. Endpoints with no requests in this window are hidden.">Requests</th>
         <th class="num" title="Total prompt tokens over the window (fresh + cache_write + cache_read), and what share of that was a cache hit">Tok in (hit %)</th>
         <th class="num" title="Output tokens over the window">Tok out</th>
         <th class="num" title="Time to first token — nearest-rank percentiles over the successful requests in the window">TTFT p50 / p90</th>
@@ -1222,6 +1222,7 @@ function updateRangeButtons() {
             lastStatsData = await resp.json();
             renderChart(currentRange, lastStatsData.hourly);
             renderUsage(lastStatsData.hourly, currentRange);
+            renderPerf(lastStatsData.recent_requests || [], perfBasis);
           }
         } catch (err) {
           consoleApi.setPaused(true);

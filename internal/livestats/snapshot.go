@@ -52,22 +52,19 @@ type RecentErrorRow struct {
 }
 
 // ProviderRow is the per-(provider, key_label, model) cumulative +
-// mean profile with the ring's recent window blocks. Stream and
-// non-stream samples merge into this single profile and share the ring.
+// mean profile. Stream and non-stream samples merge into this single profile.
 type ProviderRow struct {
-	Provider   string       `json:"provider"`
-	KeyLabel   string       `json:"key_label"`
-	Model      string       `json:"model"`
-	OK         int64        `json:"ok"`
-	Error      int64        `json:"error"`
-	Canceled   int64        `json:"canceled"`
-	Tokens     TokenCounts  `json:"tokens"`
-	DurMS      SumCount     `json:"dur_ms"`
-	TTFTMS     SumCount     `json:"ttft_ms"`
-	DurMSMean  float64      `json:"dur_ms_mean"`
-	TTFTMSMean float64      `json:"ttft_ms_mean"`
-	Last10     *WindowBlock `json:"last_10,omitempty"`
-	Last100    *WindowBlock `json:"last_100,omitempty"`
+	Provider   string      `json:"provider"`
+	KeyLabel   string      `json:"key_label"`
+	Model      string      `json:"model"`
+	OK         int64       `json:"ok"`
+	Error      int64       `json:"error"`
+	Canceled   int64       `json:"canceled"`
+	Tokens     TokenCounts `json:"tokens"`
+	DurMS      SumCount    `json:"dur_ms"`
+	TTFTMS     SumCount    `json:"ttft_ms"`
+	DurMSMean  float64     `json:"dur_ms_mean"`
+	TTFTMSMean float64     `json:"ttft_ms_mean"`
 }
 
 // DimensionRow is one group of a usage profile sliced along a single axis.
@@ -113,7 +110,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	// provider profile covers forwarded samples only (§4.2).
 	type axis map[string]*Counters
 	byTag, byLabel := axis{}, axis{}
-	prov := map[ringKey]*Counters{}
+	prov := map[provKey]*Counters{}
 
 	hourRows := map[string]*hourRow{}
 	fold := func(m map[dimsKey]Counters, hk time.Time) {
@@ -128,7 +125,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 			bookAxis(byTag, k.clientKeyTag, c)
 			bookAxis(byLabel, k.keyLabel, c)
 			if k.provider != "" {
-				kk := ringKey{k.provider, k.keyLabel, k.model}
+				kk := provKey{k.provider, k.keyLabel, k.model}
 				p := prov[kk]
 				if p == nil {
 					p = &Counters{}
@@ -144,7 +141,7 @@ func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	}
 	fold(a.cur, a.hour)
 
-	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.rings, a.globalRing, a.recentErrs, hourlyTail, a.now())
+	return assembleSnapshot(hourRows, byTag, byLabel, prov, a.globalRing, a.recentErrs, hourlyTail, a.now())
 }
 
 // bookAxis adds a group's request-face outcome counts and tokens to a
@@ -165,9 +162,9 @@ func bookAxis(m map[string]*Counters, v string, c Counters) {
 }
 
 // assembleSnapshot folds the hour rows into hourly/daily slices, builds the
-// provider rows with their recent window blocks, the overall block over the
-// union of all ring samples (contracts §1.3), and the recent_errors rows.
-func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[ringKey]*Counters, rings map[ringKey]*ring, gr *globalRing, recentErrs []Sample, hourlyTail int, now time.Time) Snapshot {
+// provider rows, the overall block over the global ring samples, and the
+// recent_errors rows.
+func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*Counters, prov map[provKey]*Counters, gr *globalRing, recentErrs []Sample, hourlyTail int, now time.Time) Snapshot {
 	// hourly[] keeps the most recent hourlyTail hours with data; daily[] the
 	// most recent dailyTail local-calendar-days. Both windows are derived from
 	// the full observed-hour set before either is truncated.
@@ -235,10 +232,10 @@ func assembleSnapshot(hourRows map[string]*hourRow, byTag, byLabel map[string]*C
 		}
 	}
 	snap.Daily = sortedDaily(daily)
-	snap.Overall = overallBlock(rings)
+	snap.Overall = overallBlock(gr)
 	snap.RecentRequests = gr.recent(globalRingCap)
 	snap.RecentErrors = recentErrorRows(recentErrs, now.Add(-24*time.Hour))
-	snap.ByProviderModel = buildProviderRows(prov, rings)
+	snap.ByProviderModel = buildProviderRows(prov)
 	snap.ByClientKeyTag = buildAxisRows(byTag)
 	snap.ByKeyLabel = buildAxisRows(byLabel)
 	// Sort hourly rows by time ascending (older first, newest at the end) so
@@ -286,20 +283,6 @@ func sortedDaily(m map[string]*HourlyRow) []HourlyRow {
 	return rows
 }
 
-// overallBlock merges the union of every ring's samples into one window
-// block (contracts §1.3): percentiles cannot be merged per key, so the
-// server computes the block over the raw union at read time.
-func overallBlock(rings map[ringKey]*ring) *WindowBlock {
-	var all []ringEntry
-	for _, r := range rings {
-		all = append(all, r.last(ringCap)...)
-	}
-	if len(all) == 0 {
-		return nil
-	}
-	return windowBlock(all)
-}
-
 // recentErrorRows maps the in-memory ring (append order, oldest last) to
 // its wire shape, newest first (contracts §1.4), filtering out any samples
 // older than cutoff.
@@ -320,21 +303,13 @@ func recentErrorRows(recentErrs []Sample, cutoff time.Time) []RecentErrorRow {
 	return rows
 }
 
-// buildProviderRows merges cumulative counters with each ring's recent
-// window blocks. A ring whose key has no counters left (rolled away, or
-// restarted into an empty current hour) still shows up, so the
-// recent-performance view never goes blind.
-func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []ProviderRow {
-	keys := make([]ringKey, 0, len(prov))
+// buildProviderRows converts the accumulated provider counters into sorted rows.
+func buildProviderRows(prov map[provKey]*Counters) []ProviderRow {
+	keys := make([]provKey, 0, len(prov))
 	for k := range prov {
 		keys = append(keys, k)
 	}
-	for k := range rings {
-		if _, ok := prov[k]; !ok {
-			keys = append(keys, k)
-		}
-	}
-	slices.SortFunc(keys, func(x, y ringKey) int {
+	slices.SortFunc(keys, func(x, y provKey) int {
 		if c := strings.Compare(x.provider, y.provider); c != 0 {
 			return c
 		}
@@ -355,10 +330,6 @@ func buildProviderRows(prov map[ringKey]*Counters, rings map[ringKey]*ring) []Pr
 			if c.TTFTMS.N > 0 {
 				row.TTFTMSMean = float64(c.TTFTMS.Sum) / float64(c.TTFTMS.N)
 			}
-		}
-		if r := rings[k]; r != nil && r.n > 0 {
-			row.Last10 = windowBlock(r.last(10))
-			row.Last100 = windowBlock(r.last(ringCap))
 		}
 		rows = append(rows, row)
 	}

@@ -389,25 +389,24 @@ function renderModels(modelsList, statsData) {
         : `<span class="pri ${ep.priority === 0 ? 'pri-0' : (ep.priority === 1 ? 'pri-1' : (ep.priority === 2 ? 'pri-2' : 'pri-n'))}">P${ep.priority}</span>`;
 
       const fullTitle = `${ep.provider} : ${ep.model}`;
-      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>`;
+      const concBadge = ep.concurrency > 0
+        ? `<span class="badge b-purple tight" title="Provider concurrency limit: ${ep.concurrency}${ep.concurrency_queue ? ', queue timeout: ' + esc(ep.concurrency_queue) : ''}">⚡ ${ep.concurrency}${ep.concurrency_queue ? `<span class="dim"> (${esc(ep.concurrency_queue)})</span>` : ''}</span>`
+        : '';
+      const epCell = `<span class="ep" title="${esc(fullTitle)}">${esc(ep.provider)} : ${modelSpan(ep.model)}</span>${concBadge ? ' ' + concBadge : ''}`;
 
-      // Per-endpoint facts — context window, capabilities, and concurrency
+      // Per-endpoint facts — context window and capabilities
       // are resolved per (provider, upstream model) against model_defaults
       // and providers configuration, so endpoints under one virtual model can
       // legitimately differ here.
       const ctxSize = ep.max_context_tokens > 0
         ? `<span class="badge b-dim tight">${fmtKMG(ep.max_context_tokens)}</span>`
         : '';
-      const concBadge = ep.concurrency > 0
-        ? `<span class="badge b-purple tight" title="Provider concurrency limit: ${ep.concurrency}${ep.concurrency_queue ? ', queue timeout: ' + esc(ep.concurrency_queue) : ''}">⚡ ${ep.concurrency}${ep.concurrency_queue ? `<span class="dim"> (${esc(ep.concurrency_queue)})</span>` : ''}</span>`
-        : '';
       const capsText = (ep.capabilities || []).map(c => esc(c)).join(' · ');
       const ctxParts = [];
-      if (concBadge) ctxParts.push(concBadge);
       if (ctxSize) ctxParts.push(ctxSize);
       if (capsText) ctxParts.push(`<span class="dim">${capsText}</span>`);
       const ctxCell = ctxParts.length > 0
-        ? `<span title="${esc(fullTitle)} concurrency / context window / capabilities">${ctxParts.join(' ')}</span>`
+        ? `<span title="${esc(fullTitle)} context window / capabilities">${ctxParts.join(' ')}</span>`
         : '<span class="dim">—</span>';
 
       const hr = ep.headroom;

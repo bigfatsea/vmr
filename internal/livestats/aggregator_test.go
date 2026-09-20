@@ -95,9 +95,12 @@ func TestAggregator_AttributionRules(t *testing.T) {
 	if pr.TTFTMS.N != 1 || pr.TTFTMS.Sum != 120 {
 		t.Errorf("expected TTFT N=1 Sum=120, got N=%d Sum=%d", pr.TTFTMS.N, pr.TTFTMS.Sum)
 	}
-	// Ring: only sample 3 should be in ring
-	if pr.Last10 == nil || pr.Last10.TTFTP50 != 120 {
-		t.Errorf("expected Last10 TTFT p50=120, got %v", pr.Last10)
+	// Global ring: only sample 3 should be in recent_requests
+	if len(snap.RecentRequests) != 1 || snap.RecentRequests[0].TTFTMS != 120 {
+		t.Errorf("expected 1 recent request with TTFTMS=120, got %+v", snap.RecentRequests)
+	}
+	if snap.Overall == nil || snap.Overall.TTFTP50 != 120 {
+		t.Errorf("expected Overall TTFT p50=120, got %v", snap.Overall)
 	}
 }
 
@@ -229,18 +232,21 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 
 	snap := agg.Snapshot(HourlyTailDefault)
 
-	// Ring must have recovered the last ≤100 samples (samples 21..120)
+	// Global ring must have recovered the 120 samples from hour 10
 	if len(snap.ByProviderModel) != 1 {
 		t.Fatalf("expected 1 provider row, got %d", len(snap.ByProviderModel))
 	}
 	pr := snap.ByProviderModel[0]
-	if pr.Last10 == nil || pr.Last100 == nil {
-		t.Fatalf("expected Last10 and Last100 to be populated")
+	if len(snap.RecentRequests) != 120 {
+		t.Fatalf("expected 120 recovered recent requests, got %d", len(snap.RecentRequests))
 	}
-	// For samples 21..120 (100 items), TTFT are 21..120.
-	// p50: ceil(0.50 * 100) = 50 -> element 50 (val 21 + 49 = 70)
-	if pr.Last100.TTFTP50 != 70 {
-		t.Errorf("expected Last100 TTFT p50=70, got %d", pr.Last100.TTFTP50)
+	if snap.Overall == nil {
+		t.Fatalf("expected Overall to be populated")
+	}
+	// For samples 1..120 (120 items), TTFT are 1..120.
+	// p50: ceil(0.50 * 120) = 60 -> element 60
+	if snap.Overall.TTFTP50 != 60 {
+		t.Errorf("expected Overall TTFT p50=60, got %d", snap.Overall.TTFTP50)
 	}
 
 	// ProviderRow reflects cumulative count (1 from h9 + 120 from h10 = 121)

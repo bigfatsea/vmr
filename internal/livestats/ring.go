@@ -3,62 +3,20 @@ package livestats
 import (
 	"math"
 	"slices"
-	"time"
 )
 
-type ringKey struct {
+type provKey struct {
 	provider, keyLabel, model string
 }
 
-// ring is a fixed-capacity circular buffer of raw per-request tuples
-// (design §3.4): percentiles and rates are computed at read time, so a
-// formula fix never requires data migration. Entries keep the four-way
-// token tally, not just the generated count — the window's usage total
-// needs all four components even though the toks rate only needs out.
-type ring struct {
-	buf  [ringCap]ringEntry
-	next int
-	n    int
-}
-
-type ringEntry struct {
-	ts     time.Time
-	durMS  int64
-	ttftMS int64
-	stream bool
-	tokens TokenCounts
-}
-
-func (r *ring) add(e ringEntry) {
-	r.buf[r.next] = e
-	r.next = (r.next + 1) % ringCap
-	if r.n < ringCap {
-		r.n++
-	}
-}
-
-// last returns the most recent k entries, oldest first; k beyond the fill
-// level returns everything there is.
-func (r *ring) last(k int) []ringEntry {
-	if k > r.n {
-		k = r.n
-	}
-	out := make([]ringEntry, k)
-	start := (r.next - k + ringCap) % ringCap
-	for i := range out {
-		out[i] = r.buf[(start+i)%ringCap]
-	}
-	return out
-}
-
-// windowBlock is the WindowBlock computation over a raw-entry window
+// windowBlock is the WindowBlock computation over a slice of RecentRequestEntry
 // (contracts §1.2): n is the window's actual entry count, tokens are the
 // four-way sums, ttft/toks percentiles are nearest-rank. ttft_ms==0 is
 // "unmeasured" and stays out of the ttft pools (design §4.2); a sample
 // with zero output tokens or a non-positive generation span stays out of
 // the toks pool (design §8: one throughput caliber, tokens.out over the
 // generation-only span).
-func windowBlock(entries []ringEntry) *WindowBlock {
+func windowBlock(entries []RecentRequestEntry) *WindowBlock {
 	wb := &WindowBlock{N: int64(len(entries))}
 	if len(entries) == 0 {
 		return wb
@@ -66,9 +24,9 @@ func windowBlock(entries []ringEntry) *WindowBlock {
 	ttfts := make([]int64, 0, len(entries))
 	toks := make([]float64, 0, len(entries))
 	for _, e := range entries {
-		wb.Tokens.add(e.tokens)
-		if e.ttftMS != 0 {
-			ttfts = append(ttfts, e.ttftMS)
+		wb.Tokens.add(e.Tokens)
+		if e.TTFTMS != 0 {
+			ttfts = append(ttfts, e.TTFTMS)
 		}
 		if v := toksOf(e); v > 0 {
 			toks = append(toks, v)
@@ -107,18 +65,26 @@ const minToksSpanMS = 50
 // prefill phase — the full dur_ms is the honest span. Zero-output,
 // non-positive-span, or sub-minToksSpanMS samples yield 0 and drop out of
 // the percentile population.
-func toksOf(e ringEntry) float64 {
-	if e.tokens.Out <= 0 || e.durMS <= 0 {
+func toksOf(e RecentRequestEntry) float64 {
+	if e.Tokens.Out <= 0 || e.DurMS <= 0 {
 		return 0
 	}
-	spanMS := e.durMS
-	if e.stream && e.ttftMS > 0 && e.durMS > e.ttftMS {
-		spanMS = e.durMS - e.ttftMS
+	spanMS := e.DurMS
+	if e.Stream && e.TTFTMS > 0 && e.DurMS > e.TTFTMS {
+		spanMS = e.DurMS - e.TTFTMS
 	}
 	if spanMS < minToksSpanMS {
 		return 0
 	}
-	return float64(e.tokens.Out) / (float64(spanMS) / 1000)
+	return float64(e.Tokens.Out) / (float64(spanMS) / 1000)
+}
+
+// overallBlock computes the WindowBlock across the global ring's retained samples.
+func overallBlock(gr *globalRing) *WindowBlock {
+	if gr == nil || gr.n == 0 {
+		return nil
+	}
+	return windowBlock(gr.recent(globalRingCap))
 }
 
 // nearestRank{Int,Float} are the nearest-rank percentile over a pre-sorted

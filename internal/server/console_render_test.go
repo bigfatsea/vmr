@@ -415,7 +415,6 @@ func statsFixture(now time.Time) map[string]any {
 				"ok": 42, "error": 2, "canceled": 1, "tokens": counters["tokens"],
 				"dur_ms": map[string]any{"sum": 45000, "n": 45}, "ttft_ms": map[string]any{"sum": 14000, "n": 45},
 				"dur_ms_mean": 1000, "ttft_ms_mean": 311,
-				"last_10": windowBlock, "last_100": windowBlock,
 			},
 		},
 		"by_client_key_tag": []map[string]any{

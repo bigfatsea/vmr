@@ -161,33 +161,26 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 	if r.OK != 20 {
 		t.Errorf("OK count = %d, want 20", r.OK)
 	}
-	if r.Last10 == nil || r.Last100 == nil {
-		t.Fatalf("Last10 or Last100 nil")
+	if len(snap.RecentRequests) != 20 {
+		t.Fatalf("RecentRequests len = %d, want 20", len(snap.RecentRequests))
 	}
-	if r.Last10.N != 10 {
-		t.Errorf("Last10 n = %d, want 10", r.Last10.N)
+	if snap.Overall == nil || snap.Overall.N != 20 {
+		t.Fatalf("Overall n = %v, want 20", snap.Overall)
 	}
-	if r.Last100.N != 20 {
-		t.Errorf("Last100 n = %d, want 20 (both modes shared ring)", r.Last100.N)
+	if math.Abs(snap.Overall.ToksP50-12.5) > 1e-4 {
+		t.Errorf("toks p50 = %f, want 12.5", snap.Overall.ToksP50)
 	}
-	// Last10 = the 5 most recent stream + 5 most recent non-stream samples,
-	// interleaved by insertion order: pool = {12.5×5, 16.667×5} sorted,
-	// p50 = ceil(0.5×10) = 5th element = 12.5 (still inside the low block).
-	if math.Abs(r.Last10.ToksP50-12.5) > 1e-4 {
-		t.Errorf("toks p50 = %f, want 12.5", r.Last10.ToksP50)
+	if snap.Overall.TTFTP50 != 1000 {
+		t.Errorf("ttft p50 = %d, want 1000", snap.Overall.TTFTP50)
 	}
-	if r.Last10.TTFTP50 != 1000 {
-		t.Errorf("ttft p50 = %d, want 1000", r.Last10.TTFTP50)
-	}
-	if r.Last100.Tokens.In != 2000 || r.Last100.Tokens.Out != 1000 {
-		t.Errorf("window token sums wrong: %+v", r.Last100.Tokens)
+	if snap.Overall.Tokens.In != 2000 || snap.Overall.Tokens.Out != 1000 {
+		t.Errorf("window token sums wrong: %+v", snap.Overall.Tokens)
 	}
 }
 
-// TestSnapshot_OverallMatchesSingleRingLast100 pins the contracts §1.3
-// invariant: with exactly one ring key, overall must agree numerically with
-// that key's last_100 — the union is then just that ring's window.
-func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
+// TestSnapshot_OverallFromGlobalRing pins the contracts §1.3 invariant:
+// overall must agree numerically with windowBlock over recent_requests.
+func TestSnapshot_OverallFromGlobalRing(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local)
 	agg, err := NewAt(dir, func() time.Time { return now })
@@ -221,23 +214,23 @@ func TestSnapshot_OverallMatchesSingleRingLast100(t *testing.T) {
 	if snap.Overall == nil {
 		t.Fatal("overall block missing with ring data present")
 	}
-	last100 := snap.ByProviderModel[0].Last100
-	if last100 == nil {
-		t.Fatal("last_100 block missing")
+	if len(snap.RecentRequests) != 12 {
+		t.Fatalf("recent requests len = %d, want 12", len(snap.RecentRequests))
 	}
-	if snap.Overall.N != last100.N {
-		t.Errorf("overall n = %d, want last_100 n %d", snap.Overall.N, last100.N)
+	expected := windowBlock(snap.RecentRequests)
+	if snap.Overall.N != expected.N {
+		t.Errorf("overall n = %d, want %d", snap.Overall.N, expected.N)
 	}
-	if snap.Overall.Tokens != last100.Tokens {
-		t.Errorf("overall tokens %+v, want %+v", snap.Overall.Tokens, last100.Tokens)
+	if snap.Overall.Tokens != expected.Tokens {
+		t.Errorf("overall tokens %+v, want %+v", snap.Overall.Tokens, expected.Tokens)
 	}
-	if snap.Overall.TTFTP50 != last100.TTFTP50 || snap.Overall.TTFTP90 != last100.TTFTP90 {
+	if snap.Overall.TTFTP50 != expected.TTFTP50 || snap.Overall.TTFTP90 != expected.TTFTP90 {
 		t.Errorf("overall ttft p50/p90 = %d/%d, want %d/%d",
-			snap.Overall.TTFTP50, snap.Overall.TTFTP90, last100.TTFTP50, last100.TTFTP90)
+			snap.Overall.TTFTP50, snap.Overall.TTFTP90, expected.TTFTP50, expected.TTFTP90)
 	}
-	if snap.Overall.ToksP50 != last100.ToksP50 || snap.Overall.ToksP10 != last100.ToksP10 {
+	if snap.Overall.ToksP50 != expected.ToksP50 || snap.Overall.ToksP10 != expected.ToksP10 {
 		t.Errorf("overall toks p50/p10 = %f/%f, want %f/%f",
-			snap.Overall.ToksP50, snap.Overall.ToksP10, last100.ToksP50, last100.ToksP10)
+			snap.Overall.ToksP50, snap.Overall.ToksP10, expected.ToksP50, expected.ToksP10)
 	}
 }
 

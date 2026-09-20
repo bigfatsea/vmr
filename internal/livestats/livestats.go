@@ -13,11 +13,6 @@ const (
 	OutcomeCanceled = "canceled"
 )
 
-// ringCap is the per-(provider, key_label, model) latency-window
-// capacity: last_100 with no room to spare (design §3.4). Stream and
-// non-stream samples share this one ring.
-const ringCap = 100
-
 // globalRingCap is the cross-endpoint latency window capacity: last 300
 // completed ok requests across all providers and models.
 const globalRingCap = 300
@@ -127,9 +122,9 @@ type RecentRequestEntry struct {
 // request never reached an attempt at all (client-side rejection or
 // no-candidate). Forwarded is the separate, authoritative gate for
 // service-quality aggregation: only a forwarded sample's tokens/dur/ttft
-// feed Counters' sums or the performance ring (design §4.2) — Provider
+// feed Counters' sums or the global performance ring (design §4.2) — Provider
 // being non-empty no longer implies Forwarded. TTFTMS 0 means unmeasured
-// and is excluded from ttft sums and the ring. ErrorClass/Status/Attempt
+// and is excluded from ttft sums and the global ring. ErrorClass/Status/Attempt
 // feed only the recent_errors ring (contracts §1.6) — memory-only,
 // slim/rollup never carry them; ErrorClass/Status quote the terminal
 // attempt verbatim.
