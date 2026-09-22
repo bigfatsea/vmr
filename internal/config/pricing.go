@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Sonnet 5
+// Ver 2026-09-23 01:50, by GLM-4.7
 
 // Pricing — YAML-shape config types and their validation/resolution.
 // providers[].pricing is the ONLY place pricing is configured: no top-level
@@ -7,6 +7,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,57 +37,25 @@ type ProviderPricingConfig struct {
 	Rates []PricingOverrideConfig `yaml:"rates"`
 }
 
-// UnmarshalYAML implements the legacy `map`/`overrides` rename shim
-// promised by the pricing-architecture simplification plan (§7.2): any
-// config still written in the pre-2026-09 field names converts to the new
-// ones here, so a migrated user doesn't have to hand-edit the field names
-// just to load the file. Strict rejection of anything else is preserved —
-// the per-key switch below is the allow-list, and any key not on it is a
-// load-time error (a misspelled `alises:` still fails, same as the rest of
-// the strict-YAML Config decode). Dual-write (both old and new set for the
-// same meaning) is rejected as ambiguous — the same shape the plan's
-// normalize() sketch specified.
-func (p *ProviderPricingConfig) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("providers[].pricing: expected a mapping node, got kind %d", node.Kind)
+// legacyPricingKeyHint appends a targeted rename hint when the strict-YAML
+// decode error names a pre-2026-09 providers[].pricing key — the same
+// targeted-fix pattern unknownProtocolHint uses for renamed protocol enum
+// values. The old keys are deliberately NOT accepted (config is strict
+// YAML); this only makes the load error say what to rename them to, instead
+// of the generic "field X not found" message. Empty string for any other
+// decode error.
+func legacyPricingKeyHint(err error) string {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return ""
 	}
-	allowed := map[string]bool{
-		"currency": true, "aliases": true, "rates": true,
-		"map": true, "overrides": true,
-	}
-	type newShape struct {
-		Currency string                  `yaml:"currency"`
-		Aliases  map[string]string       `yaml:"aliases"`
-		Rates    []PricingOverrideConfig `yaml:"rates"`
-		MapOld   map[string]string       `yaml:"map"`
-		OldOver  []PricingOverrideConfig `yaml:"overrides"`
-	}
-	var raw newShape
-	if err := node.Decode(&raw); err != nil {
-		return err
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := node.Content[i].Value
-		if !allowed[key] {
-			return fmt.Errorf("providers[].pricing: unknown field %q (allowed: currency, aliases, rates, map, overrides — only the last two are the legacy aliases for `aliases` and `rates` respectively, see docs/VirtualModelRouter_Design_v4_Quota.md's pricing section)", key)
+	for _, e := range te.Errors {
+		if strings.Contains(e, "config.ProviderPricingConfig") &&
+			(strings.Contains(e, "field map not found") || strings.Contains(e, "field overrides not found")) {
+			return " — providers[].pricing: renamed map → aliases, overrides → rates"
 		}
 	}
-	if len(raw.MapOld) > 0 && len(raw.Aliases) > 0 {
-		return fmt.Errorf("providers[].pricing: cannot configure both `map` (legacy) and `aliases` (current) — drop one of the two")
-	}
-	if len(raw.OldOver) > 0 && len(raw.Rates) > 0 {
-		return fmt.Errorf("providers[].pricing: cannot configure both `overrides` (legacy) and `rates` (current) — drop one of the two")
-	}
-	p.Currency = raw.Currency
-	p.Aliases = raw.Aliases
-	p.Rates = raw.Rates
-	if len(raw.MapOld) > 0 {
-		p.Aliases = raw.MapOld
-	}
-	if len(raw.OldOver) > 0 {
-		p.Rates = raw.OldOver
-	}
-	return nil
+	return ""
 }
 
 // PricingOverrideConfig is one providers[].pricing.rates entry, as written

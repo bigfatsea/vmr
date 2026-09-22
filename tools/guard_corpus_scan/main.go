@@ -1,4 +1,4 @@
-// Ver 2026-09-14, by Sonnet 5 & Claude
+// Ver 2026-09-23 01:50, by GLM-4.7
 
 // guard_corpus_scan is Agent Guard's M0.1 calibration and corpus analysis tool
 // (the Agent Guard spec): it reproduces the spec's
@@ -10,6 +10,11 @@
 //	go run ./tools/guard_corpus_scan
 //	go run ./tools/guard_corpus_scan -deep reports/guard-corpus-deep-analysis.json
 //	go run ./tools/guard_corpus_scan -samples /tmp/samples.json -top 20
+//
+// -deep is opt-in (default empty = baseline aggregate only): the deep mode
+// emits forensic previews of candidate credentials and its tool-call
+// extraction covers only a slice of streaming corpora, so it must be a
+// deliberate choice, not something every run sweeps in.
 //
 // What it does NOT do, on purpose: it never writes raw sensitive credential
 // values into committed output files (-out).
@@ -30,6 +35,7 @@ import (
 	"unicode/utf8"
 
 	"vmr/internal/audit"
+	"vmr/internal/chatmsg"
 	"vmr/internal/core"
 	"vmr/internal/guard"
 )
@@ -255,7 +261,7 @@ type toolStatAcc struct {
 func main() {
 	dir := flag.String("dir", "logs", "root directory to scan recursively for vmr-audit-*.jsonl[.zst] files")
 	out := flag.String("out", "internal/guard/testdata/corpus_scan.json", "baseline aggregate output path (safe to commit)")
-	deep := flag.String("deep", "reports/guard-corpus-deep-analysis.json", "optional deep analysis JSON output path (default under reports/ — the forensic previews it carries must never sit in a docs/ dir a careless git add -A could sweep in)")
+	deep := flag.String("deep", "", "optional deep analysis JSON output path; empty (the default) skips deep analysis entirely — when set, prefer a reports/ path (the forensic previews it carries must never sit in a docs/ dir a careless git add -A could sweep in)")
 	samples := flag.String("samples", "", "optional path for a redacted, human-review-only top-N sample file")
 	top := flag.Int("top", 50, "how many top-by-frequency values per rule to include in samples/deep output")
 	workers := flag.Int("workers", runtime.NumCPU(), "number of worker goroutines for concurrent scanning")
@@ -659,6 +665,19 @@ func scanToolCalls(respBytes []byte, provider, model string, ts time.Time, reqSe
 			if blk.Type == "tool_use" {
 				hasTool = true
 				handleSingleToolCall(blk.Name, string(blk.Input), provider, model, ts, known, st)
+			}
+		}
+	}
+
+	// A streaming response body is stored as a JSON string of raw SSE text,
+	// which neither object form above can see — reassemble it through
+	// chatmsg (the one shared SSE parser) before extracting tool calls.
+	var sseBody string
+	if err := json.Unmarshal(respBytes, &sseBody); err == nil {
+		if ss := chatmsg.ReassembleSSE(sseBody); ss != nil {
+			for _, tc := range ss.ToolCalls {
+				hasTool = true
+				handleSingleToolCall(tc.Name, tc.Args, provider, model, ts, known, st)
 			}
 		}
 	}

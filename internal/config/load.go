@@ -1,4 +1,4 @@
-// Ver 2026-08-31, by Opus 5
+// Ver 2026-09-23 01:50, by GLM-4.7
 
 // Config loading entry points: bytes -> expanded -> parsed -> defaulted ->
 // validated. Split out of config.go purely for that file's line budget (see
@@ -39,7 +39,7 @@ func parse(raw []byte) (*Config, error) {
 	dec := yaml.NewDecoder(strings.NewReader(expanded))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && err != io.EOF { // io.EOF = empty file; validate reports "no providers" below
-		return nil, fmt.Errorf("parse yaml: %w", err)
+		return nil, fmt.Errorf("parse yaml: %w%s", err, legacyPricingKeyHint(err))
 	}
 	if err := cfg.expandProviderAPIKeys(); err != nil {
 		return nil, err
