@@ -28,7 +28,7 @@ func ID(chain []*ctxgraph.Lineage) string { return deriveID(chain) }
 // The result is keyed by each chain's TAIL lineage (chain's last
 // element) — the same pointer ListCandidates returned and callers already
 // use as the candidate's identity.
-func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (map[*ctxgraph.Lineage]string, error) {
+func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile) (map[*ctxgraph.Lineage]string, error) {
 	if prof == nil {
 		return nil, errNilProfile
 	}
@@ -44,19 +44,18 @@ func PreviewTitles(chains [][]*ctxgraph.Lineage, prof taskseg.Profile, lang i18n
 	out := make(map[*ctxgraph.Lineage]string, len(chains))
 	for i, chain := range chains {
 		tail := chain[len(chain)-1]
-		out[tail] = titleFromRecord(recs[locs[i]], prof, lang)
+		out[tail] = titleFromRecord(recs[locs[i]], prof)
 	}
 	return out, nil
 }
 
-func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) string {
-	st := i18n.Journey(lang)
+func titleFromRecord(rec *audit.Record, prof taskseg.Profile) string {
 	if rec == nil {
-		return st.UnreadableTitle
+		return i18n.JourneyUnreadableTitle
 	}
 	body, ok := rec.Client.Request.Body.(map[string]any)
 	if !ok {
-		return st.NoTitle
+		return i18n.JourneyNoTitle
 	}
 	msgs := chatmsg.Messages(body)
 	rawMsgs := chatmsg.RawArray(body)
@@ -65,5 +64,5 @@ func titleFromRecord(rec *audit.Record, prof taskseg.Profile, lang i18n.Lang) st
 	if t := taskseg.FirstInstruction(ru); t != "" {
 		return t
 	}
-	return st.NoTitle
+	return i18n.JourneyNoTitle
 }

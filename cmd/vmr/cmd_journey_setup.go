@@ -84,7 +84,7 @@ func setupJourneyRun(paths []string, outDir string, includeSelfTraffic bool, llm
 	for i, l := range cands {
 		chains[i] = ctxgraph.ChainFrom(l, byIdx)
 	}
-	titles, err := journey.PreviewTitles(chains, prof, lang)
+	titles, err := journey.PreviewTitles(chains, prof)
 	if err != nil {
 		return nil, err
 	}

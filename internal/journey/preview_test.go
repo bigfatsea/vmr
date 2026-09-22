@@ -8,7 +8,6 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
-	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
 
@@ -37,7 +36,7 @@ func TestIDMatchesDeriveID(t *testing.T) {
 // this matters more than a nicer error message (titleFromRecord would
 // otherwise panic on prof.RealUserText).
 func TestPreviewTitles_NilProfileErrors(t *testing.T) {
-	if _, err := PreviewTitles([][]*ctxgraph.Lineage{{{}}}, nil, i18n.EN); err == nil {
+	if _, err := PreviewTitles([][]*ctxgraph.Lineage{{{}}}, nil); err == nil {
 		t.Error("PreviewTitles with a nil Profile should return an error, not panic")
 	}
 }
@@ -56,7 +55,7 @@ func TestPreviewTitles_ReturnsRealOpeningInstruction(t *testing.T) {
 	l := onlyLineage(t, path)
 	chain := []*ctxgraph.Lineage{l}
 
-	batched, err := PreviewTitles([][]*ctxgraph.Lineage{chain}, taskseg.OpenClawAware, i18n.EN)
+	batched, err := PreviewTitles([][]*ctxgraph.Lineage{chain}, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatalf("PreviewTitles: %v", err)
 	}
@@ -69,11 +68,11 @@ func TestPreviewTitles_ReturnsRealOpeningInstruction(t *testing.T) {
 // paths: a nil record (FetchRecords couldn't resolve the location) and a
 // record whose body has no real user instruction at all.
 func TestTitleFromRecordFallbacks(t *testing.T) {
-	if got := titleFromRecord(nil, taskseg.Generic, i18n.EN); got != "(unreadable)" {
+	if got := titleFromRecord(nil, taskseg.Generic); got != "(unreadable)" {
 		t.Errorf("titleFromRecord(nil) = %q, want (unreadable)", got)
 	}
 	rec := mkRec(time.Now(), "", []any{msg("system", "sys only")}, sseText("ok"))
-	if got := titleFromRecord(&rec, taskseg.Generic, i18n.EN); got != "(untitled)" {
+	if got := titleFromRecord(&rec, taskseg.Generic); got != "(untitled)" {
 		t.Errorf("titleFromRecord(no real user msg) = %q, want (untitled)", got)
 	}
 }

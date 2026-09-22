@@ -36,7 +36,7 @@ type TaskCluster struct {
 
 // ComputeTaskClusters groups JourneyIndexRow items by instruction similarity.
 // Heartbeat and noise tasks are excluded. Minimum similarity threshold is 0.45.
-func ComputeTaskClusters(rows []JourneyIndexRow, lang i18n.Lang) []TaskCluster {
+func ComputeTaskClusters(rows []JourneyIndexRow) []TaskCluster {
 	if len(rows) < 2 {
 		return nil
 	}
@@ -107,7 +107,7 @@ func ComputeTaskClusters(rows []JourneyIndexRow, lang i18n.Lang) []TaskCluster {
 			cheapest, fastest := clusterExtremes(members)
 			anchorTitle := cleanAnchorTitle(group[0].row.Title)
 			if anchorTitle == "" {
-				anchorTitle = i18n.Journey(lang).NoTitle
+				anchorTitle = i18n.JourneyNoTitle
 			}
 			clusters = append(clusters, TaskCluster{
 				AnchorTitle: anchorTitle,

@@ -402,6 +402,11 @@ func warnRecordUnreadable(journeyID string, m *ctxgraph.Manifest) {
 		journeyID, ctxgraph.CanonicalPath(m.Path), m.Line)
 }
 
+// lang is accepted for signature symmetry with BuildChain/BuildAll's public
+// contract but unused in the body: its one-time use was feeding the
+// fallback-title placeholders, now frozen to English (i18n.JourneyNoTitle
+// etc.) rather than following -lang — see internal/i18n's journey_render.go
+// package doc.
 func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgraph.Loc]*audit.Record, lang i18n.Lang) (*Journey, error) {
 	head, tail := chain[0], chain[len(chain)-1]
 	j := &Journey{
@@ -503,9 +508,9 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 			if newTask || curTask == nil {
 				var title string
 				if atStitchBoundary {
-					title, humanInitiated = titleAtStitchBoundary(ru, m, msgs, rawMsgs, off, seen, stitchEdge, lang)
+					title, humanInitiated = titleAtStitchBoundary(ru, m, msgs, rawMsgs, off, seen, stitchEdge)
 				} else {
-					title = taskseg.TaskTitle(taskseg.LastInstruction(ru, deltaStart), i18n.Journey(lang).ToolLoopTitle)
+					title = taskseg.TaskTitle(taskseg.LastInstruction(ru, deltaStart), i18n.JourneyToolLoopTitle)
 				}
 				curTask = &Task{Title: title}
 				j.Tasks = append(j.Tasks, curTask)
@@ -520,7 +525,7 @@ func buildFrom(chain []*ctxgraph.Lineage, prof taskseg.Profile, recs map[ctxgrap
 		}
 	}
 
-	j.Title = deriveTitle(firstRu, j.Tasks, lang)
+	j.Title = deriveTitle(firstRu, j.Tasks)
 	return j, nil
 }
 
@@ -571,8 +576,8 @@ func appendNewEvents(j *Journey, step *Step, m *ctxgraph.Manifest, msgs []chatms
 // genuine new user instruction right there — toolLoopTitle would otherwise
 // claim this is "just a tool loop continuing", which understates what
 // actually happened (a structural context break was bridged).
-func stitchTaskTitle(e *ctxgraph.StitchEdge, lang i18n.Lang) string {
-	return i18n.Journey(lang).StitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
+func stitchTaskTitle(e *ctxgraph.StitchEdge) string {
+	return i18n.JourneyStitchedTaskTitle(e.Kind.String(), pctStr(e.Score))
 }
 
 // extractEntities moved to chatmsg.ExtractEntities: internal/report needed
@@ -768,9 +773,9 @@ func newInstructionTitleAtStitch(ru taskseg.RealUsers, m *ctxgraph.Manifest, msg
 // more specific wording when there's no such instruction is more
 // informative than the generic tool-loop placeholder — a bridged structural
 // break is worth calling out on its own.
-func titleAtStitchBoundary(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event, stitchEdge *ctxgraph.StitchEdge, lang i18n.Lang) (title string, humanInitiated bool) {
+func titleAtStitchBoundary(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, seen map[ctxgraph.Hash]*Event, stitchEdge *ctxgraph.StitchEdge) (title string, humanInitiated bool) {
 	newInstr := newInstructionTitleAtStitch(ru, m, msgs, rawMsgs, off, seen)
-	title = taskseg.TaskTitle(newInstr, stitchTaskTitle(stitchEdge, lang))
+	title = taskseg.TaskTitle(newInstr, stitchTaskTitle(stitchEdge))
 	return title, newInstr != ""
 }
 
@@ -779,17 +784,16 @@ func titleAtStitchBoundary(ru taskseg.RealUsers, m *ctxgraph.Manifest, msgs []ch
 // already built by buildFrom's single per-step IndexRealUsers call, not
 // re-parsed here — falling back to the first task with a real title, then
 // a placeholder.
-func deriveTitle(firstRu taskseg.RealUsers, tasks []*Task, lang i18n.Lang) string {
+func deriveTitle(firstRu taskseg.RealUsers, tasks []*Task) string {
 	if t := taskseg.FirstInstruction(firstRu); t != "" {
 		return t
 	}
-	st := i18n.Journey(lang)
 	for _, t := range tasks {
-		if t.Title != "" && t.Title != st.ToolLoopTitle {
+		if t.Title != "" && t.Title != i18n.JourneyToolLoopTitle {
 			return t.Title
 		}
 	}
-	return st.NoTitle
+	return i18n.JourneyNoTitle
 }
 
 // sortByRootThenTime orders lineages deterministically for listing: by

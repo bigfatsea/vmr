@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-22 02:40, by Sonnet 5
 
 // Pairs with internal/journey/findings.go — the rule-derived, Step-level
 // "suspect list" findings (design doc's "候选/嫌疑清单，不是判决").
@@ -7,7 +7,7 @@
 // (journey.FindingCode) is the stable identifier and never varies by language.
 package i18n
 
-import "strconv"
+import "fmt"
 
 // JourneyFindingText is one Step-level finding's localized parts — mirrors
 // report's FindingText but without a Metric field (a journey Finding is
@@ -40,206 +40,270 @@ type JourneyFindingsText struct {
 	LLMConstraintDropped        func(anchor string) JourneyFindingText
 }
 
+// journeyFindingsRow holds this file's literal templates, one row per Lang
+// (Table's own doc comment). No detector here has internal branching — every
+// field is pure interpolation, so unlike report_efficiency.go/report_doc.go
+// there is no shared-logic closure to write; JourneyFindings below just
+// plugs each row's templates into fmt.Sprintf.
+type journeyFindingsRow struct {
+	exactRepeatFindingFmt  string
+	exactRepeatEvidenceFmt string
+	exactRepeatAction      string
+
+	narrationFindingFmt  string
+	narrationEvidenceFmt string
+	narrationAction      string
+
+	unverifiedSuccessFindingFmt  string
+	unverifiedSuccessEvidenceFmt string
+	unverifiedSuccessAction      string
+
+	reasoningMismatchFindingFmt  string
+	reasoningMismatchEvidenceFmt string
+	reasoningMismatchAction      string
+
+	planMisalignmentFindingFmt  string
+	planMisalignmentEvidenceFmt string
+	planMisalignmentAction      string
+
+	unadaptedRetryFindingFmt  string
+	unadaptedRetryEvidenceFmt string
+	unadaptedRetryAction      string
+
+	unusedResultFindingFmt  string
+	unusedResultEvidenceFmt string
+	unusedResultAction      string
+
+	unverifiedEntityFindingFmt  string
+	unverifiedEntityEvidenceFmt string
+	unverifiedEntityAction      string
+
+	constraintDroppedFindingFmt  string
+	constraintDroppedEvidenceFmt string
+	constraintDroppedAction      string
+
+	toolMisinterpretationFindingFmt string
+	toolMisinterpretationAction     string
+
+	semanticOscillationFindingFmt string
+	semanticOscillationAction     string
+
+	goalDriftFindingFmt string
+	goalDriftAction     string
+
+	unverifiedCompletionFinding string
+	unverifiedCompletionAction  string
+
+	llmConstraintDroppedFindingFmt string
+	llmConstraintDroppedAction     string
+}
+
+var journeyFindingsRows = Table[journeyFindingsRow]{
+	EN: {
+		exactRepeatFindingFmt:  "Suspected exact-repeat loop: %s called with identical arguments %d times",
+		exactRepeatEvidenceFmt: "tool %s, %d calls with byte-identical arguments",
+		exactRepeatAction:      "Manually review whether these calls are spinning in place rather than making real progress each time",
+
+		narrationFindingFmt:  "Suspected \"narration without action\": %d consecutive text-only turns with no tool call and highly similar content",
+		narrationEvidenceFmt: "%d consecutive Steps carried no tool_call",
+		narrationAction:      "Manually review whether the agent is stuck restating intent without ever acting on it",
+
+		unverifiedSuccessFindingFmt:  "Suspected silent success claim: an error marker appeared at Step %d, and the task ended without any verification-looking call afterward",
+		unverifiedSuccessEvidenceFmt: "error marker at Step %d; no call resembling verification/confirmation seen between there and task end",
+		unverifiedSuccessAction:      "Manually confirm the task actually completed, rather than the agent having assumed an optimistic outcome",
+
+		reasoningMismatchFindingFmt:  "Suspected reasoning-action mismatch: %s mentioned in the reasoning text does not appear in this turn's actual tool-call arguments",
+		reasoningMismatchEvidenceFmt: "entities referenced in reasoning text: %s",
+		reasoningMismatchAction:      "Manually verify this call's actual target matches what the reasoning described",
+
+		planMisalignmentFindingFmt:  "Suspected plan-execution misalignment: of the %d plan items listed at the start of this turn, %d have no matching trace in the steps that followed",
+		planMisalignmentEvidenceFmt: "%d/%d plan items had no later reference (string/entity matching only — not proof they were truly skipped semantically)",
+		planMisalignmentAction:      "Manually check whether these plan items were skipped, replaced, or just referenced with different wording",
+
+		unadaptedRetryFindingFmt:  "Suspected unadapted retry: after %s errored, the very next same-tool call repeated its arguments verbatim",
+		unadaptedRetryEvidenceFmt: "after %s's result errored, the next call to the same tool used byte-identical arguments",
+		unadaptedRetryAction:      "Manually confirm whether this is genuinely spinning in place, or an adjustment was made that just didn't show up in the arguments",
+
+		unusedResultFindingFmt:  "Suspected unused tool result: %s mentioned in the result was never referenced again in any later step",
+		unusedResultEvidenceFmt: "entities in the tool result: %s",
+		unusedResultAction:      "Manually confirm this result truly had no bearing on later decisions, rather than being referenced under different wording",
+
+		unverifiedEntityFindingFmt:  "Suspected reference to a falsified entity: a tool result reported %s as missing/not found, but a later step still refers to it",
+		unverifiedEntityEvidenceFmt: "falsified entities: %s (identified only from a literal ENOENT/404/not-found marker — not a confirmed hallucination)",
+		unverifiedEntityAction:      "Manually confirm the later reference isn't relying on a stale assumption instead of a re-verified result",
+
+		constraintDroppedFindingFmt:  "Suspected constraint text dropped at compaction: %d entities present before the boundary (e.g. %s) are gone from the post-compaction content",
+		constraintDroppedEvidenceFmt: "entities present before compaction, absent after: %s (an unverified, hypothesis-level check — it only names the pattern, it hasn't confirmed real impact)",
+		constraintDroppedAction:      "Manually confirm whether the constraints/context these entities represent still matter and should be re-stated in a later turn",
+
+		toolMisinterpretationFindingFmt: "Suspected tool result misinterpretation: %s returned an error or negative result, but subsequent reasoning claimed success",
+		toolMisinterpretationAction:     "Manually verify whether the model developed hallucinated optimism upon tool failure and proceeded erroneously",
+
+		semanticOscillationFindingFmt: "Suspected semantic oscillation: %s called repeatedly with slight argument variations yielding no real progress",
+		semanticOscillationAction:     "Manually review whether the tool invocation is stuck in a futile retry loop; prompt the agent to change search/investigation direction",
+
+		goalDriftFindingFmt: "Suspected goal drift: execution significantly deviated from the root user intent starting around Step %d",
+		goalDriftAction:     "Manually check if the agent is stuck in an irrelevant subtask or rabbit hole; add periodic goal-alignment reminders in the prompt",
+
+		unverifiedCompletionFinding: "Suspected unverified completion claim: final response claimed task completion, but no supporting verification action was observed in the trajectory",
+		unverifiedCompletionAction:  "Manually verify whether the deliverables actually work; instruct the agent to run tests or build verification before claiming completion",
+
+		llmConstraintDroppedFindingFmt: "Suspected core constraint/policy dropped at compaction: %s",
+		llmConstraintDroppedAction:     "Manually review and re-inject the critical constraint in the system prompt or subsequent turns",
+	},
+	ZH: {
+		exactRepeatFindingFmt:  "疑似精确重复循环：%s 已被相同参数调用 %d 次",
+		exactRepeatEvidenceFmt: "工具 %s，%d 次调用参数完全一致",
+		exactRepeatAction:      "建议人工复核这几次调用是否在原地打转，而不是每次都有实质进展",
+
+		narrationFindingFmt:  "疑似“只说不做”：连续 %d 轮纯文本、无工具调用、内容高度相似",
+		narrationEvidenceFmt: "连续 %d 个 Step 都没有 tool_call",
+		narrationAction:      "建议人工复核 agent 是否卡在反复声明意图而未触发行动",
+
+		unverifiedSuccessFindingFmt:  "疑似静默声明成功：Step %d 出现过错误标记，之后未见验证类调用就结束了本轮任务",
+		unverifiedSuccessEvidenceFmt: "错误标记出现于 Step %d，此后到任务结束都没有再出现看起来像验证/确认的调用",
+		unverifiedSuccessAction:      "建议人工确认任务是否真的完成，而不是 agent 自行“脑补”了一个乐观结论",
+
+		reasoningMismatchFindingFmt:  "疑似推理-行动不一致：推理文本提到的 %s 未出现在本轮实际的工具调用参数里",
+		reasoningMismatchEvidenceFmt: "推理文本引用的实体：%s",
+		reasoningMismatchAction:      "建议人工核实这次调用的目标是否与推理描述的一致",
+
+		planMisalignmentFindingFmt:  "疑似计划-执行错位：本轮开头列出的 %d 条计划里，有 %d 条在后续步骤里找不到对应的执行痕迹",
+		planMisalignmentEvidenceFmt: "%d/%d 条计划项未见后续引用（字符串/实体匹配，不代表语义上真的被跳过）",
+		planMisalignmentAction:      "建议人工核对这几条计划项是被跳过、被替代，还是只是没有用相同措辞被引用",
+
+		unadaptedRetryFindingFmt:  "疑似无适应重试：%s 出错后，紧接着的同工具重试参数逐字相同",
+		unadaptedRetryEvidenceFmt: "工具 %s 收到错误结果后，下一次同工具调用的参数与出错那次完全一致",
+		unadaptedRetryAction:      "建议人工确认这是真的在原地重试，还是重试前的调整没有反映在参数里",
+
+		unusedResultFindingFmt:  "疑似工具结果未被利用：结果中提到的 %s 在此后的步骤里再未被引用",
+		unusedResultEvidenceFmt: "工具结果中的实体：%s",
+		unusedResultAction:      "建议人工确认这条结果是否真的对后续决策没有影响，还是被引用时换了措辞",
+
+		unverifiedEntityFindingFmt:  "疑似引用了已被证伪的实体：工具结果显示 %s 不存在/未找到，但后续步骤仍在引用它",
+		unverifiedEntityEvidenceFmt: "已被证伪的实体：%s（仅基于 ENOENT/404/not found 类字面标记识别，不代表确认幻觉）",
+		unverifiedEntityAction:      "建议人工确认后续引用是否基于过时的假设，而不是重新验证过的结果",
+
+		constraintDroppedFindingFmt:  "疑似 compaction 丢失了约束文本：压缩前提到的 %d 个实体（如 %s）在压缩后的内容里找不到了",
+		constraintDroppedEvidenceFmt: "压缩前存在、压缩后消失的实体：%s（未经验证的假设级检测，只是命名了这个现象，没有确认是否造成了实际影响）",
+		constraintDroppedAction:      "建议人工确认这些实体代表的约束/上下文是否还需要，是否应该在后续轮次里重新强调",
+
+		toolMisinterpretationFindingFmt: "疑似工具结果曲解：%s 返回报错或异常，但后续推理误判为成功",
+		toolMisinterpretationAction:     "建议人工复核模型是否对工具的报错产生了乐观幻觉并在此基础上继续推进",
+
+		semanticOscillationFindingFmt: "疑似语义原地打转：%s 连续多次调用但参数微调缺乏实质进展",
+		semanticOscillationAction:     "建议人工复核该工具调用是否陷入无效重试死循环，考虑提示模型更换探索路径",
+
+		goalDriftFindingFmt: "疑似长程目标漂移：从 Step %d 起执行行为显著脱离初始根目标",
+		goalDriftAction:     "建议人工复核 Agent 是否陷入次要支线探索或调试泥潭，在 Prompt 中增加阶段性目标对齐提醒",
+
+		unverifiedCompletionFinding: "疑似未验证宣称完成：终步明确声称完成任务，但轨迹中缺失对应验证动作",
+		unverifiedCompletionAction:  "建议人工复核交付物是否真实可用，要求 Agent 在宣称完成前必须执行测试/构建验证",
+
+		llmConstraintDroppedFindingFmt: "疑似 compaction 丢失了核心否定式约束/规范：%s",
+		llmConstraintDroppedAction:     "建议在后续对话或 System Prompt 中重新注入该核心约束",
+	},
+}
+
 func JourneyFindings(lang Lang) JourneyFindingsText {
-	if lang == ZH {
-		return JourneyFindingsText{
-			ExactRepeatToolCall: func(tool string, count int) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似精确重复循环：" + tool + " 已被相同参数调用 " + strconv.Itoa(count) + " 次",
-					Evidence: "工具 " + tool + "，" + strconv.Itoa(count) + " 次调用参数完全一致",
-					Action:   "建议人工复核这几次调用是否在原地打转，而不是每次都有实质进展",
-				}
-			},
-			NarrationWithoutAction: func(runLen int) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似“只说不做”：连续 " + strconv.Itoa(runLen) + " 轮纯文本、无工具调用、内容高度相似",
-					Evidence: "连续 " + strconv.Itoa(runLen) + " 个 Step 都没有 tool_call",
-					Action:   "建议人工复核 agent 是否卡在反复声明意图而未触发行动",
-				}
-			},
-			UnverifiedSuccess: func(errorSeq int) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似静默声明成功：Step " + strconv.Itoa(errorSeq) + " 出现过错误标记，之后未见验证类调用就结束了本轮任务",
-					Evidence: "错误标记出现于 Step " + strconv.Itoa(errorSeq) + "，此后到任务结束都没有再出现看起来像验证/确认的调用",
-					Action:   "建议人工确认任务是否真的完成，而不是 agent 自行“脑补”了一个乐观结论",
-				}
-			},
-			ReasoningActionMismatch: func(entities string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似推理-行动不一致：推理文本提到的 " + entities + " 未出现在本轮实际的工具调用参数里",
-					Evidence: "推理文本引用的实体：" + entities,
-					Action:   "建议人工核实这次调用的目标是否与推理描述的一致",
-				}
-			},
-			PlanExecutionMisalignment: func(skipped, total int) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似计划-执行错位：本轮开头列出的 " + strconv.Itoa(total) + " 条计划里，有 " + strconv.Itoa(skipped) + " 条在后续步骤里找不到对应的执行痕迹",
-					Evidence: strconv.Itoa(skipped) + "/" + strconv.Itoa(total) + " 条计划项未见后续引用（字符串/实体匹配，不代表语义上真的被跳过）",
-					Action:   "建议人工核对这几条计划项是被跳过、被替代，还是只是没有用相同措辞被引用",
-				}
-			},
-			UnadaptedRetry: func(tool string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似无适应重试：" + tool + " 出错后，紧接着的同工具重试参数逐字相同",
-					Evidence: "工具 " + tool + " 收到错误结果后，下一次同工具调用的参数与出错那次完全一致",
-					Action:   "建议人工确认这是真的在原地重试，还是重试前的调整没有反映在参数里",
-				}
-			},
-			UnusedToolResult: func(entities string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似工具结果未被利用：结果中提到的 " + entities + " 在此后的步骤里再未被引用",
-					Evidence: "工具结果中的实体：" + entities,
-					Action:   "建议人工确认这条结果是否真的对后续决策没有影响，还是被引用时换了措辞",
-				}
-			},
-			UnverifiedEntityReference: func(entities string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似引用了已被证伪的实体：工具结果显示 " + entities + " 不存在/未找到，但后续步骤仍在引用它",
-					Evidence: "已被证伪的实体：" + entities + "（仅基于 ENOENT/404/not found 类字面标记识别，不代表确认幻觉）",
-					Action:   "建议人工确认后续引用是否基于过时的假设，而不是重新验证过的结果",
-				}
-			},
-			ConstraintTextDropped: func(entities string, total int) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似 compaction 丢失了约束文本：压缩前提到的 " + strconv.Itoa(total) + " 个实体（如 " + entities + "）在压缩后的内容里找不到了",
-					Evidence: "压缩前存在、压缩后消失的实体：" + entities + "（未经验证的假设级检测，只是命名了这个现象，没有确认是否造成了实际影响）",
-					Action:   "建议人工确认这些实体代表的约束/上下文是否还需要，是否应该在后续轮次里重新强调",
-				}
-			},
-			ToolResultMisinterpretation: func(tool, explanation string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似工具结果曲解：" + tool + " 返回报错或异常，但后续推理误判为成功",
-					Evidence: explanation,
-					Action:   "建议人工复核模型是否对工具的报错产生了乐观幻觉并在此基础上继续推进",
-				}
-			},
-			SemanticOscillation: func(tool, explanation string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似语义原地打转：" + tool + " 连续多次调用但参数微调缺乏实质进展",
-					Evidence: explanation,
-					Action:   "建议人工复核该工具调用是否陷入无效重试死循环，考虑提示模型更换探索路径",
-				}
-			},
-			GoalDrift: func(driftSeq int, explanation string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似长程目标漂移：从 Step " + strconv.Itoa(driftSeq) + " 起执行行为显著脱离初始根目标",
-					Evidence: explanation,
-					Action:   "建议人工复核 Agent 是否陷入次要支线探索或调试泥潭，在 Prompt 中增加阶段性目标对齐提醒",
-				}
-			},
-			UnverifiedCompletionClaim: func(missing string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似未验证宣称完成：终步明确声称完成任务，但轨迹中缺失对应验证动作",
-					Evidence: missing,
-					Action:   "建议人工复核交付物是否真实可用，要求 Agent 在宣称完成前必须执行测试/构建验证",
-				}
-			},
-			LLMConstraintDropped: func(anchor string) JourneyFindingText {
-				return JourneyFindingText{
-					Finding:  "疑似 compaction 丢失了核心否定式约束/规范：" + anchor,
-					Evidence: "",
-					Action:   "建议在后续对话或 System Prompt 中重新注入该核心约束",
-				}
-			},
-		}
-	}
+	r := journeyFindingsRows.Row(lang)
 	return JourneyFindingsText{
 		ExactRepeatToolCall: func(tool string, count int) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected exact-repeat loop: " + tool + " called with identical arguments " + strconv.Itoa(count) + " times",
-				Evidence: "tool " + tool + ", " + strconv.Itoa(count) + " calls with byte-identical arguments",
-				Action:   "Manually review whether these calls are spinning in place rather than making real progress each time",
+				Finding:  fmt.Sprintf(r.exactRepeatFindingFmt, tool, count),
+				Evidence: fmt.Sprintf(r.exactRepeatEvidenceFmt, tool, count),
+				Action:   r.exactRepeatAction,
 			}
 		},
 		NarrationWithoutAction: func(runLen int) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected \"narration without action\": " + strconv.Itoa(runLen) + " consecutive text-only turns with no tool call and highly similar content",
-				Evidence: strconv.Itoa(runLen) + " consecutive Steps carried no tool_call",
-				Action:   "Manually review whether the agent is stuck restating intent without ever acting on it",
+				Finding:  fmt.Sprintf(r.narrationFindingFmt, runLen),
+				Evidence: fmt.Sprintf(r.narrationEvidenceFmt, runLen),
+				Action:   r.narrationAction,
 			}
 		},
 		UnverifiedSuccess: func(errorSeq int) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected silent success claim: an error marker appeared at Step " + strconv.Itoa(errorSeq) + ", and the task ended without any verification-looking call afterward",
-				Evidence: "error marker at Step " + strconv.Itoa(errorSeq) + "; no call resembling verification/confirmation seen between there and task end",
-				Action:   "Manually confirm the task actually completed, rather than the agent having assumed an optimistic outcome",
+				Finding:  fmt.Sprintf(r.unverifiedSuccessFindingFmt, errorSeq),
+				Evidence: fmt.Sprintf(r.unverifiedSuccessEvidenceFmt, errorSeq),
+				Action:   r.unverifiedSuccessAction,
 			}
 		},
 		ReasoningActionMismatch: func(entities string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected reasoning-action mismatch: " + entities + " mentioned in the reasoning text does not appear in this turn's actual tool-call arguments",
-				Evidence: "entities referenced in reasoning text: " + entities,
-				Action:   "Manually verify this call's actual target matches what the reasoning described",
+				Finding:  fmt.Sprintf(r.reasoningMismatchFindingFmt, entities),
+				Evidence: fmt.Sprintf(r.reasoningMismatchEvidenceFmt, entities),
+				Action:   r.reasoningMismatchAction,
 			}
 		},
 		PlanExecutionMisalignment: func(skipped, total int) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected plan-execution misalignment: of the " + strconv.Itoa(total) + " plan items listed at the start of this turn, " + strconv.Itoa(skipped) + " have no matching trace in the steps that followed",
-				Evidence: strconv.Itoa(skipped) + "/" + strconv.Itoa(total) + " plan items had no later reference (string/entity matching only — not proof they were truly skipped semantically)",
-				Action:   "Manually check whether these plan items were skipped, replaced, or just referenced with different wording",
+				Finding:  fmt.Sprintf(r.planMisalignmentFindingFmt, total, skipped),
+				Evidence: fmt.Sprintf(r.planMisalignmentEvidenceFmt, skipped, total),
+				Action:   r.planMisalignmentAction,
 			}
 		},
 		UnadaptedRetry: func(tool string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected unadapted retry: after " + tool + " errored, the very next same-tool call repeated its arguments verbatim",
-				Evidence: "after " + tool + "'s result errored, the next call to the same tool used byte-identical arguments",
-				Action:   "Manually confirm whether this is genuinely spinning in place, or an adjustment was made that just didn't show up in the arguments",
+				Finding:  fmt.Sprintf(r.unadaptedRetryFindingFmt, tool),
+				Evidence: fmt.Sprintf(r.unadaptedRetryEvidenceFmt, tool),
+				Action:   r.unadaptedRetryAction,
 			}
 		},
 		UnusedToolResult: func(entities string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected unused tool result: " + entities + " mentioned in the result was never referenced again in any later step",
-				Evidence: "entities in the tool result: " + entities,
-				Action:   "Manually confirm this result truly had no bearing on later decisions, rather than being referenced under different wording",
+				Finding:  fmt.Sprintf(r.unusedResultFindingFmt, entities),
+				Evidence: fmt.Sprintf(r.unusedResultEvidenceFmt, entities),
+				Action:   r.unusedResultAction,
 			}
 		},
 		UnverifiedEntityReference: func(entities string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected reference to a falsified entity: a tool result reported " + entities + " as missing/not found, but a later step still refers to it",
-				Evidence: "falsified entities: " + entities + " (identified only from a literal ENOENT/404/not-found marker — not a confirmed hallucination)",
-				Action:   "Manually confirm the later reference isn't relying on a stale assumption instead of a re-verified result",
+				Finding:  fmt.Sprintf(r.unverifiedEntityFindingFmt, entities),
+				Evidence: fmt.Sprintf(r.unverifiedEntityEvidenceFmt, entities),
+				Action:   r.unverifiedEntityAction,
 			}
 		},
 		ConstraintTextDropped: func(entities string, total int) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected constraint text dropped at compaction: " + strconv.Itoa(total) + " entities present before the boundary (e.g. " + entities + ") are gone from the post-compaction content",
-				Evidence: "entities present before compaction, absent after: " + entities + " (an unverified, hypothesis-level check — it only names the pattern, it hasn't confirmed real impact)",
-				Action:   "Manually confirm whether the constraints/context these entities represent still matter and should be re-stated in a later turn",
+				Finding:  fmt.Sprintf(r.constraintDroppedFindingFmt, total, entities),
+				Evidence: fmt.Sprintf(r.constraintDroppedEvidenceFmt, entities),
+				Action:   r.constraintDroppedAction,
 			}
 		},
 		ToolResultMisinterpretation: func(tool, explanation string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected tool result misinterpretation: " + tool + " returned an error or negative result, but subsequent reasoning claimed success",
+				Finding:  fmt.Sprintf(r.toolMisinterpretationFindingFmt, tool),
 				Evidence: explanation,
-				Action:   "Manually verify whether the model developed hallucinated optimism upon tool failure and proceeded erroneously",
+				Action:   r.toolMisinterpretationAction,
 			}
 		},
-		SemanticOscillation: func(tool, explanation string) JourneyFindingText {
+		SemanticOscillation: func(tool string, explanation string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected semantic oscillation: " + tool + " called repeatedly with slight argument variations yielding no real progress",
+				Finding:  fmt.Sprintf(r.semanticOscillationFindingFmt, tool),
 				Evidence: explanation,
-				Action:   "Manually review whether the tool invocation is stuck in a futile retry loop; prompt the agent to change search/investigation direction",
+				Action:   r.semanticOscillationAction,
 			}
 		},
 		GoalDrift: func(driftSeq int, explanation string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected goal drift: execution significantly deviated from the root user intent starting around Step " + strconv.Itoa(driftSeq),
+				Finding:  fmt.Sprintf(r.goalDriftFindingFmt, driftSeq),
 				Evidence: explanation,
-				Action:   "Manually check if the agent is stuck in an irrelevant subtask or rabbit hole; add periodic goal-alignment reminders in the prompt",
+				Action:   r.goalDriftAction,
 			}
 		},
 		UnverifiedCompletionClaim: func(missing string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected unverified completion claim: final response claimed task completion, but no supporting verification action was observed in the trajectory",
+				Finding:  r.unverifiedCompletionFinding,
 				Evidence: missing,
-				Action:   "Manually verify whether the deliverables actually work; instruct the agent to run tests or build verification before claiming completion",
+				Action:   r.unverifiedCompletionAction,
 			}
 		},
 		LLMConstraintDropped: func(anchor string) JourneyFindingText {
 			return JourneyFindingText{
-				Finding:  "Suspected core constraint/policy dropped at compaction: " + anchor,
+				Finding:  fmt.Sprintf(r.llmConstraintDroppedFindingFmt, anchor),
 				Evidence: "",
-				Action:   "Manually review and re-inject the critical constraint in the system prompt or subsequent turns",
+				Action:   r.llmConstraintDroppedAction,
 			}
 		},
 	}

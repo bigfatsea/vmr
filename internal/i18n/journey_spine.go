@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-22 03:10, by Sonnet 5
 
 // Pairs with internal/journey/render_spine.go and its viewmodel counterpart
 // internal/journey/viewmodel_spine.go — the decision-spine layer
@@ -9,10 +9,7 @@
 // Findings section's text comes from journey_findings.go.
 package i18n
 
-import (
-	"fmt"
-	"strconv"
-)
+import "fmt"
 
 // SpineText is render_spine.go's text, in one language.
 type SpineText struct {
@@ -101,221 +98,323 @@ type SpineText struct {
 	LabelEvidenceAnchor string
 }
 
+// spineRow holds this file's literal templates, one row per Lang (Table's
+// own doc comment). CacheBreakBadge's switch over kind is the one real
+// branching logic — same set of kind values dispatch to the same case in
+// both languages, so the switch is written once in Spine below and each
+// case's OUTPUT (mostly plain, one interpolated) lives here.
+type spineRow struct {
+	overviewTitle          string
+	overviewStartFmt       string
+	overviewFirstErrorFmt  string
+	overviewTransitionFmt  string
+	overviewEndFmt         string
+	tagToolIntensive       string
+	tagRetryHeavy          string
+	tagContextCompacted    string
+	tagsLineFmt            string
+	overviewCostLineFmt    string
+	overviewFailedStepsFmt string
+
+	spineTitle                   string
+	spineTaskLineFmt             string
+	spineFindingTag              string
+	spineValueTruncatedFmt       string
+	spineResultValueTruncatedFmt string
+	spineDetailLinkFmt           string
+	spineDetailCoordFmt          string
+	spineCoordNote               string
+
+	spineInstructionLineFmt string
+	spineReportLineFmt      string
+	spinePositionalMatch    string
+
+	cacheBreakUnexplainedFmt  string
+	cacheBreakProviderSwitch  string
+	cacheBreakSystem          string
+	cacheBreakTools           string
+	cacheBreakHistoryStitch   string
+	cacheBreakHistoryContract string
+	cacheBreakHistoryFork     string
+
+	artifactsTitle       string
+	artifactsSummaryFmt  string
+	artifactsTableHeader string
+	artifactsHeuristic   string
+	artifactsStructured  string
+
+	spineFinalDeliverableTitle        string
+	spineFinalDeliverableFoundFmt     string
+	spineFinalDeliverableExcerptLabel string
+
+	stepTagPlan       string
+	stepTagAction     string
+	stepTagObserve    string
+	stepTagRetry      string
+	stepTagError      string
+	stepTagCompaction string
+	stepTagReport     string
+
+	timelineTitle  string
+	timelineLegend string
+	timelineNoData string
+
+	findingsTitle            string
+	findingsNone             string
+	findingGroupTitleFmt     string
+	findingHeaderFmt         string
+	findingRelatedFmt        string
+	findingEvidenceFmt       string
+	findingActionFmt         string
+	anthropicOnlyCoverageFmt string
+
+	badgeLLMInferredFmt string
+	badgeRuleDetected   string
+	labelEvidenceAnchor string
+}
+
+var spineRows = Table[spineRow]{
+	EN: {
+		overviewTitle:          "## Overview\n\n",
+		overviewStartFmt:       "Started %s",
+		overviewFirstErrorFmt:  "First error marker · Step %d · %s",
+		overviewTransitionFmt:  "First non-routine transition (%s) · Step %d · %s",
+		overviewEndFmt:         "Ended · Step %d · finish=%s · %s",
+		tagToolIntensive:       "tool-intensive",
+		tagRetryHeavy:          "retry-heavy",
+		tagContextCompacted:    "context-compacted",
+		tagsLineFmt:            "**Tags**: %s\n\n",
+		overviewCostLineFmt:    "Estimated cost ≈ %s (list-price estimate, not your bill)",
+		overviewFailedStepsFmt: "%d/%d steps failed (HTTP/upstream error)",
+
+		spineTitle:                   "## Decision Spine\n\n",
+		spineTaskLineFmt:             "**t%s · %s**\n\n",
+		spineFindingTag:              " ⚠️",
+		spineValueTruncatedFmt:       "\n… (+%d more chars — full value in this Step's detail page)",
+		spineResultValueTruncatedFmt: "\n… (+%d more chars — full value in the next Step's detail page)",
+		spineDetailLinkFmt:           "→ [detail](%s)\n\n",
+		spineDetailCoordFmt:          "→ `%s`\n\n",
+		spineCoordNote:               "> Batch suite output: each Step shows only its source coordinate (`file:line`). Run `vmr analyze -journey <id>` for a single-journey report with full detail links.\n\n",
+
+		spineInstructionLineFmt: "💬 Instruction · %s\n\n",
+		spineReportLineFmt:      "💬 Report · %s\n\n",
+		spinePositionalMatch:    " (matched by position — ID unmatched)",
+
+		cacheBreakUnexplainedFmt:  "Cache: unexplained drop (%s→%s)",
+		cacheBreakProviderSwitch:  "Cache: provider switched",
+		cacheBreakSystem:          "Cache: system prompt changed",
+		cacheBreakTools:           "Cache: tool definitions changed",
+		cacheBreakHistoryStitch:   "Cache: context stitched",
+		cacheBreakHistoryContract: "Cache: context contracted",
+		cacheBreakHistoryFork:     "Cache: context forked",
+
+		artifactsTitle:       "## Touched Artifacts\n\n",
+		artifactsSummaryFmt:  "Recorded %d target(s) touched during execution:\n\n",
+		artifactsTableHeader: "| Target Path | Operation | First Step | Calls | Detection |\n| :--- | :--- | :--- | :--- | :--- |\n",
+		artifactsHeuristic:   "Shell heuristic",
+		artifactsStructured:  "Structured parameter",
+
+		spineFinalDeliverableTitle:        "## Final Deliverable\n\n",
+		spineFinalDeliverableFoundFmt:     "Step %d · `%s`\n\n",
+		spineFinalDeliverableExcerptLabel: "Deliverable excerpt",
+
+		stepTagPlan:       "🔷 📋",
+		stepTagAction:     "🔷 🔧",
+		stepTagObserve:    "🔷 👀",
+		stepTagRetry:      "🔷 🔄",
+		stepTagError:      "🔷 ⚠️",
+		stepTagCompaction: "🔷 🧹",
+		stepTagReport:     "🔷 💬",
+
+		timelineTitle:  "## Tool Call Timeline\n\n",
+		timelineLegend: "Legend: ● normal · 🔄 suspected repeat · ❌ step carries an error marker\n\n",
+		timelineNoData: "(no tool calls in this Journey)\n\n",
+
+		findingsTitle:            "## Suspected Issues (candidate list, not a verdict)\n\n",
+		findingsNone:             "No rule-detectable suspected issues.\n\n",
+		findingGroupTitleFmt:     "### %s · %d hits (earliest Step %d)\n\n",
+		findingHeaderFmt:         "%d. **%s** · Step %d\n",
+		findingRelatedFmt:        "   - related Steps: %s\n",
+		findingEvidenceFmt:       "   - evidence: %s\n",
+		findingActionFmt:         "   - action: %s\n",
+		anthropicOnlyCoverageFmt: "> ⚠️ Every request in this journey is non-Anthropic Messages protocol. The following signals depend on a field only ever populated for Anthropic Messages protocol and structurally cannot fire on this journey — their absence doesn't mean \"checked, no issue found\": %s\n\n",
+
+		badgeLLMInferredFmt: " [AI Inferred · %s]",
+		badgeRuleDetected:   " [Rule-detected]",
+		labelEvidenceAnchor: "Evidence Anchor: ",
+	},
+	ZH: {
+		overviewTitle:          "## 概览\n\n",
+		overviewStartFmt:       "起始 %s",
+		overviewFirstErrorFmt:  "首个错误标记 · Step %d · %s",
+		overviewTransitionFmt:  "首个非常规转折（%s）· Step %d · %s",
+		overviewEndFmt:         "结束 · Step %d · finish=%s · %s",
+		tagToolIntensive:       "工具密集型",
+		tagRetryHeavy:          "重试多",
+		tagContextCompacted:    "上下文压缩",
+		tagsLineFmt:            "**标签**：%s\n\n",
+		overviewCostLineFmt:    "估算成本 ≈ %s（按标价估算，非实际账单）",
+		overviewFailedStepsFmt: "%d/%d 步请求失败（HTTP/上游错误）",
+
+		spineTitle:                   "## 决策脊柱\n\n",
+		spineTaskLineFmt:             "**t%s · %s**\n\n",
+		spineFindingTag:              " ⚠️",
+		spineValueTruncatedFmt:       "\n… (+%d 字符已截断 — 完整值见本 Step 的详单)",
+		spineResultValueTruncatedFmt: "\n… (+%d 字符已截断 — 完整值见下一步的详单)",
+		spineDetailLinkFmt:           "→ [详情](%s)\n\n",
+		spineDetailCoordFmt:          "→ `%s`\n\n",
+		spineCoordNote:               "> 批量套件产出：各 Step 只标源坐标（`文件:行`）。运行 `vmr analyze -journey <id>` 生成带完整详单链接的单条报告。\n\n",
+
+		spineInstructionLineFmt: "💬 指令 · %s\n\n",
+		spineReportLineFmt:      "💬 汇报 · %s\n\n",
+		spinePositionalMatch:    "（按位置推测，ID 未匹配）",
+
+		cacheBreakUnexplainedFmt:  "Cache: 异常骤降 (%s→%s)",
+		cacheBreakProviderSwitch:  "Cache: 服务端点切换",
+		cacheBreakSystem:          "Cache: 系统提示词变更",
+		cacheBreakTools:           "Cache: 工具定义变更",
+		cacheBreakHistoryStitch:   "Cache: 跨会话缝合",
+		cacheBreakHistoryContract: "Cache: 上下文压缩截断",
+		cacheBreakHistoryFork:     "Cache: 上下文分叉",
+
+		artifactsTitle:       "## 触达文件与资产\n\n",
+		artifactsSummaryFmt:  "任务过程共记录 %d 个触达目标：\n\n",
+		artifactsTableHeader: "| 目标路径 | 操作 | 首次步骤 | 频次 | 判定依据 |\n| :--- | :--- | :--- | :--- | :--- |\n",
+		artifactsHeuristic:   "Shell 启发式",
+		artifactsStructured:  "结构化参数",
+
+		spineFinalDeliverableTitle:        "## 最终交付物\n\n",
+		spineFinalDeliverableFoundFmt:     "Step %d · `%s`\n\n",
+		spineFinalDeliverableExcerptLabel: "交付物节选",
+
+		stepTagPlan:       "🔷 📋",
+		stepTagAction:     "🔷 🔧",
+		stepTagObserve:    "🔷 👀",
+		stepTagRetry:      "🔷 🔄",
+		stepTagError:      "🔷 ⚠️",
+		stepTagCompaction: "🔷 🧹",
+		stepTagReport:     "🔷 💬",
+
+		timelineTitle:  "## 工具调用时序图\n\n",
+		timelineLegend: "图例：● 正常 · 🔄 疑似重复 · ❌ 本步含错误标记\n\n",
+		timelineNoData: "（本 Journey 未出现工具调用）\n\n",
+
+		findingsTitle:            "## 疑似问题（候选清单，不是判决）\n\n",
+		findingsNone:             "未检测到规则可判定的疑似问题。\n\n",
+		findingGroupTitleFmt:     "### %s · 命中 %d 条（最早 Step %d）\n\n",
+		findingHeaderFmt:         "%d. **%s** · Step %d\n",
+		findingRelatedFmt:        "   - 相关 Step：%s\n",
+		findingEvidenceFmt:       "   - 证据：%s\n",
+		findingActionFmt:         "   - 建议：%s\n",
+		anthropicOnlyCoverageFmt: "> ⚠️ 本 journey 全部请求均为非 Anthropic Messages 协议。以下信号依赖仅 Anthropic Messages 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题：%s\n\n",
+
+		badgeLLMInferredFmt: " [AI推测 · 置信度: %s]",
+		badgeRuleDetected:   " [规则检测]",
+		labelEvidenceAnchor: "原文证据锚点：",
+	},
+}
+
 func Spine(lang Lang) SpineText {
-	if lang == ZH {
-		return SpineText{
-			OverviewTitle: "## 概览\n\n",
-			OverviewStart: func(ts string) string { return "起始 " + ts },
-			OverviewFirstError: func(seq int, ts string) string {
-				return "首个错误标记 · Step " + strconv.Itoa(seq) + " · " + ts
-			},
-			OverviewTransition: func(seq int, kind, ts string) string {
-				return "首个非常规转折（" + kind + "）· Step " + strconv.Itoa(seq) + " · " + ts
-			},
-			OverviewEnd: func(seq int, finish, ts string) string {
-				return "结束 · Step " + strconv.Itoa(seq) + " · finish=" + finish + " · " + ts
-			},
-			TagToolIntensive:    "工具密集型",
-			TagRetryHeavy:       "重试多",
-			TagContextCompacted: "上下文压缩",
-			TagsLine:            func(tags string) string { return "**标签**：" + tags + "\n\n" },
-			OverviewCostLine: func(money string) string {
-				return "估算成本 ≈ " + money + "（按标价估算，非实际账单）"
-			},
-			OverviewFailedStepsLine: func(failed, total int) string {
-				return strconv.Itoa(failed) + "/" + strconv.Itoa(total) + " 步请求失败（HTTP/上游错误）"
-			},
-
-			SpineTitle:      "## 决策脊柱\n\n",
-			SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
-			SpineFindingTag: " ⚠️",
-			SpineValueTruncated: func(more int) string {
-				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见本 Step 的详单)"
-			},
-			SpineResultValueTruncated: func(more int) string {
-				return "\n… (+" + strconv.Itoa(more) + " 字符已截断 — 完整值见下一步的详单)"
-			},
-			SpineDetailLink:  func(relPath string) string { return "→ [详情](" + relPath + ")\n\n" },
-			SpineDetailCoord: func(coord string) string { return "→ `" + coord + "`\n\n" },
-			SpineCoordNote:   "> 批量套件产出：各 Step 只标源坐标（`文件:行`）。运行 `vmr analyze -journey <id>` 生成带完整详单链接的单条报告。\n\n",
-
-			SpineInstructionLine: func(text string) string { return "💬 指令 · " + text + "\n\n" },
-			SpineReportLine:      func(text string) string { return "💬 汇报 · " + text + "\n\n" },
-			SpinePositionalMatch: "（按位置推测，ID 未匹配）",
-			CacheBreakBadge: func(kind string, from, to string) string {
-				switch kind {
-				case "unexplained":
-					return fmt.Sprintf("Cache: 异常骤降 (%s→%s)", from, to)
-				case "provider_switch":
-					return "Cache: 服务端点切换"
-				case "system":
-					return "Cache: 系统提示词变更"
-				case "tools":
-					return "Cache: 工具定义变更"
-				case "history:stitch":
-					return "Cache: 跨会话缝合"
-				case "history:contract":
-					return "Cache: 上下文压缩截断"
-				case "history:fork":
-					return "Cache: 上下文分叉"
-				default:
-					return ""
-				}
-			},
-
-			ArtifactsTitle: "## 触达文件与资产\n\n",
-			ArtifactsSummary: func(count int) string {
-				return "任务过程共记录 " + strconv.Itoa(count) + " 个触达目标：\n\n"
-			},
-			ArtifactsTableHeader: "| 目标路径 | 操作 | 首次步骤 | 频次 | 判定依据 |\n| :--- | :--- | :--- | :--- | :--- |\n",
-			ArtifactsHeuristic:   "Shell 启发式",
-			ArtifactsStructured:  "结构化参数",
-
-			SpineFinalDeliverableTitle: "## 最终交付物\n\n",
-			SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
-				return "Step " + strconv.Itoa(stepSeq) + " · `" + toolName + "`\n\n"
-			},
-			SpineFinalDeliverableExcerptLabel: "交付物节选",
-
-			StepTagPlan:       "🔷 📋",
-			StepTagAction:     "🔷 🔧",
-			StepTagObserve:    "🔷 👀",
-			StepTagRetry:      "🔷 🔄",
-			StepTagError:      "🔷 ⚠️",
-			StepTagCompaction: "🔷 🧹",
-			StepTagReport:     "🔷 💬",
-
-			TimelineTitle:  "## 工具调用时序图\n\n",
-			TimelineLegend: "图例：● 正常 · 🔄 疑似重复 · ❌ 本步含错误标记\n\n",
-			TimelineNoData: "（本 Journey 未出现工具调用）\n\n",
-
-			FindingsTitle: "## 疑似问题（候选清单，不是判决）\n\n",
-			FindingsNone:  "未检测到规则可判定的疑似问题。\n\n",
-			FindingGroupTitle: func(code string, count, firstStep int) string {
-				return "### " + code + " · 命中 " + strconv.Itoa(count) + " 条（最早 Step " + strconv.Itoa(firstStep) + "）\n\n"
-			},
-			FindingHeader: func(idx int, code string, stepSeq int) string {
-				return strconv.Itoa(idx) + ". **" + code + "** · Step " + strconv.Itoa(stepSeq) + "\n"
-			},
-			FindingRelated:  func(seqs string) string { return "   - 相关 Step：" + seqs + "\n" },
-			FindingEvidence: func(text string) string { return "   - 证据：" + text + "\n" },
-			FindingAction:   func(text string) string { return "   - 建议：" + text + "\n" },
-			AnthropicOnlyCoverageNote: func(codes string) string {
-				return "> ⚠️ 本 journey 全部请求均为非 Anthropic Messages 协议。以下信号依赖仅 Anthropic Messages 协议才会填充的字段，在本 journey 上结构性无法触发——未出现不代表检查过没问题：" + codes + "\n\n"
-			},
-
-			BadgeLLMInferred: func(confidence string) string {
-				return " [AI推测 · 置信度: " + confidence + "]"
-			},
-			BadgeRuleDetected:   " [规则检测]",
-			LabelEvidenceAnchor: "原文证据锚点：",
-		}
-	}
+	r := spineRows.Row(lang)
 	return SpineText{
-		OverviewTitle: "## Overview\n\n",
-		OverviewStart: func(ts string) string { return "Started " + ts },
-		OverviewFirstError: func(seq int, ts string) string {
-			return "First error marker · Step " + strconv.Itoa(seq) + " · " + ts
-		},
+		OverviewTitle:      r.overviewTitle,
+		OverviewStart:      func(ts string) string { return fmt.Sprintf(r.overviewStartFmt, ts) },
+		OverviewFirstError: func(seq int, ts string) string { return fmt.Sprintf(r.overviewFirstErrorFmt, seq, ts) },
 		OverviewTransition: func(seq int, kind, ts string) string {
-			return "First non-routine transition (" + kind + ") · Step " + strconv.Itoa(seq) + " · " + ts
+			return fmt.Sprintf(r.overviewTransitionFmt, kind, seq, ts)
 		},
 		OverviewEnd: func(seq int, finish, ts string) string {
-			return "Ended · Step " + strconv.Itoa(seq) + " · finish=" + finish + " · " + ts
+			return fmt.Sprintf(r.overviewEndFmt, seq, finish, ts)
 		},
-		TagToolIntensive:    "tool-intensive",
-		TagRetryHeavy:       "retry-heavy",
-		TagContextCompacted: "context-compacted",
-		TagsLine:            func(tags string) string { return "**Tags**: " + tags + "\n\n" },
-		OverviewCostLine: func(money string) string {
-			return "Estimated cost ≈ " + money + " (list-price estimate, not your bill)"
-		},
+		TagToolIntensive:    r.tagToolIntensive,
+		TagRetryHeavy:       r.tagRetryHeavy,
+		TagContextCompacted: r.tagContextCompacted,
+		TagsLine:            func(tags string) string { return fmt.Sprintf(r.tagsLineFmt, tags) },
+		OverviewCostLine:    func(money string) string { return fmt.Sprintf(r.overviewCostLineFmt, money) },
 		OverviewFailedStepsLine: func(failed, total int) string {
-			return strconv.Itoa(failed) + "/" + strconv.Itoa(total) + " steps failed (HTTP/upstream error)"
+			return fmt.Sprintf(r.overviewFailedStepsFmt, failed, total)
 		},
 
-		SpineTitle:      "## Decision Spine\n\n",
-		SpineTaskLine:   func(idx int, title string) string { return "**t" + pad2(idx) + " · " + title + "**\n\n" },
-		SpineFindingTag: " ⚠️",
+		SpineTitle: r.spineTitle,
+		SpineTaskLine: func(idx int, title string) string {
+			return fmt.Sprintf(r.spineTaskLineFmt, pad2(idx), title)
+		},
+		SpineFindingTag: r.spineFindingTag,
 		SpineValueTruncated: func(more int) string {
-			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in this Step's detail page)"
+			return fmt.Sprintf(r.spineValueTruncatedFmt, more)
 		},
 		SpineResultValueTruncated: func(more int) string {
-			return "\n… (+" + strconv.Itoa(more) + " more chars — full value in the next Step's detail page)"
+			return fmt.Sprintf(r.spineResultValueTruncatedFmt, more)
 		},
-		SpineDetailLink:  func(relPath string) string { return "→ [detail](" + relPath + ")\n\n" },
-		SpineDetailCoord: func(coord string) string { return "→ `" + coord + "`\n\n" },
-		SpineCoordNote:   "> Batch suite output: each Step shows only its source coordinate (`file:line`). Run `vmr analyze -journey <id>` for a single-journey report with full detail links.\n\n",
+		SpineDetailLink:  func(relPath string) string { return fmt.Sprintf(r.spineDetailLinkFmt, relPath) },
+		SpineDetailCoord: func(coord string) string { return fmt.Sprintf(r.spineDetailCoordFmt, coord) },
+		SpineCoordNote:   r.spineCoordNote,
 
-		SpineInstructionLine: func(text string) string { return "💬 Instruction · " + text + "\n\n" },
-		SpineReportLine:      func(text string) string { return "💬 Report · " + text + "\n\n" },
-		SpinePositionalMatch: " (matched by position — ID unmatched)",
+		SpineInstructionLine: func(text string) string { return fmt.Sprintf(r.spineInstructionLineFmt, text) },
+		SpineReportLine:      func(text string) string { return fmt.Sprintf(r.spineReportLineFmt, text) },
+		SpinePositionalMatch: r.spinePositionalMatch,
 		CacheBreakBadge: func(kind string, from, to string) string {
 			switch kind {
 			case "unexplained":
-				return fmt.Sprintf("Cache: unexplained drop (%s→%s)", from, to)
+				return fmt.Sprintf(r.cacheBreakUnexplainedFmt, from, to)
 			case "provider_switch":
-				return "Cache: provider switched"
+				return r.cacheBreakProviderSwitch
 			case "system":
-				return "Cache: system prompt changed"
+				return r.cacheBreakSystem
 			case "tools":
-				return "Cache: tool definitions changed"
+				return r.cacheBreakTools
 			case "history:stitch":
-				return "Cache: context stitched"
+				return r.cacheBreakHistoryStitch
 			case "history:contract":
-				return "Cache: context contracted"
+				return r.cacheBreakHistoryContract
 			case "history:fork":
-				return "Cache: context forked"
+				return r.cacheBreakHistoryFork
 			default:
 				return ""
 			}
 		},
 
-		ArtifactsTitle: "## Touched Artifacts\n\n",
-		ArtifactsSummary: func(count int) string {
-			return "Recorded " + strconv.Itoa(count) + " target(s) touched during execution:\n\n"
-		},
-		ArtifactsTableHeader: "| Target Path | Operation | First Step | Calls | Detection |\n| :--- | :--- | :--- | :--- | :--- |\n",
-		ArtifactsHeuristic:   "Shell heuristic",
-		ArtifactsStructured:  "Structured parameter",
+		ArtifactsTitle:       r.artifactsTitle,
+		ArtifactsSummary:     func(count int) string { return fmt.Sprintf(r.artifactsSummaryFmt, count) },
+		ArtifactsTableHeader: r.artifactsTableHeader,
+		ArtifactsHeuristic:   r.artifactsHeuristic,
+		ArtifactsStructured:  r.artifactsStructured,
 
-		SpineFinalDeliverableTitle: "## Final Deliverable\n\n",
+		SpineFinalDeliverableTitle: r.spineFinalDeliverableTitle,
 		SpineFinalDeliverableFound: func(stepSeq int, toolName string) string {
-			return "Step " + strconv.Itoa(stepSeq) + " · `" + toolName + "`\n\n"
+			return fmt.Sprintf(r.spineFinalDeliverableFoundFmt, stepSeq, toolName)
 		},
-		SpineFinalDeliverableExcerptLabel: "Deliverable excerpt",
+		SpineFinalDeliverableExcerptLabel: r.spineFinalDeliverableExcerptLabel,
 
-		StepTagPlan:       "🔷 📋",
-		StepTagAction:     "🔷 🔧",
-		StepTagObserve:    "🔷 👀",
-		StepTagRetry:      "🔷 🔄",
-		StepTagError:      "🔷 ⚠️",
-		StepTagCompaction: "🔷 🧹",
-		StepTagReport:     "🔷 💬",
+		StepTagPlan:       r.stepTagPlan,
+		StepTagAction:     r.stepTagAction,
+		StepTagObserve:    r.stepTagObserve,
+		StepTagRetry:      r.stepTagRetry,
+		StepTagError:      r.stepTagError,
+		StepTagCompaction: r.stepTagCompaction,
+		StepTagReport:     r.stepTagReport,
 
-		TimelineTitle:  "## Tool Call Timeline\n\n",
-		TimelineLegend: "Legend: ● normal · 🔄 suspected repeat · ❌ step carries an error marker\n\n",
-		TimelineNoData: "(no tool calls in this Journey)\n\n",
+		TimelineTitle:  r.timelineTitle,
+		TimelineLegend: r.timelineLegend,
+		TimelineNoData: r.timelineNoData,
 
-		FindingsTitle: "## Suspected Issues (candidate list, not a verdict)\n\n",
-		FindingsNone:  "No rule-detectable suspected issues.\n\n",
+		FindingsTitle: r.findingsTitle,
+		FindingsNone:  r.findingsNone,
 		FindingGroupTitle: func(code string, count, firstStep int) string {
-			return "### " + code + " · " + strconv.Itoa(count) + " hits (earliest Step " + strconv.Itoa(firstStep) + ")\n\n"
+			return fmt.Sprintf(r.findingGroupTitleFmt, code, count, firstStep)
 		},
 		FindingHeader: func(idx int, code string, stepSeq int) string {
-			return strconv.Itoa(idx) + ". **" + code + "** · Step " + strconv.Itoa(stepSeq) + "\n"
+			return fmt.Sprintf(r.findingHeaderFmt, idx, code, stepSeq)
 		},
-		FindingRelated:  func(seqs string) string { return "   - related Steps: " + seqs + "\n" },
-		FindingEvidence: func(text string) string { return "   - evidence: " + text + "\n" },
-		FindingAction:   func(text string) string { return "   - action: " + text + "\n" },
+		FindingRelated:  func(seqs string) string { return fmt.Sprintf(r.findingRelatedFmt, seqs) },
+		FindingEvidence: func(text string) string { return fmt.Sprintf(r.findingEvidenceFmt, text) },
+		FindingAction:   func(text string) string { return fmt.Sprintf(r.findingActionFmt, text) },
 		AnthropicOnlyCoverageNote: func(codes string) string {
-			return "> ⚠️ Every request in this journey is non-Anthropic Messages protocol. The following signals depend on a field only ever populated for Anthropic Messages protocol and structurally cannot fire on this journey — their absence doesn't mean \"checked, no issue found\": " + codes + "\n\n"
+			return fmt.Sprintf(r.anthropicOnlyCoverageFmt, codes)
 		},
 
-		BadgeLLMInferred: func(confidence string) string {
-			return " [AI Inferred · " + confidence + "]"
-		},
-		BadgeRuleDetected:   " [Rule-detected]",
-		LabelEvidenceAnchor: "Evidence Anchor: ",
+		BadgeLLMInferred:    func(confidence string) string { return fmt.Sprintf(r.badgeLLMInferredFmt, confidence) },
+		BadgeRuleDetected:   r.badgeRuleDetected,
+		LabelEvidenceAnchor: r.labelEvidenceAnchor,
 	}
 }

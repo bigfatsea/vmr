@@ -1,8 +1,11 @@
-// Ver 2026-09-15, by gemini-3.7-flash
+// Ver 2026-09-22 18:40, by coding
 
 package archtest
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -313,5 +316,68 @@ func TestArchitecture_SideI18nPairing_Negative(t *testing.T) {
 		root,
 	); len(got) != 0 {
 		t.Errorf("existing counterpart reported %v, want none", got)
+	}
+}
+
+// TestArchitecture_I18nTableAdoption pins Phase 2's "every interpolated
+// *Text file converts to the Table[T] row-table pattern" rule as an
+// executable invariant. The rule keys on the struct shape itself — a
+// *Text struct with a func-typed field carries duplicated closure logic
+// per language unless its file reads a Table row — so no exemption
+// list is needed: files whose *Text structs have no func-typed fields
+// (report_client_endpoint/report_compaction/report_toolwaste, deliberately
+// kept on the branch shape, see KNOWN_ISSUES §1.4) pass automatically,
+// and a future file is caught the moment it grows its first interpolated
+// field. This is the guard Phase 2 lacked: report_cost.go sat on the old
+// branch shape through all three phases because nothing mechanical
+// flagged it (verification report problem 1).
+func TestArchitecture_I18nTableAdoption(t *testing.T) {
+	root := repoRootDir(t)
+	dir := filepath.Join(root, "internal", "i18n")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read internal/i18n: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		fset := token.NewFileSet()
+		f, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			t.Errorf("%s: %v", e.Name(), parseErr)
+			continue
+		}
+		var interpolated []string
+		ast.Inspect(f, func(n ast.Node) bool {
+			ts, ok := n.(*ast.TypeSpec)
+			if !ok || ts.Type == nil {
+				return true
+			}
+			st, ok := ts.Type.(*ast.StructType)
+			if !ok {
+				return true
+			}
+			for _, field := range st.Fields.List {
+				if _, isFunc := field.Type.(*ast.FuncType); isFunc {
+					interpolated = append(interpolated, ts.Name.Name)
+					break
+				}
+			}
+			return true
+		})
+		if len(interpolated) == 0 {
+			continue
+		}
+		src, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("%s: %v", e.Name(), readErr)
+			continue
+		}
+		if !strings.Contains(string(src), "Table[") {
+			t.Errorf("internal/i18n/%s declares interpolated *Text type(s) %s but never reads a Table row — keep interpolated copy in a Table[T] per-language row table (internal/i18n/table.go), not an if lang == ZH branch with the closures duplicated per language",
+				e.Name(), strings.Join(interpolated, ", "))
+		}
 	}
 }

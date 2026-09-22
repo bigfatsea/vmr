@@ -91,12 +91,13 @@ var funcLineExemptions = map[string]int{
 var funcBudgetRoots = []string{"internal", "cmd"}
 
 // funcBudgetExemptPkgs are packages whose "functions" are string tables, not
-// control flow. internal/i18n's per-section constructors are a `return
-// XxxText{...}` literal and nothing else — internal/i18n/report_detail.go's
-// Detail is 305 lines of translated strings with zero branching beyond the
-// one `if lang == ZH`. A line budget there measures how much text a report
-// section renders, which is not a complexity signal and not something anyone
-// should refactor to satisfy.
+// control flow. internal/i18n's per-section constructors are a
+// `return XxxText{...}` literal reading a package-level Lang-indexed row
+// table (internal/i18n/table.go), plus for files with no interpolated
+// field, the older `if lang == ZH {...}` shape — either way there's no
+// control flow beyond picking a row/branch. A line budget there measures
+// how much text a report section renders, which is not a complexity
+// signal and not something anyone should refactor to satisfy.
 var funcBudgetExemptPkgs = map[string]bool{
 	"internal/i18n": true,
 }

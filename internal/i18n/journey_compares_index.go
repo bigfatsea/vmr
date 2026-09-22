@@ -1,4 +1,4 @@
-// Ver 2026-09-07, by pi
+// Ver 2026-09-22 02:10, by Sonnet 5
 
 // Pairs with cmd/vmr/compares_index.go (compares/index.{json,md}, D21).
 package i18n
@@ -16,37 +16,48 @@ type ComparesIndexText struct {
 	TimeRange   func(from, to string) string
 }
 
+// comparesIndexRow holds journey_compares_index.go's literal templates, one
+// row per Lang (Table's own doc comment).
+type comparesIndexRow struct {
+	title        string
+	emptyState   string
+	totalFmt     string
+	tableHeader  string
+	stepsFmt     string
+	partialMark  string
+	timeRangeFmt string
+}
+
+var comparesIndexRows = Table[comparesIndexRow]{
+	EN: {
+		title:        "# Journey Comparisons\n\n",
+		emptyState:   "No comparisons found in this directory.\n\nTo run a pairwise journey comparison:\n```bash\nvmr analyze -compare <id1>,<id2>\n```\n",
+		totalFmt:     "Total comparisons: %d\n\n",
+		tableHeader:  "| Side A (Baseline) | Side B (Candidate) | Report |\n| --- | --- | --- |\n",
+		stepsFmt:     " (%d steps)",
+		partialMark:  " ⚠️ partial",
+		timeRangeFmt: "<br>%s ~ %s",
+	},
+	ZH: {
+		title:        "# Journey 对照索引\n\n",
+		emptyState:   "本目录下暂无对照。\n\n运行一次双任务对照：\n```bash\nvmr analyze -compare <id1>,<id2>\n```\n",
+		totalFmt:     "对照总数：%d\n\n",
+		tableHeader:  "| A 侧（基线） | B 侧（候选） | 报告 |\n| --- | --- | --- |\n",
+		stepsFmt:     "（%d 步）",
+		partialMark:  " ⚠️ 部分",
+		timeRangeFmt: "<br>%s ~ %s",
+	},
+}
+
 func ComparesIndex(lang Lang) ComparesIndexText {
-	if lang == ZH {
-		return ComparesIndexText{
-			Title:      "# Journey 对照索引\n\n",
-			EmptyState: "本目录下暂无对照。\n\n运行一次双任务对照：\n```bash\nvmr analyze -compare <id1>,<id2>\n```\n",
-			Total: func(n int) string {
-				return fmt.Sprintf("对照总数：%d\n\n", n)
-			},
-			TableHeader: "| A 侧（基线） | B 侧（候选） | 报告 |\n| --- | --- | --- |\n",
-			Steps: func(n int) string {
-				return fmt.Sprintf("（%d 步）", n)
-			},
-			PartialMark: " ⚠️ 部分",
-			TimeRange: func(from, to string) string {
-				return fmt.Sprintf("<br>%s ~ %s", from, to)
-			},
-		}
-	}
+	r := comparesIndexRows.Row(lang)
 	return ComparesIndexText{
-		Title:      "# Journey Comparisons\n\n",
-		EmptyState: "No comparisons found in this directory.\n\nTo run a pairwise journey comparison:\n```bash\nvmr analyze -compare <id1>,<id2>\n```\n",
-		Total: func(n int) string {
-			return fmt.Sprintf("Total comparisons: %d\n\n", n)
-		},
-		TableHeader: "| Side A (Baseline) | Side B (Candidate) | Report |\n| --- | --- | --- |\n",
-		Steps: func(n int) string {
-			return fmt.Sprintf(" (%d steps)", n)
-		},
-		PartialMark: " ⚠️ partial",
-		TimeRange: func(from, to string) string {
-			return fmt.Sprintf("<br>%s ~ %s", from, to)
-		},
+		Title:       r.title,
+		EmptyState:  r.emptyState,
+		Total:       func(n int) string { return fmt.Sprintf(r.totalFmt, n) },
+		TableHeader: r.tableHeader,
+		Steps:       func(n int) string { return fmt.Sprintf(r.stepsFmt, n) },
+		PartialMark: r.partialMark,
+		TimeRange:   func(from, to string) string { return fmt.Sprintf(r.timeRangeFmt, from, to) },
 	}
 }

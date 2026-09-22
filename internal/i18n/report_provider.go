@@ -1,9 +1,12 @@
-// Ver 2026-08-12 23:40, by Opus 5
+// Ver 2026-09-22 02:25, by Sonnet 5
 
 // Pairs with internal/report/viewmodel_provider.go (§2.5 Provider Spend & Quota).
 package i18n
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // ProviderText is viewmodel_provider.go's text, in one language.
 type ProviderText struct {
@@ -21,31 +24,50 @@ type ProviderText struct {
 	SkippedAttemptsNote func(total int, names string, more int) string
 }
 
+// providerRow holds this file's ProviderText literal templates, one row per
+// Lang (Table's own doc comment). The two SkippedAttemptsNote branches
+// share the same "more > 0" condition in both languages, so that logic is
+// written once in Provider below.
+type providerRow struct {
+	title                  string
+	intro                  string
+	headers                []string
+	costHdrFmt             string
+	skippedAttemptsMoreFmt string
+	skippedAttemptsFmt     string
+}
+
+var providerRows = Table[providerRow]{
+	EN: {
+		title:                  "§2.5 Provider Spend & Quota",
+		intro:                  "Cross-model roll-up by upstream account (config.yaml's providers[].name) — answers \"how much did this account consume overall, and how reliable was it\" without manually summing its endpoint rows.\n\n",
+		headers:                []string{"Provider", "Models", "Requests", "Success Rate", "fresh/cached/out", "Cache Eff.", "Dur. Mean", "Error Rate", "Top Error"},
+		costHdrFmt:             "$ Estimate%s",
+		skippedAttemptsMoreFmt: "> %d attempts skipped (unknown provider: %s, … +%d more)",
+		skippedAttemptsFmt:     "> %d attempts skipped (unknown provider: %s)",
+	},
+	ZH: {
+		title:                  "§2.5 账户（Provider）消耗与额度",
+		intro:                  "按上游账户（config.yaml 的 providers[].name）上卷的跨模型汇总——回答\"这个账户整体消耗多少、可靠性如何\"，而不是逐个模型手动相加。\n\n",
+		headers:                []string{"账户", "模型数", "请求", "成功率", "fresh/cached/out", "缓存效率", "均值耗时", "错误率", "主要错误类"},
+		costHdrFmt:             "$ 估算%s",
+		skippedAttemptsMoreFmt: "> 有 %d 次请求在重算中跳过（未知账户: %s，… 另有 %d 个）",
+		skippedAttemptsFmt:     "> 有 %d 次请求在重算中跳过（未知账户: %s）",
+	},
+}
+
 func Provider(lang Lang) ProviderText {
-	if lang == ZH {
-		return ProviderText{
-			Title:   "§2.5 账户（Provider）消耗与额度",
-			Intro:   "按上游账户（config.yaml 的 providers[].name）上卷的跨模型汇总——回答\"这个账户整体消耗多少、可靠性如何\"，而不是逐个模型手动相加。\n\n",
-			Headers: []string{"账户", "模型数", "请求", "成功率", "fresh/cached/out", "缓存效率", "均值耗时", "错误率", "主要错误类"},
-			CostHdr: func(cur string) string { return "$ 估算" + cur },
-			SkippedAttemptsNote: func(total int, names string, more int) string {
-				if more > 0 {
-					return "> 有 " + strconv.Itoa(total) + " 次请求在重算中跳过（未知账户: " + names + "，… 另有 " + strconv.Itoa(more) + " 个）"
-				}
-				return "> 有 " + strconv.Itoa(total) + " 次请求在重算中跳过（未知账户: " + names + "）"
-			},
-		}
-	}
+	r := providerRows.Row(lang)
 	return ProviderText{
-		Title:   "§2.5 Provider Spend & Quota",
-		Intro:   "Cross-model roll-up by upstream account (config.yaml's providers[].name) — answers \"how much did this account consume overall, and how reliable was it\" without manually summing its endpoint rows.\n\n",
-		Headers: []string{"Provider", "Models", "Requests", "Success Rate", "fresh/cached/out", "Cache Eff.", "Dur. Mean", "Error Rate", "Top Error"},
-		CostHdr: func(cur string) string { return "$ Estimate" + cur },
+		Title:   r.title,
+		Intro:   r.intro,
+		Headers: r.headers,
+		CostHdr: func(cur string) string { return fmt.Sprintf(r.costHdrFmt, cur) },
 		SkippedAttemptsNote: func(total int, names string, more int) string {
 			if more > 0 {
-				return "> " + strconv.Itoa(total) + " attempts skipped (unknown provider: " + names + ", … +" + strconv.Itoa(more) + " more)"
+				return fmt.Sprintf(r.skippedAttemptsMoreFmt, total, names, more)
 			}
-			return "> " + strconv.Itoa(total) + " attempts skipped (unknown provider: " + names + ")"
+			return fmt.Sprintf(r.skippedAttemptsFmt, total, names)
 		},
 	}
 }
@@ -111,51 +133,32 @@ type ProviderQuotaText struct {
 	FormatEstimatedShare func(usedStr string, estimatedPct float64) string
 }
 
-func ProviderQuota(lang Lang) ProviderQuotaText {
-	if lang == ZH {
-		return ProviderQuotaText{
-			Title: "额度与消耗对照",
-			Intro: "只列配了 `quota:` 的账户，把两个不同时间窗口的消耗数字并排给出——" +
-				"不做减法、不算覆盖率，各自标注来源。\n\n",
-			Headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
-			WindowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
-				"两种口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
-				"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：" +
-				"上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——" +
-				"两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，" +
-				"当响应正规化改写过内容（模型名改写、`<think>` 剥离等）时两者会差出这段字节。两种口径共同的出入源：" +
-				"config 里的权重/倍率在本窗口期内被改过。\n",
-			StalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
-				"与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 `-`。括号内的\"X% 估算\"标注" +
-				"这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
-			ConfigChangedFootnote: "> ‡ 该账户的 `quota:` metric/every 曾被改过——盘上还留着旧配置写下的计数器，" +
-				"新配置对应的计数器还没有任何记账；进程本身是健康的，不是停过，只是配置换了一把新钥匙。" +
-				"（旧计数器不会被自动清理，所以这个标记只说明「改过」，不说明改于何时——一次很久以前的修改同样会让它出现。）\n",
-			OverQuotaFootnote: "> ⭐ 已用% ≥ 100% 时的标记：该账户本周期已超出配置的额度上限。\n",
-			SourcePathLine: func(path string) string {
-				return "实时计数器来自 `" + path + "`。\n"
-			},
-			CrossInstanceWarning: "> 本次输入的审计日志全部不在这份实时计数器所在的 `log_dir` 下——" +
-				"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
-			NoOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
-				"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
-			IncludeUsageFootnote: "> 某个 tokens 账户的\"估算\"占比接近 100%：多半是流式 `openai-completions` 调用方没发 " +
-				"`stream_options.include_usage:true`——此时上游响应里没有 usage 块，而 vmr 不会替客户端注入请求字段（字节透传）。" +
-				"让客户端带上该选项，或改用 `anthropic-messages`/`openai-responses`（两者总是回传 usage）。\n",
-			FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
-				if estimatedPct > 0 {
-					return usedStr + "（" + pctHundredStr(estimatedPct) + " 估算）"
-				}
-				return usedStr
-			},
-		}
-	}
-	return ProviderQuotaText{
-		Title: "Quota vs. Consumption",
-		Intro: "Every account that declares a `quota:`, with two independently-windowed consumption figures " +
+// providerQuotaRow holds this file's ProviderQuotaText literal templates,
+// one row per Lang (Table's own doc comment). FormatEstimatedShare's
+// "estimatedPct > 0" branch is the only conditional here — identical
+// condition both languages, so it's written once in ProviderQuota below.
+type providerQuotaRow struct {
+	title                   string
+	intro                   string
+	headers                 []string
+	windowFootnote          string
+	stalePeriodFootnote     string
+	configChangedFootnote   string
+	overQuotaFootnote       string
+	sourcePathLineFmt       string
+	crossInstanceWarning    string
+	noOverlapFootnote       string
+	includeUsageFootnote    string
+	formatEstimatedShareFmt string
+}
+
+var providerQuotaRows = Table[providerQuotaRow]{
+	EN: {
+		title: "Quota vs. Consumption",
+		intro: "Every account that declares a `quota:`, with two independently-windowed consumption figures " +
 			"placed side by side — never subtracted or ratioed, each labeled with its own source.\n\n",
-		Headers: []string{"Provider", "Metric", "Window Consumed¹", "Used This Period²", "Amount", "Used%", "Elapsed%", "Period"},
-		WindowFootnote: "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay " +
+		headers: []string{"Provider", "Metric", "Window Consumed¹", "Used This Period²", "Amount", "Used%", "Elapsed%", "Period"},
+		windowFootnote: "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay " +
 			"of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the " +
 			"router's own `multiplier × forwarded-attempt count` formula literally (the router charges once per forwarded " +
 			"upstream success, failed attempts were never charged in the first place, and the multiplier is applied by exact " +
@@ -165,31 +168,76 @@ func ProviderQuota(lang Lang) ProviderQuotaText {
 			"UPSTREAM bytes while this column can only count the bytes forwarded to the client, so the two differ by whatever " +
 			"response normalization rewrote (model-name rewrite, `<think>` stripping, ...). Common to both metrics: " +
 			"config weights/multipliers changed mid-window.\n",
-		StalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
+		stalePeriodFootnote: "> ² Used This Period: the router's own real-time counter from `<log_dir>/vmr-quota.json` — the authoritative " +
 			"account, in a different window than the column to its left. Never subtract or ratio the two. Shows `-` when the stored " +
 			"counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a " +
 			"degraded estimate (a byte-count fallback used when upstream didn't return exact usage), not authoritative metering.\n",
-		ConfigChangedFootnote: "> ‡ This account's `quota:` metric/every was changed at some point — the on-disk counter is still " +
+		configChangedFootnote: "> ‡ This account's `quota:` metric/every was changed at some point — the on-disk counter is still " +
 			"keyed under the OLD config, and the new key has no charges yet. The process itself is healthy and running; only the " +
 			"config changed underneath it. (Superseded keys are never cleaned up, so this marker says the config *was* changed, " +
 			"not *when* — a long-ago edit raises it just the same.)\n",
-		OverQuotaFootnote: "> ⭐ marks Used% >= 100%: this account is over its configured quota for the current period.\n",
-		SourcePathLine: func(path string) string {
-			return "The real-time counter is read from `" + path + "`.\n"
-		},
-		CrossInstanceWarning: "> None of this report's input audit logs resolve under that counter's `log_dir` — the real-time column " +
+		overQuotaFootnote: "> ⭐ marks Used% >= 100%: this account is over its configured quota for the current period.\n",
+		sourcePathLineFmt: "The real-time counter is read from `%s`.\n",
+		crossInstanceWarning: "> None of this report's input audit logs resolve under that counter's `log_dir` — the real-time column " +
 			"may be from a different machine/vmr instance than the one that produced the logs, not necessarily the same account's " +
 			"same books as the recomputed column to its left.\n",
-		NoOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
+		noOverlapFootnote: "> † Window Consumed shares NO time at all with the period range to its right — e.g. analyzing months-old " +
 			"archived logs against today's billing period. More extreme than the routine \"windows don't align\" case: the two " +
 			"numbers belong to two entirely unrelated stretches of time, not two views of the same one.\n",
-		IncludeUsageFootnote: "> A tokens account showing a near-100% estimated share is usually a streaming `openai-completions` " +
+		includeUsageFootnote: "> A tokens account showing a near-100% estimated share is usually a streaming `openai-completions` " +
 			"caller that didn't send `stream_options.include_usage:true` — without it the upstream response carries no usage block, " +
 			"and vmr never injects request fields (byte-faithful). Have the client send that option, or use `anthropic-messages` / " +
 			"`openai-responses` (both always report usage).\n",
+		formatEstimatedShareFmt: "%s (%s est.)",
+	},
+	ZH: {
+		title: "额度与消耗对照",
+		intro: "只列配了 `quota:` 的账户，把两个不同时间窗口的消耗数字并排给出——" +
+			"不做减法、不算覆盖率，各自标注来源。\n\n",
+		headers: []string{"账户", "metric", "本报表窗口消耗¹", "本周期已用²", "上限", "已用%", "周期已过%", "周期区间"},
+		windowFootnote: "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。" +
+			"两种口径的精度不同：**requests 口径无出入**——按 `倍率 × 已转发尝试数` 逐字复现路由半区的记账公式" +
+			"（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：" +
+			"上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——" +
+			"两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，" +
+			"当响应正规化改写过内容（模型名改写、`<think>` 剥离等）时两者会差出这段字节。两种口径共同的出入源：" +
+			"config 里的权重/倍率在本窗口期内被改过。\n",
+		stalePeriodFootnote: "> ² 本周期已用：来自 `<log_dir>/vmr-quota.json` 的实时计数器，是路由半区的权威记账——" +
+			"与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 `-`。括号内的\"X% 估算\"标注" +
+			"这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
+		configChangedFootnote: "> ‡ 该账户的 `quota:` metric/every 曾被改过——盘上还留着旧配置写下的计数器，" +
+			"新配置对应的计数器还没有任何记账；进程本身是健康的，不是停过，只是配置换了一把新钥匙。" +
+			"（旧计数器不会被自动清理，所以这个标记只说明「改过」，不说明改于何时——一次很久以前的修改同样会让它出现。）\n",
+		overQuotaFootnote: "> ⭐ 已用% ≥ 100% 时的标记：该账户本周期已超出配置的额度上限。\n",
+		sourcePathLineFmt: "实时计数器来自 `%s`。\n",
+		crossInstanceWarning: "> 本次输入的审计日志全部不在这份实时计数器所在的 `log_dir` 下——" +
+			"实时列可能来自另一台机器/另一个 vmr 实例，与左侧重算列不属于同一账户的同一份记账。\n",
+		noOverlapFootnote: "> † 本报表窗口消耗与右侧的周期区间没有任何时间交集——例如用几个月前的存档日志对照今天的计费周期，" +
+			"两个数字分属完全不相干的两段时间，比\"窗口不对齐\"更极端，读到这个标记时不要把两者当作同一段时间的两种口径。\n",
+		includeUsageFootnote: "> 某个 tokens 账户的\"估算\"占比接近 100%：多半是流式 `openai-completions` 调用方没发 " +
+			"`stream_options.include_usage:true`——此时上游响应里没有 usage 块，而 vmr 不会替客户端注入请求字段（字节透传）。" +
+			"让客户端带上该选项，或改用 `anthropic-messages`/`openai-responses`（两者总是回传 usage）。\n",
+		formatEstimatedShareFmt: "%s（%s 估算）",
+	},
+}
+
+func ProviderQuota(lang Lang) ProviderQuotaText {
+	r := providerQuotaRows.Row(lang)
+	return ProviderQuotaText{
+		Title:                 r.title,
+		Intro:                 r.intro,
+		Headers:               r.headers,
+		WindowFootnote:        r.windowFootnote,
+		StalePeriodFootnote:   r.stalePeriodFootnote,
+		ConfigChangedFootnote: r.configChangedFootnote,
+		OverQuotaFootnote:     r.overQuotaFootnote,
+		SourcePathLine:        func(path string) string { return fmt.Sprintf(r.sourcePathLineFmt, path) },
+		CrossInstanceWarning:  r.crossInstanceWarning,
+		NoOverlapFootnote:     r.noOverlapFootnote,
+		IncludeUsageFootnote:  r.includeUsageFootnote,
 		FormatEstimatedShare: func(usedStr string, estimatedPct float64) string {
 			if estimatedPct > 0 {
-				return usedStr + " (" + pctHundredStr(estimatedPct) + " est.)"
+				return fmt.Sprintf(r.formatEstimatedShareFmt, usedStr, pctHundredStr(estimatedPct))
 			}
 			return usedStr
 		},

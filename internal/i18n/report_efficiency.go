@@ -1,19 +1,22 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-22 02:20, by Sonnet 5
 
 // Pairs with internal/report/viewmodel_efficiency.go (§7 Efficiency & Waste)
-// and internal/report/metrics.go's buildFindings. See
-// docs/VirtualModelRouter_Design_v4_Analytics.md's "JSON 契约" subsection: the
-// six Finding* closures here are called with EN by Build (populating
-// Report2.Efficiency's language-agnostic default), again with the report's
-// real language by cmd_report.go's LocalizeEfficiency (overwriting it
-// before macro/summary.json is written), and again independently by
-// renderEfficiency for the Markdown output — three calls, same selection
-// logic, only the text differs. Code (report.FindingCode) never appears
-// here — it's the caller's stable identifier and never varies by language.
+// and internal/report/metrics.go's buildFindings. The six Finding* closures
+// here are called twice, both times through buildFindings(rep, lang): once
+// with EN by buildFindingsForJSON (populating Report2.Efficiency and
+// macro/summary.json's language-invariant baseline, R1), and again with the
+// report's actual render language by viewmodel_efficiency.go's
+// vmEfficiencySection for the Markdown output — it deliberately never reads
+// the already-computed rep.Efficiency, precisely so Markdown keeps
+// following -lang after R1 froze the JSON path to English. Code
+// (report.FindingCode) never appears here — it's the caller's stable
+// identifier and never varies by language; neither does Params, which
+// carries the raw values a script needs to rebuild the sentence in another
+// language without calling back into this package.
 package i18n
 
 import (
-	"strconv"
+	"fmt"
 	"strings"
 )
 
@@ -51,146 +54,212 @@ type EfficiencyText struct {
 	ProviderQuotaExhaustionFinding func(provider string, models []string, usedPct string, metric, every string) FindingText
 }
 
-func Efficiency(lang Lang) EfficiencyText {
-	if lang == ZH {
-		return EfficiencyText{
-			Title:            "§7 效率与浪费 ⭐",
-			TableHeaders:     [5]string{"发现", "指标", "值", "涉及", "建议"},
-			ToolWasteTitle:   "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 macro/context-efficiency.json -> tools[]）",
-			ToolWasteHeaders: [6]string{"形态", "请求", "声明", "已用", "利用率", "浪费字节"},
-			WindowNote:       "> 统计窗口 = 本报告的输入日志范围；低频工具（如 cron 触发类）可能不在窗口内，裁剪决策建议基于 ≥1 周日志。\n\n",
-			DetailSummary: func(shape string, requests, declared, distinctCalled int) string {
-				return shape + " · " + strconv.Itoa(requests) + " 请求 · 声明 " + strconv.Itoa(declared) + " 个 · 实际调用 " + strconv.Itoa(distinctCalled) + " 个"
-			},
-			CalledToolsTitle: func(n int) string {
-				return "**调用过的工具（" + strconv.Itoa(n) + " 个，按调用次数降序）：**"
-			},
-			CalledToolLine: func(idx int, name string, n int) string {
-				return strconv.Itoa(idx) + ". " + name + " (" + strconv.Itoa(n) + " 次)"
-			},
-			NeverCalledTitle: func(n int) string {
-				return "**声明但从未调用（" + strconv.Itoa(n) + " 个，按字母序）：**"
-			},
-			NeverCalledLine: func(idx int, name string) string { return strconv.Itoa(idx) + ". " + name },
+// efficiencyRow holds report_efficiency.go's literal templates, one row
+// per Lang (Table's own doc comment). Two findings have real conditional
+// composition (CacheMissFinding on dominantModel, ProviderQuotaExhaustionFinding
+// on len(models)) — the condition is identical in both languages, so that
+// logic is written once in Efficiency below and only the branch templates
+// live here.
+type efficiencyRow struct {
+	title               string
+	tableHeaders        [5]string
+	toolWasteTitle      string
+	toolWasteHeaders    [6]string
+	windowNote          string
+	detailSummaryFmt    string
+	calledToolsTitleFmt string
+	calledToolLineFmt   string
+	neverCalledTitleFmt string
+	neverCalledLineFmt  string
 
-			ToolSchemaWasteFinding: func(shape string, requests int, wasteBytes, utilPct string) FindingText {
-				return FindingText{
-					Title: "工具 schema 浪费", Value: wasteBytes,
-					Implicated: shape + "/" + strconv.Itoa(requests) + " 请求",
-					Action:     "裁剪未用工具；利用率 " + utilPct + "%",
-				}
-			},
-			CacheMissFinding: func(freshTokens, sharePct string, dominantModel, dominantTokens string) FindingText {
-				implicated := "全局"
-				if dominantModel != "" {
-					implicated = "全局，" + dominantModel + " 占 " + dominantTokens
-				}
-				return FindingText{
-					Title: "缓存未命中输入", Value: freshTokens + " (" + sharePct + "%)",
-					Implicated: implicated, Action: "检查 prompt 前缀稳定性 / 开启 provider 缓存",
-				}
-			},
-			CronRedundancyFinding: func(freshTokens, cacheEffPct, class string) FindingText {
-				return FindingText{
-					Title: "定时任务冗余", Value: freshTokens + " fresh, 缓存效率 " + cacheEffPct,
-					Implicated: class, Action: "拉长间隔 / 换便宜模型 / 缓存前缀",
-				}
-			},
-			OutputTruncationFinding: func(trunc, total int) FindingText {
-				return FindingText{
-					Title: "输出截断", Value: strconv.Itoa(trunc) + "/" + strconv.Itoa(total),
-					Implicated: "stream 中断", Action: "排查上游超时 / 提高 stream_idle",
-				}
-			},
-			SlowRequestsFinding: func(sharePct string, thresholdSec int) FindingText {
-				return FindingText{
-					Title: "慢请求", Value: "~" + sharePct + "% > " + strconv.Itoa(thresholdSec) + "s",
-					Implicated: "见 §4 stream_ms 归因", Action: "见 §4",
-				}
-			},
-			ContextGrowthFinding: func(growthX, sessionID, sessionTitle string) FindingText {
-				return FindingText{
-					Title: "上下文膨胀", Value: "×" + growthX,
-					Implicated: sessionID + " " + sessionTitle, Action: "中途 compaction",
-				}
-			},
-			ProviderQuotaExhaustionFinding: func(provider string, models []string, usedPct string, metric, every string) FindingText {
-				implicated := provider
-				if len(models) > 0 {
-					implicated = provider + " (" + strings.Join(models, ", ") + ")"
-				}
-				return FindingText{
-					Title: "额度即将耗尽", Value: usedPct + "%（" + metric + " · " + every + "）",
-					Implicated: implicated, Action: "检查该账户或模型的路由权重或额度配置",
-				}
-			},
-		}
-	}
+	toolSchemaWasteTitle         string
+	toolSchemaWasteImplicatedFmt string
+	toolSchemaWasteActionFmt     string
+
+	cacheMissTitle                 string
+	cacheMissValueFmt              string
+	cacheMissImplicatedPlain       string
+	cacheMissImplicatedDominantFmt string
+	cacheMissAction                string
+
+	cronRedundancyTitle    string
+	cronRedundancyValueFmt string
+	cronRedundancyAction   string
+
+	outputTruncationTitle      string
+	outputTruncationImplicated string
+	outputTruncationAction     string
+
+	slowRequestsTitle      string
+	slowRequestsValueFmt   string
+	slowRequestsImplicated string
+	slowRequestsAction     string
+
+	contextGrowthTitle    string
+	contextGrowthValueFmt string
+	contextGrowthAction   string
+
+	quotaExhaustionTitle    string
+	quotaExhaustionValueFmt string
+	quotaExhaustionAction   string
+}
+
+var efficiencyRows = Table[efficiencyRow]{
+	EN: {
+		title:               "§7 Efficiency & Waste ⭐",
+		tableHeaders:        [5]string{"Finding", "Metric", "Value", "Implicated", "Action"},
+		toolWasteTitle:      "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in macro/context-efficiency.json -> tools[])",
+		toolWasteHeaders:    [6]string{"Shape", "Requests", "Declared", "Used", "Utilization", "Wasted Bytes"},
+		windowNote:          "> Stats window = this report's input log range; low-frequency tools (e.g. cron-triggered ones) may fall outside it — base trimming decisions on ≥1 week of logs.\n\n",
+		detailSummaryFmt:    "%s · %d requests · %d declared · %d actually called",
+		calledToolsTitleFmt: "**Tools called (%d, by call count descending):**",
+		calledToolLineFmt:   "%d. %s (%d×)",
+		neverCalledTitleFmt: "**Declared but never called (%d, alphabetical):**",
+		neverCalledLineFmt:  "%d. %s",
+
+		toolSchemaWasteTitle:         "Tool schema waste",
+		toolSchemaWasteImplicatedFmt: "%s/%d requests",
+		toolSchemaWasteActionFmt:     "Trim unused tool declarations; utilization %s%%",
+
+		cacheMissTitle:                 "Cache-missed input",
+		cacheMissValueFmt:              "%s (%s%%)",
+		cacheMissImplicatedPlain:       "Global",
+		cacheMissImplicatedDominantFmt: "Global, %s accounts for %s",
+		cacheMissAction:                "Check prompt-prefix stability / enable provider caching",
+
+		cronRedundancyTitle:    "Scheduled-task redundancy",
+		cronRedundancyValueFmt: "%s fresh, cache efficiency %s",
+		cronRedundancyAction:   "Lengthen the interval / switch to a cheaper model / cache the prefix",
+
+		outputTruncationTitle:      "Output truncation",
+		outputTruncationImplicated: "stream interrupted",
+		outputTruncationAction:     "Investigate upstream timeouts / raise stream_idle",
+
+		slowRequestsTitle:      "Slow requests",
+		slowRequestsValueFmt:   "~%s%% > %ds",
+		slowRequestsImplicated: "see §4 stream_ms attribution",
+		slowRequestsAction:     "see §4",
+
+		contextGrowthTitle:    "Context growth",
+		contextGrowthValueFmt: "×%s",
+		contextGrowthAction:   "compact mid-session",
+
+		quotaExhaustionTitle:    "Quota nearing exhaustion",
+		quotaExhaustionValueFmt: "%s%% (%s · %s)",
+		quotaExhaustionAction:   "Review this account's or model's routing weight or quota configuration",
+	},
+	ZH: {
+		title:               "§7 效率与浪费 ⭐",
+		tableHeaders:        [5]string{"发现", "指标", "值", "涉及", "建议"},
+		toolWasteTitle:      "**工具形态浪费 Top-5**（按浪费字节降序；完整明细见 macro/context-efficiency.json -> tools[]）",
+		toolWasteHeaders:    [6]string{"形态", "请求", "声明", "已用", "利用率", "浪费字节"},
+		windowNote:          "> 统计窗口 = 本报告的输入日志范围；低频工具（如 cron 触发类）可能不在窗口内，裁剪决策建议基于 ≥1 周日志。\n\n",
+		detailSummaryFmt:    "%s · %d 请求 · 声明 %d 个 · 实际调用 %d 个",
+		calledToolsTitleFmt: "**调用过的工具（%d 个，按调用次数降序）：**",
+		calledToolLineFmt:   "%d. %s (%d 次)",
+		neverCalledTitleFmt: "**声明但从未调用（%d 个，按字母序）：**",
+		neverCalledLineFmt:  "%d. %s",
+
+		toolSchemaWasteTitle:         "工具 schema 浪费",
+		toolSchemaWasteImplicatedFmt: "%s/%d 请求",
+		toolSchemaWasteActionFmt:     "裁剪未用工具；利用率 %s%%",
+
+		cacheMissTitle:                 "缓存未命中输入",
+		cacheMissValueFmt:              "%s (%s%%)",
+		cacheMissImplicatedPlain:       "全局",
+		cacheMissImplicatedDominantFmt: "全局，%s 占 %s",
+		cacheMissAction:                "检查 prompt 前缀稳定性 / 开启 provider 缓存",
+
+		cronRedundancyTitle:    "定时任务冗余",
+		cronRedundancyValueFmt: "%s fresh, 缓存效率 %s",
+		cronRedundancyAction:   "拉长间隔 / 换便宜模型 / 缓存前缀",
+
+		outputTruncationTitle:      "输出截断",
+		outputTruncationImplicated: "stream 中断",
+		outputTruncationAction:     "排查上游超时 / 提高 stream_idle",
+
+		slowRequestsTitle:      "慢请求",
+		slowRequestsValueFmt:   "~%s%% > %ds",
+		slowRequestsImplicated: "见 §4 stream_ms 归因",
+		slowRequestsAction:     "见 §4",
+
+		contextGrowthTitle:    "上下文膨胀",
+		contextGrowthValueFmt: "×%s",
+		contextGrowthAction:   "中途 compaction",
+
+		quotaExhaustionTitle:    "额度即将耗尽",
+		quotaExhaustionValueFmt: "%s%%（%s · %s）",
+		quotaExhaustionAction:   "检查该账户或模型的路由权重或额度配置",
+	},
+}
+
+func Efficiency(lang Lang) EfficiencyText {
+	r := efficiencyRows.Row(lang)
 	return EfficiencyText{
-		Title:            "§7 Efficiency & Waste ⭐",
-		TableHeaders:     [5]string{"Finding", "Metric", "Value", "Implicated", "Action"},
-		ToolWasteTitle:   "**Tool Shape Waste Top-5** (sorted by wasted bytes descending; full detail in macro/context-efficiency.json -> tools[])",
-		ToolWasteHeaders: [6]string{"Shape", "Requests", "Declared", "Used", "Utilization", "Wasted Bytes"},
-		WindowNote:       "> Stats window = this report's input log range; low-frequency tools (e.g. cron-triggered ones) may fall outside it — base trimming decisions on ≥1 week of logs.\n\n",
+		Title:            r.title,
+		TableHeaders:     r.tableHeaders,
+		ToolWasteTitle:   r.toolWasteTitle,
+		ToolWasteHeaders: r.toolWasteHeaders,
+		WindowNote:       r.windowNote,
 		DetailSummary: func(shape string, requests, declared, distinctCalled int) string {
-			return shape + " · " + strconv.Itoa(requests) + " requests · " + strconv.Itoa(declared) + " declared · " + strconv.Itoa(distinctCalled) + " actually called"
+			return fmt.Sprintf(r.detailSummaryFmt, shape, requests, declared, distinctCalled)
 		},
-		CalledToolsTitle: func(n int) string { return "**Tools called (" + strconv.Itoa(n) + ", by call count descending):**" },
+		CalledToolsTitle: func(n int) string { return fmt.Sprintf(r.calledToolsTitleFmt, n) },
 		CalledToolLine: func(idx int, name string, n int) string {
-			return strconv.Itoa(idx) + ". " + name + " (" + strconv.Itoa(n) + "×)"
+			return fmt.Sprintf(r.calledToolLineFmt, idx, name, n)
 		},
-		NeverCalledTitle: func(n int) string { return "**Declared but never called (" + strconv.Itoa(n) + ", alphabetical):**" },
-		NeverCalledLine:  func(idx int, name string) string { return strconv.Itoa(idx) + ". " + name },
+		NeverCalledTitle: func(n int) string { return fmt.Sprintf(r.neverCalledTitleFmt, n) },
+		NeverCalledLine:  func(idx int, name string) string { return fmt.Sprintf(r.neverCalledLineFmt, idx, name) },
 
 		ToolSchemaWasteFinding: func(shape string, requests int, wasteBytes, utilPct string) FindingText {
 			return FindingText{
-				Title: "Tool schema waste", Value: wasteBytes,
-				Implicated: shape + "/" + strconv.Itoa(requests) + " requests",
-				Action:     "Trim unused tool declarations; utilization " + utilPct + "%",
+				Title: r.toolSchemaWasteTitle, Value: wasteBytes,
+				Implicated: fmt.Sprintf(r.toolSchemaWasteImplicatedFmt, shape, requests),
+				Action:     fmt.Sprintf(r.toolSchemaWasteActionFmt, utilPct),
 			}
 		},
 		CacheMissFinding: func(freshTokens, sharePct string, dominantModel, dominantTokens string) FindingText {
-			implicated := "Global"
+			implicated := r.cacheMissImplicatedPlain
 			if dominantModel != "" {
-				implicated = "Global, " + dominantModel + " accounts for " + dominantTokens
+				implicated = fmt.Sprintf(r.cacheMissImplicatedDominantFmt, dominantModel, dominantTokens)
 			}
 			return FindingText{
-				Title: "Cache-missed input", Value: freshTokens + " (" + sharePct + "%)",
-				Implicated: implicated, Action: "Check prompt-prefix stability / enable provider caching",
+				Title: r.cacheMissTitle, Value: fmt.Sprintf(r.cacheMissValueFmt, freshTokens, sharePct),
+				Implicated: implicated, Action: r.cacheMissAction,
 			}
 		},
 		CronRedundancyFinding: func(freshTokens, cacheEffPct, class string) FindingText {
 			return FindingText{
-				Title: "Scheduled-task redundancy", Value: freshTokens + " fresh, cache efficiency " + cacheEffPct,
-				Implicated: class, Action: "Lengthen the interval / switch to a cheaper model / cache the prefix",
+				Title: r.cronRedundancyTitle, Value: fmt.Sprintf(r.cronRedundancyValueFmt, freshTokens, cacheEffPct),
+				Implicated: class, Action: r.cronRedundancyAction,
 			}
 		},
 		OutputTruncationFinding: func(trunc, total int) FindingText {
 			return FindingText{
-				Title: "Output truncation", Value: strconv.Itoa(trunc) + "/" + strconv.Itoa(total),
-				Implicated: "stream interrupted", Action: "Investigate upstream timeouts / raise stream_idle",
+				Title: r.outputTruncationTitle, Value: fmt.Sprintf("%d/%d", trunc, total),
+				Implicated: r.outputTruncationImplicated, Action: r.outputTruncationAction,
 			}
 		},
 		SlowRequestsFinding: func(sharePct string, thresholdSec int) FindingText {
 			return FindingText{
-				Title: "Slow requests", Value: "~" + sharePct + "% > " + strconv.Itoa(thresholdSec) + "s",
-				Implicated: "see §4 stream_ms attribution", Action: "see §4",
+				Title: r.slowRequestsTitle, Value: fmt.Sprintf(r.slowRequestsValueFmt, sharePct, thresholdSec),
+				Implicated: r.slowRequestsImplicated, Action: r.slowRequestsAction,
 			}
 		},
 		ContextGrowthFinding: func(growthX, sessionID, sessionTitle string) FindingText {
 			return FindingText{
-				Title: "Context growth", Value: "×" + growthX,
-				Implicated: sessionID + " " + sessionTitle, Action: "compact mid-session",
+				Title: r.contextGrowthTitle, Value: fmt.Sprintf(r.contextGrowthValueFmt, growthX),
+				Implicated: sessionID + " " + sessionTitle, Action: r.contextGrowthAction,
 			}
 		},
 		ProviderQuotaExhaustionFinding: func(provider string, models []string, usedPct string, metric, every string) FindingText {
 			implicated := provider
 			if len(models) > 0 {
-				implicated = provider + " (" + strings.Join(models, ", ") + ")"
+				implicated = fmt.Sprintf("%s (%s)", provider, strings.Join(models, ", "))
 			}
 			return FindingText{
-				Title: "Quota nearing exhaustion", Value: usedPct + "% (" + metric + " · " + every + ")",
-				Implicated: implicated, Action: "Review this account's or model's routing weight or quota configuration",
+				Title: r.quotaExhaustionTitle, Value: fmt.Sprintf(r.quotaExhaustionValueFmt, usedPct, metric, every),
+				Implicated: implicated, Action: r.quotaExhaustionAction,
 			}
 		},
 	}

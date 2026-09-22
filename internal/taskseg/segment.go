@@ -146,12 +146,13 @@ func IsNewTask(traceChanged, prevNoReply, hasNewInstr bool) bool {
 }
 
 // TaskTitle returns newInstruction when non-empty, else fallback. Takes the
-// fallback as a parameter instead of importing internal/i18n: report's one
-// full-corpus analysis pass runs once, not once per language (its fallback
-// is a fixed English placeholder — re-running the pass per language just
-// for a rare placeholder string isn't worth it), while journey passes its own
-// localized i18n.Journey(lang).ToolLoopTitle. taskseg stays a leaf that
-// doesn't depend on the rendering layer either way.
+// fallback as a parameter instead of importing internal/i18n: both callers'
+// fallback is a fixed English placeholder (report's own literal; journey's
+// i18n.JourneyToolLoopTitle, frozen rather than following -lang since it
+// can leak into journeys/index.json — see journey_render.go's package doc),
+// so neither needs anything internal/i18n could offer beyond the plain
+// string. taskseg stays a leaf that doesn't depend on the rendering layer
+// either way.
 func TaskTitle(newInstruction, fallback string) string {
 	if newInstruction != "" {
 		return newInstruction
