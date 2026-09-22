@@ -604,18 +604,20 @@ func (rt *Router) forwardSuccess(w http.ResponseWriter, r *http.Request, resp *h
 	copyErr, status := relayResponseBody(rt, snap, w, r, ep, att, rbody, body, isSSE, opaque, snap.Cfg.Timeouts.StreamIdle.D())
 	rt.reportStreamOutcome(key, status)
 	*healthReported = true
-	// Charged here regardless of copyErr — a truncated response still
-	// consumed whatever tokens actually reached the client (see
-	// chargeQuota's doc comment); nil-safe when no quota.Registry is wired
-	// up or this endpoint carries no quota: config.
-	rt.chargeQuota(ep, rbody, creq, time.Now())
-	// Stamp the audit evidence (raw four-component counters + upstream
-	// credential label) at the same point: every Forwarded attempt carries
-	// it, independent of whether any quota billing happened (audit evidence
-	// must not depend on quota configuration). tokenStamp re-derives the
-	// same counters tokenCharge would — same source, same instant — and the
-	// parity differential test pins stamp vs charge against each other.
-	att.SetTokens(tokenStamp(rbody, creq))
+	// One read of the stream's token state, shared by the ledger and the
+	// audit stamp. Reading twice would let them disagree: on copyFlush's
+	// early-return paths (idle timeout, client write error, cancel) the
+	// reader goroutine can still ingest one more chunk before it exits, and
+	// an SSE stream's usage event usually rides that last chunk — so one
+	// side could bill a degraded estimate while the other stamped exact
+	// usage, and estimated_pct would contradict its own evidence.
+	rawTokens, estimated, _, _ := tokenCharge(rbody, creq)
+	// Charged regardless of copyErr — a truncated response still consumed
+	// whatever tokens reached the client (see chargeQuota's doc comment);
+	// nil-safe when no quota.Registry is wired up or this endpoint carries
+	// no quota: config.
+	rt.chargeQuota(ep, rawTokens, estimated, time.Now())
+	att.SetTokens(tokenStamp(rawTokens))
 	att.SetKeyLabel(ep.KeyLabel)
 	att.SetUpstreamModel(rbody.ObservedModel())
 	// rbody.Usage() is safe to read here even on copyFlush's early-return

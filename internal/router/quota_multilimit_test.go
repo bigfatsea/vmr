@@ -271,7 +271,7 @@ func TestChargeQuota_MultiLimit_TokensOnlyFetchedWhenSomeLimitNeedsIt(t *testing
 	ep := &core.Endpoint{Provider: "p1", Model: "m", Quota: spec}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 
-	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow)
+	rt.chargeFromStream(ep, rbody, &core.CanonicalRequest{}, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", quota.LimitKey(req, ""), quota.PeriodStart(req, chargeNow))
 	if used.Requests != 1 {

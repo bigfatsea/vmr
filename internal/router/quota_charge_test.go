@@ -34,18 +34,27 @@ var chargeNow = time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)
 
 // --- nil-safety (dev plan §5.4) ---
 
+// chargeFromStream is the pre-split chargeQuota shape these tests were written
+// against: read the stream's counters, then bill them. Production splits the
+// two so forwardSuccess can share one read with the audit stamp; the tests
+// only ever want "bill this response", so they keep the one-call form.
+func (rt *Router) chargeFromStream(ep *core.Endpoint, rbody respnorm.NormalizerStream, creq *core.CanonicalRequest, now time.Time) {
+	raw, estimated, _, _ := tokenCharge(rbody, creq)
+	rt.chargeQuota(ep, raw, estimated, now)
+}
+
 func TestChargeQuota_NilSafe_NoRegistry(t *testing.T) {
 	rt := &Router{} // Quota left nil, exactly like router.New's real construction
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{Limits: []core.Limit{requestsLimit(100)}}}
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
-	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
+	rt.chargeFromStream(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
 }
 
 func TestChargeQuota_NilSafe_NoEndpointQuota(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	ep := &core.Endpoint{Provider: "p1"} // Quota nil: no quota: configured
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
-	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow)
+	rt.chargeFromStream(ep, rbody, &core.CanonicalRequest{}, chargeNow)
 	used, _ := rt.Quota.Used("p1", "requests/1mo", chargeNow)
 	if used.Requests != 0 {
 		t.Fatalf("charged an endpoint with no quota: %+v", used)
@@ -56,7 +65,7 @@ func TestChargeQuota_NilSafe_EmptyLimits(t *testing.T) {
 	rt := &Router{Quota: quota.NewRegistry("")}
 	ep := &core.Endpoint{Provider: "p1", Quota: &core.QuotaSpec{}} // Limits: nil
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
-	rt.chargeQuota(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
+	rt.chargeFromStream(ep, rbody, &core.CanonicalRequest{}, chargeNow) // must not panic
 }
 
 // --- metric: requests ---
@@ -68,9 +77,9 @@ func TestChargeQuota_Requests_OnePerCall(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, est := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 3 {
@@ -98,7 +107,7 @@ func TestChargeQuota_Tokens_SniffedUsage_Buffered(t *testing.T) {
 		t.Fatalf("sniffed usage = %+v ok=%v, want In=100 Out=50 CacheRead=20", u, ok)
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	// OpenAI semantics: prompt_tokens (100) already includes the 20 cached
@@ -130,7 +139,7 @@ func TestChargeQuota_Tokens_SniffedUsage_SSE(t *testing.T) {
 		t.Fatalf("sniffed SSE usage = %+v ok=%v, want In=10 Out=5", u, ok)
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Fresh != 10 || used.Out != 5 {
 		t.Fatalf("charged counters = %+v, want Fresh=10 Out=5", used)
@@ -175,7 +184,7 @@ data: {"type":"message_stop"}
 		t.Fatalf("sniffed two-stage usage = %+v, want In=120 Out=25 CacheRead=20", u)
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	// fresh = In - CacheRead - CacheWrite = 120 - 20 - 0 = 100.
 	if used.Fresh != 100 || used.CacheRead != 20 || used.Out != 25 {
@@ -227,7 +236,7 @@ func TestChargeQuota_Tokens_TruncatedMidStream_Degrades(t *testing.T) {
 		t.Fatal("a truncated stream must never report sniffed usage")
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	wantOutInt := chatmsg.EstimateResponseBodyTokens(partial)
 	wantOut := float64(wantOutInt)
@@ -259,7 +268,7 @@ func TestChargeQuota_Tokens_DegradedEstimate_NoUsageField(t *testing.T) {
 		t.Fatal("Usage() ok=true, want false — body has no usage field")
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 
 	wantOutInt := chatmsg.EstimateResponseBodyTokens(body)
@@ -296,7 +305,7 @@ func TestChargeQuota_Tokens_OpaqueAlwaysDegrades(t *testing.T) {
 		t.Fatal("opaque response yielded sniffed usage, want none")
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Fresh != 7 {
 		t.Fatalf("Fresh = %v, want 7 (degraded, not the 999 in the opaque body)", used.Fresh)
@@ -316,9 +325,9 @@ func TestChargeQuota_IndependentProviders(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(epA, rbody, creq, chargeNow)
-	rt.chargeQuota(epA, rbody, creq, chargeNow)
-	rt.chargeQuota(epB, rbody, creq, chargeNow)
+	rt.chargeFromStream(epA, rbody, creq, chargeNow)
+	rt.chargeFromStream(epA, rbody, creq, chargeNow)
+	rt.chargeFromStream(epB, rbody, creq, chargeNow)
 
 	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(lr, chargeNow))
 	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(lr, chargeNow))
@@ -419,7 +428,7 @@ data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text
 		t.Fatalf("UsageSides = (%v, %v), want (true, false)", inSeen, outSeen)
 	}
 
-	rt.chargeQuota(ep, rs, creq, chargeNow)
+	rt.chargeFromStream(ep, rs, creq, chargeNow)
 	used, est := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	// In side was really sniffed: exact, cache components intact.
 	// Anthropic shape: input_tokens=100 excludes cache_read=20, so

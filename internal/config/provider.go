@@ -124,6 +124,19 @@ type Provider struct {
 	ConcurrencyQueue *Duration `yaml:"concurrency_queue"`
 }
 
+// ResolvedConcurrencyQueue applies the default rule once, for every consumer
+// (snapshot endpoint build, limiter registry, vmr check): explicit value wins,
+// an unconstrained provider never waits, everything else gets the default.
+func (p Provider) ResolvedConcurrencyQueue() time.Duration {
+	if p.ConcurrencyQueue != nil {
+		return p.ConcurrencyQueue.D()
+	}
+	if p.Concurrency == 0 {
+		return 0
+	}
+	return DefaultConcurrencyQueue
+}
+
 // baseURLCredentialKeys is the fixed blacklist of query-parameter names whose
 // value IS a credential. Deliberately not a heuristic: vmr must not
 // second-guess legitimate gateway query parameters (Azure's api-version and

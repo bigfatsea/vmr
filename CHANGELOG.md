@@ -21,6 +21,10 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+### Fixed
+- **Quota billing and the audit token stamp now come from one read**: `forwardSuccess` called `tokenCharge` twice — once via `chargeQuota`, once via `tokenStamp` — with the response normalizer's mutex released in between. On `copyFlush`'s early-return paths (stream-idle timeout, client write error, cancel) the reader goroutine can still ingest one more chunk before it exits, and an SSE stream's `usage` event usually rides that last chunk, so the ledger could bill a degraded estimate while the audit record stamped exact usage, or the reverse — leaving `estimated_pct` contradicting its own evidence. Both consumers now take the same counters. Also removes one redundant per-request computation on token-metered accounts.
+- **A second instance on one `log_dir` now degrades live stats to memory-only, as designed**: losing `.vmr-stats.lock` made `livestats.New` return an error, which left `Server.liveStats` nil — the completion hook stopped booking and `/stats` returned no ledger at all, so the console Overview, Models usage and `recent_*` blocks were simply blank. The design doc, `KNOWN_ISSUES` and the startup log all described a memory-only degradation instead. The lock guards the slim/rollup *files*, so losing it is no reason to stop counting: the instance now counts in memory, reads and writes nothing under `log_dir`, and says so in one startup WARN. Reachable only under `-audit=false` — with auditing on, `audit.New`'s own dir lock fails first and the process exits — which is exactly the case livestats carries a separate lock for.
+
 ### Changed
 - **Console Models & Status UI Formatting Consistency**:
   - In `/models.html` ("Virtual Models & Endpoint Topology"), renamed column `Virtual Model` to `Name`, renamed column `Provider : Model` to `Provider & Model`, formatted cell values as `provider:model` without spaces, and switched capability tag separator from middots (` · `) to slashes (`/`).

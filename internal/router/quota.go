@@ -48,35 +48,20 @@ func applicableLimits(limits []core.Limit, model string) []core.Limit {
 // tokens already sent were genuinely consumed, and forwardSuccess always
 // returns success=true for exactly this reason (see its own doc comment).
 //
+// raw/estimated come from the caller's single tokenCharge read, shared with
+// the audit stamp (see forwardSuccess) — they are ignored outright for a
+// metric: requests Limit, which bills one unit regardless.
+//
 // nil-safe throughout, per the dev plan's §5.4 contract: rt.Quota==nil (no
 // quota.Registry wired up — most tests, vmr diagnose), ep.Quota==nil (this
 // endpoint's provider has no quota: configured), and an empty Limits slice
 // are all silent no-ops, never a panic — a statistics helper must not be
 // able to break a response that has already been written to the client.
-func (rt *Router) chargeQuota(ep *core.Endpoint, rbody respnorm.NormalizerStream, creq *core.CanonicalRequest, now time.Time) {
+func (rt *Router) chargeQuota(ep *core.Endpoint, raw quota.Counters, estimated float64, now time.Time) {
 	if rt.Quota == nil || ep.Quota == nil || len(ep.Quota.Limits) == 0 {
 		return
 	}
-	var raw quota.Counters
-	var estimated float64
-	if needsTokenCharge(ep.Quota.Limits, ep.Model) {
-		raw, estimated, _, _ = tokenCharge(rbody, creq)
-	}
 	ChargeResponse(rt.Quota, ep, raw, estimated, now)
-}
-
-// needsTokenCharge reports whether any of limits that actually apply to
-// model (see applicableLimits) needs the token/usage extraction tokenCharge
-// performs — i.e. is metric: tokens. A provider whose only applicable
-// Limit is metric: requests never needs it (zero extra cost — see
-// tokenCharge's own doc comment on why that matters for the hot path).
-func needsTokenCharge(limits []core.Limit, model string) bool {
-	for _, l := range limits {
-		if l.Metric != core.MetricRequests && quota.AppliesToModel(l, model) {
-			return true
-		}
-	}
-	return false
 }
 
 // ChargeResponse charges every one of ep's provider Limits that apply to
@@ -141,15 +126,12 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 
 // tokenStamp converts one response's raw counters into the audit stamp
 // value — the exact audit.TokenCount shape Attempt.Tokens stores (the
-// LiveStats-side key space). Every Forwarded attempt gets one (audit
-// evidence must not depend on quota configuration, which is why this is
-// separate from needsTokenCharge-gated tokenCharge): quota billing and
-// audit stamping read the SAME counters, same instant — the parity
-// differential test (cmd/vmr/quota_parity_test.go pattern) pins the two
-// against each other. The mapping lives here rather than in audit so the
-// audit package stays free of quota's vocabulary.
-func tokenStamp(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) *audit.TokenCount {
-	raw, _, _, _ := tokenCharge(rbody, creq)
+// LiveStats-side key space). Every Forwarded attempt gets one, independent of
+// whether any quota billing happened: audit evidence must not depend on quota
+// configuration. It takes the counters rather than re-reading the stream so
+// billing and stamping cannot disagree (see forwardSuccess). The mapping lives
+// here rather than in audit so that package stays free of quota's vocabulary.
+func tokenStamp(raw quota.Counters) *audit.TokenCount {
 	return &audit.TokenCount{
 		In:         int64(raw.Fresh),
 		Out:        int64(raw.Out),

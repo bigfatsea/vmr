@@ -343,32 +343,66 @@ func TestAggregator_RetentionBoundaryIsCalendarDay(t *testing.T) {
 	}
 }
 
-// TestAggregator_DirLockRejectsSecondInstance: two aggregators on one dir
-// cannot coexist — the second fails to take the advisory flock, so slim/rollup
-// stay single-writer even with -audit=false (design §3.2). Skipped on Windows,
-// where the lock is a deliberate no-op.
-func TestAggregator_DirLockRejectsSecondInstance(t *testing.T) {
+// TestAggregator_SecondInstanceDegradesToMemoryOnly: a second aggregator on
+// one dir loses the advisory flock and keeps counting in memory, touching no
+// slim/rollup file — the degradation the LiveStats design promises, and the
+// reason livestats carries its own lock instead of riding audit's (this path
+// is only reachable under -audit=false). Skipped on Windows, where the lock
+// is a deliberate no-op.
+func TestAggregator_SecondInstanceDegradesToMemoryOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("no flock on windows; acquireDirLock is a deliberate no-op there")
 	}
 	dir := t.TempDir()
-	now := func() time.Time { return time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local) }
+	clock := time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local)
+	now := func() time.Time { return clock }
 
 	a1, err := NewAt(dir, now)
 	if err != nil {
 		t.Fatalf("first NewAt: %v", err)
 	}
-
-	if a2, err := NewAt(dir, now); err == nil {
-		a2.Close()
-		t.Fatal("second NewAt on the same dir succeeded, want lock error")
+	if a1.MemoryOnly() {
+		t.Fatal("lock holder must not be memory-only")
 	}
 
-	// After the first releases, a fresh instance can take the dir.
+	a2, err := NewAt(dir, now)
+	if err != nil {
+		t.Fatalf("second NewAt must degrade, not fail: %v", err)
+	}
+	if !a2.MemoryOnly() {
+		t.Fatal("second NewAt took the lock, want memory-only degradation")
+	}
+
+	before, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	a2.Record(Sample{
+		TS: clock, VModel: "coding", Protocol: "openai-completions", Outcome: OutcomeOK,
+		Provider: "p1", Model: "m1", Forwarded: true, DurMS: 100, TTFTMS: 10,
+		Tokens: TokenCounts{In: 1, Out: 1},
+	})
+	snap := a2.Snapshot(HourlyTailDefault)
+	if len(snap.ByProviderModel) != 1 || snap.ByProviderModel[0].OK != 1 {
+		t.Errorf("memory-only instance must still count: %+v", snap.ByProviderModel)
+	}
+	after, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Errorf("memory-only instance wrote to the holder's log_dir: %d entries before, %d after", len(before), len(after))
+	}
+	a2.Close()
+
+	// After the first releases, a fresh instance takes the dir for real.
 	a1.Close()
 	a3, err := NewAt(dir, now)
 	if err != nil {
 		t.Fatalf("NewAt after first Close: %v", err)
+	}
+	if a3.MemoryOnly() {
+		t.Error("instance taking a free dir lock must not be memory-only")
 	}
 	a3.Close()
 }

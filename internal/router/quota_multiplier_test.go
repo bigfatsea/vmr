@@ -29,7 +29,7 @@ func TestChargeQuota_ModelMultiplier_ExactMatch(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 9 {
@@ -46,7 +46,7 @@ func TestChargeQuota_ModelMultiplier_WildcardFallback(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 3 {
@@ -63,7 +63,7 @@ func TestChargeQuota_ModelMultiplier_NoMatchNoWildcard_DefaultsToOne(t *testing.
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 1 {
@@ -81,7 +81,7 @@ func TestChargeQuota_ModelMultiplier_NotConfigured_NoOp(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "requests/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Requests != 1 {
@@ -110,7 +110,7 @@ func TestChargeQuota_ModelMultiplier_NonIntegerIsExact(t *testing.T) {
 	if _, err := io.Copy(io.Discard, rbody); err != nil {
 		t.Fatalf("drain: %v", err)
 	}
-	rt.chargeQuota(ep, rbody, creq, chargeNow)
+	rt.chargeFromStream(ep, rbody, creq, chargeNow)
 
 	used, _ := rt.Quota.Used("p1", "tokens/1mo", quota.PeriodStart(l, chargeNow))
 	if used.Fresh != 10.5 {
@@ -133,8 +133,8 @@ func TestChargeQuota_ModelMultiplier_IndependentProviders(t *testing.T) {
 	rbody := respnorm.Wrap(bytes.NewReader(nil), respnorm.Options{ClientModel: "m", UpstreamModel: "m", IsSSE: false, Protocol: "openai-completions", Opaque: false})
 	creq := &core.CanonicalRequest{}
 
-	rt.chargeQuota(epA, rbody, creq, chargeNow)
-	rt.chargeQuota(epB, rbody, creq, chargeNow)
+	rt.chargeFromStream(epA, rbody, creq, chargeNow)
+	rt.chargeFromStream(epB, rbody, creq, chargeNow)
 
 	usedA, _ := rt.Quota.Used("plan-a", "requests/1mo", quota.PeriodStart(lA, chargeNow))
 	usedB, _ := rt.Quota.Used("plan-b", "requests/1mo", quota.PeriodStart(lB, chargeNow))

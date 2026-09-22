@@ -36,6 +36,10 @@ type Aggregator struct {
 	// by the hourly tail so ?range= variants don't thrash each other.
 	snapCache map[int]cachedSnap
 
+	// memoryOnly is set when the dir lock went to another process: counters
+	// and rings work normally, nothing is read from or written to disk.
+	memoryOnly bool
+
 	// recoveredRows / recoverDur record what startup recovery loaded, for the
 	// one-line startup log — the operator's signal for whether the rollup
 	// file has grown enough to want daily rolling (design §8).
@@ -89,13 +93,16 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 
 	// Take the advisory dir lock before touching any slim/rollup file. A
-	// second vmr process on the same log_dir fails here — cmd_start then
-	// degrades this instance to memory-only stats rather than corrupting the
-	// first instance's files. When -audit is on, audit.New already failed
-	// first; this lock is what covers -audit=false (design §3.2).
+	// second vmr process on the same log_dir loses it and runs memory-only:
+	// the lock guards the FILES, so losing it is no reason to stop counting.
+	// Nothing is loaded either — this instance starts from zero rather than
+	// showing the holder's history as its own. Reachable only under
+	// -audit=false; with audit on, audit.New's own lock already failed first
+	// and the process never got here.
 	lock, err := acquireDirLock(a.dir)
 	if err != nil {
-		return err
+		a.memoryOnly = true
+		return nil
 	}
 	a.lock = lock
 
@@ -164,6 +171,14 @@ func rebuildCurrentHour(f *os.File, cur map[dimsKey]Counters, gr *globalRing) {
 
 func (a *Aggregator) rollupPath() string {
 	return filepath.Join(a.dir, rollupFileName)
+}
+
+// MemoryOnly reports whether another process holds the dir lock, so this
+// instance counts in memory but neither reads nor writes slim/rollup files.
+func (a *Aggregator) MemoryOnly() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.memoryOnly
 }
 
 // RecoveryInfo reports what startup recovery loaded: the number of in-memory
@@ -285,7 +300,9 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 
 	// In last-wins semantics, appending the updated total ensures subsequent
 	// loads reflect the merged state without an upsert.
-	_ = appendJSONL(a.rollupPath(), countersRow(hour, key, c))
+	if !a.memoryOnly {
+		_ = appendJSONL(a.rollupPath(), countersRow(hour, key, c))
+	}
 }
 
 // bookRecentError appends one non-ok sample to the recent_errors ring
@@ -319,10 +336,12 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 		a.slim.Close()
 		a.slim = nil
 	}
-	old, _ := listSlimFiles(a.dir, newHour)
-	for _, name := range old {
-		if err := rollSlimFile(a.dir, name); err == nil {
-			deleteSlim(a.dir, name)
+	if !a.memoryOnly {
+		old, _ := listSlimFiles(a.dir, newHour)
+		for _, name := range old {
+			if err := rollSlimFile(a.dir, name); err == nil {
+				deleteSlim(a.dir, name)
+			}
 		}
 	}
 	for k, c := range a.cur {
@@ -336,8 +355,10 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 	a.cur = make(map[dimsKey]Counters)
 	a.hour = newHour
 	a.evictOldRollup()
-	if f, err := openSlim(a.dir, a.hour); err == nil {
-		a.slim = f
+	if !a.memoryOnly {
+		if f, err := openSlim(a.dir, a.hour); err == nil {
+			a.slim = f
+		}
 	}
 }
 

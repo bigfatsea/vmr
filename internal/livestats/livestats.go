@@ -78,7 +78,8 @@ type SumCount struct {
 }
 
 // WindowBlock is the read-time portrait of one recent-sample window
-// (contracts §1.2): the window's actual sample count, its four-way token
+// (the console's /stats contract): the window's actual sample
+// count, its four-way token
 // totals, and nearest-rank ttft/toks percentiles. The only rate is toks —
 // output-token generation throughput: tokens.out over (dur_ms - ttft_ms)
 // for streamed samples, tokens.out / dur_ms for non-streamed ones
@@ -125,7 +126,8 @@ type RecentRequestEntry struct {
 // feed Counters' sums or the global performance ring (design §4.2) — Provider
 // being non-empty no longer implies Forwarded. TTFTMS 0 means unmeasured
 // and is excluded from ttft sums and the global ring. ErrorClass/Status/Attempt
-// feed only the recent_errors ring (contracts §1.6) — memory-only,
+// feed only the recent_errors ring (the console's /stats
+// contract) — memory-only,
 // slim/rollup never carry them; ErrorClass/Status quote the terminal
 // attempt verbatim.
 type Sample struct {
@@ -169,12 +171,21 @@ type dimsKey struct {
 	stream                                                    bool
 }
 
+// Keyed, not positional: Dims and dimsKey order their fields differently and
+// six of seven are strings, so a positional literal survives a reorder and
+// silently mis-buckets every dimension slice.
 func (d Dims) key() dimsKey {
-	return dimsKey{d.VModel, d.Protocol, d.ClientKeyTag, d.Provider, d.Model, d.KeyLabel, d.Stream}
+	return dimsKey{
+		vmodel: d.VModel, protocol: d.Protocol, clientKeyTag: d.ClientKeyTag,
+		provider: d.Provider, model: d.Model, keyLabel: d.KeyLabel, stream: d.Stream,
+	}
 }
 
 func (k dimsKey) dims() Dims {
-	return Dims{k.vmodel, k.protocol, k.provider, k.model, k.keyLabel, k.clientKeyTag, k.stream}
+	return Dims{
+		VModel: k.vmodel, Protocol: k.protocol, Provider: k.provider,
+		Model: k.model, KeyLabel: k.keyLabel, ClientKeyTag: k.clientKeyTag, Stream: k.stream,
+	}
 }
 
 // id is a total order over dims for deterministic row output.
@@ -185,7 +196,10 @@ func (k dimsKey) id() string {
 }
 
 func (s Sample) key() dimsKey {
-	return dimsKey{s.VModel, s.Protocol, s.ClientKeyTag, s.Provider, s.Model, s.KeyLabel, s.Stream}
+	return dimsKey{
+		vmodel: s.VModel, protocol: s.Protocol, clientKeyTag: s.ClientKeyTag,
+		provider: s.Provider, model: s.Model, keyLabel: s.KeyLabel, stream: s.Stream,
+	}
 }
 
 func streamBit(b bool) string {

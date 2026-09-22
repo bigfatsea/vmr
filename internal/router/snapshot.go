@@ -251,12 +251,7 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			}
 			effCapabilities := resolveModelCapabilities(cfg.ModelDefaults, providerName, upstreamModel)
 			effMaxContextTokens := resolveModelMaxContextTokens(cfg.ModelDefaults, providerName, upstreamModel)
-			queueWait := config.DefaultConcurrencyQueue
-			if p.ConcurrencyQueue != nil {
-				queueWait = p.ConcurrencyQueue.D()
-			} else if p.Concurrency == 0 {
-				queueWait = 0
-			}
+			queueWait := p.ResolvedConcurrencyQueue()
 			ep := &core.Endpoint{
 				Provider:         providerName,
 				AdapterType:      protocol,

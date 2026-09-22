@@ -140,6 +140,25 @@ func setupQuotaLedger(cfg *config.Config, rt *router.Router, logger *log.Logger)
 	}
 }
 
+// setupLiveStats builds the completed-request ledger (slim WAL + rollup in
+// log_dir) and logs what startup recovery found. A nil aggregator — log_dir
+// unusable — leaves /stats serving in-flight data only; losing the dir lock
+// to another process degrades to memory-only inside the aggregator instead.
+func setupLiveStats(cfg *config.Config, logger *log.Logger) (*livestats.Aggregator, func()) {
+	agg, err := livestats.New(cfg.LogDir)
+	if err != nil {
+		logger.Printf("WARN live stats: %v (live stats disabled for this run)", err)
+		return nil, func() {}
+	}
+	if agg.MemoryOnly() {
+		logger.Printf("WARN live stats: another process holds %s — counting in memory only, nothing read from or written to disk", cfg.LogDir)
+	}
+	if rows, dur := agg.RecoveryInfo(); rows > 0 || dur > 50*time.Millisecond {
+		logger.Printf("live stats: rollup recovery loaded %d rows in %s", rows, dur.Round(time.Millisecond))
+	}
+	return agg, func() { agg.Close() }
+}
+
 // setupGuard builds Agent Guard's online engine (M3.4), only when cfg
 // declares guard: at all — a hot reload that adds one later needs a
 // restart to take effect (same precedent as log_dir). Toggling mode/off
@@ -230,16 +249,8 @@ func cmdStart(args []string) error {
 	// Quota registry lives on Router (surviving hot reloads).
 	defer setupQuotaLedger(cfg, rt, logger)()
 
-	// Live stats aggregator: owns slim WAL and rollup persistence in log_dir.
-	liveAgg, err := livestats.New(cfg.LogDir)
-	if err != nil {
-		logger.Printf("WARN live stats: %v (degrading to in-memory only)", err)
-	} else {
-		defer liveAgg.Close()
-		if rows, dur := liveAgg.RecoveryInfo(); rows > 0 || dur > 50*time.Millisecond {
-			logger.Printf("live stats: rollup recovery loaded %d rows in %s", rows, dur.Round(time.Millisecond))
-		}
-	}
+	liveAgg, closeLiveStats := setupLiveStats(cfg, logger)
+	defer closeLiveStats()
 
 	vmrGuard, err := setupGuard(cfg)
 	if err != nil {

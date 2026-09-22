@@ -192,10 +192,7 @@ func (r *ProviderLimiterRegistry) Install(providers []config.Provider) {
 		if p.Concurrency <= 0 {
 			continue
 		}
-		queueWait := config.DefaultConcurrencyQueue
-		if p.ConcurrencyQueue != nil {
-			queueWait = p.ConcurrencyQueue.D()
-		}
+		queueWait := p.ResolvedConcurrencyQueue()
 		// Hot-reload reuse: keep running semaphore if capacity and queue match
 		if cur != nil {
 			if existing := (*cur)[p.Name]; existing != nil {
