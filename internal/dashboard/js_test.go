@@ -76,9 +76,8 @@ if (failed > 0) {
 }
 
 // TestJS_DashboardRenderSmoke verifies that every dashboard HTML page (macro-dashboard,
-// tool-waste, benchmarks, journey-viewer, journey-compare, request-browser) renders its
-// underlying JSON slices without NaN, undefined, or unrendered dash placeholders in
-// critical cells (§6.2, N15).
+// journey-viewer, request-browser) renders its underlying JSON slices without NaN,
+// undefined, or unrendered dash placeholders in critical cells (§6.2, N15).
 func TestJS_DashboardRenderSmoke(t *testing.T) {
 	nodePath, err := exec.LookPath("node")
 	if err != nil {
@@ -236,33 +235,7 @@ const mockMacro = {
     'macro-dashboard summary-stats did not render cleanly'
   );
 
-  // 2. tool-waste.html
-  const twEls = runPageSmoke('tool-waste.html', mockMacro);
-  const twBody = await waitFor(
-    () => (twEls.get('tools-body') || {}).innerHTML || '',
-    (h) => h.includes('tools:shape-1') && !h.includes('undefined') && !h.includes('NaN'),
-    'tool-waste tools-body did not render cleanly'
-  );
-
-  // 3. benchmarks.html
-  const mockBenchmarks = {
-    'manifest.json': mockManifest,
-    'journeys/benchmarks.json': {
-      journey_count: 10,
-      metric_distributions: { model_ms: { count: 10, mean: 1250, median: 1100, p90: 2000, min: 500, max: 3000 } },
-      finding_rates: { cache_miss: 0.2 },
-      correlations: [{ metric_a: 'model_ms', metric_b: 'tokens_out', rho: 0.85, n: 10 }],
-      protocol_share: { anthropic: 1.0 }
-    }
-  };
-  const bmEls = runPageSmoke('benchmarks.html', mockBenchmarks);
-  const bmStats = await waitFor(
-    () => (bmEls.get('headline-stats') || {}).innerHTML || '',
-    (h) => h.includes('10') && !h.includes('undefined') && !h.includes('NaN'),
-    'benchmarks headline-stats did not render cleanly'
-  );
-
-  // 4. journey-viewer.html (index)
+  // 2. journey-viewer.html (index)
   const mockJourneyIndex = {
     'manifest.json': mockManifest,
     'journeys/index.json': {
@@ -276,7 +249,7 @@ const mockMacro = {
     'journey-viewer index cand-list did not render cleanly'
   );
 
-  // 5. journey-viewer.html (detail) — exercises the full behavior-indicator
+  // 3. journey-viewer.html (detail) — exercises the full behavior-indicator
   // table, the context sparkline, model usage, and tool-call args + paired
   // results resolved through the bodies blob table.
   const mockJourneyDetail = {
@@ -332,69 +305,7 @@ const mockMacro = {
     }
   }
 
-  // 6. journey-compare.html (index)
-  const mockCmpIndex = {
-    'manifest.json': mockManifest,
-    'compares/index.json': {
-      compares: [{ filename: 'compare-a-vs-b.json', a_journey: { id: 'j-a', title: 'Journey A' }, b_journey: { id: 'j-b', title: 'Journey B' } }]
-    }
-  };
-  const cmpIdxEls = runPageSmoke('journey-compare.html', mockCmpIndex);
-  const cmpCand = await waitFor(
-    () => (cmpIdxEls.get('cand-list') || {}).innerHTML || '',
-    (h) => h.includes('j-a vs j-b') && !h.includes('undefined') && !h.includes('NaN'),
-    'journey-compare index cand-list did not render cleanly'
-  );
-
-  // 7. journey-compare.html (detail) — rows[].kind values match
-  // internal/journey/compare.go (ms/multiple/ratio/count/tokens), and the
-  // page must render the extras.* + llm_* sections, not just the diff table.
-  const mockCmpDetail = {
-    'manifest.json': mockManifest,
-    'compares/compare-a-vs-b.json': {
-      a_journey: { id: 'j-a', title: 'Journey A', steps: 10, tool_calls: 5 },
-      b_journey: { id: 'j-b', title: 'Journey B', steps: 8, tool_calls: 3 },
-      rows: [
-        { metric: 'model_ms', label: 'Model Time', kind: 'ms', a: 5000, b: 4000, delta_rel: -0.2, notable: false },
-        { metric: 'agent_exec_ms', label: 'Agent Exec', kind: 'ms', a: 8000, b: 800, delta_rel: -0.9, notable: true },
-        { metric: 'plan_exec_ratio', label: 'Plan/Exec', kind: 'ratio', a: 0.5, b: 0.4, delta_rel: -0.2, notable: false }
-      ],
-      tools: [{ name: 'exec', a_calls: 5, b_calls: 3 }],
-      extras: {
-        endpoints: { a: ['openai:p:m1'], b: ['openai:p:m2'], same: false },
-        cache: { a: { first_ratio: 0.2, steady_mean: 0.9, min: 0, max: 1, series: [{ seq: 1, ratio: 0.2 }, { seq: 2, ratio: 0.9 }], breaks: { unexplained: 2, 'history:replace_tail': 1 } },
-                 b: { first_ratio: 0.1, steady_mean: 0.95, min: 0, max: 1, series: [{ seq: 1, ratio: 0.1 }], breaks: { provider_switch: 1 } } },
-        sys_prompt: { a: { tokens: 0, changes: 0, excerpt: '', truncated: false }, b: { tokens: 0, changes: 0, excerpt: '', truncated: false } },
-        final_context: { a: { seq: 10, system_tokens: 0, user_tokens: 100, assistant_tokens: 200, tool_tokens: 50 },
-                         b: { seq: 8, system_tokens: 0, user_tokens: 80, assistant_tokens: 150, tool_tokens: 40 } },
-        duration: { a_wall_ns: 8582590290000, b_wall_ns: 3206357437000, a_termination: 'stop', b_termination: 'stop' },
-        deliverable: { a: { found: true, tool_name: 'write', step_seq: 7, excerpt: 'package main', truncated: true }, b: { found: false } },
-        cost: { a: { currency: 'USD', total: 0.3, resolved: true, priced_steps: 3, total_steps: 10 }, b: { currency: 'USD', resolved: false, priced_steps: 0, total_steps: 8 } },
-        initial_instruction: { a: { found: true, text: 'do the thing' }, b: { found: true, text: 'verify the thing' } },
-        divergence: { found: true, index: 0, a_step_seq: 1, b_step_seq: 1, task_title: 'do the thing', a_tools: ['bash'], b_tools: ['bash'], severity: 'light' },
-        sources: ['vmr-audit-2026-08-25.jsonl']
-      },
-      llm_interpretation: { model: 'cheap', scope: 'overall', status: 'ok', cached: true, text: 'A and B differ in scope.' },
-      llm_divergence: { model: 'cheap', scope: 'divergence', status: 'ok', cached: true, text: 'They diverge at step 1.' }
-    }
-  };
-  const cmpDetailEls = runPageSmoke('journey-compare.html', mockCmpDetail, '#data=compares/compare-a-vs-b.json');
-  const cmpDetail = await waitFor(
-    () => (cmpDetailEls.get('compare-view') || {}).innerHTML || '',
-    (h) => h.includes('Journey A') && !h.includes('undefined') && !h.includes('NaN'),
-    'journey-compare detail compare-view did not render cleanly'
-  );
-  for (const section of ['Behavior Profile Comparison', 'Divergence Point', 'Model &amp; Endpoint Check', 'Prompt Cache Hit Rate', 'Cost Estimate', 'Evidence Provenance', 'LLM Interpretation']) {
-    if (!cmpDetail.includes(section)) {
-      throw new Error('journey-compare detail missing section "' + section + '": ' + cmpDetail);
-    }
-  }
-  // kind: 'ms' must format as seconds, never a bare millisecond count.
-  if (!cmpDetail.includes('5.0s') || cmpDetail.includes('>5000<')) {
-    throw new Error('journey-compare detail did not format ms rows as seconds: ' + cmpDetail);
-  }
-
-  // 8. request-browser.html — the only page consuming requests/index.json:
+  // 4. request-browser.html — the only page consuming requests/index.json:
   // table rows, facet options, journey_link → journey-viewer deep link, and
   // pagination meta. The page reads f-pagesize's value for page math, so the
   // mock select must be pre-seeded or pagination degenerates to NaN slicing.

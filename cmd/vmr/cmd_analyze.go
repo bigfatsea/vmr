@@ -154,13 +154,13 @@ func cmdAnalyze(args []string) error {
 		rc := resolveReportConfig(*fl.reportConfigPath, os.Stdout)
 		outDir := resolveString(*fl.outDirFlag, rc.Output, "reports")
 		if !*fl.noCache && tryRenderOnlyL3Cache(outDir, *fl.langFlag, flagPassed(fs, "lang")) {
-			return nil
+			return maybeOpen(*fl.openFlag, outDir)
 		}
 		if err := runRenderOnly(outDir, *fl.langFlag, flagPassed(fs, "lang")); err != nil {
 			return err
 		}
 		recordRenderOnlyL3Cache(outDir)
-		return nil
+		return maybeOpen(*fl.openFlag, outDir)
 	}
 
 	hasSelector, err := validateAnalyzeModeFlags(*fl.journeyArg, *fl.compareArg, *fl.benchmarkFlag, *fl.renderAllFlag, *fl.macroOnlyFlag, *fl.listOnlyFlag, *fl.journeyOnlyFlag, flagPassed(fs, "details"))
@@ -203,7 +203,7 @@ func cmdAnalyze(args []string) error {
 		return err
 	}
 
-	return dispatchAnalyze(&analyzeRun{
+	if err := dispatchAnalyze(&analyzeRun{
 		paths:              paths,
 		configPath:         *fl.configPath,
 		outDir:             outDir,
@@ -236,7 +236,21 @@ func cmdAnalyze(args []string) error {
 		selfTrafficTags:    rc.SelfTrafficClientTags,
 		reportConfigSource: rc.SourcePath,
 		showUngrouped:      *fl.showUngrouped,
-	})
+	}); err != nil {
+		return err
+	}
+	return maybeOpen(*fl.openFlag, outDir)
+}
+
+// maybeOpen is the one call site -open routes through regardless of which
+// analyze mode ran: every mode ends up writing (or leaving in place) the
+// same dashboard skeleton pages in outDir, so there is nothing mode-specific
+// about what gets served.
+func maybeOpen(open bool, outDir string) error {
+	if !open {
+		return nil
+	}
+	return serveAndOpen(outDir)
 }
 
 // dispatchAnalyze routes to exactly one of: -macro-only, -benchmark, -compare,
@@ -299,7 +313,7 @@ func dispatchAnalyze(r *analyzeRun) error {
 }
 
 // finishAnalyze is the one successful-run exit shared by every analyze
-// mode (§5.4's "每次 analyze 调用都幂等刷新骨架页"): the six skeleton
+// mode (§5.4's "每次 analyze 调用都幂等刷新骨架页"): the skeleton
 // dashboard pages are rewritten into the output root first, so /reports/
 // always serves pages from the running binary (a skeleton refresh failure
 // only warns on stderr — pages may be stale, never the analysis itself);
@@ -494,6 +508,7 @@ type analyzeCLIFlags struct {
 	llmKeyFlag         *string
 	llmCacheDirFlag    *string
 	llmDryRun          *bool
+	openFlag           *bool
 }
 
 func bindAnalyzeCLIFlags(fs *flag.FlagSet) *analyzeCLIFlags {
@@ -521,5 +536,6 @@ func bindAnalyzeCLIFlags(fs *flag.FlagSet) *analyzeCLIFlags {
 		llmKeyFlag:         fs.String("llm-key", "", "bearer token for that VMR instance, only needed if it has api_keys configured. Default: report.yaml's llm_key"),
 		llmCacheDirFlag:    fs.String("llm-cache-dir", "", "directory for the disk cache of LLM interpretation results; absent both here and in report.yaml's llm_cache_dir => no caching, ever"),
 		llmDryRun:          fs.Bool("llm-dry-run", false, "with -llm-addr: print every LLM call this run would make — per evidence-pack size estimate and the maximum call count (detector packs included) — and exit without calling anything"),
+		openFlag:           fs.Bool("open", false, "after writing the report, serve outDir on 127.0.0.1 (random port, foreground, Ctrl-C to stop) and open the dashboard in the default browser — a one-shot local viewer, distinct from the config-level analytics.serve"),
 	}
 }

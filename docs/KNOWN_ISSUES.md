@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-20 22:56, by Sonnet 5 -->
+<!-- Ver 2026-09-21 12:00, by Sonnet 5 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -187,6 +187,16 @@
 - **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流，给日志行加结构化字段牵动 stderr 格式与全部日志消费者；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
 - **`/stats.overall` 合并窗口块目前无内置消费者，作为 JSON 契约保留**：它是为控制台首屏那一段"全局 TTFT p50"加的（分位数不可跨 ring 合并，只能服务端在读时对样本并集算）；该 vitals段在 console polish 轮据用户反馈移除，`overall` 随之空转。删掉它是纯粹的契约收缩且要改测试，收益为零；留着无害（已测、可外部消费、首屏日后补延迟信号会重新用上）。无 ring 样本时为 `null`。见 LiveStats 设计文档 `/stats` 契约段。
 - **零 attempt 失败（全端点冷却等）的错误类别由 `sampleFromRecord` 合成为 `no_candidate`，audit.Record 不扩充顶层字段**：一批失败导致所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，路由半区未向上游发起任何 attempt，因而 `audit.Record.Attempts` 为空。`server.sampleFromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为 `livestats.Sample` 合成 `error_class="no_candidate"` 并由客户端侧 HTTP 响应码（503 等）兜底 `status`，使控制台 Recent Failures 能够准确区分并过滤最常见的级联冷却失败，而无需为了展示层需求扩充审计日志顶层 schema。
+- **分析半区渲染架构的四条判据，可机械执行**：R0（投影不互相派生）——HTML 不由 Markdown 转，Markdown 也不由 HTML 转，两者都只从数据产品或共享 VM 来；R1（语言不进数据产品）——判据是"换语言能否只重跑渲染、不重算聚合"，不能就是违反；R2（单一结构化 VM）——判据是"VM 里能否出现任何已经是某种格式的片段"，能就是违反；R3（交互式投影只为查询而非阅读存在）——判据是"把这页全部内容打印成纸，有无信息损失"，没有就该是文档不是应用。外加一条分界：**文档自带内容，只有应用才需要数据源**——文档的正确形态是自包含单文件（`file://` 直接打开），应用才必须有 HTTP。六张看板骨架页里五张其实是文档却套了应用的加载模式（零业务数据的骨架 + 运行时 fetch），这是可达性门槛的根因，不是"用得少"的旁证。
+- **`internal/report` 的 `ParaVM` 携带逐字 Markdown 片段是刻意的，不是 R2 的例外被忽略**：56 个构造点实测分类——28 处纯 i18n 文本段落、15 处靠序列化器接管块间空白即可覆盖、9 处强调式组标题、2 处可结构化的生成式图表（形状不同：一处是序列数据宜做 `Chart`，一处是图宜做 `Flow`）、1 处 blockquote 统计行、1 处绕过既有 `DetailsVM`——`ParaVM` 本身不删，降级为**显式逃生舱**：类型保留，`internal/archtest` 加一条构造点数量预算（`TestParaVMBudget`），像文件/函数行数预算一样可调但必须显式抬，只降不升。
+- **删除三张零交互看板页（`journey-compare.html`／`benchmarks.html`／`tool-waste.html`）后的回退态是终态，不是欠账**：若后续 HTML 序列化器最终被否决（未立项或立项后废弃），这三个产物的文档形态**永久只有 Markdown**——这是可接受的终态，因为按 R3 判据它们本来就是"文档"而非"应用"，不需要为它们再补一个 HTML 消费者才算完整。
+- **`analytics.serve` 与 `vmr analyze -open` 是两个不同场景，不是同一能力的两种开关**：前者是路由半区的常驻 HTTP 挂载点（`server/reports.go`，`mountReports`），服务 `request-browser` 这一个真应用的长会话查询，需要鉴权、需要进程常驻；后者是分析半区命令的一次性查看，绑 `127.0.0.1` 随机端口、前台运行、`Ctrl-C` 退出，不鉴权（本机单用户，产物已在本机磁盘上）、服务范围限定在这次 `analyze` 产出的目录内。两者共享"文档需要 HTTP 才能 fetch 相对路径 JSON"这同一个根因，但生命周期与信任模型都不同，不合并成一个开关。
+- **R1（语言不进数据产品）的语言载体处置表，逐行冻结——这张表就是 R1 的验收定义**：`summary.json` 的 `efficiency[].finding/action`、`highlights[]` 与 `manifest.json` 的 `footnotes`／`disclaimers`，以及 `j-*.json` 里 `Finding.Source` 留空（规则派生）的 findings 叙述，一律降级为 `(rule, severity, params)`，句子在 Project 层按语言组装（`manifest.json` 是契约文件，schema 变更须走 `format` 版本步进）；`compares/*.json` 的 `rows[].label` 已有 `rows[].metric` 作中立 id，渲染期改由 metric 查文案目录；`sessions[].title`、请求正文摘录是**透传内容**，显式豁免，翻译它是错的；`llm_interpretation.text` 与 `llm_findings[]` 里 `Finding.Source == SourceLLMInferred` 的条目是**LLM 原文**，豁免并标注 `llm_lang`（见下一条分流规则）；journey 兜底标题（`ToolLoopTitle`／`StitchedTaskTitle`）是潜在载体，结构化为标记 + 渲染期本地化，但实测 633 条候选 0 命中，优先级最低、本期不动。**R1 判据的最终措辞**：换语言重渲染后，除透传内容与标注了 `llm_lang` 的 LLM 原文外，产物逐字节中立。
+- **LLM 原文的豁免按 `Finding.Source` 分流，不按数组分**：`llm_interpretation.text` 与 `llm_findings[]` 里 `Source == SourceLLMInferred` 的条目同属 LLM 原文，走 `llm_lang` 豁免；同一个 `[]Finding` 里 `Source` 留空（规则派生）的条目仍属投影层文案，走 Code+Params 重组。对整个数组一刀切（要么全豁免要么全不豁免）会让 R1 判据在 journey 半边不成立。
+- **边界澄清（两条，防止已有裁决被误读成自己的反面）**：① 本节上文「不自建 Markdown→HTML 的渲染层」否决的是"在数据层养一个只覆盖子集的 Markdown 解析器"；VM→HTML 序列化器**不解析 Markdown，它序列化 VM**——从共享结构直接产出第二种格式，这是被允许、甚至被鼓励的形态，两者不是同一件事。② §1.0「永久不做」清单里的 "Web UI" 指管理控制台（RBAC、多租户后台一类），不指分析半区的渲染产物——本仓已在发六张报表页（含四个控制台页），加一个 HTML 序列化器不违反这条红线。
+- **裁决并排期「Markdown 转义从构造时移到序列化器」**：本节上文「LLM 自由文本的 Markdown 结构转义做在 Finding 构造时」（`sanitizeMDStruct`，`internal/journey/llm.go`，16 处调用点）给出的理由是"`i18n` 模板层修不了，转义必须发生在插进模板句子之前"。单一结构化 VM 完成后这个理由自动失效——LLM 文本进的是带类型的字段而非模板句子，序列化器天然知道自己在往什么结构位置写，转义因此应该是序列化器的职责。**本条只登记裁决与排期，执行随后续的 VM 结构化逼近工作**；届时与 §2.73（"在转换层做转义，不提前在数据层碰文本"，方向相反）一并统一。过渡期新增的 `Finding.Params` 字段存**原始值**，旧的叙述字段仍是**已转义文本**——两者语义不同，不可混用，这是过渡期的临时状态，不是最终形态。
+- **冻结「读者四」（给别的团队用，零配置可打开）这条承重假设本身**：依据是 `docs/VirtualModelRouter_Design_v4_Strategy.md` 的目标用户画像"100 人以内的中小型 AI 研发团队"及其中的竞争格局对位（One-API／LiteLLM／OpenRouter）——这确立了"给别的团队用"是产品定位的一部分，不是臆测。**它不覆盖**多语种需求本身——多语种的依据是团队构成（中文母语 + 全球触达）与既有双语产物，与读者四是两条独立的理由链。**假设动摇时的降级表**：R1（语言不进数据产品）不依赖读者四，三条独立理由单独成立（语言是读者属性、产物腐烂是症状不是需求消失的证据、机械判据本身成立）；已否决的「砍语种」方案依赖读者四；R2（单一结构化 VM）强依赖读者四（收益前提是"会有第二种格式或第二个语种消费者"）；HTML 序列化器几乎是纯押注——没有读者四，它应当直接否决而非推迟。
+- **数据产品是对外契约，`manifest.json` 的 `format` 是它的版本号**：加性变更（新增字段、新增可选切片）不必步进；删除字段、改变既有字段语义、改变产物目录布局属破坏性变更，必须步进 `format` 并在 `CHANGELOG.md` 标注 Breaking。`internal/report/rows.go` 的 `Format` 常量是 `manifest.go` 的 `ManifestFormat` 的别名，两处不独立改。
 
 ---
 

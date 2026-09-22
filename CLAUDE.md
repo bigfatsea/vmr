@@ -69,7 +69,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/viewmodel_*.go` (the ViewModel builders; `archtest` enforces the pairing), `i18n/journey_*.go` next to `internal/journey`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 | `livestats` | Completed-request live telemetry ledger: zero-internal-dependency leaf owning slim WAL append, hourly lazy rollups, restart recovery with duplicate row last-wins assimilation, in-memory ring buffers with nearest-rank percentiles, and read-time `/stats` snapshot aggregation |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
-| `dashboard` | `vmr analyze`'s static skeleton dashboard pages: embeds six self-contained HTML files and writes them (`WriteSkeletons`) into the report output root on every run. All rendering happens browser-side against `manifest.json`/`macro/*.json`/etc; the Go side is embed + write only, stdlib-only leaf |
+| `dashboard` | `vmr analyze`'s static skeleton dashboard pages: embeds self-contained HTML files and writes them (`WriteSkeletons`) into the report output root on every run. All rendering happens browser-side against `manifest.json`/`macro/*.json`/etc; the Go side is embed + write only, stdlib-only leaf |
 
 Routing half:
 

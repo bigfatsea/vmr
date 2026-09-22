@@ -10,7 +10,7 @@ import (
 )
 
 // TestWriteSkeletons_BasicShape covers the core contract: dir created when
-// missing, exactly the six pages written flat at the root, 0600/0700 modes,
+// missing, exactly the three pages written flat at the root, 0600/0700 modes,
 // and non-empty contents.
 func TestWriteSkeletons_BasicShape(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "reports", "nested") // dir itself doesn't exist yet
@@ -99,7 +99,7 @@ func TestWriteSkeletons_Idempotent(t *testing.T) {
 // WriteSkeletons call — /reports/ pages are always the binary's own.
 func TestWriteSkeletons_OverwriteStale(t *testing.T) {
 	dir := t.TempDir()
-	stale := filepath.Join(dir, "tool-waste.html")
+	stale := filepath.Join(dir, "macro-dashboard.html")
 	if err := os.WriteFile(stale, []byte("<html>user customized</html>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestRequestBrowser_ReadsSnakeCaseFields(t *testing.T) {
 }
 
 // TestAllDashboardPages_ReadSnakeCaseFields is the complete regression guard for N15:
-// All 6 dashboard pages must read their slices using the actual snake_case json tags
+// all dashboard pages must read their slices using the actual snake_case json tags
 // instead of Go PascalCase struct field names.
 func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 	type pageCase struct {
@@ -246,17 +246,6 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 			},
 		},
 		{
-			file: "assets/tool-waste.html",
-			bad: []string{
-				"t.DeclaredCount", "t.CalledCount", "t.SchemaBytesShipped",
-				"t.SchemaWasteBytes", "t.Signature", "ce.Tools",
-			},
-			want: []string{
-				"t.schema_bytes_shipped", "t.schema_waste_bytes", "t.distinct_called",
-				"t.declared", "ce.tools",
-			},
-		},
-		{
 			file: "assets/journey-viewer.html",
 			bad: []string{
 				"metrics.ModelMS", "m.AgentExecMS", "metrics.HumanIdleMS",
@@ -278,36 +267,6 @@ func TestAllDashboardPages_ReadSnakeCaseFields(t *testing.T) {
 				"usage.in", "usage.out", "u.tokens_in", "u.tokens_out",
 				"tc.args_ref", "tc.result", "res.ref", "res.is_error", "res.match",
 				"j.deliverable", "d.step_seq", "d.tool_name",
-			},
-		},
-		{
-			file: "assets/benchmarks.html",
-			bad: []string{
-				"s.JourneyCount", "s.MetricDist", "s.FindingRate", "s.Correlations",
-				"s.ProtocolShare", "c.MetricA", "c.MetricB", "c.Rho",
-			},
-			want: []string{
-				"s.journey_count", "s.metric_distributions", "s.finding_rates",
-				"s.correlations", "s.protocol_share", "c.metric_a", "c.metric_b", "c.rho",
-			},
-		},
-		{
-			file: "assets/journey-compare.html",
-			bad: []string{
-				"c.ID", "c.ARef", "c.BRef", "cmp.Rows", "cmp.Tools",
-				"t.ACalls", "t.BCalls", "aRef.Steps", "aRef.ToolCalls",
-				"cmp.Extras", "cmp.LLMInterpretation", "cmp.LLMDivergence",
-				"ex.Divergence", "ex.Endpoints", "ex.FinalContext", "r.DeltaRel", "r.Notable",
-			},
-			want: []string{
-				"c.filename", "c.a_journey", "c.b_journey", "cmp.rows",
-				"cmp.tools", "t.a_calls", "t.b_calls", "aRef.steps", "aRef.tool_calls",
-				// extras.* sections added when the compare page reached .md parity
-				"cmp.extras", "cmp.llm_interpretation", "cmp.llm_divergence",
-				"ex.divergence", "ex.endpoints", "ex.cache", "ex.sys_prompt",
-				"ex.final_context", "ex.deliverable", "ex.cost", "ex.sources",
-				"ex.initial_instruction", "r.delta_rel", "r.notable",
-				"dv.a_step_seq", "dv.task_title", "dv.a_tools",
 			},
 		},
 	}

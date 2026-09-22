@@ -242,7 +242,7 @@ function esc(s) {
 
 // wireHashReload makes an in-page `#data=` navigation actually reload the
 // document. The skeleton pages that serve both a candidate list and a
-// detail view (journey-viewer, journey-compare) switch via location.hash;
+// detail view (journey-viewer) switch via location.hash;
 // browsers treat a bare fragment change as same-document and never re-run
 // the page script, so clicking "open →" from the candidate list did
 // nothing (copying the link into a fresh tab worked because that is a full

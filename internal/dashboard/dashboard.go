@@ -1,15 +1,23 @@
 // Ver 2026-09-06, by Claude
 
 // Package dashboard delivers vmr analyze's static skeleton dashboard pages
-// (see the Analytics design doc's skeleton-page section): six self-contained
+// (see the Analytics design doc's skeleton-page section): three self-contained
 // HTML files with zero business data, written to the report output root on
 // every analyze run. All rendering happens browser-side — the pages fetch
 // relative-path JSON slices (manifest.json, macro/*.json, requests/,
-// journeys/, compares/) and render DOM + inline SVG from them, so writing
+// journeys/) and render DOM + inline SVG from them, so writing
 // the JSON slices is what "delivers the dashboard". The Go side is embed +
 // WriteSkeletons only; the bulk of the work lives in the embedded
 // assets/*.html files, whose line budget archtest deliberately does
 // not track. Leaf package: stdlib only, zero vmr/internal dependencies.
+//
+// journey-compare.html, benchmarks.html, and tool-waste.html were removed
+// (KNOWN_ISSUES §1.5, R3): all three were zero-interaction pages — printing
+// them to paper loses no information — so per R3 they are documents, not
+// applications, and their HTML consumer was a parallel hand-written
+// implementation of what compares/*.md, journeys/benchmarks.md, and the
+// report's §7 already rendered. Deleting the page loses no capability;
+// it only stops a duplicate from drifting out of sync with the Markdown.
 package dashboard
 
 import (
@@ -33,9 +41,9 @@ var assets embed.FS
 // safe.
 const commonJSTag = `<script src="common.js"></script>`
 
-// skeletonPages are the six skeleton HTML pages (§6.2), written flat into
+// skeletonPages are the three skeleton HTML pages (§6.2), written flat into
 // the report output root — never a subdirectory. Root placement is
-// deliberate: a page that loads both journeys/ and compares/ slices would
+// deliberate: a page that loads both journeys/ and requests/ slices would
 // need ../-relative fetch paths from inside either one; at the root every
 // #data= path matches the on-disk layout (§4) byte-for-byte. Each file is
 // self-contained (inline CSS/JS): no extra .css/.js assets to serve, so the
@@ -45,9 +53,6 @@ var skeletonPages = []string{
 	"macro-dashboard.html",
 	"request-browser.html",
 	"journey-viewer.html",
-	"journey-compare.html",
-	"benchmarks.html",
-	"tool-waste.html",
 }
 
 // WriteSkeletons writes the six skeleton dashboard pages into dir's root,

@@ -664,7 +664,7 @@ func TestCmdAnalyze_CompareWildcard(t *testing.T) {
 }
 
 // TestCmdAnalyze_WritesSkeletonPages pins §5.4's implementation discipline:
-// every analyze invocation idempotently refreshes the six skeleton
+// every analyze invocation idempotently refreshes the skeleton
 // dashboard pages into the output root — the default suite, the zoom modes,
 // everything. The pages carry zero business data (data is fetched
 // client-side from the JSON slices), so a skeleton at the root is always

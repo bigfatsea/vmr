@@ -166,9 +166,6 @@
         <a href="macro-dashboard.html" class="active">Macro Dashboard</a>
         <a href="request-browser.html">Request Browser</a>
         <a href="journey-viewer.html">Journey Viewer</a>
-        <a href="journey-compare.html">Compare</a>
-        <a href="benchmarks.html">Benchmarks</a>
-        <a href="tool-waste.html">Tool Waste</a>
       </nav>
       <div class="top-actions">
         <button id="btn-auth">🔑 Key</button>
@@ -701,7 +698,7 @@
           <div class="stat-card">
             <div class="stat-k">Declared Tool Shapes</div>
             <div class="stat-v">${tools.length.toLocaleString()}</div>
-            <div class="stat-sub"><a href="tool-waste.html">View Tool Waste Analysis →</a></div>
+            <div class="stat-sub">See below for waste breakdown</div>
           </div>
         `;
 
@@ -732,7 +729,7 @@
 
         document.getElementById('tool-waste-overview').innerHTML = `
           <p>Total tool schema bytes shipped: <strong>${FmtBytes(totalShipped)}</strong> · Dead/Unused waste: <strong>${FmtBytes(totalWaste)}</strong> (<strong>${wastePct}</strong> waste ratio).</p>
-          <p style="margin-top:8px;"><a href="tool-waste.html" class="primary" style="display:inline-block; padding:4px 10px; border-radius:4px; background:var(--trace); color:#fff;">Open Full Tool Waste Card →</a></p>
+          <p style="margin-top:8px; color:var(--ink-dim);">Per-shape breakdown (which tools were never called): see the report's §7 Efficiency &amp; waste section.</p>
         `;
       }
 
