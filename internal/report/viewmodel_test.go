@@ -1,16 +1,18 @@
 // Ver 2026-09-15, by Opus 5
 
-// Unit tests for the ViewModel types and the fixed serializer: structure
-// only — heading levels, table geometry, fold/details wrappers, block
-// order. Copy correctness (every string localized and formatted) is the
-// builders' job and is pinned by the golden and byte-equivalence tests.
+// Unit tests for the ViewModel types and the fixed serializer: structure —
+// heading levels, table geometry, fold/details wrappers, block order — plus
+// a couple of targeted lang-following regression guards (most copy
+// correctness is pinned by the golden and byte-equivalence tests instead).
 package report
 
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 func TestRenderMarkdownStructure(t *testing.T) {
@@ -147,5 +149,38 @@ func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
 		if strings.Contains(md, "report.yaml)") || !strings.Contains(md, i18n.Doc(lang).MetaReportConfig("")) {
 			t.Errorf("lang=%v: 'no report.yaml loaded' must still say so explicitly:\n%s", lang, md)
 		}
+	}
+}
+
+// TestMacroMarkdownFindingsFollowLang guards the report-side half of R1's
+// "text rot" risk: the JSON products are frozen to English by design
+// (buildFindingsForJSON), but vmEfficiencySection deliberately does NOT
+// reuse rep.Efficiency — it calls buildFindings(rep, lang) fresh every
+// render specifically so Markdown keeps following -lang. That fresh-build
+// path is cheap to silently regress (e.g. a future edit reusing the
+// English rep.Efficiency slice) with nothing else catching it, since nothing
+// else renders §7 in a non-English language. Mirrors journey's
+// TestJourneySummaryIsLangInvariant, one package over.
+func TestMacroMarkdownFindingsFollowLang(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, heartbeatDreamDiaryTiedRecords())
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("BuildCached: %v", err)
+	}
+
+	mdEN := MacroMarkdown(rep, i18n.EN, nil, nil)
+	mdZH := MacroMarkdown(rep, i18n.ZH, nil, nil)
+	if mdEN == mdZH {
+		t.Fatal("EN and ZH renders are byte-identical — §7 findings are not following -lang")
+	}
+	if !strings.Contains(mdEN, "Scheduled-task redundancy") {
+		t.Errorf("EN render missing the English cron-redundancy finding title:\n%s", mdEN)
+	}
+	if strings.Contains(mdZH, "Scheduled-task redundancy") {
+		t.Error("ZH render still carries the English cron-redundancy finding title — buildFindings is not being called with lang=zh")
+	}
+	if !strings.Contains(mdZH, "定时任务冗余") {
+		t.Errorf("ZH render missing the Chinese cron-redundancy finding title:\n%s", mdZH)
 	}
 }

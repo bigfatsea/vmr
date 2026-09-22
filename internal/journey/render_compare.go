@@ -1,4 +1,4 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -16,9 +16,11 @@ import (
 // diff table with notable rows starred, and a tool-usage side-by-side.
 // Purely a view over already-computed Comparison data — same fact-layer-
 // renderer convention as RenderMarkdown (no judgment calls happen here).
-// cmp.Rows[].Label is already localized (Compare(a, b, lang) computed it
-// with the same lang the caller passes here) — this function reads it
-// directly rather than looking it up a second time.
+// cmp.Rows[].Label is the English baseline Compare persisted (R1) — this
+// function looks the label up fresh in lang from r.Metric
+// (i18n.MetricLabel) rather than reading Label back, so a compare-*.json
+// read off disk at a different original language than the current render
+// still gets the right table.
 func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	var b strings.Builder
 	w := func(format string, args ...any) { fmt.Fprintf(&b, format, args...) }
@@ -28,7 +30,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	if cmp.Partial {
 		w("> ⚠️ %s\n\n", t.PartialBanner)
 	}
-	renderComparisonSummaryCard(w, cmp, t)
+	renderComparisonSummaryCard(w, cmp, t, lang)
 	w("%s", t.SideBlock("A", cmp.A.ID, escapeHTML(cmp.A.Title), cmp.A.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.A.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.A.ReportFile))
 	w("%s", t.SideBlock("B", cmp.B.ID, escapeHTML(cmp.B.Title), cmp.B.From.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"), cmp.B.To.In(fmtutil.DisplayZone).Format("15:04:05"), cmp.B.ReportFile))
 	if cmp.Extras != nil {
@@ -42,7 +44,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 		if r.Notable {
 			mark = " ⚠️"
 		}
-		w("| %s%s | %s | %s | %s |\n", r.Label, mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew))
+		w("| %s%s | %s | %s | %s |\n", i18n.MetricLabel(lang, string(r.Metric)), mark, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew))
 	}
 	w("%s", t.NotableFootnote(notableRelThreshold*100))
 
@@ -138,12 +140,12 @@ func emptyDash(s string, t i18n.CompareText) string {
 	return s
 }
 
-func renderComparisonSummaryCard(w func(string, ...any), cmp Comparison, t i18n.CompareText) {
+func renderComparisonSummaryCard(w func(string, ...any), cmp Comparison, t i18n.CompareText, lang i18n.Lang) {
 	var items []string
 	var notableTop []string
 	for _, r := range cmp.Rows {
 		if r.Notable {
-			notableTop = append(notableTop, fmt.Sprintf("%s: %s → %s (%s)", r.Label, formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew)))
+			notableTop = append(notableTop, fmt.Sprintf("%s: %s → %s (%s)", i18n.MetricLabel(lang, string(r.Metric)), formatMetric(r.Kind, r.A), formatMetric(r.Kind, r.B), formatDelta(r.A, r.B, t.DeltaNew)))
 			if len(notableTop) >= 3 {
 				break
 			}

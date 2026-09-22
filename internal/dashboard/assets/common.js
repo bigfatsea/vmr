@@ -1,6 +1,6 @@
-// Ver 2026-09-06, VMR Forensics Dashboard Common Runtime (§5.6, §6.2, §6.3, §6.6)
+// Ver 2026-09-21 22:00, VMR Forensics Dashboard Common Runtime (§5.6, §6.2, §6.3, §6.6)
 
-const EXPECTED_MANIFEST_FORMAT = 11;
+const EXPECTED_MANIFEST_FORMAT = 12;
 
 // versionBehavior decides UI status based on expected vs actual format versions (§6.6).
 function versionBehavior(expected, actual) {
@@ -242,7 +242,7 @@ function esc(s) {
 
 // wireHashReload makes an in-page `#data=` navigation actually reload the
 // document. The skeleton pages that serve both a candidate list and a
-// detail view (journey-viewer) switch via location.hash;
+// detail view (journey-viewer, journey-compare) switch via location.hash;
 // browsers treat a bare fragment change as same-document and never re-run
 // the page script, so clicking "open →" from the candidate list did
 // nothing (copying the link into a fresh tab worked because that is a full

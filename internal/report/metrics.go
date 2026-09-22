@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 // Derived-metric helpers, true per-bucket percentiles, and the small
 // per-record extraction helpers shared by Build. Every finish* computes the
@@ -292,12 +292,16 @@ func freshestModel(rows []Row) *Row {
 // buckets. One row per actionable finding, each naming the implicated entity
 // and a suggested action.
 //
-// buildFindings runs BEFORE Build's own "---- sort all slices ----" pass
+// buildFindings dispatches to one independent finder per Code (below) and
+// collects whichever ones fired — split into named helpers, rather than one
+// long function, once every finder gained its own Params block.
+//
+// Every finder runs BEFORE Build's own "---- sort all slices ----" pass
 // (rep.Tools/rep.ByModel/rep.Workloads are still in whatever order their
-// source map happened to iterate in when this function reads them — see
-// aggregate.go's call site). Every "pick the worst one" search below must
-// therefore find its answer by explicit comparison over the WHOLE bucket,
-// with its own tie-break on the bucket's identity field — exactly the
+// source map happened to iterate in when a finder reads them — see
+// aggregate.go's call site). Every "pick the worst one" search therefore
+// must find its answer by explicit comparison over the WHOLE bucket, with
+// its own tie-break on the bucket's identity field — exactly the
 // non-determinism class TestBuildIsDeterministic's doc comment describes,
 // just one level removed (a *finding* picked from map-order data, not a
 // *row* rendered in map-order). "First match, then break" over an
@@ -307,94 +311,167 @@ func freshestModel(rows []Row) *Row {
 // rep.Workloads/Tools/ByModel themselves, which the sort later in Build
 // does make deterministic) across repeated Build() calls.
 func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
-	tx := i18n.Efficiency(lang)
 	var out []Finding
-	add := func(code FindingCode, metric string, ft i18n.FindingText) {
-		out = append(out, Finding{Code: code, Finding: ft.Title, Metric: metric, Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action})
+	for _, f := range []*Finding{
+		findToolSchemaWaste(rep, lang),
+		findCacheMiss(rep, lang),
+		findCronRedundancy(rep, lang),
+		findOutputTruncation(rep, lang),
+		findSlowRequests(rep, lang),
+		findContextGrowth(rep, lang),
+		quotaExhaustionFinding(rep, lang), // findings_quota.go
+	} {
+		if f != nil {
+			out = append(out, *f)
+		}
 	}
+	return out
+}
 
-	// tool schema waste: the worst (highest SchemaWasteBytes, tie-broken by
-	// Shape) among shapes under 20% declare-utilization — mirrors the
-	// criteria rep.Tools' own later sort uses, so "the worst shape" means
-	// the same thing here as it does in §7's own table.
-	var worstTool *ToolShapeRow
+// findToolSchemaWaste picks the worst (highest SchemaWasteBytes, tie-broken
+// by Shape) among shapes under 20% declare-utilization — mirrors the
+// criteria rep.Tools' own later sort uses, so "the worst shape" means the
+// same thing here as it does in §7's own table.
+func findToolSchemaWaste(rep *Report2, lang i18n.Lang) *Finding {
+	var worst *ToolShapeRow
 	for i := range rep.Tools {
 		t := &rep.Tools[i]
 		if t.DeclareUtilization >= 0.20 || t.SchemaBytesShipped == 0 {
 			continue
 		}
-		if worstTool == nil || t.SchemaWasteBytes > worstTool.SchemaWasteBytes ||
-			(t.SchemaWasteBytes == worstTool.SchemaWasteBytes && t.Shape < worstTool.Shape) {
-			worstTool = t
+		if worst == nil || t.SchemaWasteBytes > worst.SchemaWasteBytes ||
+			(t.SchemaWasteBytes == worst.SchemaWasteBytes && t.Shape < worst.Shape) {
+			worst = t
 		}
 	}
-	if worstTool != nil {
-		add(FindingToolSchemaWaste, "schema_bytes_shipped", tx.ToolSchemaWasteFinding(
-			worstTool.Shape, worstTool.Requests, fmtBytesGB(worstTool.SchemaBytesShipped),
-			strconv.FormatFloat(float64(worstTool.DeclareUtilization)*100, 'f', 1, 64)))
+	if worst == nil {
+		return nil
 	}
-
-	// cache miss input (global)
-	if rep.Overall.TokensKnown > 0 {
-		fresh := rep.Overall.TokensInFresh
-		share := float64(fresh) / float64(rep.Overall.TokensIn) * 100
-		dominantModel, dominantTokens := "", ""
-		if m := freshestModel(rep.ByModel); m != nil && m.TokensInFresh > 0 && m.TokensInFresh >= fresh/2 {
-			dominantModel, dominantTokens = m.Model, fmtutil.FmtTokens(m.TokensInFresh)
-		}
-		add(FindingCacheMiss, "cache_miss_tokens", tx.CacheMissFinding(
-			fmtutil.FmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens))
+	ft := i18n.Efficiency(lang).ToolSchemaWasteFinding(
+		worst.Shape, worst.Requests, fmtBytesGB(worst.SchemaBytesShipped),
+		strconv.FormatFloat(float64(worst.DeclareUtilization)*100, 'f', 1, 64))
+	return &Finding{
+		Code: FindingToolSchemaWaste, Finding: ft.Title, Metric: "schema_bytes_shipped",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			"shape":                worst.Shape,
+			"requests":             strconv.Itoa(worst.Requests),
+			"schema_bytes_shipped": strconv.FormatInt(worst.SchemaBytesShipped, 10),
+			"declare_utilization":  strconv.FormatFloat(worst.DeclareUtilization, 'f', -1, 64),
+		},
 	}
+}
 
-	// scheduled-task redundancy (heartbeat/dream_diary low cache-eff): the
-	// worst offender (highest TokensInFresh, tie-broken by Class) among the
-	// two scheduled classes with cache_efficiency below 0.30 — this is the
-	// exact case that was empirically observed flipping between "heartbeat"
-	// and "dream_diary" from one otherwise-identical run to the next before
-	// this fix, since both classes routinely sit at the same rounded ~1%
-	// cache efficiency in real corpora.
-	var worstWL *WorkloadRow
+// findCacheMiss reports the global fresh-input share, naming the dominant
+// model behind it when one model alone accounts for at least half of it.
+func findCacheMiss(rep *Report2, lang i18n.Lang) *Finding {
+	if rep.Overall.TokensKnown <= 0 {
+		return nil
+	}
+	fresh := rep.Overall.TokensInFresh
+	share := float64(fresh) / float64(rep.Overall.TokensIn) * 100
+	dominantModel, dominantTokens := "", ""
+	var dominantModelFresh int64
+	if m := freshestModel(rep.ByModel); m != nil && m.TokensInFresh > 0 && m.TokensInFresh >= fresh/2 {
+		dominantModel, dominantTokens = m.Model, fmtutil.FmtTokens(m.TokensInFresh)
+		dominantModelFresh = m.TokensInFresh
+	}
+	params := map[string]string{
+		"fresh_tokens": strconv.FormatInt(fresh, 10),
+		"share_pct":    strconv.FormatFloat(share, 'f', -1, 64),
+	}
+	if dominantModel != "" {
+		params["dominant_model"] = dominantModel
+		params["dominant_tokens"] = strconv.FormatInt(dominantModelFresh, 10)
+	}
+	ft := i18n.Efficiency(lang).CacheMissFinding(
+		fmtutil.FmtTokens(fresh), strconv.FormatFloat(share, 'f', 1, 64), dominantModel, dominantTokens)
+	return &Finding{
+		Code: FindingCacheMiss, Finding: ft.Title, Metric: "cache_miss_tokens",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action, Params: params,
+	}
+}
+
+// findCronRedundancy picks the worst offender (highest TokensInFresh,
+// tie-broken by Class) among the two scheduled classes (heartbeat/
+// dream_diary) with cache_efficiency below 0.30 — this is the exact case
+// that was empirically observed flipping between "heartbeat" and
+// "dream_diary" from one otherwise-identical run to the next before this
+// fix, since both classes routinely sit at the same rounded ~1% cache
+// efficiency in real corpora.
+func findCronRedundancy(rep *Report2, lang i18n.Lang) *Finding {
+	var worst *WorkloadRow
 	for i := range rep.Workloads {
 		w := &rep.Workloads[i]
 		if (w.Class != "heartbeat" && w.Class != "dream_diary") || w.TokensKnown == 0 || w.CacheEfficiency >= 0.30 {
 			continue
 		}
-		if worstWL == nil || w.TokensInFresh > worstWL.TokensInFresh ||
-			(w.TokensInFresh == worstWL.TokensInFresh && w.Class < worstWL.Class) {
-			worstWL = w
+		if worst == nil || w.TokensInFresh > worst.TokensInFresh ||
+			(w.TokensInFresh == worst.TokensInFresh && w.Class < worst.Class) {
+			worst = w
 		}
 	}
-	if worstWL != nil {
-		add(FindingCronRedundancy, "fresh + cache_eff", tx.CronRedundancyFinding(
-			fmtutil.FmtTokens(worstWL.TokensInFresh), pctStr(worstWL.CacheEfficiency), worstWL.Class))
+	if worst == nil {
+		return nil
 	}
+	ft := i18n.Efficiency(lang).CronRedundancyFinding(
+		fmtutil.FmtTokens(worst.TokensInFresh), pctStr(worst.CacheEfficiency), worst.Class)
+	return &Finding{
+		Code: FindingCronRedundancy, Finding: ft.Title, Metric: "fresh + cache_eff",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			"fresh_tokens": strconv.FormatInt(worst.TokensInFresh, 10),
+			"cache_eff":    strconv.FormatFloat(worst.CacheEfficiency, 'f', -1, 64),
+			"class":        worst.Class,
+		},
+	}
+}
 
-	// output truncation
+// findOutputTruncation fires when any stream broke off truncated this window.
+func findOutputTruncation(rep *Report2, lang i18n.Lang) *Finding {
 	trunc := rep.Overall.Truncated
-	// finish=length is a stronger truncation signal; approximate from overall if available
-	if trunc > 0 || rep.Overall.Requests > 0 {
-		// count finish=length from sessions/tools? Truncated field covers stream breaks;
-		// finish=length is separate. We report truncated stream breaks here.
-		if trunc > 0 {
-			add(FindingOutputTruncation, "truncated", tx.OutputTruncationFinding(trunc, rep.Overall.Requests))
-		}
+	if trunc <= 0 {
+		return nil
 	}
-
-	// slow requests
-	if rep.Overall.RequestsWithDur > 0 {
-		slow := rep.Overall.SlowRequests
-		if slow > 0 {
-			share := float64(slow) / float64(rep.Overall.RequestsWithDur) * 100
-			add(FindingSlowRequests, "slow_request_share", tx.SlowRequestsFinding(
-				strconv.FormatFloat(share, 'f', 0, 64), SlowThresholdMS/1000))
-		}
+	ft := i18n.Efficiency(lang).OutputTruncationFinding(trunc, rep.Overall.Requests)
+	return &Finding{
+		Code: FindingOutputTruncation, Finding: ft.Title, Metric: "truncated",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			"truncated": strconv.Itoa(trunc),
+			"requests":  strconv.Itoa(rep.Overall.Requests),
+		},
 	}
+}
 
-	// context growth (worst session) — tie-broken by ID for the same
-	// reason as the three findings above: on an exact ContextGrowth tie
-	// (plausible since it's rounded to 1 decimal for display), a bare ">"
-	// comparison keeps whichever session was encountered first in
-	// rep.Sessions' as-yet-unsorted order, which is not deterministic.
+// findSlowRequests fires when any request crossed SlowThresholdMS.
+func findSlowRequests(rep *Report2, lang i18n.Lang) *Finding {
+	if rep.Overall.RequestsWithDur <= 0 {
+		return nil
+	}
+	slow := rep.Overall.SlowRequests
+	if slow <= 0 {
+		return nil
+	}
+	share := float64(slow) / float64(rep.Overall.RequestsWithDur) * 100
+	ft := i18n.Efficiency(lang).SlowRequestsFinding(strconv.FormatFloat(share, 'f', 0, 64), SlowThresholdMS/1000)
+	return &Finding{
+		Code: FindingSlowRequests, Finding: ft.Title, Metric: "slow_request_share",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			"share_pct":         strconv.FormatFloat(share, 'f', -1, 64),
+			"slow":              strconv.Itoa(slow),
+			"requests_with_dur": strconv.Itoa(rep.Overall.RequestsWithDur),
+			"threshold_s":       strconv.Itoa(SlowThresholdMS / 1000),
+		},
+	}
+}
+
+// findContextGrowth picks the worst session (highest ContextGrowth,
+// tie-broken by ID for determinism over rep.Sessions' as-yet-unsorted
+// order — see buildFindings' own doc history), reporting only when growth
+// reaches 5x.
+func findContextGrowth(rep *Report2, lang i18n.Lang) *Finding {
 	var worst *SessionRow
 	for i := range rep.Sessions {
 		s := &rep.Sessions[i]
@@ -406,51 +483,42 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 			worst = s
 		}
 	}
-	if worst != nil && worst.ContextGrowth >= 5 {
-		add(FindingContextGrowth, "context_growth", tx.ContextGrowthFinding(
-			strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, reqdetail.EscapeHTML(worst.Title)))
+	if worst == nil || worst.ContextGrowth < 5 {
+		return nil
 	}
-
-	// provider quota exhaustion — see findings_quota.go.
-	if f := quotaExhaustionFinding(rep, lang); f != nil {
-		out = append(out, *f)
+	ft := i18n.Efficiency(lang).ContextGrowthFinding(
+		strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, reqdetail.EscapeHTML(worst.Title))
+	return &Finding{
+		Code: FindingContextGrowth, Finding: ft.Title, Metric: "context_growth",
+		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			// session_title is the RAW value, unescaped — Params holds
+			// original values, never pre-escaped text (R2-b will move
+			// escaping to the serializer; storing it raw here already
+			// matches that end state).
+			"context_growth": strconv.FormatFloat(float64(worst.ContextGrowth), 'f', -1, 64),
+			"session_id":     worst.ID,
+			"session_title":  worst.Title,
+		},
 	}
-
-	return out
 }
 
 // buildFindingsForJSON is buildFindings fixed to English — the only call
 // Build itself makes (aggregate.go), so this is Report2.Efficiency's
 // language-agnostic default: a deterministic baseline Build computes
-// without needing a lang parameter. cmd_report.go overwrites it with the
-// report's actual display language — see LocalizeEfficiency, below. Kept
-// as its own named function (not an inline
-// i18n.EN literal at the call site) so aggregate.go's own call site never
-// needs to import internal/i18n itself — see that file's line-count budget
-// note.
-func buildFindingsForJSON(rep *Report2) []Finding {
-	return buildFindings(rep, i18n.EN)
-}
-
-// LocalizeEfficiency recomputes rep.Efficiency in lang, overwriting the
-// English default Build/BuildCached always populate internally
-// (buildFindingsForJSON) — call this once, after Build/BuildCached
-// returns, before the slices are written, so their efficiency[] narrative
-// fields match the language the accompanying Markdown will render in.
-// Build/BuildCached deliberately stay language-agnostic (no lang
-// parameter) — see json_lang_policy_plan_sonnet-5.md §3.1 for why this
-// path was chosen over adding lang to their signatures. Cheap and pure:
-// same already-aggregated rep, no I/O, and buildFindings' "pick the worst
-// one" selection logic doesn't depend on lang (TestBuildFindingsIsDeterministic
-// already pins that), so this can never select a different set of Codes
-// than the English default did — only their rendered text changes.
+// without needing a lang parameter. Nothing overwrites rep.Efficiency
+// afterward (R1: the persisted JSON stays language-invariant regardless of
+// -lang — see BuildSummarySlice, which reads it as-is). Kept as its own
+// named function (not an inline i18n.EN literal at the call site) so
+// aggregate.go's own call site never needs to import internal/i18n itself
+// — see that file's line-count budget note.
 //
 // viewmodel_efficiency.go's own Markdown renderer deliberately does NOT read
-// rep.Efficiency after this runs — it keeps computing its own independent
-// buildFindings(rep, lang) call, so Markdown rendering never depends on
-// whether (or when) a caller happened to call LocalizeEfficiency first.
-func LocalizeEfficiency(rep *Report2, lang i18n.Lang) {
-	rep.Efficiency = buildFindings(rep, lang)
+// rep.Efficiency — it computes its own independent buildFindings(rep, lang)
+// call with the report's actual display language, so Markdown rendering
+// never depends on this English baseline at all.
+func buildFindingsForJSON(rep *Report2) []Finding {
+	return buildFindings(rep, i18n.EN)
 }
 
 // ---- formatting helpers (shared by render + findings) ----

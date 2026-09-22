@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 package archtest
 
 import (
@@ -51,10 +51,12 @@ var fileLineExemptions = map[string]int{
 	// or rendering logic again, which belongs in ingest.go/viewmodel_*.go.
 	// 900 -> 1000 for Agent Guard's GuardSummary/GuardRuleRow rows, 1000 ->
 	// 1010 for GuardInboundSummary.SanitizedRuneCounts (both M2 of
-	// the Agent Guard spec) — a new metric
-	// adding a field is exactly the expected growth this exemption's own
-	// comment describes.
-	"internal/report/rows.go": 1010,
+	// the Agent Guard spec), 1010 -> 1050 for Finding.Params plus the new
+	// HighlightCode/Highlight types (R1: language-neutral data products,
+	// codebase-weight-analysis doc §7) — each a new field/type on the JSON
+	// contract, exactly the expected growth this exemption's own comment
+	// describes.
+	"internal/report/rows.go": 1050,
 	// detail.go was split into internal/reqdetail in P2, slimming it to ~286
 	// lines. internal/config/config.go used to carry a 750 exemption here; it
 	// is 699 lines, i.e. under the default, so the exemption was dropped
@@ -64,12 +66,18 @@ var fileLineExemptions = map[string]int{
 	"internal/report/detail.go":  335,
 	"internal/report/session.go": 1000,
 
-	"internal/journey/journey.go":             850,
-	"internal/journey/render_md.go":           60,
-	"internal/journey/render_spine.go":        70,
-	"internal/journey/render_spine_args.go":   70,
-	"internal/journey/findings.go":            580,
-	"internal/journey/findings_toolresult.go": 320,
+	"internal/journey/journey.go":           850,
+	"internal/journey/render_md.go":         60,
+	"internal/journey/render_spine.go":      70,
+	"internal/journey/render_spine_args.go": 70,
+	// 580 -> 620, 320 -> 340: R1 (codebase-weight-analysis doc §7) added
+	// Finding.Params collection at each detector's construction site plus
+	// localizeFinding, the render-time reconstruction every rule-derived
+	// detector's Code now needs a case for — the same kind of "a new field
+	// needs a home in every existing construction site" growth rows.go's
+	// own exemption comment describes, not scope creep.
+	"internal/journey/findings.go":            620,
+	"internal/journey/findings_toolresult.go": 340,
 	"internal/journey/compare.go":             820,
 	"internal/journey/metrics.go":             435,
 	"internal/journey/benchmarks.go":          380,

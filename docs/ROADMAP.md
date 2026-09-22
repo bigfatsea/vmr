@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-21 12:00, by Sonnet 5 -->
+<!-- Ver 2026-09-22 01:15, by Sonnet 5 -->
 
 # vmr — Roadmap（产品路线图）
 
@@ -79,3 +79,17 @@
 - **现状**：`macro/*.json` 是嵌套 schema、`requests/index.json` 是行集合，pandas / Excel 用户要先 flatten（`RequestRow` 本身已接近扁平）。
 - **可能方案**：`vmr analyze -format csv` 导出几张固定扁平表（`requests.csv` / `cost_by_client.csv` / `cost_by_date.csv` / `sessions.csv`），不做「万能 CSV」。
 - **触发条件**：出现真实的表格工具消费需求——无消费者就没人需要。
+
+## 4. 多语言与本地化
+
+### R8. 默认套件同时产出全部已装载语种的 Markdown
+
+**状态**：YAGNI，待触发；技术前提已具备。曾在数据产品语言中立化改造（R1）的收尾阶段评估过。
+
+- **现状**：`vmr analyze` 一次只渲染一种语言的 Markdown（`-lang`/`report.yaml` 选定）；`macro/*.json`、`j-<id>.json`、`compare-*.json`、`manifest.json` 均已语言中立（不随 `-lang` 变化），所以换语言不再需要重新聚合——`-render-only -lang <其他语种>` 是一次廉价纯重渲染（见《用户指南》"输出语言"一节）。真正缺的只是"默认一次产出两种语言"这个自动化行为，不是能力缺口。
+- **不做的原因**：过去"某语种腐烂"的根因是换语言太贵，没人愿意手动重跑——这个根因已经消失。剩下的是纯产品取舍：默认双倍产物体积与运行耗时，换一个大多数场景用不上的自动化便利，此刻没有真实需求撑住这笔代价（YAGNI）。
+- **若立项，推荐技术路线**：**语种镜像子目录**（如 `zh/vmr-report.md`、`zh/journeys/...`），不要用文件名后缀（`vmr-report.zh.md`）。镜像子目录与根目录结构完全同构，子树内部现有的相对链接（`../../vmr-report.md`、`../index.md`、`details/j-*.md`）在镜像内天然闭环，不需要改一行链接生成代码；文件名后缀方案做不到这一点，会导致副语种文档内部链接静默指向主语种文件。
+  - **已知陷阱**：有两类链接会逃出 Markdown 子树、指向语言中立的共享根，镜像时必须多解析一层 `../` 而不是原样复制：`internal/i18n/reqdetail_detail.go` 里请求详情页"返回"链接指向的 `request-browser.html`（看板页本身语言中立，直接 fetch 根目录 JSON）；`internal/journey/viewmodel_build.go` 的 `SysPromptEraLink` 指向的 `requests/evidence/`（透传正文 dump，同样语言中立）。忽略这两类会让镜像子目录变成双重断裂或纯浪费。
+  - 实现建议复用 `renderAllFromDisk`，让它接受一个输出根目录覆盖参数（渲染到 `outDir/zh` 而非 `outDir`），而不是给每个文件写入点单独穿一个"文件名后缀"参数。
+  - 只对默认套件与 `-macro-only` 生效；`-journey`/`-compare`/`-benchmark` 这类单点变焦命令语义上就是"聚焦一个目标"，保持只产出一种语言。
+- **触发条件**：出现真实的"同一份输出目录要同时给中英文两组人开箱查阅"需求——无此类真实场景前不要为其设计开关（连 `-all-langs` 这样的显式开关也一样，先有场景再造轮子）。

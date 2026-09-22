@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 // The report's data shape: every struct that Build fills in and that both
 // renderers (vmr-report.md, rebuilt from the slices) read back out. Split out of
@@ -80,17 +80,21 @@ type Report2 struct {
 
 // Meta carries provenance + method notes consumed by the appendix.
 type Meta struct {
-	Format           int               `json:"format"`
-	GeneratedAt      string            `json:"generated_at"`
-	Inputs           []string          `json:"inputs"`
-	Records          int               `json:"records"`
-	ParseErrors      int               `json:"parse_errors"`
-	From             string            `json:"from,omitempty"`
-	To               string            `json:"to,omitempty"`
-	SlowThreshold    int               `json:"slow_threshold_ms"`
-	PercentileMethod string            `json:"percentile_method"` // documented in appendix
-	Footnotes        map[string]string `json:"footnotes,omitempty"`
-	Disclaimers      []string          `json:"disclaimers,omitempty"`
+	Format           int      `json:"format"`
+	GeneratedAt      string   `json:"generated_at"`
+	Inputs           []string `json:"inputs"`
+	Records          int      `json:"records"`
+	ParseErrors      int      `json:"parse_errors"`
+	From             string   `json:"from,omitempty"`
+	To               string   `json:"to,omitempty"`
+	SlowThreshold    int      `json:"slow_threshold_ms"`
+	PercentileMethod string   `json:"percentile_method"` // documented in appendix
+	// Footnotes/Disclaimers round-trip manifest.json's own fields into the
+	// in-memory shape (LoadReport) for symmetry; no renderer in this
+	// package reads them back — vmAppendixClosing builds the Markdown
+	// appendix independently, straight from rep.Meta/rep.Pricing.
+	Footnotes   map[string]FootnoteRef `json:"footnotes,omitempty"`
+	Disclaimers []DisclaimerRef        `json:"disclaimers,omitempty"`
 	// DetailsEnabled records whether details/*.md has anything in it for
 	// this run's output — either this run's own -details write, or (via
 	// `vmr analyze`) the journey half having already batch-materialized
@@ -530,13 +534,22 @@ type ToolShapeRow struct {
 type Finding struct {
 	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
+	// Params carries the raw values that drove this finding (a shape name,
+	// a byte count, a percentage as a bare float, a session id — never a
+	// pre-formatted or pre-escaped string) so a consumer can reconstruct
+	// the sentence in any language without re-aggregating (R1: language is
+	// a render-time concern, never baked into the data product). Keys are
+	// finding-specific; see buildFindings' call sites for what each Code
+	// populates.
+	Params map[string]string `json:"params,omitempty"`
 	// Finding/Value/Implicated/Action are narrative text. Build populates
-	// them with the English default (buildFindingsForJSON); cmd_report.go
-	// overwrites Report2.Efficiency with the report's actual display
-	// language (LocalizeEfficiency) before the slices are written, so
-	// the persisted JSON follows -lang like the Markdown does. Markdown
-	// rendering computes its own separate localized copy rather than
-	// reading this struct post-overwrite — see viewmodel_efficiency.go.
+	// them with the English baseline (buildFindingsForJSON) and nothing
+	// overwrites that afterward — the persisted JSON is deliberately
+	// language-invariant (R1). They stay for one transition version so an
+	// existing consumer reading plain sentences doesn't break; new code
+	// should prefer Code+Params. Markdown rendering computes its own
+	// separate copy in the report's actual display language — see
+	// viewmodel_efficiency.go — so it never reads this struct at all.
 	Finding    string `json:"finding"`
 	Metric     string `json:"metric"`
 	Value      string `json:"value"`
@@ -559,6 +572,30 @@ const (
 	// real-time counter — see findings_quota.go's quotaExhaustionFinding.
 	FindingProviderQuotaExhaustion FindingCode = "provider_quota_exhaustion"
 )
+
+// HighlightCode identifies which report-opening highlight a row is,
+// independent of its (localized) display text — same role as FindingCode.
+type HighlightCode string
+
+const (
+	HighlightCacheWarn    HighlightCode = "cache_warn"
+	HighlightToolWarn     HighlightCode = "tool_warn"
+	HighlightEndpointWarn HighlightCode = "endpoint_warn"
+	HighlightNoAnomalies  HighlightCode = "no_anomalies"
+)
+
+// Highlight is one row of summary.json's opening highlights list — same
+// Code+Params+Text split as Finding, and for the same reason: highlights()
+// used to return bare localized sentences, which meant summary.json's
+// highlights field baked language into the data product (R1 violation).
+// Text carries the English baseline for the persisted JSON; Markdown
+// rendering calls highlights() directly with the real lang and never reads
+// a persisted copy.
+type Highlight struct {
+	Code   HighlightCode     `json:"code"`
+	Text   string            `json:"text"`
+	Params map[string]string `json:"params,omitempty"`
+}
 
 // RequestRow is one row of requests/index.json's "requests" field: the per-request drill-down
 // backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;

@@ -1,8 +1,9 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
+	"vmr/internal/taskseg"
 )
 
 // makeSampleReport builds a comprehensive Report2 for testing slice extraction.
@@ -266,7 +268,7 @@ func TestMacroSlices_EquivalenceWithReport2(t *testing.T) {
 	rep := makeSampleReport()
 
 	// 1. Build the 5 slices
-	summary := BuildSummarySlice(rep, i18n.EN)
+	summary := BuildSummarySlice(rep)
 	finance := BuildFinanceSlice(rep)
 	reliability := BuildReliabilitySlice(rep)
 	workloads := BuildWorkloadsSlice(rep)
@@ -440,7 +442,7 @@ func TestManifest_AtomicWriteAndValidation(t *testing.T) {
 	rep := makeSampleReport()
 
 	// 1. Write the 5 macro slices
-	if err := WriteMacroSlices(tempDir, rep, i18n.EN); err != nil {
+	if err := WriteMacroSlices(tempDir, rep); err != nil {
 		t.Fatalf("WriteMacroSlices: %v", err)
 	}
 
@@ -465,8 +467,8 @@ func TestManifest_AtomicWriteAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildManifest: %v", err)
 	}
-	if manifest.Format != 11 {
-		t.Errorf("manifest.Format = %d, want 11", manifest.Format)
+	if manifest.Format != ManifestFormat {
+		t.Errorf("manifest.Format = %d, want %d", manifest.Format, ManifestFormat)
 	}
 	if len(manifest.Slices) != 5 {
 		t.Errorf("manifest.Slices has %d entries, want 5", len(manifest.Slices))
@@ -501,8 +503,8 @@ func TestManifest_AtomicWriteAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidateManifest failed on valid snapshot: %v", err)
 	}
-	if validated.Format != 11 {
-		t.Errorf("validated.Format = %d, want 11", validated.Format)
+	if validated.Format != ManifestFormat {
+		t.Errorf("validated.Format = %d, want %d", validated.Format, ManifestFormat)
 	}
 
 	// 4. Tamper detection: modify one slice by appending a space
@@ -552,7 +554,7 @@ func TestManifest_PartialMacroSetRejected(t *testing.T) {
 	// BuildManifest with rep != nil must refuse when a macro slice is gone.
 	t.Run("BuildManifest refuses a missing macro slice", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
+		if err := WriteMacroSlices(dir, rep); err != nil {
 			t.Fatalf("WriteMacroSlices: %v", err)
 		}
 		if err := os.Remove(filepath.Join(dir, SliceMacroFinance)); err != nil {
@@ -568,7 +570,7 @@ func TestManifest_PartialMacroSetRejected(t *testing.T) {
 	// ValidateManifest must reject a manifest that records 4 of 5 macro slices.
 	t.Run("ValidateManifest refuses a partial macro set on record", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
+		if err := WriteMacroSlices(dir, rep); err != nil {
 			t.Fatalf("WriteMacroSlices: %v", err)
 		}
 		m, err := BuildManifest(dir, rep, i18n.EN)
@@ -624,8 +626,8 @@ func TestManifest_PartialMacroSetRejected(t *testing.T) {
 			Format:      ManifestFormat,
 			TimeRange:   [2]string{"2026-08-24T00:00:00Z", "2026-08-24T23:59:59Z"},
 			Inputs:      []InputFile{{Path: "logs/audit.jsonl", SHA256: "abc"}},
-			Footnotes:   map[string]string{"note": "text"},
-			Disclaimers: []string{"disc"},
+			Footnotes:   map[string]FootnoteRef{"note": {Code: "text"}},
+			Disclaimers: []DisclaimerRef{{Code: "disc"}},
 		}
 		if err := WriteManifest(dir, initial); err != nil {
 			t.Fatal(err)
@@ -648,10 +650,10 @@ func TestManifest_PartialMacroSetRejected(t *testing.T) {
 		if len(updated.Inputs) != 1 || updated.Inputs[0].Path != "logs/audit.jsonl" {
 			t.Errorf("Inputs = %v, want preserved inputs", updated.Inputs)
 		}
-		if updated.Footnotes["note"] != "text" {
+		if updated.Footnotes["note"].Code != "text" {
 			t.Errorf("Footnotes = %v, want preserved footnotes", updated.Footnotes)
 		}
-		if len(updated.Disclaimers) != 1 || updated.Disclaimers[0] != "disc" {
+		if len(updated.Disclaimers) != 1 || updated.Disclaimers[0].Code != "disc" {
 			t.Errorf("Disclaimers = %v, want preserved disclaimers", updated.Disclaimers)
 		}
 	})
@@ -711,25 +713,117 @@ func TestConfidenceFields(t *testing.T) {
 }
 
 // TestFootnotesAndDisclaimersStructure verifies that structured footnotes
-// and disclaimers are populated for both English and Chinese (§3.3).
+// and disclaimers carry stable codes (§3.3) — and, per R1, that they no
+// longer take a lang parameter at all, since a code is by definition the
+// same in every language.
 func TestFootnotesAndDisclaimersStructure(t *testing.T) {
 	rep := makeSampleReport()
 
-	fnEN, discEN := BuildFootnotesAndDisclaimers(rep, i18n.EN)
-	if fnEN["¹"] == "" || fnEN["⚠️low-n"] == "" {
-		t.Errorf("EN footnotes missing required keys: %+v", fnEN)
+	fn, disc := BuildFootnotesAndDisclaimers(rep)
+	if fn["¹"].Code == "" || fn["⚠️low-n"].Code == "" {
+		t.Errorf("footnotes missing required keys: %+v", fn)
 	}
 
-	fnZH, discZH := BuildFootnotesAndDisclaimers(rep, i18n.ZH)
-	if fnZH["¹"] == "" || fnZH["⚠️low-n"] == "" {
-		t.Errorf("ZH footnotes missing required keys: %+v", fnZH)
+	// makeSampleReport sets Compactions but not Pricing — disc should carry
+	// exactly the compaction disclaimer, not the pricing one.
+	if len(disc) != 1 || disc[0].Code != "compaction_retention" {
+		t.Errorf("disc = %+v, want exactly one compaction_retention entry (report has Compactions but no Pricing)", disc)
 	}
 
-	// Disclaimers should not be empty when Pricing and Compactions are present
-	if len(discEN) == 0 {
-		t.Errorf("discEN is empty for report with pricing and compactions")
+	// Separately, a report WITH Pricing must carry the pricing_estimate
+	// disclaimer with its params — Params is where a consumer gets back
+	// what Pricing.Disclaimer(lang) used to bake straight into the text.
+	priced := makeSampleReport()
+	priced.Pricing = &Pricing{Currency: "USD", StandardGeneratedAt: "2026-08-31"}
+	_, discPriced := BuildFootnotesAndDisclaimers(priced)
+	var sawPricing bool
+	for _, d := range discPriced {
+		if d.Code == "pricing_estimate" {
+			sawPricing = true
+			if d.Params["currency"] != "USD" || d.Params["as_of"] != "2026-08-31" {
+				t.Errorf("pricing_estimate disclaimer params = %+v, want currency=USD as_of=2026-08-31", d.Params)
+			}
+		}
 	}
-	if len(discZH) == 0 {
-		t.Errorf("discZH is empty for report with pricing and compactions")
+	if !sawPricing {
+		t.Errorf("discPriced = %+v, want a pricing_estimate entry", discPriced)
+	}
+}
+
+// TestSlicesAreLangInvariant is R1's machine-checkable acceptance test for
+// the report side (codebase-weight-analysis doc §7): analyzing the same
+// input once per language must produce byte-identical macro/*.json slices
+// and an identical manifest.json apart from its Lang/GeneratedAt fields —
+// language is a render-time (Markdown) concern only, never baked into the
+// JSON data product. Uses heartbeatDreamDiaryTiedRecords (aggregate_test.go)
+// since it's already proven to trigger both a Finding (FindingCronRedundancy)
+// and a Highlight (the cache-warn branch, same cache_efficiency=0 fixture),
+// so this test exercises the exact fields R1 is about, not just a report
+// with no findings at all.
+func TestSlicesAreLangInvariant(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, heartbeatDreamDiaryTiedRecords())
+	now := time.Now()
+
+	build := func(lang i18n.Lang) (slices map[string][]byte, manifest *Manifest) {
+		rep, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("BuildCached: %v", err)
+		}
+		outDir := t.TempDir()
+		if err := WriteMacroSlices(outDir, rep); err != nil {
+			t.Fatalf("WriteMacroSlices: %v", err)
+		}
+		manifest, err = BuildManifest(outDir, rep, lang)
+		if err != nil {
+			t.Fatalf("BuildManifest: %v", err)
+		}
+		slices = make(map[string][]byte)
+		for _, rel := range MacroSlicePaths {
+			data, err := os.ReadFile(filepath.Join(outDir, rel))
+			if err != nil {
+				t.Fatalf("read %s: %v", rel, err)
+			}
+			slices[rel] = data
+		}
+		return slices, manifest
+	}
+
+	enSlices, enManifest := build(i18n.EN)
+	zhSlices, zhManifest := build(i18n.ZH)
+
+	var sawFinding, sawHighlight bool
+	if bytes.Contains(enSlices[SliceMacroSummary], []byte(`"cron_redundancy"`)) {
+		sawFinding = true
+	}
+	if bytes.Contains(enSlices[SliceMacroSummary], []byte(`"cache_warn"`)) {
+		sawHighlight = true
+	}
+	if !sawFinding || !sawHighlight {
+		t.Fatalf("fixture should trigger both a Finding and a Highlight — sawFinding=%v sawHighlight=%v, summary.json:\n%s",
+			sawFinding, sawHighlight, enSlices[SliceMacroSummary])
+	}
+
+	for _, rel := range MacroSlicePaths {
+		if !bytes.Equal(enSlices[rel], zhSlices[rel]) {
+			t.Errorf("%s differs between -lang en and -lang zh (R1 violation):\n--- en ---\n%s\n--- zh ---\n%s",
+				rel, enSlices[rel], zhSlices[rel])
+		}
+	}
+
+	// manifest.json: same everything except Lang (by design) and
+	// GeneratedAt (wall clock, expected to differ between the two builds).
+	enManifest.Lang, zhManifest.Lang = "", ""
+	enManifest.GeneratedAt, zhManifest.GeneratedAt = TimePoint{}, TimePoint{}
+	enBytes, err := json.Marshal(enManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zhBytes, err := json.Marshal(zhManifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(enBytes, zhBytes) {
+		t.Errorf("manifest.json differs between -lang en and -lang zh beyond Lang/GeneratedAt (R1 violation):\n--- en ---\n%s\n--- zh ---\n%s", enBytes, zhBytes)
 	}
 }

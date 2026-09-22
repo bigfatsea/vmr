@@ -1,4 +1,4 @@
-// Ver 2026-07-30 22:00, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -50,7 +50,7 @@ func testPack(t *testing.T) EvidencePack {
 	t.Helper()
 	a := JourneySummary{ID: "j-a", Title: "A", Metrics: Metrics{ModelMS: 1000}}
 	b := JourneySummary{ID: "j-b", Title: "B", Metrics: Metrics{ModelMS: 2000}}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	return EvidencePack{Comparison: cmp, TaskTitlesA: []string{"t1"}, TaskTitlesB: []string{"t1"}}
 }
 
@@ -73,8 +73,8 @@ func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	s := Summarize(j, i18n.EN)
-	cmp := Compare(s, s, i18n.EN)
+	s := Summarize(j)
+	cmp := Compare(s, s)
 
 	pack := BuildEvidencePack(j, j, cmp, i18n.EN)
 

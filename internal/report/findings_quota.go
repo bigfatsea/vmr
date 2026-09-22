@@ -1,4 +1,4 @@
-// Ver 2026-08-13, by Opus 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 // §7 Provider Quota Exhaustion finding (quota design specification). Split out of
 // metrics.go on purpose (see that file's own note in the dev plan on why:
@@ -57,5 +57,12 @@ func quotaExhaustionFinding(rep *Report2, lang i18n.Lang) *Finding {
 	return &Finding{
 		Code: FindingProviderQuotaExhaustion, Finding: ft.Title, Metric: "provider_quota_used_pct",
 		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
+		Params: map[string]string{
+			"provider": worst.Provider,
+			"models":   strings.Join(worst.Models, ","),
+			"used_pct": strconv.FormatFloat(worst.Live.Pct, 'f', -1, 64),
+			"metric":   worst.Metric,
+			"every":    worst.Every,
+		},
 	}
 }

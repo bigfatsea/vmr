@@ -1,4 +1,4 @@
-// Ver 2026-07-30 21:00, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Differential analysis: diffing two Journeys'
 // already-computed Metrics is the whole deliverable — "两份剖面做差就是对比
@@ -105,16 +105,18 @@ type Comparison struct {
 
 // Compare diffs a and b's Metrics — the whole of Phase 4d ("两份剖面做差就是对比报告的骨架"). Order is fixed:
 // caller decides which Journey is "A" and which is "B" (e.g. baseline vs
-// candidate); Compare doesn't sort or normalize that choice away. lang
-// picks each row's localized Label (i18n.MetricLabel) — the same lookup
-// Markdown rendering already used, now folded into the JSON-producing path
-// too (json_lang_policy_plan_sonnet-5.md), so compare-*.json's rows[].label
-// matches the compare-*.md table generated from the same call.
-func Compare(a, b JourneySummary, lang i18n.Lang) Comparison {
+// candidate); Compare doesn't sort or normalize that choice away. No lang
+// parameter (R1): each row's Label is the English baseline
+// (i18n.MetricLabel(i18n.EN, ...)) — Metric is already the stable,
+// non-localized id, so a consumer that wants another language's label
+// looks it up from Metric via i18n.MetricLabel rather than reading a
+// frozen string. Markdown rendering does exactly that at render time
+// (render_compare.go) instead of reading Label back.
+func Compare(a, b JourneySummary) Comparison {
 	ma, mb := a.Metrics, b.Metrics
 	rows := make([]MetricDiff, len(metricSpecs))
 	for i, spec := range metricSpecs {
-		rows[i] = metricDiff(spec.Code, i18n.MetricLabel(lang, string(spec.Code)), spec.Kind, spec.Value(ma), spec.Value(mb))
+		rows[i] = metricDiff(spec.Code, i18n.MetricLabel(i18n.EN, string(spec.Code)), spec.Kind, spec.Value(ma), spec.Value(mb))
 	}
 	return Comparison{A: journeyRef(a), B: journeyRef(b), Partial: a.Partial || b.Partial, Rows: rows, Tools: toolShareDiff(ma.ToolCallDist, mb.ToolCallDist)}
 }

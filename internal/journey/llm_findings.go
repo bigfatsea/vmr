@@ -1,4 +1,4 @@
-// Ver 2026-08-16 23:15, by gemini-3.7-flash
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Phase 1b LLM semantic detectors for single Journey analysis.
 //
@@ -73,6 +73,7 @@ func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts 
 				Code:           FindingToolResultMisinterpretation,
 				StepSeq:        item.StepSeq,
 				Source:         SourceLLMInferred,
+				LLMLang:        lang.String(),
 				Confidence:     ConfidenceHigh,
 				EvidenceAnchor: item.EvidenceAnchor,
 				Finding:        fText.Finding,
@@ -198,6 +199,7 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 				Code:           FindingSemanticOscillation,
 				StepSeq:        item.StepSeq,
 				Source:         SourceLLMInferred,
+				LLMLang:        lang.String(),
 				Confidence:     ConfidenceHigh,
 				EvidenceAnchor: item.EvidenceAnchor,
 				Finding:        fText.Finding,
@@ -289,6 +291,7 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 			StepSeq:        item.DriftStepSeq,
 			RelatedSeq:     related,
 			Source:         SourceLLMInferred,
+			LLMLang:        lang.String(),
 			Confidence:     ConfidenceHigh,
 			EvidenceAnchor: item.EvidenceAnchor,
 			Finding:        fText.Finding,
@@ -346,6 +349,7 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 				Code:           FindingConstraintTextDropped,
 				StepSeq:        item.StepSeq,
 				Source:         SourceLLMInferred,
+				LLMLang:        lang.String(),
 				Confidence:     ConfidenceHigh,
 				EvidenceAnchor: item.EvidenceAnchor,
 				Finding:        fText.Finding,
@@ -444,6 +448,7 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 			Code:           FindingPlanExecutionMisalignment,
 			StepSeq:        planStepSeq,
 			Source:         SourceLLMInferred,
+			LLMLang:        lang.String(),
 			Confidence:     ConfidenceHigh,
 			EvidenceAnchor: item.EvidenceAnchor,
 			Finding:        fText.Finding,
@@ -522,6 +527,7 @@ func detectLLMUnverifiedCompletionClaim(ctx context.Context, j *Journey, opts LL
 			Code:           FindingUnverifiedCompletionClaim,
 			StepSeq:        lastStepSeq,
 			Source:         SourceLLMInferred,
+			LLMLang:        lang.String(),
 			Confidence:     ConfidenceHigh,
 			EvidenceAnchor: item.EvidenceAnchor,
 			Finding:        fText.Finding,

@@ -1,8 +1,9 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
 import (
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"strings"
@@ -33,7 +34,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 	}
 
 	t.Run("below threshold: no finding", func(t *testing.T) {
-		got := ComputeFindings(mk(exactRepeatThreshold-1), i18n.EN)
+		got := ComputeFindings(mk(exactRepeatThreshold - 1))
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
 				t.Fatalf("unexpected finding below threshold: %+v", f)
@@ -42,7 +43,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 	})
 
 	t.Run("at threshold: fires once, located at the last occurrence", func(t *testing.T) {
-		got := ComputeFindings(mk(exactRepeatThreshold), i18n.EN)
+		got := ComputeFindings(mk(exactRepeatThreshold))
 		var hits []Finding
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
@@ -69,7 +70,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 		for i := 1; i <= exactRepeatThreshold+2; i++ {
 			steps = append(steps, &Step{Seq: i, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"echo `+string(rune('a'+i))+`"}`)}})
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
 				t.Fatalf("unexpected finding: every call had distinct args: %+v", f)
@@ -89,7 +90,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			}
 			steps = append(steps, s)
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
 				t.Fatalf("unexpected finding for scattered repeats: %+v", f)
@@ -109,7 +110,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			}
 			steps = append(steps, s)
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
 				t.Fatalf("unexpected finding: run broke at gap %d: %+v", maxRepeatGap+1, f)
@@ -126,7 +127,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			}
 			steps = append(steps, s)
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var hits []Finding
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
@@ -154,7 +155,7 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			}
 			steps = append(steps, s)
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var hits int
 		for _, f := range got {
 			if f.Code == FindingExactRepeatToolCall {
@@ -177,7 +178,7 @@ func TestDetectNarrationWithoutAction(t *testing.T) {
 	}
 
 	t.Run("run at threshold fires", func(t *testing.T) {
-		got := ComputeFindings(journeyOf(similarSteps(narrationMinRun)...), i18n.EN)
+		got := ComputeFindings(journeyOf(similarSteps(narrationMinRun)...))
 		var hits int
 		for _, f := range got {
 			if f.Code == FindingNarrationWithoutAction {
@@ -190,7 +191,7 @@ func TestDetectNarrationWithoutAction(t *testing.T) {
 	})
 
 	t.Run("below threshold does not fire", func(t *testing.T) {
-		got := ComputeFindings(journeyOf(similarSteps(narrationMinRun-1)...), i18n.EN)
+		got := ComputeFindings(journeyOf(similarSteps(narrationMinRun - 1)...))
 		for _, f := range got {
 			if f.Code == FindingNarrationWithoutAction {
 				t.Fatalf("unexpected finding below run threshold: %+v", f)
@@ -201,7 +202,7 @@ func TestDetectNarrationWithoutAction(t *testing.T) {
 	t.Run("a tool call breaks the run", func(t *testing.T) {
 		steps := similarSteps(narrationMinRun)
 		steps[1].ToolCalls = []chatmsg.ToolCall{tc("write", "{}")}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingNarrationWithoutAction {
 				t.Fatalf("unexpected finding: a tool call should break the narration run: %+v", f)
@@ -215,7 +216,7 @@ func TestDetectNarrationWithoutAction(t *testing.T) {
 			{Seq: 2, RespText: "the weather today looks fine"},
 			{Seq: 3, RespText: "let's talk about something entirely different"},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingNarrationWithoutAction {
 				t.Fatalf("unexpected finding: consecutive texts share no vocabulary: %+v", f)
@@ -232,7 +233,7 @@ func TestDetectUnverifiedSuccess(t *testing.T) {
 			{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"go build"}`)}},
 			{Seq: 2, NewEvents: []*Event{errEvent}, Finish: "stop"},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingUnverifiedSuccess {
@@ -256,7 +257,7 @@ func TestDetectUnverifiedSuccess(t *testing.T) {
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("read_file", `{"path":"/a"}`)}},
 			{Seq: 3, Finish: "stop"},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingUnverifiedSuccess {
 				t.Fatalf("unexpected finding: a verification-shaped call should disarm it: %+v", f)
@@ -266,7 +267,7 @@ func TestDetectUnverifiedSuccess(t *testing.T) {
 
 	t.Run("no error at all: never fires", func(t *testing.T) {
 		steps := []*Step{{Seq: 1, Finish: "stop"}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingUnverifiedSuccess {
 				t.Fatalf("unexpected finding with no error marker: %+v", f)
@@ -282,7 +283,7 @@ func TestDetectReasoningActionMismatch(t *testing.T) {
 			Reasoning: "I need to check config.go carefully before making any changes to the router logic",
 			ToolCalls: []chatmsg.ToolCall{tc("write_file", `{"path":"router.go","content":"..."}`)},
 		}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var found bool
 		for _, f := range got {
 			if f.Code == FindingReasoningActionMismatch && f.StepSeq == 1 {
@@ -300,7 +301,7 @@ func TestDetectReasoningActionMismatch(t *testing.T) {
 			Reasoning: "I need to check config.go carefully before making any changes to it",
 			ToolCalls: []chatmsg.ToolCall{tc("write_file", `{"path":"config.go","content":"..."}`)},
 		}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingReasoningActionMismatch {
 				t.Fatalf("unexpected finding: entity is present in the call args: %+v", f)
@@ -319,7 +320,7 @@ func TestDetectReasoningActionMismatch(t *testing.T) {
 			Reasoning: "Plan: 1. check AGENTS.md first. 2. then check SOUL.md. Let me read SOUL.md now to confirm it loaded correctly and completely",
 			ToolCalls: []chatmsg.ToolCall{tc("read_file", `{"path":"/home/user/.hermes/SOUL.md"}`)},
 		}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingReasoningActionMismatch {
 				t.Fatalf("unexpected finding: AGENTS.md is an earlier plan step, not this turn's justification: %+v", f)
@@ -338,7 +339,7 @@ func TestDetectReasoningActionMismatch(t *testing.T) {
 			Reasoning: "Let me check whether ~/.hermes/SOUL.md loaded correctly and completely this time around",
 			ToolCalls: []chatmsg.ToolCall{tc("read_file", `{"path":"/home/user/.hermes/SOUL.md"}`)},
 		}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingReasoningActionMismatch {
 				t.Fatalf("unexpected finding: same file, different path prefix: %+v", f)
@@ -352,7 +353,7 @@ func TestDetectReasoningActionMismatch(t *testing.T) {
 			Reasoning: "check a.go",
 			ToolCalls: []chatmsg.ToolCall{tc("write_file", `{"path":"b.go"}`)},
 		}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingReasoningActionMismatch {
 				t.Fatalf("unexpected finding: reasoning text is under reasoningMinChars: %+v", f)
@@ -368,7 +369,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"config.go"}`)}},
 			{Seq: 3, RespText: "done reading config.go"},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingPlanExecutionMisalignment {
@@ -395,7 +396,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 				ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"config.go"}`)}},
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"deploy.yaml"}`)}},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingPlanExecutionMisalignment {
 				t.Fatalf("unexpected finding: both plan items were executed, one in the same turn as the plan: %+v", f)
@@ -409,7 +410,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"config.go"}`)}},
 			{Seq: 3, ToolCalls: []chatmsg.ToolCall{tc("write", `{"path":"deploy.yaml"}`)}},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingPlanExecutionMisalignment {
 				t.Fatalf("unexpected finding: both items were later referenced: %+v", f)
@@ -422,7 +423,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 			{Seq: 1, Reasoning: "I'll go read the config file and then figure out what to do next."},
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"config.go"}`)}},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingPlanExecutionMisalignment {
 				t.Fatalf("unexpected finding: no numbered plan was ever stated: %+v", f)
@@ -445,7 +446,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 			lines = append(lines, strconv.Itoa(i)+". item")
 		}
 		steps := []*Step{{Seq: 1, Reasoning: strings.Join(lines, "\n")}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingPlanExecutionMisalignment {
 				t.Fatalf("unexpected finding: list exceeds maxPlanItems: %+v", f)
@@ -472,7 +473,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 			{Seq: 2, ToolCalls: []chatmsg.ToolCall{tc("read", `{"path":"config.go"}`)}},
 			{Seq: 3, RespText: "done reading config.go"},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingPlanExecutionMisalignment {
@@ -491,7 +492,7 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 		steps := []*Step{
 			{Seq: 1, Reasoning: "Note: 1. this is just an aside, not a real multi-step plan."},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingPlanExecutionMisalignment {
 				t.Fatalf("unexpected finding: minPlanItems requires >= 2 items: %+v", f)
@@ -502,11 +503,14 @@ func TestDetectPlanExecutionMisalignment(t *testing.T) {
 
 // TestComputeFindingsIsDeterministic mirrors
 // internal/report/aggregate_test.go's TestBuildFindingsIsDeterministic: the
-// SELECTION of findings (Code/StepSeq/RelatedSeq) must be identical whether
-// ComputeFindings is called with EN (feeding j-<id>.json) or a
-// different lang (feeding the rendered Markdown) — only the text may vary.
-// If a detector's selection logic ever accidentally reads i18n text instead
-// of raw data, this catches it.
+// TestComputeFindingsIsDeterministic pins SELECTION determinism
+// (Code/StepSeq/RelatedSeq) across repeated calls: ComputeFindings no
+// longer takes a lang parameter at all (R1 — it always builds the English
+// baseline plus Params, and Markdown reconstructs the actual display
+// language from those at render time via localizeFinding), so the
+// EN-vs-ZH comparison this test used to run is no longer meaningful — what
+// remains worth pinning is that repeated calls over the same Journey never
+// pick a different winner due to map iteration order.
 func TestComputeFindingsIsDeterministic(t *testing.T) {
 	steps := []*Step{
 		{Seq: 1, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"go build"}`)}},
@@ -531,12 +535,107 @@ func TestComputeFindingsIsDeterministic(t *testing.T) {
 		return out
 	}
 
-	en := keysOf(ComputeFindings(j, i18n.EN))
-	zh := keysOf(ComputeFindings(j, i18n.ZH))
-	if len(en) == 0 {
+	first := keysOf(ComputeFindings(j))
+	if len(first) == 0 {
 		t.Fatal("test fixture produced no findings at all — fixture is not exercising the detectors")
 	}
-	if !reflect.DeepEqual(en, zh) {
-		t.Fatalf("EN and ZH selected different findings — selection must not depend on lang:\nEN: %v\nZH: %v", en, zh)
+	for i := 1; i < 8; i++ {
+		if got := keysOf(ComputeFindings(j)); !reflect.DeepEqual(got, first) {
+			t.Fatalf("run %d selected different findings than run 0 — selection must not depend on map iteration order:\nrun 0: %v\nrun %d: %v", i, first, i, got)
+		}
+	}
+}
+
+// TestJourneySummaryIsLangInvariant is R1's machine-checkable acceptance
+// test for the journey side (codebase-weight-analysis doc §7). Two paths,
+// both must hold:
+//
+//  1. Source unset (rule-derived): ComputeFindings' JSON output is the
+//     English baseline plus Params, identical across repeated calls (no
+//     lang parameter exists to vary it) — and Markdown reconstructs
+//     DIFFERENT, correctly-localized text for EN vs ZH from that SAME
+//     persisted Code+Params via localizeFinding, proving the render-time
+//     reconstruction actually does work rather than silently no-op'ing.
+//  2. Source == SourceLLMInferred: text is exempt from reconstruction
+//     (localizeFinding passes it through unchanged regardless of render
+//     lang) but must carry a non-empty LLMLang recording what language it
+//     was actually generated in.
+//
+// Only asserting "everything except llm_lang is identical" would let a
+// missing LLMLang slip through unnoticed — that omission is exactly the
+// class of defect an external reviewer flagged against an earlier version
+// of this plan, so this test checks the two paths separately rather than
+// diffing the whole struct.
+func TestJourneySummaryIsLangInvariant(t *testing.T) {
+	var steps []*Step
+	for i := 1; i <= exactRepeatThreshold; i++ {
+		steps = append(steps, &Step{Seq: i, ToolCalls: []chatmsg.ToolCall{tc("bash", `{"cmd":"go build"}`)}})
+	}
+	j := journeyOf(steps...)
+
+	findings := ComputeFindings(j)
+	var ruleFinding *Finding
+	for i := range findings {
+		if findings[i].Code == FindingExactRepeatToolCall {
+			ruleFinding = &findings[i]
+		}
+	}
+	if ruleFinding == nil {
+		t.Fatalf("fixture should trigger FindingExactRepeatToolCall, got %+v", findings)
+	}
+	if ruleFinding.Source != "" {
+		t.Fatalf("rule-derived finding must have empty Source, got %q", ruleFinding.Source)
+	}
+	if ruleFinding.Params["tool"] != "bash" || ruleFinding.Params["count"] == "" {
+		t.Fatalf("rule-derived finding missing expected Params, got %+v", ruleFinding.Params)
+	}
+
+	// ① Rule-derived: repeated ComputeFindings calls serialize identically
+	// (no lang parameter to vary — this is the machine-checkable form of
+	// "language never entered the data product" for this call).
+	dataA, err := json.Marshal(findings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataB, err := json.Marshal(ComputeFindings(j))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(dataA) != string(dataB) {
+		t.Errorf("ComputeFindings results not byte-identical across repeated calls:\nA: %s\nB: %s", dataA, dataB)
+	}
+
+	// Render the SAME persisted findings at both languages — the text must
+	// actually differ (proving localizeFinding reconstructs from Params,
+	// not a pass-through) and each must contain that language's own label.
+	sum := &JourneySummary{Findings: findings}
+	mdEN := RenderMarkdownFromSummary(sum, i18n.EN, false, false)
+	mdZH := RenderMarkdownFromSummary(sum, i18n.ZH, false, false)
+	if mdEN == mdZH {
+		t.Error("EN and ZH renders are identical — localizeFinding is not reconstructing per-language text from Params")
+	}
+	if !strings.Contains(mdEN, "action:") {
+		t.Errorf("EN render missing the English 'action:' label:\n%s", mdEN)
+	}
+	if !strings.Contains(mdZH, "建议：") {
+		t.Errorf("ZH render missing the Chinese '建议：' label:\n%s", mdZH)
+	}
+
+	// ② LLM-inferred: exempt from reconstruction, must carry LLMLang.
+	llmFinding := Finding{
+		Code: FindingToolResultMisinterpretation, StepSeq: 1,
+		Source: SourceLLMInferred, Confidence: ConfidenceHigh,
+		EvidenceAnchor: "anchor text",
+		Finding:        "模型误解了工具结果",
+		Evidence:       "证据文本",
+		Action:         "建议文本",
+		LLMLang:        "zh",
+	}
+	if llmFinding.LLMLang == "" {
+		t.Fatal("LLM-inferred finding must carry a non-empty LLMLang")
+	}
+	gotEN := localizeFinding(llmFinding, i18n.EN)
+	if gotEN.Finding != llmFinding.Finding || gotEN.Evidence != llmFinding.Evidence || gotEN.Action != llmFinding.Action {
+		t.Errorf("localizeFinding must pass an LLM-inferred finding through unchanged regardless of render lang:\nwant %+v\ngot  %+v", llmFinding, gotEN)
 	}
 }

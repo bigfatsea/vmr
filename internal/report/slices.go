@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-21 22:00, by Sonnet 5
 //
 // Domain-sliced macro report schemas and writers (§3.2, §0.3 D2).
 // Deconstructs the monolithic Report2 into five independent domain slices:
@@ -74,7 +74,7 @@ func BuildCostCoverage(rep *Report2) CostCoverage {
 type SummarySlice struct {
 	Overall    Row          `json:"overall"`
 	Efficiency []Finding    `json:"efficiency,omitempty"`
-	Highlights []string     `json:"highlights,omitempty"`
+	Highlights []Highlight  `json:"highlights,omitempty"`
 	Meta       *SummaryMeta `json:"meta,omitempty"`
 }
 
@@ -139,16 +139,20 @@ type ContextEfficiencySlice struct {
 	Tools       []ToolShapeRow  `json:"tools,omitempty"`
 }
 
-// BuildSummarySlice projects rep into SummarySlice with localized highlights and findings.
-func BuildSummarySlice(r *Report2, lang i18n.Lang) SummarySlice {
+// BuildSummarySlice projects rep into SummarySlice. Efficiency/Highlights
+// are the English baseline regardless of the report's display language (R1:
+// the persisted JSON stays language-invariant) — Markdown rendering computes
+// its own independent, actually-localized copies of both (viewmodel_efficiency.go,
+// viewmodel_doc.go's vmSummarySection) and never reads this slice back.
+func BuildSummarySlice(r *Report2) SummarySlice {
 	if r == nil {
 		return SummarySlice{}
 	}
 	findings := r.Efficiency
-	if lang != i18n.EN || len(findings) == 0 {
-		findings = buildFindings(r, lang)
+	if len(findings) == 0 {
+		findings = buildFindingsForJSON(r)
 	}
-	hl := highlights(r, lang)
+	hl := highlights(r, i18n.EN)
 	return SummarySlice{
 		Overall:    r.Overall,
 		Efficiency: findings,
@@ -248,7 +252,10 @@ func BuildContextEfficiencySlice(r *Report2) ContextEfficiencySlice {
 
 // WriteMacroSlices writes the 5 domain slices into <dir>/macro/*.json atomically (0600).
 // Slices are built, marshaled, and released sequentially (K-01 / §11.3) to minimize peak RSS.
-func WriteMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
+// Language-neutral (R1): no slice builder here takes a lang parameter — every
+// narrative field they write is the English baseline, and Markdown rendering
+// always recomputes its own localized copy rather than reading these back.
+func WriteMacroSlices(dir string, r *Report2) error {
 	if r == nil {
 		return fmt.Errorf("cannot write nil report slices")
 	}
@@ -257,7 +264,7 @@ func WriteMacroSlices(dir string, r *Report2, lang i18n.Lang) error {
 		return fmt.Errorf("mkdir macro dir: %w", err)
 	}
 
-	if err := writeJSONAtomic(macroDir, "summary.json", BuildSummarySlice(r, lang)); err != nil {
+	if err := writeJSONAtomic(macroDir, "summary.json", BuildSummarySlice(r)); err != nil {
 		return err
 	}
 	if err := writeJSONAtomic(macroDir, "finance.json", BuildFinanceSlice(r)); err != nil {

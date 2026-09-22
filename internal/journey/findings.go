@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Rule-derived, Step-level "suspect list" findings for a single Journey —
 // the same Finding/FindingCode shape internal/report's buildFindings already
@@ -21,6 +21,7 @@ package journey
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"vmr/internal/i18n"
@@ -59,13 +60,30 @@ type Finding struct {
 	Confidence FindingConfidence `json:"confidence,omitempty"`
 	// EvidenceAnchor contains a verbatim excerpt from the transcript that triggered the finding.
 	EvidenceAnchor string `json:"evidence_anchor,omitempty"`
-	// Finding/Evidence/Action are narrative text, localized per the lang
-	// ComputeFindings was called with. j-<id>.json and
-	// j-<id>.md are both built from the same target-lang call
-	// (cmd/vmr/cmd_journey.go's writeJourneyFile); report's macro slices
-	// match, via cmd_report.go's report.LocalizeEfficiency call before
-	// WriteJSON. Code and EvidenceAnchor are the stable machine anchors and
-	// do NOT follow lang.
+	// Params carries the raw values that drove this finding (a tool name, a
+	// repeat count, a step sequence, a comma-joined entity list — never a
+	// pre-formatted or pre-localized string) so a consumer can reconstruct
+	// the sentence in any language without recomputing the detector (R1:
+	// language is a render-time concern, never baked into the data
+	// product — same split as internal/report's Finding.Params). Empty for
+	// LLM-inferred findings (Source == SourceLLMInferred) — see LLMLang.
+	Params map[string]string `json:"params,omitempty"`
+	// LLMLang is the language the LLM was prompted in, set only when
+	// Source == SourceLLMInferred. Finding/Evidence/Action for an
+	// LLM-inferred finding are the model's own generated text — R1's LLM-
+	// original-text exemption: they are NOT re-derivable in another
+	// language without a new model call, so they are exempted from the
+	// language-invariance requirement rather than reduced to Code+Params,
+	// as long as this field says which language they were generated in.
+	LLMLang string `json:"llm_lang,omitempty"`
+	// Finding/Evidence/Action are narrative text. For a rule-derived
+	// finding (Source unset) these are the English baseline, reconstructible
+	// from Code+Params — j-<id>.json no longer follows lang for these (R1).
+	// For an LLM-inferred finding (Source == SourceLLMInferred) these are
+	// the model's own original-language text — see LLMLang above. Either
+	// way, j-<id>.md renders its own copy at the actual display language
+	// from Code+Params (RenderMarkdownFromSummary), never reading this
+	// struct's Finding/Evidence/Action back for the rule-derived case.
 	Finding  string `json:"finding"`
 	Evidence string `json:"evidence,omitempty"`
 	Action   string `json:"action,omitempty"`
@@ -98,14 +116,18 @@ const (
 // ComputeFindings runs every detector (Phase 1's five plus Phase 2's four,
 // findings_toolresult.go) over j and returns the combined, Step-order-
 // sorted candidate list. Selection (which Steps match, which Code, which
-// RelatedSeq) never depends on lang — only the Finding/Evidence/Action text
-// does; TestComputeFindingsIsDeterministic locks this in, since
-// j-<id>.json and the rendered Markdown must never disagree on WHICH
-// Steps got flagged, regardless of which lang either was built with (see
-// the Finding struct's own doc comment for the still-open question of
-// whether j-<id>.json's *text* should track lang or stay fixed EN).
-func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
-	tx := i18n.JourneyFindings(lang)
+// RelatedSeq) never depended on lang; the Finding/Evidence/Action text now
+// doesn't either (R1) — this always builds the English baseline plus each
+// finding's Params, so j-<id>.json is language-invariant. Markdown rendering
+// reconstructs the actually-requested language from Code+Params at render
+// time (localizeFinding, called from buildVMFindings) rather than reading
+// this call's text back — the same split internal/report's
+// buildFindingsForJSON/viewmodel_efficiency.go use.
+// TestComputeFindingsIsDeterministic locks in that selection never depends
+// on map iteration order either, since j-<id>.json and the rendered
+// Markdown must never disagree on WHICH Steps got flagged.
+func ComputeFindings(j *Journey) []Finding {
+	tx := i18n.JourneyFindings(i18n.EN)
 	steps := journeySteps(j)
 
 	var out []Finding
@@ -126,6 +148,60 @@ func ComputeFindings(j *Journey, lang i18n.Lang) []Finding {
 		return out[a].Code < out[b].Code // stable tie-break: multiple codes on the same Step
 	})
 	return out
+}
+
+// localizeFinding reconstructs f's Finding/Evidence/Action text in lang from
+// its Code+Params — the render-time counterpart to each detectXxx's
+// construction-time tx.XxxFinding call (ComputeFindings always builds the
+// English baseline; this is what lets Markdown show the actually-requested
+// language, including when -render-only reads an English-baseline
+// j-<id>.json back off disk and renders it in a different language than
+// whatever ComputeFindings happened to run with originally).
+//
+// LLM-inferred findings (Source == SourceLLMInferred) are returned
+// unchanged — their Finding/Evidence/Action is the model's own generated
+// text (see Finding.LLMLang's doc comment), not reconstructible from
+// Params. The LLM semantic detector Codes (FindingToolResultMisinterpretation
+// and friends, llm_findings.go) only ever appear with that Source set, so
+// the switch below never needs a case for them; an unrecognized Code (a
+// future addition this function hasn't been taught yet) falls back to the
+// persisted text unchanged rather than blanking it.
+func localizeFinding(f Finding, lang i18n.Lang) Finding {
+	if f.Source == SourceLLMInferred {
+		return f
+	}
+	tx := i18n.JourneyFindings(lang)
+	var ft i18n.JourneyFindingText
+	switch f.Code {
+	case FindingExactRepeatToolCall:
+		count, _ := strconv.Atoi(f.Params["count"])
+		ft = tx.ExactRepeatToolCall(f.Params["tool"], count)
+	case FindingNarrationWithoutAction:
+		runLen, _ := strconv.Atoi(f.Params["run_len"])
+		ft = tx.NarrationWithoutAction(runLen)
+	case FindingUnverifiedSuccess:
+		errorSeq, _ := strconv.Atoi(f.Params["error_seq"])
+		ft = tx.UnverifiedSuccess(errorSeq)
+	case FindingReasoningActionMismatch:
+		ft = tx.ReasoningActionMismatch(f.Params["entities"])
+	case FindingPlanExecutionMisalignment:
+		skipped, _ := strconv.Atoi(f.Params["skipped"])
+		total, _ := strconv.Atoi(f.Params["total"])
+		ft = tx.PlanExecutionMisalignment(skipped, total)
+	case FindingUnadaptedRetry:
+		ft = tx.UnadaptedRetry(f.Params["tool"])
+	case FindingUnusedToolResult:
+		ft = tx.UnusedToolResult(f.Params["entities"])
+	case FindingUnverifiedEntityReference:
+		ft = tx.UnverifiedEntityReference(f.Params["entities"])
+	case FindingConstraintTextDropped:
+		total, _ := strconv.Atoi(f.Params["total"])
+		ft = tx.ConstraintTextDropped(f.Params["entities"], total)
+	default:
+		return f
+	}
+	f.Finding, f.Evidence, f.Action = ft.Finding, ft.Evidence, ft.Action
+	return f
 }
 
 // --- exact_repeat_tool_call ---------------------------------------------
@@ -198,6 +274,7 @@ func detectExactRepeatToolCall(steps []*Step, tx i18n.JourneyFindingsText) []Fin
 			out = append(out, Finding{
 				Code: FindingExactRepeatToolCall, StepSeq: last, RelatedSeq: related,
 				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+				Params: map[string]string{"tool": g.Name, "count": strconv.Itoa(len(run))},
 			})
 		}
 	}
@@ -240,6 +317,7 @@ func detectNarrationWithoutAction(steps []*Step, tx i18n.JourneyFindingsText) []
 			out = append(out, Finding{
 				Code: FindingNarrationWithoutAction, StepSeq: steps[runEnd-1].Seq, RelatedSeq: related,
 				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+				Params: map[string]string{"run_len": strconv.Itoa(runLen)},
 			})
 		}
 		i = runEnd
@@ -302,6 +380,7 @@ func detectUnverifiedSuccess(j *Journey, tx i18n.JourneyFindingsText) []Finding 
 				out = append(out, Finding{
 					Code: FindingUnverifiedSuccess, StepSeq: s.Seq, RelatedSeq: []int{errorSeq},
 					Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+					Params: map[string]string{"error_seq": strconv.Itoa(errorSeq)},
 				})
 			}
 		}
@@ -410,10 +489,12 @@ func detectReasoningActionMismatch(steps []*Step, tx i18n.JourneyFindingsText) [
 			continue
 		}
 		missing = capEntities(missing)
-		ft := tx.ReasoningActionMismatch(strings.Join(missing, ", "))
+		entities := strings.Join(missing, ", ")
+		ft := tx.ReasoningActionMismatch(entities)
 		out = append(out, Finding{
 			Code: FindingReasoningActionMismatch, StepSeq: s.Seq,
 			Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+			Params: map[string]string{"entities": entities},
 		})
 	}
 	return out
@@ -479,6 +560,7 @@ func detectPlanExecutionMisalignment(j *Journey, tx i18n.JourneyFindingsText) []
 		out = append(out, Finding{
 			Code: FindingPlanExecutionMisalignment, StepSeq: first.Seq,
 			Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+			Params: map[string]string{"skipped": strconv.Itoa(skipped), "total": strconv.Itoa(len(items))},
 		})
 	}
 	return out

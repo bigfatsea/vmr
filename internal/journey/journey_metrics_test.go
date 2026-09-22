@@ -1,4 +1,4 @@
-// Ver 2026-09-03, by pi-agent
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -44,7 +44,7 @@ func metricTestJourney(t *testing.T) (*Journey, Metrics, []Finding) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	f := ComputeFindings(j, i18n.EN)
+	f := ComputeFindings(j)
 	return j, m, f
 }
 

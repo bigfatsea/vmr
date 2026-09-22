@@ -1,4 +1,4 @@
-// Ver 2026-07-30 12:00, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -249,7 +249,7 @@ func TestCompareBasicDiff(t *testing.T) {
 		},
 	}
 
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	if cmp.A.ID != "j-a" || cmp.B.ID != "j-b" {
 		t.Fatalf("journey refs = %q/%q, want j-a/j-b", cmp.A.ID, cmp.B.ID)
 	}
@@ -313,7 +313,7 @@ func TestCompare_ModelSwitchCount_Row(t *testing.T) {
 		{StepSeq: 7, From: "p2:m1", To: "p1:m1"},
 		{StepSeq: 9, From: "p1:m1", To: "p2:m1"},
 	}}}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	var row *MetricDiff
 	for i := range cmp.Rows {
 		if cmp.Rows[i].Metric == MetricModelSwitchCount {
@@ -334,7 +334,7 @@ func TestCompare_ModelSwitchCount_Row(t *testing.T) {
 func TestCompare_OutputRepetitionRate_Row(t *testing.T) {
 	a := JourneySummary{Metrics: Metrics{OutputRepetitionRate: 0.12}}
 	b := JourneySummary{Metrics: Metrics{OutputRepetitionRate: 0.65}}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	var row *MetricDiff
 	for i := range cmp.Rows {
 		if cmp.Rows[i].Metric == MetricOutputRepetitionRate {
@@ -358,7 +358,7 @@ func TestCompare_OutputRepetitionRate_Row(t *testing.T) {
 func TestCompareSmallDeltaNotNotable(t *testing.T) {
 	a := JourneySummary{Metrics: Metrics{ToolCallCount: 0}}
 	b := JourneySummary{Metrics: Metrics{ToolCallCount: 1}}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	for _, r := range cmp.Rows {
 		if r.Metric == MetricToolCallCount && r.Notable {
 			t.Error("0 vs 1 tool call should not be notable (below the count floor)")
@@ -371,7 +371,7 @@ func TestCompareSmallDeltaNotNotable(t *testing.T) {
 func TestCompareZeroZeroNotNotable(t *testing.T) {
 	a := JourneySummary{Metrics: Metrics{CompactionCount: 0, CompactionLossTokens: 0}}
 	b := JourneySummary{Metrics: Metrics{CompactionCount: 0, CompactionLossTokens: 0}}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	for _, r := range cmp.Rows {
 		if r.DeltaRel != 0 {
 			t.Errorf("row %q: DeltaRel = %v for two zero values, want 0", r.Label, r.DeltaRel)
@@ -387,7 +387,7 @@ func TestRenderComparisonMarkdown(t *testing.T) {
 		Metrics: Metrics{ModelMS: 1000, ToolCallDist: []ToolCallStat{{Name: "read", Count: 5}}}}
 	b := JourneySummary{ID: "j-b", Title: "跑B股研究", From: time.Now(), To: time.Now(),
 		Metrics: Metrics{ModelMS: 9000, ToolCallDist: []ToolCallStat{{Name: "read", Count: 1}}}}
-	md := RenderComparisonMarkdown(Compare(a, b, i18n.EN), i18n.EN)
+	md := RenderComparisonMarkdown(Compare(a, b), i18n.EN)
 
 	for _, want := range []string{"[j-a](j-a.md)", "[j-b](j-b.md)", "跑A股研究", "跑B股研究", "Model Time", "⚠️", "read"} {
 		if !strings.Contains(md, want) {
@@ -412,7 +412,7 @@ func TestRenderComparisonMarkdown_CostLine(t *testing.T) {
 	b := JourneySummary{ID: "j-b", Title: "B", From: time.Now(), To: time.Now()}
 
 	t.Run("one side priced: line plus footnote, deliverable section skipped", func(t *testing.T) {
-		cmp := Compare(a, b, i18n.EN)
+		cmp := Compare(a, b)
 		cmp.Extras = &ComparisonExtras{Cost: CostPair{
 			A: CostFact{Resolved: true, Total: fp(3.5)},
 			B: CostFact{Resolved: false},
@@ -429,7 +429,7 @@ func TestRenderComparisonMarkdown_CostLine(t *testing.T) {
 	})
 
 	t.Run("neither side priced: the unresolved note, no footnote", func(t *testing.T) {
-		cmp := Compare(a, b, i18n.EN)
+		cmp := Compare(a, b)
 		cmp.Extras = &ComparisonExtras{Cost: CostPair{}}
 		md := RenderComparisonMarkdown(cmp, i18n.EN)
 		if !strings.Contains(md, "Neither side had resolvable pricing") {
@@ -448,7 +448,7 @@ func TestRenderComparisonMarkdown_EscapesTitles(t *testing.T) {
 	adversarial := "<!-- Ver 2026-07-24 14:45, by Sonnet 5 --> real content after"
 	a := JourneySummary{ID: "j-a", Title: adversarial, From: time.Now(), To: time.Now()}
 	b := JourneySummary{ID: "j-b", Title: "跑B股研究", From: time.Now(), To: time.Now()}
-	md := RenderComparisonMarkdown(Compare(a, b, i18n.EN), i18n.EN)
+	md := RenderComparisonMarkdown(Compare(a, b), i18n.EN)
 
 	if strings.Contains(md, "<!--") {
 		t.Errorf("rendered comparison leaked a raw HTML comment marker from a side's title:\n%s", md)
@@ -477,8 +477,8 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 		t.Fatalf("Build B: %v", err)
 	}
 
-	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
-	cmp := Compare(sa, sb, i18n.EN)
+	sa, sb := Summarize(jA), Summarize(jB)
+	cmp := Compare(sa, sb)
 	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, nil, "")
 	cmp.Extras = &extras
 
@@ -519,7 +519,7 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 func TestRenderComparisonMarkdown_WithSources(t *testing.T) {
 	a := JourneySummary{ID: "j-a", Title: "A", From: time.Now(), To: time.Now()}
 	b := JourneySummary{ID: "j-b", Title: "B", From: time.Now(), To: time.Now()}
-	cmp := Compare(a, b, i18n.EN)
+	cmp := Compare(a, b)
 	extras := ComparisonExtras{Sources: []string{"logs/vmr-audit-2026-07-28.jsonl.zst", "logs/vmr-audit-2026-07-29.jsonl"}}
 	cmp.Extras = &extras
 
@@ -699,8 +699,8 @@ func TestCompare_CacheAttribution(t *testing.T) {
 		t.Fatalf("Build B: %v", err)
 	}
 
-	sa, sb := Summarize(jA, i18n.EN), Summarize(jB, i18n.EN)
-	cmp := Compare(sa, sb, i18n.EN)
+	sa, sb := Summarize(jA), Summarize(jB)
+	cmp := Compare(sa, sb)
 	extras := ComputeComparisonExtras(jA, jB, sa.Metrics, sb.Metrics, nil, "")
 	cmp.Extras = &extras
 

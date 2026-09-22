@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // JourneySummary — j-<id>.json's shape and its one constructor. Split
 // out of metrics.go (whose archtest budget it was crowding) so the summary's
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"vmr/internal/fmtutil"
-	"vmr/internal/i18n"
 )
 
 // JourneySummary is j-<id>.json's shape (design doc: "输出同时落
@@ -72,21 +71,22 @@ type JourneySummary struct {
 	Deliverable *DeliverableStats `json:"deliverable,omitempty"`
 }
 
-// Summarize builds j's JourneySummary, computing Metrics and Findings
-// in the specified target language. The finding Code fields remain stable
-// canonical identifiers across languages, while human-readable Finding/Action
-// texts follow lang, keeping .json and .md outputs fully aligned —
-// compare-*.json's MetricDiff.Label and macro/summary.json's efficiency[]
-// follow the same lang-follows-everywhere policy (P8).
+// Summarize builds j's JourneySummary — Metrics and rule-derived Findings
+// are both language-neutral now (R1), so unlike its earlier form this takes
+// no lang parameter at all: Findings carries the English baseline plus
+// Params, and Markdown rendering reconstructs the actual display language
+// from those at render time (localizeFinding, called from
+// buildVMFindings) rather than needing this call to have already built the
+// right language.
 //
 // The -compare path (cmd/vmr/cmd_journey.go's compareJourneys) calls this on both
-// sides purely to get Metrics for Compare(sA, sB, lang) — Compare/journeyRef
+// sides purely to get Metrics for Compare(sA, sB) — Compare/journeyRef
 // only ever project ID/Title/From/To/Metrics out of the result, so the
 // Structure this also computes (P4) is built and discarded on that path.
 // Millisecond-scale waste, not worth a second entry point for; noted here
 // so it reads as a known, accepted cost rather than an oversight.
-func Summarize(j *Journey, lang i18n.Lang) JourneySummary {
-	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, lang), nil, nil, nil)
+func Summarize(j *Journey) JourneySummary {
+	return NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j), nil, nil, nil)
 }
 
 // NewJourneySummary is JourneySummary's one constructor, shared by Summarize

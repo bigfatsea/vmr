@@ -1,4 +1,4 @@
-# Ver 2026-08-05, by Sonnet 5
+# Ver 2026-09-22 00:10, by Sonnet 5
 # vmr analyze's own sidecar config — copy to report.yaml and adjust.
 # THIS example file is the one meant to be committed; report.yaml itself is
 # .gitignore'd, same as config.yaml — it can hold a real llm_key. Entirely
@@ -16,10 +16,20 @@
 language: en   # en (default) | zh — output language for vmr-report.md /
                # journeys/index.md / journeys/details/j-*.md /
                # compares/*.md / journeys/benchmarks.md / requests/details/*.md.
-               # Narrative JSON fields (e.g. Finding.Finding, MetricDiff.Label)
-               # always stay English regardless of this setting, so a script
-               # parsing those files never has to account for which language
-               # a report was generated in. Overridden by -lang.
+               # The JSON slices (macro/*.json, manifest.json, j-*.json,
+               # compare-*.json) are language-invariant regardless of this
+               # setting: narrative fields (Finding.Finding, MetricDiff.Label)
+               # are always the English baseline, each paired with a
+               # structured code/params a script can use to build its own
+               # sentence in any language, so parsing those files never has
+               # to account for which language a report was generated in.
+               # The one exception is LLM-generated text (llm_interpretation,
+               # llm_findings — only present when -llm-addr was used): that's
+               # the model's own original-language output, tagged with an
+               # llm_lang field instead of being re-derivable. Overridden by
+               # -lang, which -render-only can now also change on an
+               # existing snapshot — that's a cheap pure re-render, not a
+               # re-aggregation, since none of the above depends on it.
 
 output: reports   # -o's default (built-in default: "reports"). One shared
                   # setting — the default suite and every zoom selector

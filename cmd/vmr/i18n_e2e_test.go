@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // End-to-end tests for the multi-language report/journey design (see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section):
@@ -67,8 +67,9 @@ func e2eReportFixture(t *testing.T) string {
 // addition.
 type reportEfficiencyJSON struct {
 	Efficiency []struct {
-		Code    string `json:"code"`
-		Finding string `json:"finding"`
+		Code    string            `json:"code"`
+		Finding string            `json:"finding"`
+		Params  map[string]string `json:"params"`
 	} `json:"efficiency"`
 }
 
@@ -112,16 +113,17 @@ func TestE2E_ReportDefaultsToEnglish(t *testing.T) {
 	}
 }
 
-// TestE2E_ReportLangFlagZh_EfficiencyFollowsLang covers -lang zh end to
-// end: vmr-report.md AND macro/summary.json's efficiency[].finding must both
-// switch to Chinese (P8, docs/VirtualModelRouter_Design_v4_Analytics.md
-// §4.3 — Build always computes the English default internally, but
-// cmd_report.go calls report.LocalizeEfficiency(rep, lang) before
-// WriteJSON to overwrite it with the report's actual display language).
-// This test used to pin the opposite (JSON stays English regardless of
-// -lang) — reversed, not deleted, so the fact that this was a deliberate
-// policy change (not an accidental regression) stays visible in history.
-func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
+// TestE2E_ReportLangFlagZh_EfficiencyStaysEnglish covers -lang zh end to
+// end: vmr-report.md switches to Chinese but macro/summary.json's
+// efficiency[].finding stays the English baseline (R1, codebase-weight-
+// analysis doc §7 — language is a render-time concern, never baked into
+// the data product; the persisted JSON must be reproducible in either
+// language without re-aggregating). Finding.Params carries the raw values
+// a consumer would need to build the Chinese sentence itself. This test
+// used to pin the opposite (JSON follows -lang) — reversed back, not
+// deleted, so the fact that this was a deliberate policy correction (not
+// an accidental regression) stays visible in history.
+func TestE2E_ReportLangFlagZh_EfficiencyStaysEnglish(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", outDir, path}); err != nil {
@@ -137,8 +139,11 @@ func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 	for _, f := range rep.Efficiency {
 		if f.Code == "tool_schema_waste" {
 			found = true
-			if f.Finding != "工具 schema 浪费" {
-				t.Errorf("efficiency[].finding for tool_schema_waste = %q, want the Chinese %q under -lang zh", f.Finding, "工具 schema 浪费")
+			if f.Finding != "Tool schema waste" {
+				t.Errorf("efficiency[].finding for tool_schema_waste = %q, want the English baseline %q even under -lang zh", f.Finding, "Tool schema waste")
+			}
+			if f.Params["shape"] == "" {
+				t.Errorf("efficiency[].params should carry the raw shape value, got %+v", f.Params)
 			}
 		}
 	}
@@ -149,13 +154,12 @@ func TestE2E_ReportLangFlagZh_EfficiencyFollowsLang(t *testing.T) {
 
 // TestE2E_ReportConfigFileZh covers report.yaml (via -report-config, so the
 // test doesn't have to chdir): language: zh with no -lang flag at all must
-// still switch the output language — the whole point of report.yaml being
-// auto-loaded rather than requiring -lang on every invocation. Checks both
-// vmr-report.md and macro/summary.json's efficiency[] (P8) — cmd_report.go
-// resolves lang exactly once (resolveLanguage) and feeds that same value to
-// both LocalizeEfficiency and Markdown, so a report.yaml-only language
-// choice reaches the JSON output the same way -lang does; this pins that
-// rather than assuming it from the -lang-flag tests alone.
+// still switch vmr-report.md's language — the whole point of report.yaml
+// being auto-loaded rather than requiring -lang on every invocation.
+// macro/summary.json's efficiency[] stays the English baseline regardless
+// (R1) — same split TestE2E_ReportLangFlagZh_EfficiencyStaysEnglish pins
+// for -lang, checked here too so a report.yaml-only language choice isn't
+// assumed to behave the same from the -lang-flag test alone.
 func TestE2E_ReportConfigFileZh(t *testing.T) {
 	path := e2eReportFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
@@ -175,8 +179,8 @@ func TestE2E_ReportConfigFileZh(t *testing.T) {
 	for _, f := range rep.Efficiency {
 		if f.Code == "tool_schema_waste" {
 			found = true
-			if f.Finding != "工具 schema 浪费" {
-				t.Errorf("report.yaml language: zh should also localize macro/summary.json's efficiency[].finding, got %q", f.Finding)
+			if f.Finding != "Tool schema waste" {
+				t.Errorf("report.yaml language: zh should NOT localize macro/summary.json's efficiency[].finding (R1), got %q", f.Finding)
 			}
 		}
 	}
@@ -344,15 +348,17 @@ func TestE2E_JourneyRenderAllLangZh(t *testing.T) {
 	}
 }
 
-// TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang covers -compare's
-// JSON/Markdown consistency (P8, docs/VirtualModelRouter_Design_v4_Analytics.md
-// §4.3): compare-*.md and compare-*.json's rows[].label — MetricDiff.Label,
-// produced by Compare(a, b, lang) — must both switch to Chinese under
-// -lang zh, using the same i18n.MetricLabel lookup. This test used to pin
-// the opposite (JSON stayed English regardless of -lang) — reversed, not
-// deleted, so the fact that this was a deliberate policy change (not an
-// accidental regression) stays visible in history.
-func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
+// TestE2E_JourneyCompareLangZh_JSONLabelStaysEnglish covers -compare's
+// JSON/Markdown split (R1, codebase-weight-analysis doc §7):
+// compare-*.md's metric table switches to Chinese under -lang zh, but
+// compare-*.json's rows[].label (MetricDiff.Label) stays the English
+// baseline Compare persisted — Markdown reconstructs the actual language
+// at render time from rows[].metric via i18n.MetricLabel
+// (render_compare.go) rather than reading Label back. This test used to
+// pin the opposite (JSON followed -lang) — reversed back, not deleted, so
+// the fact that this was a deliberate policy correction (not an accidental
+// regression) stays visible in history.
+func TestE2E_JourneyCompareLangZh_JSONLabelStaysEnglish(t *testing.T) {
 	path := e2eStoryFixture(t)
 	outDir := filepath.Join(t.TempDir(), "out")
 
@@ -420,8 +426,8 @@ func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 	for _, r := range cmp.Rows {
 		if r.Metric == "model_ms" {
 			foundModelMS = true
-			if r.Label != "模型时间" {
-				t.Errorf("compare-*.json rows[].label for model_ms = %q, want the Chinese %q under -lang zh", r.Label, "模型时间")
+			if r.Label != "Model Time" {
+				t.Errorf("compare-*.json rows[].label for model_ms = %q, want the English baseline %q (R1) even under -lang zh", r.Label, "Model Time")
 			}
 		}
 	}
@@ -430,21 +436,26 @@ func TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang(t *testing.T) {
 	}
 }
 
-// TestE2E_LangZh_AllThreeJSONOutputsAgree is the cross-check
-// TestE2E_ReportLangFlagZh_EfficiencyFollowsLang and
-// TestE2E_JourneyCompareLangZh_JSONLabelsFollowLang each individually can't
-// provide: one test function asserting all three JSON outputs
-// (macro/summary.json, j-<id>.json, compare-*.json) are in Chinese
-// under the SAME -lang zh run, so a future regression in any one of them
-// surfaces here instead of only in an isolated per-output test (P8,
-// json_lang_policy_plan_sonnet-5.md §3.5 — "each package's own tests
-// passing individually is exactly how the inconsistency this policy fixes
-// went unnoticed for as long as it did"). Each output uses its own
-// existing fixture rather than one shared audit log — the point is
-// same-run language agreement, not that the three outputs describe the
-// same data.
-func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
-	// macro/summary.json: efficiency[].finding.
+// TestE2E_LangZh_AllThreeJSONOutputsAreLangInvariant is the cross-check
+// TestE2E_ReportLangFlagZh_EfficiencyStaysEnglish and
+// TestE2E_JourneyCompareLangZh_JSONLabelStaysEnglish each individually can't
+// provide: one test function checking all three JSON outputs
+// (macro/summary.json, j-<id>.json, compare-*.json) under the SAME -lang zh
+// run, so a future regression in any one of them surfaces here instead of
+// only in an isolated per-output test (P8, json_lang_policy_plan_sonnet-5.md
+// §3.5 — "each package's own tests passing individually is exactly how the
+// inconsistency this policy fixes went unnoticed for as long as it did").
+// All three are now language-invariant (R1, codebase-weight-analysis doc
+// §7, Steps 5+6 of this phase) — this test only checks that they parse and
+// carry the expected rows; TestSlicesAreLangInvariant (report) and
+// TestJourneySummaryIsLangInvariant (journey) are the byte-level machine
+// judges for each half, so this one stays a light cross-output sanity
+// check rather than duplicating either. Each output uses its own existing
+// fixture rather than one shared audit log — the point is same-run
+// consistency, not that the three outputs describe the same data.
+func TestE2E_LangZh_AllThreeJSONOutputsAreLangInvariant(t *testing.T) {
+	// macro/summary.json: efficiency[].finding — English baseline regardless
+	// of -lang (R1).
 	reportPath := e2eReportFixture(t)
 	reportOut := filepath.Join(t.TempDir(), "out")
 	if err := cmdAnalyze([]string{"-macro-only", "-lang", "zh", "-o", reportOut, reportPath}); err != nil {
@@ -455,8 +466,8 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	for _, f := range rep.Efficiency {
 		if f.Code == "tool_schema_waste" {
 			foundReport = true
-			if f.Finding != "工具 schema 浪费" {
-				t.Errorf("macro/summary.json efficiency[].finding = %q, want %q", f.Finding, "工具 schema 浪费")
+			if f.Finding != "Tool schema waste" {
+				t.Errorf("macro/summary.json efficiency[].finding = %q, want the English baseline %q (R1)", f.Finding, "Tool schema waste")
 			}
 		}
 	}
@@ -464,10 +475,9 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 		t.Fatal("macro/summary.json: expected tool_schema_waste finding")
 	}
 
-	// j-<id>.json: parses cleanly under -lang zh — its narrative
-	// fields already followed lang before P8 (TestE2E_JourneyRenderAllLangZh
-	// covers the Markdown side); this just confirms it's still true
-	// alongside the other two outputs in the same run.
+	// j-<id>.json: language-invariant now too (R1) — this block only
+	// confirms the JSON parses with the right id; finding-text invariance
+	// itself is TestJourneySummaryIsLangInvariant's job, not this one's.
 	journeyPath := e2eStoryFixture(t)
 	journeyOut := filepath.Join(t.TempDir(), "out")
 	listing := captureStdout(t, func() {
@@ -499,7 +509,7 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 		t.Fatalf("journey-%s.json did not parse as expected: err=%v, id=%q", ids[0], err, journey.ID)
 	}
 
-	// compare-*.json: rows[].label, same fixture/ids as above.
+	// compare-*.json: rows[].label is the English baseline now too (R1).
 	if err := cmdAnalyze([]string{"-compare", ids[0] + "," + ids[1], "-lang", "zh", "-o", journeyOut, journeyPath}); err != nil {
 		t.Fatalf("cmdAnalyze -compare: %v", err)
 	}
@@ -533,8 +543,8 @@ func TestE2E_LangZh_AllThreeJSONOutputsAgree(t *testing.T) {
 	for _, r := range cmp.Rows {
 		if r.Metric == "model_ms" {
 			foundCompare = true
-			if r.Label != "模型时间" {
-				t.Errorf("compare-*.json rows[].label for model_ms = %q, want %q", r.Label, "模型时间")
+			if r.Label != "Model Time" {
+				t.Errorf("compare-*.json rows[].label for model_ms = %q, want the English baseline %q (R1)", r.Label, "Model Time")
 			}
 		}
 	}

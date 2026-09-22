@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 // Golden VM structures for TestGoldenVMStructure (viewmodel_golden_test.go):
 // the full MacroReportVM JSON for the compact golden fixture, one constant
@@ -13,7 +13,7 @@ const (
   "Title": "VMR Usage Report",
   "Meta": [
     {
-      "Text": "Data source: 2 files · format 11 · 7 records (1 bad rows) · 2026-07-22 18:39:00 – 2026-07-24 02:00:00\n\n"
+      "Text": "Data source: 2 files · format 12 · 7 records (1 bad rows) · 2026-07-22 18:39:00 – 2026-07-24 02:00:00\n\n"
     },
     {
       "Text": "Config: /etc/vmr/report.yaml\n\n"
@@ -1276,7 +1276,7 @@ const (
     }
   ],
   "Disclaimers": [
-    "- Input: a.jsonl, b.jsonl · format 11 · 7 records / 1 bad rows\n",
+    "- Input: a.jsonl, b.jsonl · format 12 · 7 records / 1 bad rows\n",
     "- Period: 2026-07-22 18:39:00 – 2026-07-24 02:00:00 (local timezone)\n",
     "- Percentile method: nearest-rank\n",
     "- n basis: each percentile is annotated with n (= ttft_known / requests_with_dur / stream_known); n<20 is marked ⚠️low-n.\n",
@@ -1297,7 +1297,7 @@ const (
   "Title": "VMR 用量报告",
   "Meta": [
     {
-      "Text": "数据源: 2 个文件 · format 11 · 7 条记录（1 坏行）· 2026-07-22 18:39:00 – 2026-07-24 02:00:00\n\n"
+      "Text": "数据源: 2 个文件 · format 12 · 7 条记录（1 坏行）· 2026-07-22 18:39:00 – 2026-07-24 02:00:00\n\n"
     },
     {
       "Text": "配置: /etc/vmr/report.yaml\n\n"
@@ -2560,7 +2560,7 @@ const (
     }
   ],
   "Disclaimers": [
-    "- 输入: a.jsonl, b.jsonl · format 11 · 7 记录 / 1 坏行\n",
+    "- 输入: a.jsonl, b.jsonl · format 12 · 7 记录 / 1 坏行\n",
     "- 时段: 2026-07-22 18:39:00 – 2026-07-24 02:00:00 (本地时区)\n",
     "- 百分位: nearest-rank\n",
     "- n 基准: 每个百分位标注 n（= ttft_known / requests_with_dur / stream_known）；n<20 标 ⚠️low-n。\n",

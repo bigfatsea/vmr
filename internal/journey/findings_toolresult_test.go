@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -101,7 +101,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingUnadaptedRetry {
@@ -132,7 +132,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnadaptedRetry {
 				t.Fatalf("unexpected finding: retry arguments changed: %+v", f)
@@ -153,7 +153,7 @@ func TestDetectUnadaptedRetry(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnadaptedRetry {
 				t.Fatalf("unexpected finding: no error was ever reported: %+v", f)
@@ -184,7 +184,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingUnusedToolResult {
@@ -216,7 +216,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnusedToolResult {
 				t.Fatalf("unexpected finding: entity was referenced in the very next response: %+v", f)
@@ -248,7 +248,7 @@ func TestDetectUnusedToolResult(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnusedToolResult {
 				t.Fatalf("unexpected finding: b.md (one of four listed files) was used, the rest being unused is ordinary triage: %+v", f)
@@ -281,7 +281,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingUnverifiedEntityReference {
@@ -307,7 +307,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnverifiedEntityReference {
 				t.Fatalf("unexpected finding: entity was never referenced again: %+v", f)
@@ -336,7 +336,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		for _, f := range ComputeFindings(j, i18n.EN) {
+		for _, f := range ComputeFindings(j) {
 			if f.Code == FindingUnverifiedEntityReference && strings.Contains(f.Finding, "journey.go") {
 				t.Fatalf("journey.go sat ~300 bytes from the not-found phrase, should not be falsified: %+v", f)
 			}
@@ -359,7 +359,7 @@ func TestDetectUnverifiedEntityReference(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Build: %v", err)
 		}
-		got := ComputeFindings(j, i18n.EN)
+		got := ComputeFindings(j)
 		for _, f := range got {
 			if f.Code == FindingUnverifiedEntityReference {
 				t.Fatalf("unexpected finding: the result never reported the entity missing: %+v", f)
@@ -377,7 +377,7 @@ func TestDetectConstraintTextDropped(t *testing.T) {
 				SwallowedEntities: []string{"HEARTBEAT.md"}, SurvivedEntities: []string{"AGENTS.md"},
 			}},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		var found *Finding
 		for i := range got {
 			if got[i].Code == FindingConstraintTextDropped {
@@ -394,7 +394,7 @@ func TestDetectConstraintTextDropped(t *testing.T) {
 
 	t.Run("no compaction: no finding", func(t *testing.T) {
 		steps := []*Step{{Seq: 1}}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingConstraintTextDropped {
 				t.Fatalf("unexpected finding: no compaction boundary at all: %+v", f)
@@ -406,7 +406,7 @@ func TestDetectConstraintTextDropped(t *testing.T) {
 		steps := []*Step{
 			{Seq: 1, Compaction: &CompactionInfo{TokensBefore: 100, TokensAfter: 100, SurvivedEntities: []string{"AGENTS.md"}}},
 		}
-		got := ComputeFindings(journeyOf(steps...), i18n.EN)
+		got := ComputeFindings(journeyOf(steps...))
 		for _, f := range got {
 			if f.Code == FindingConstraintTextDropped {
 				t.Fatalf("unexpected finding: nothing was swallowed: %+v", f)

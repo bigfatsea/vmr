@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Phase 2's four Finding detectors — all built on I1
 // (chatmsg.ToolResultList), the tool_call↔tool_result precise-pairing
@@ -12,6 +12,7 @@ package journey
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 
 	"vmr/internal/chatmsg"
@@ -127,6 +128,7 @@ func detectUnadaptedRetry(steps []*Step, tx i18n.JourneyFindingsText) []Finding 
 			out = append(out, Finding{
 				Code: FindingUnadaptedRetry, StepSeq: retryStep.Seq, RelatedSeq: []int{s.Seq},
 				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+				Params: map[string]string{"tool": tc.Name},
 			})
 		}
 	}
@@ -219,10 +221,12 @@ func detectUnusedToolResult(steps []*Step, tx i18n.JourneyFindingsText) []Findin
 			if anyUsed {
 				continue
 			}
-			ft := tx.UnusedToolResult(strings.Join(capEntities(entities), ", "))
+			joined := strings.Join(capEntities(entities), ", ")
+			ft := tx.UnusedToolResult(joined)
 			out = append(out, Finding{
 				Code: FindingUnusedToolResult, StepSeq: s.Seq,
 				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+				Params: map[string]string{"entities": joined},
 			})
 		}
 	}
@@ -277,10 +281,12 @@ func detectUnverifiedEntityReference(steps []*Step, tx i18n.JourneyFindingsText)
 			if len(stillReferenced) == 0 {
 				continue
 			}
-			ft := tx.UnverifiedEntityReference(strings.Join(capEntities(stillReferenced), ", "))
+			joined := strings.Join(capEntities(stillReferenced), ", ")
+			ft := tx.UnverifiedEntityReference(joined)
 			out = append(out, Finding{
 				Code: FindingUnverifiedEntityReference, StepSeq: s.Seq,
 				Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+				Params: map[string]string{"entities": joined},
 			})
 		}
 	}
@@ -308,10 +314,13 @@ func detectConstraintTextDropped(steps []*Step, tx i18n.JourneyFindingsText) []F
 			continue
 		}
 		shown := capEntities(s.Compaction.SwallowedEntities)
-		ft := tx.ConstraintTextDropped(strings.Join(shown, ", "), len(s.Compaction.SwallowedEntities))
+		total := len(s.Compaction.SwallowedEntities)
+		joined := strings.Join(shown, ", ")
+		ft := tx.ConstraintTextDropped(joined, total)
 		out = append(out, Finding{
 			Code: FindingConstraintTextDropped, StepSeq: s.Seq,
 			Finding: ft.Finding, Evidence: ft.Evidence, Action: ft.Action,
+			Params: map[string]string{"entities": joined, "total": strconv.Itoa(total)},
 		})
 	}
 	return out

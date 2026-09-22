@@ -1,4 +1,4 @@
-// Ver 2026-07-29 11:00, by Sonnet 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 package report
 
@@ -233,7 +233,7 @@ func TestMarkdownAndJSON(t *testing.T) {
 	// Slice roundtrip preserves fields but not the unexported requests slice:
 	// the slices + manifest are the only persisted macro data, so the rebuild
 	// must reproduce everything the renderer reads (D2/D11).
-	if err := WriteMacroSlices(dir, rep, i18n.EN); err != nil {
+	if err := WriteMacroSlices(dir, rep); err != nil {
 		t.Fatal(err)
 	}
 	m, err := BuildManifest(dir, rep, i18n.EN)
@@ -1050,6 +1050,12 @@ func TestBuildFindingsIsDeterministic(t *testing.T) {
 		}
 		if found.Implicated != "heartbeat" {
 			t.Fatalf("run %d: implicated = %q, want %q (heartbeat has more fresh tokens: 1000 vs 100 — the higher-fresh class must always win, not whichever the map happened to yield first)", i, found.Implicated, "heartbeat")
+		}
+		// Params is collected from the same map-order-independent winner as
+		// the narrative text — it must be exactly as deterministic, not a
+		// separate un-pinned code path that happens to agree today.
+		if found.Params["class"] != "heartbeat" {
+			t.Fatalf("run %d: params[class] = %q, want %q", i, found.Params["class"], "heartbeat")
 		}
 	}
 }

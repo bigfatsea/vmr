@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Journey ViewModel builders for the decision spine, the tool-call timeline,
 // the findings section and the final deliverable — the viewmodel-side
@@ -419,6 +419,12 @@ func buildVMFindings(s *JourneySummary, lang i18n.Lang) []VMBlock {
 	byCode := map[FindingCode]*group{}
 	var order []FindingCode
 	for _, f := range s.Findings {
+		// Reconstruct rule-derived findings' text in the actual render
+		// language (R1) — s.Findings carries the English baseline (or, on
+		// a stale on-disk JSON predating this field, the language it was
+		// originally built with); LLM-inferred entries pass through
+		// unchanged (localizeFinding's own doc comment).
+		f = localizeFinding(f, lang)
 		if byCode[f.Code] == nil {
 			byCode[f.Code] = &group{code: f.Code}
 			order = append(order, f.Code)

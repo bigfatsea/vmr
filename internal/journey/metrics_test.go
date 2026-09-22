@@ -1,4 +1,4 @@
-// Ver 2026-07-30 00:10, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Tests for the nine-indicator behavior taskseg.
 package journey
@@ -355,7 +355,7 @@ func TestSummarize(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	s := Summarize(j, i18n.EN)
+	s := Summarize(j)
 	if s.ID != j.ID || s.Title != j.Title || !s.From.Equal(j.From) || !s.To.Equal(j.To) {
 		t.Errorf("Summarize identity fields = %+v, want them copied from Journey %+v", s, j)
 	}
@@ -377,7 +377,7 @@ func TestSummarize_WithLLMFindings(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	s := Summarize(j, i18n.EN)
+	s := Summarize(j)
 	dataNoLLM, err := json.Marshal(s)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

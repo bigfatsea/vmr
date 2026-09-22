@@ -1,4 +1,4 @@
-// Ver 2026-07-29 14:00, by Sonnet 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 package main
 
 import (
@@ -310,8 +310,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	}
 	rep.Meta.ReportConfigPath = opts.reportConfigPath
 	rep.Meta.DetailsEnabled = detailsPresentFor(opts.detailsOn, detailDir) // see its own doc comment
-	report.LocalizeEfficiency(rep, opts.lang)
-	if err := report.WriteMacroSlices(opts.outDir, rep, opts.lang); err != nil {
+	if err := report.WriteMacroSlices(opts.outDir, rep); err != nil {
 		return nil, err
 	}
 

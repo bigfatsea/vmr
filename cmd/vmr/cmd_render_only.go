@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-22 00:10, by Sonnet 5
 
 package main
 
@@ -16,27 +16,43 @@ import (
 )
 
 // runRenderOnly implements `vmr analyze -render-only` (§5.4).
-// Validates manifest.json, enforces language inheritance (D10),
-// and executes the single render path from disk JSON without touching audit logs.
+// Validates manifest.json, then re-renders in the requested language — or,
+// with no -lang, inherits the snapshot's last-rendered language (D10).
+// Changing language here is now a normal, cheap path (R1,
+// codebase-weight-analysis doc §7): the JSON data product is
+// language-invariant, so redrawing it in a different language is pure
+// re-render, never re-aggregation. This used to hard-error on any language
+// other than the snapshot's own — that guard predated R1, when the JSON
+// itself still carried narrative text baked in at the original language.
 func runRenderOnly(outDir string, requestedLang string, langPassed bool) error {
 	m, err := report.ValidateManifest(outDir)
 	if err != nil {
 		return fmt.Errorf("-render-only requires a valid manifest: %w", err)
 	}
 
-	manifestLang, err := i18n.Parse(m.Lang)
+	lang, err := i18n.Parse(m.Lang)
 	if err != nil {
-		manifestLang = i18n.EN
+		lang = i18n.EN
 	}
-
 	if langPassed {
 		reqLang, err := i18n.Parse(requestedLang)
-		if err != nil || reqLang != manifestLang {
-			return fmt.Errorf("-render-only cannot change language (snapshot was generated in %q, requested %q); rerun full analyze with -lang to re-aggregate", m.Lang, requestedLang)
+		if err != nil {
+			return fmt.Errorf("-render-only: invalid -lang %q: %w", requestedLang, err)
 		}
+		lang = reqLang
 	}
 
-	return renderAllFromDisk(outDir, manifestLang)
+	if err := renderAllFromDisk(outDir, lang); err != nil {
+		return err
+	}
+	// Stamp the language actually just rendered (R1: manifest.json's Lang
+	// means "last Markdown render," not "this snapshot's language" — see
+	// the Manifest.Lang field's own doc comment). rep=nil: BuildManifest's
+	// nil-rep path re-hashes whatever slices are already on disk (untouched
+	// by a render-only pass) and preserves TimeRange/Inputs/Footnotes/
+	// Disclaimers from the existing manifest — only Lang and GeneratedAt
+	// actually change.
+	return writeReportManifest(outDir, nil, lang)
 }
 
 // renderAllFromDisk renders all resident human-readable Markdown products from on-disk JSON (§5.4).

@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-21 22:00, by Sonnet 5
 package dashboard
 
 import (
@@ -178,7 +178,7 @@ async function waitFor(getter, check, desc) {
 }
 
 const mockManifest = {
-  format: 11,
+  format: 12,
   lang: 'en',
   generated_at: { ts: 1787500000000, ts_display: '2026-08-24 10:00:00' },
   time_range: ['2026-08-24 00:00:00', '2026-08-24 23:59:59']

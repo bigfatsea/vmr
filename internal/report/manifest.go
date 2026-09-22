@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-21 22:00, by Sonnet 5
 //
 // Manifest modeling and atomic writing sequence (§3.4, §8.2, D20).
 // Manifest is the sole authoritative token for snapshot admission.
@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"vmr/internal/ctxgraph"
@@ -20,8 +19,15 @@ import (
 	"vmr/internal/i18n"
 )
 
-// ManifestFormat is the current version of the report snapshot manifest (§3.4, D2).
-const ManifestFormat = 11
+// ManifestFormat is the current version of the report snapshot manifest
+// (§3.4, D2). 11 -> 12: R1 (codebase-weight-analysis doc §7) changed three
+// field shapes on the data product — macro/summary.json's efficiency[]
+// gained Params (additive, wouldn't alone need a bump) but highlights[]
+// changed from []string to []Highlight{code,text,params} (breaking), and
+// manifest.json's footnotes/disclaimers changed from bare localized strings
+// to {code,params} (breaking) — see KNOWN_ISSUES' "数据产品是对外契约" entry
+// for the compatibility policy this follows.
+const ManifestFormat = 12
 
 const (
 	SliceMacroSummary           = "macro/summary.json"
@@ -92,56 +98,75 @@ type SliceRef struct {
 // Manifest is the authoritative admission token and consistency record
 // for a report snapshot (§3.4, §8.2).
 type Manifest struct {
-	Format      int                 `json:"format"`
-	GeneratedAt TimePoint           `json:"generated_at"`
-	TimeRange   [2]string           `json:"time_range"`
-	Lang        string              `json:"lang"`
-	Timezone    string              `json:"timezone"`
-	Inputs      []InputFile         `json:"inputs"`
-	Slices      map[string]SliceRef `json:"slices"`
-	Footnotes   map[string]string   `json:"footnotes,omitempty"`
-	Disclaimers []string            `json:"disclaimers,omitempty"`
+	Format      int       `json:"format"`
+	GeneratedAt TimePoint `json:"generated_at"`
+	TimeRange   [2]string `json:"time_range"`
+	// Lang is the language of the LAST MARKDOWN RENDER this snapshot's
+	// manifest was stamped after — not "this product's language". The five
+	// macro/*.json slices, requests/index.json, and this manifest's own
+	// Footnotes/Disclaimers are language-invariant (R1); only vmr-report.md
+	// and the other rendered .md files vary by language. Re-rendering in a
+	// different language (-render-only -lang) updates this field without
+	// touching any JSON slice.
+	Lang        string                 `json:"lang"`
+	Timezone    string                 `json:"timezone"`
+	Inputs      []InputFile            `json:"inputs"`
+	Slices      map[string]SliceRef    `json:"slices"`
+	Footnotes   map[string]FootnoteRef `json:"footnotes,omitempty"`
+	Disclaimers []DisclaimerRef        `json:"disclaimers,omitempty"`
+}
+
+// FootnoteRef is one manifest.json footnote definition: a stable code
+// instead of pre-localized text, plus any parameters needed to reconstruct
+// it (R1 — same Code+Params split as Finding/Highlight). Every current
+// footnote is static (no params), but the shape stays uniform with
+// DisclaimerRef's rather than special-casing the no-params case.
+type FootnoteRef struct {
+	Code   string            `json:"code"`
+	Params map[string]string `json:"params,omitempty"`
+}
+
+// DisclaimerRef is one manifest.json disclaimer: same Code+Params split.
+type DisclaimerRef struct {
+	Code   string            `json:"code"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 // BuildFootnotesAndDisclaimers extracts structured footnote definitions and
-// disclaimers for downstream consumers (§3.3).
-func BuildFootnotesAndDisclaimers(rep *Report2, lang i18n.Lang) (map[string]string, []string) {
-	footnotes := make(map[string]string)
-	var disclaimers []string
-
-	if lang == i18n.ZH {
-		footnotes["¹"] = "cache_efficiency 等比值指标的分母 / 总请求数 < 90% 时标注低置信度"
-		footnotes["⚠️low-n"] = "样本量 n < 20：分位数与比率受小样本扰动影响较大"
-		footnotes["²"] = "来自 <log_dir>/vmr-quota.json 的实时计数器，是路由半区的权威记账"
-		footnotes["⭐"] = "已用% ≥ 100% 时的标记：该账户本周期已超出配置的额度上限"
-		footnotes["†"] = "本报表窗口消耗与右侧的周期区间没有任何时间交集"
-		footnotes["‡"] = "该账户的 quota: metric/every 曾被改过——盘上还留着旧配置写下的计数器"
-	} else {
-		footnotes["¹"] = "Low confidence: ratio metrics like cache_efficiency have denominator / total requests < 90%"
-		footnotes["⚠️low-n"] = "Sample size n < 20: percentiles and rates are subject to small-sample variance"
-		footnotes["²"] = "Live counter from <log_dir>/vmr-quota.json — authoritative routing ledger"
-		footnotes["⭐"] = "Marks Used% >= 100%: account exceeded configured quota for current period"
-		footnotes["†"] = "Window Consumed shares NO time at all with the period range"
-		footnotes["‡"] = "Quota metric/every was modified — on-disk counter reflects prior configuration"
+// disclaimers for downstream consumers (§3.3). Language-neutral (R1): no
+// lang parameter, because a footnote's glyph key and a disclaimer's code
+// are exactly the "reproduce it in either language without re-aggregating"
+// contract R1 asks for — nothing here should ever need to vary by lang.
+func BuildFootnotesAndDisclaimers(rep *Report2) (map[string]FootnoteRef, []DisclaimerRef) {
+	footnotes := map[string]FootnoteRef{
+		"¹":       {Code: "low_confidence_ratio"},
+		"⚠️low-n": {Code: "low_sample_size"},
+		"²":       {Code: "quota_live_counter"},
+		"⭐":       {Code: "quota_exceeded"},
+		"†":       {Code: "quota_window_no_overlap"},
+		"‡":       {Code: "quota_metric_changed"},
 	}
 
+	var disclaimers []DisclaimerRef
 	if rep != nil {
 		if rep.Pricing != nil {
-			if d := rep.Pricing.Disclaimer(lang); d != "" {
-				disclaimers = append(disclaimers, d)
+			asOf := rep.Pricing.StandardGeneratedAt
+			if asOf == "" {
+				asOf = "(unknown date)"
 			}
-			costTx := i18n.Cost(lang)
-			if costTx.ScopeFootnote != "" {
-				s := strings.TrimSpace(strings.TrimPrefix(costTx.ScopeFootnote, ">"))
-				disclaimers = append(disclaimers, s)
+			cur := rep.Pricing.Currency
+			if cur == "" {
+				cur = "USD"
 			}
+			params := map[string]string{"as_of": asOf, "currency": cur}
+			if rep.Pricing.RequestedCurrency != "" && rep.Pricing.RequestedCurrency != rep.Pricing.Currency {
+				params["requested_currency"] = rep.Pricing.RequestedCurrency
+			}
+			disclaimers = append(disclaimers, DisclaimerRef{Code: "pricing_estimate", Params: params})
+			disclaimers = append(disclaimers, DisclaimerRef{Code: "cost_scope"})
 		}
 		if len(rep.Compactions) > 0 {
-			compTx := i18n.Compaction(lang)
-			if compTx.Footnote != "" {
-				s := strings.TrimSpace(strings.TrimPrefix(compTx.Footnote, ">"))
-				disclaimers = append(disclaimers, s)
-			}
+			disclaimers = append(disclaimers, DisclaimerRef{Code: "compaction_retention"})
 		}
 	}
 	return footnotes, disclaimers
@@ -153,7 +178,7 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 	now := time.Now()
 	var timeRange [2]string
 	var inputs []InputFile
-	footnotes, disclaimers := BuildFootnotesAndDisclaimers(rep, lang)
+	footnotes, disclaimers := BuildFootnotesAndDisclaimers(rep)
 	if rep != nil {
 		timeRange = [2]string{rep.Meta.From, rep.Meta.To}
 		for _, in := range rep.Meta.Inputs {

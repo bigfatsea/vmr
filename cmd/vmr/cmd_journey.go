@@ -1,4 +1,4 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package main
 
@@ -269,7 +269,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 	}
 	j.Partial = partial
 	m := journey.ComputeMetrics(j)
-	findings := journey.ComputeFindings(j, lang)
+	findings := journey.ComputeFindings(j)
 
 	if llmOpts.Addr != "" && llmOpts.DryRun {
 		// Every pack the run would send — each detector whose candidate
@@ -310,7 +310,7 @@ func renderJourney(target *ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, fi
 		// (§3.6), and a failed attempt is worth seeing in the JSON too.
 		// scope "": this document only ever has one LLM section (unlike
 		// -compare, there's no second, divergence-scoped call).
-		llmInterp = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, "")
+		llmInterp = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, "", lang)
 	}
 
 	cost := journey.ComputeJourneyCost(j, priceRes, ccy)
@@ -364,8 +364,8 @@ func compareJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage,
 	// Partial field silently lost the fact (D19 makes the field the carrier).
 	jA.Partial = partialA
 	jB.Partial = partialB
-	sA, sB := journey.Summarize(jA, lang), journey.Summarize(jB, lang)
-	cmp := journey.Compare(sA, sB, lang)
+	sA, sB := journey.Summarize(jA), journey.Summarize(jB)
+	cmp := journey.Compare(sA, sB)
 	// ReportFile points at each side's own journey report; the comparison
 	// lives under compares/, so the .md's side-block link must climb out to
 	// journeys/details/ to resolve.
@@ -465,7 +465,7 @@ func compareLLMRecords(jA, jB *journey.Journey, cmp journey.Comparison, extras j
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: LLM interpretation failed, report will not include it: %v\n", err)
 	}
-	overall = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, journey.LLMScopeOverall)
+	overall = journey.NewLLMInterpretation(llmOpts.LLMOptions, res, err, journey.LLMScopeOverall, lang)
 
 	if extras.Divergence.Found {
 		divPack := journey.BuildDivergenceEvidencePack(jA, jB, extras.Divergence, lang)
@@ -475,7 +475,7 @@ func compareLLMRecords(jA, jB *journey.Journey, cmp journey.Comparison, extras j
 		if divErr != nil {
 			fmt.Fprintf(os.Stderr, "warning: divergence LLM interpretation failed, report will not include it: %v\n", divErr)
 		}
-		div = journey.NewLLMInterpretation(llmOpts.LLMOptions, divRes, divErr, journey.LLMScopeDivergence)
+		div = journey.NewLLMInterpretation(llmOpts.LLMOptions, divRes, divErr, journey.LLMScopeDivergence, lang)
 	}
 	return overall, div
 }
@@ -534,7 +534,7 @@ func renderJourneys(cands []*ctxgraph.Lineage, byIdx map[int]*ctxgraph.Lineage, 
 		for i, j := range journeys {
 			j.Partial = toRenderPartial[start+i]
 			m := journey.ComputeMetrics(j)
-			findings := journey.ComputeFindings(j, lang)
+			findings := journey.ComputeFindings(j)
 			// Same cost computation as single -journey's renderJourney — the
 			// batch rendered the same journeys and must produce the same
 			// files (formerly a nil cost here: batch output silently lacked
@@ -695,7 +695,7 @@ func journeyBaseName(j *journey.Journey) string {
 // is a pure string build.
 func ensureJourneyFile(j *journey.Journey, journeysDir string, lang i18n.Lang, prof taskseg.Profile, detailDir, evidenceDir string, cost *journey.CostFact) error {
 	m := journey.ComputeMetrics(j)
-	findings := journey.ComputeFindings(j, lang)
+	findings := journey.ComputeFindings(j)
 	// true: both -compare sides are user-named targets, same as a single
 	// -journey render (P13.1) — not a batch scope.
 	_, err := writeJourneyFile(j, m, findings, journeysDir, lang, nil, nil, prof, detailDir, evidenceDir, cost, true, nil)

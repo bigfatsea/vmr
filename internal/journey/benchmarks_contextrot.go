@@ -1,4 +1,4 @@
-// Ver 2026-08-16 18:30, by Gemini 3.7 Flash
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -102,7 +102,7 @@ func computeContextRot(journeys []*Journey, findingsPerJourney [][]Finding) []Co
 		if idx < len(findingsPerJourney) {
 			findings = findingsPerJourney[idx]
 		} else {
-			findings = ComputeFindings(j, i18n.EN)
+			findings = ComputeFindings(j)
 		}
 		for _, f := range findings {
 			if bIdx, ok := stepBucket[f.StepSeq]; ok {

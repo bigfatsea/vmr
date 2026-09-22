@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -23,20 +23,26 @@ var errBoom = errors.New("server returned 500")
 func TestNewLLMInterpretation_Outcomes(t *testing.T) {
 	opts := LLMOptions{Model: "agent"}
 
-	ok := NewLLMInterpretation(opts, InterpretResult{Text: "reading", Cached: true, Duration: 1500 * time.Millisecond}, nil, LLMScopeOverall)
+	ok := NewLLMInterpretation(opts, InterpretResult{Text: "reading", Cached: true, Duration: 1500 * time.Millisecond}, nil, LLMScopeOverall, i18n.EN)
 	if ok.Status != LLMStatusOK || ok.Text != "reading" || !ok.Cached || ok.DurationMS != 1500 {
 		t.Errorf("ok record = %+v, want status ok with text/cached/duration carried", ok)
 	}
 	if ok.Model != "agent" || ok.Scope != LLMScopeOverall {
 		t.Errorf("ok record = %+v, want model/scope stamped", ok)
 	}
+	if ok.LLMLang != "en" {
+		t.Errorf("ok record LLMLang = %q, want %q", ok.LLMLang, "en")
+	}
 
-	failed := NewLLMInterpretation(opts, InterpretResult{}, errBoom, LLMScopeDivergence)
+	failed := NewLLMInterpretation(opts, InterpretResult{}, errBoom, LLMScopeDivergence, i18n.EN)
 	if failed.Status != LLMStatusFailed || failed.Error != errBoom.Error() {
 		t.Errorf("failed record = %+v, want status failed with the error carried", failed)
 	}
 	if failed.Text != "" || failed.Cached || failed.DurationMS != 0 {
 		t.Errorf("failed record = %+v, want no text/cached/duration on failure", failed)
+	}
+	if failed.LLMLang != "" {
+		t.Errorf("failed record LLMLang = %q, want empty (no text to tag)", failed.LLMLang)
 	}
 }
 
@@ -84,12 +90,12 @@ func TestLLMInterpretation_JSONRoundTripRendersIdentically(t *testing.T) {
 // without a record renders no LLM section at all.
 func TestJourneyVM_LLMSessionFromSummary(t *testing.T) {
 	j := vmEquivalenceFixture(t)
-	base := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil, nil)
+	base := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j), nil, nil, nil)
 	if got := RenderMarkdownFromSummary(&base, i18n.EN, false, false); strings.Contains(got, "## LLM") {
 		t.Error("summary without a record must not render an LLM section")
 	}
 
-	with := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil,
+	with := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j), nil, nil,
 		&LLMInterpretation{Model: "agent", Status: LLMStatusOK, Text: "the model's own reading"})
 	md := RenderMarkdownFromSummary(&with, i18n.EN, false, false)
 	idx := strings.Index(md, "## LLM Interpretation")
@@ -101,7 +107,7 @@ func TestJourneyVM_LLMSessionFromSummary(t *testing.T) {
 		t.Errorf("LLM section must be the document's tail, got:\n%s", tail)
 	}
 	// A failed record renders nothing, matching the full run's omission.
-	withFailed := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil,
+	withFailed := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j), nil, nil,
 		&LLMInterpretation{Model: "agent", Status: LLMStatusFailed, Error: "boom"})
 	if got := RenderMarkdownFromSummary(&withFailed, i18n.EN, false, false); strings.Contains(got, "## LLM") {
 		t.Errorf("failed record must not render an LLM section:\n%s", got)
@@ -115,12 +121,12 @@ func TestJourneyVM_LLMSessionFromSummary(t *testing.T) {
 func TestRenderComparisonMarkdown_LLMSessionsFromRecords(t *testing.T) {
 	sA := JourneySummary{ID: "j-a", Title: "A", Metrics: Metrics{ModelMS: 1000}}
 	sB := JourneySummary{ID: "j-b", Title: "B", Metrics: Metrics{ModelMS: 2000}}
-	base := RenderComparisonMarkdown(Compare(sA, sB, i18n.EN), i18n.EN)
+	base := RenderComparisonMarkdown(Compare(sA, sB), i18n.EN)
 	if strings.Contains(base, "## LLM") {
 		t.Error("comparison without records must not render an LLM section")
 	}
 
-	cmp := Compare(sA, sB, i18n.EN)
+	cmp := Compare(sA, sB)
 	cmp.LLMInterpretation = &LLMInterpretation{Model: "agent", Status: LLMStatusOK, Scope: LLMScopeOverall, Text: "overall reading"}
 	cmp.LLMDivergence = &LLMInterpretation{Model: "agent", Status: LLMStatusOK, Scope: LLMScopeDivergence, Text: "divergence reading"}
 	md := RenderComparisonMarkdown(cmp, i18n.EN)

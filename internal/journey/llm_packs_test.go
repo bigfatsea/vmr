@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -31,7 +31,7 @@ func TestBuildSingleJourneyEvidencePack(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	m := ComputeMetrics(j)
-	findings := ComputeFindings(j, i18n.EN)
+	findings := ComputeFindings(j)
 
 	pack := BuildSingleJourneyEvidencePack(j, m, findings, i18n.EN)
 	if pack.Journey.ID != j.ID {
@@ -192,7 +192,7 @@ func TestCacheKey_DiffersAcrossPackTypes(t *testing.T) {
 // principle, be large — but EvidencePack (llm.go, the -compare LLM
 // interpretation input) must not grow because of it. This is not
 // hypothetical: BuildEvidencePack takes the full in-memory *Journey (not
-// JourneySummary), and Summarize(j, lang) — which now always computes
+// JourneySummary), and Summarize(j) — which now always computes
 // Structure — sits directly upstream of Compare/BuildEvidencePack in
 // production (cmd_journey.go's compareJourneys calls Summarize then Compare
 // then BuildEvidencePack in sequence). Proving the pack's size tracks only
@@ -204,8 +204,8 @@ func TestBuildEvidencePack_SizeBoundedRegardlessOfStructureRichness(t *testing.T
 	huge := buildJourneyWithArgsLen(t, 200000) // same fixture structure_test.go's volume guard uses
 
 	packFor := func(j *Journey) EvidencePack {
-		s := Summarize(j, i18n.EN) // computes Structure — the thing under test must not leak through
-		cmp := Compare(s, s, i18n.EN)
+		s := Summarize(j) // computes Structure — the thing under test must not leak through
+		cmp := Compare(s, s)
 		return BuildEvidencePack(j, j, cmp, i18n.EN)
 	}
 
@@ -237,8 +237,8 @@ func TestBuildSingleJourneyEvidencePack_SizeBoundedRegardlessOfStructureRichness
 
 	packFor := func(j *Journey) SingleJourneyEvidencePack {
 		m := ComputeMetrics(j)
-		findings := ComputeFindings(j, i18n.EN)
-		_ = Summarize(j, i18n.EN) // computes Structure as a production caller would upstream — must not leak into this pack
+		findings := ComputeFindings(j)
+		_ = Summarize(j) // computes Structure as a production caller would upstream — must not leak into this pack
 		return BuildSingleJourneyEvidencePack(j, m, findings, i18n.EN)
 	}
 

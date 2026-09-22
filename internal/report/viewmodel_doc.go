@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-21 22:00, by Sonnet 5
 
 // ViewModel builder for the document-level pieces the section files don't
 // own: the H1 + meta header, §0's summary table and auto highlights, §8's
@@ -225,7 +225,7 @@ func vmSummarySection(rep *Report2, lang i18n.Lang) SectionVM {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.SummaryStarNote})
 	hl := t.HighlightsAuto + "\n"
 	for _, h := range highlights(rep, lang) {
-		hl += "- " + h + "\n"
+		hl += "- " + h.Text + "\n"
 	}
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: hl + "\n"})
 	return sec
@@ -266,14 +266,26 @@ func summaryInteractiveShare(rep *Report2) int {
 // headline, whatever the utilization ratio.
 const highlightWasteFloorBytes = 8 << 20
 
-// highlights generates ≤3 auto highlights from the finished buckets.
-func highlights(rep *Report2, lang i18n.Lang) []string {
+// highlights generates ≤3 auto highlights from the finished buckets. Each
+// carries Code+Params alongside its rendered Text (R1: summary.json's
+// persisted highlights[] must stay language-invariant — see
+// BuildSummarySlice, which calls this with i18n.EN for that path; Markdown
+// rendering calls it directly with the real lang, same split as findings).
+func highlights(rep *Report2, lang i18n.Lang) []Highlight {
 	t := i18n.Doc(lang)
-	var out []string
+	var out []Highlight
 	// 1. workload with low cache-eff
 	for _, wl := range rep.Workloads {
 		if wl.TokensKnown > 0 && wl.CacheEfficiency < 0.30 {
-			out = append(out, t.CacheWarn(wl.Class, pctStr(wl.CacheEfficiency), fmtutil.FmtTokens(wl.TokensInFresh)))
+			out = append(out, Highlight{
+				Code: HighlightCacheWarn,
+				Text: t.CacheWarn(wl.Class, pctStr(wl.CacheEfficiency), fmtutil.FmtTokens(wl.TokensInFresh)),
+				Params: map[string]string{
+					"class":        wl.Class,
+					"cache_eff":    strconv.FormatFloat(wl.CacheEfficiency, 'f', -1, 64),
+					"fresh_tokens": strconv.FormatInt(wl.TokensInFresh, 10),
+				},
+			})
 			break
 		}
 	}
@@ -282,8 +294,19 @@ func highlights(rep *Report2, lang i18n.Lang) []string {
 	// slack doesn't manufacture a highlight on a well-behaved corpus.
 	if len(rep.Tools) > 0 && rep.Tools[0].SchemaWasteBytes >= highlightWasteFloorBytes {
 		tl := rep.Tools[0]
-		out = append(out, t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
-			fmtBytesGB(tl.SchemaWasteBytes), pctStr(tl.DeclareUtilization), len(tl.NeverCalled)))
+		out = append(out, Highlight{
+			Code: HighlightToolWarn,
+			Text: t.ToolWarn(tl.Shape, tl.Requests, fmtBytesGB(tl.SchemaBytesShipped),
+				fmtBytesGB(tl.SchemaWasteBytes), pctStr(tl.DeclareUtilization), len(tl.NeverCalled)),
+			Params: map[string]string{
+				"shape":                tl.Shape,
+				"requests":             strconv.Itoa(tl.Requests),
+				"schema_bytes_shipped": strconv.FormatInt(tl.SchemaBytesShipped, 10),
+				"schema_waste_bytes":   strconv.FormatInt(tl.SchemaWasteBytes, 10),
+				"declare_utilization":  strconv.FormatFloat(tl.DeclareUtilization, 'f', -1, 64),
+				"never_called_count":   strconv.Itoa(len(tl.NeverCalled)),
+			},
+		})
 	}
 	// 3. worst endpoint error rate
 	var worst *EndpointRow
@@ -295,10 +318,20 @@ func highlights(rep *Report2, lang i18n.Lang) []string {
 	}
 	if worst != nil && worst.Attempts >= 4 && worst.ErrorRate > 5 {
 		top := topErrorClass(worst, lang)
-		out = append(out, t.EndpointWarn(worst.Endpoint, strconv.FormatFloat(float64(worst.ErrorRate), 'f', 1, 64), top))
+		topCls, topN := topErrorClassCount(worst.ErrorClasses)
+		out = append(out, Highlight{
+			Code: HighlightEndpointWarn,
+			Text: t.EndpointWarn(worst.Endpoint, strconv.FormatFloat(float64(worst.ErrorRate), 'f', 1, 64), top),
+			Params: map[string]string{
+				"endpoint":        worst.Endpoint,
+				"error_rate_pct":  strconv.FormatFloat(float64(worst.ErrorRate), 'f', -1, 64),
+				"top_error_class": topCls,
+				"top_error_count": strconv.Itoa(topN),
+			},
+		})
 	}
 	if len(out) == 0 {
-		out = append(out, t.NoAnomalies)
+		out = append(out, Highlight{Code: HighlightNoAnomalies, Text: t.NoAnomalies})
 	}
 	return out
 }

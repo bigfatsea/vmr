@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // The persisted half of the LLM interpretation layer: the
 // LLMInterpretation record (what -llm-addr's outcome becomes inside
@@ -53,13 +53,20 @@ type LLMInterpretation struct {
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	Cached     bool   `json:"cached,omitempty"`
 	Text       string `json:"text,omitempty"`
+	// LLMLang is the language the model was prompted in (Interpret's own
+	// lang argument). R1's LLM-original-text exemption (same as
+	// Finding.LLMLang): Text is the model's own generated language and is
+	// never re-derivable in another language without a new call, so it is
+	// exempt from language-invariance as long as this field says which
+	// language it was generated in. Empty on a failed call (no text to tag).
+	LLMLang string `json:"llm_lang,omitempty"`
 }
 
 // NewLLMInterpretation records one Interpret call's outcome for persistence.
 // err != nil yields a "failed" record (Text empty, Error set); success
-// yields "ok" with the model's raw reply. elapsed is the caller's observed
-// wall-clock span of the call.
-func NewLLMInterpretation(opts LLMOptions, res InterpretResult, err error, scope string) *LLMInterpretation {
+// yields "ok" with the model's raw reply, stamped with lang (the language
+// Interpret was actually called with).
+func NewLLMInterpretation(opts LLMOptions, res InterpretResult, err error, scope string, lang i18n.Lang) *LLMInterpretation {
 	rec := &LLMInterpretation{
 		Model:      opts.Model,
 		Scope:      scope,
@@ -75,6 +82,7 @@ func NewLLMInterpretation(opts LLMOptions, res InterpretResult, err error, scope
 		return rec
 	}
 	rec.Status = LLMStatusOK
+	rec.LLMLang = lang.String()
 	return rec
 }
 

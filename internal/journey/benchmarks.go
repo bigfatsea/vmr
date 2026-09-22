@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // Benchmark statistics — "一批 Journey 里找出反复出现的行为
 // 倾向" (the journey design specification's
@@ -29,8 +29,6 @@ package journey
 import (
 	"math"
 	"sort"
-
-	"vmr/internal/i18n"
 )
 
 // Distribution summarizes one metric's values across a corpus — mean/
@@ -243,7 +241,7 @@ func ComputeBenchmarkStats(journeys []*Journey) BenchmarkStats {
 	findingsPerJourney := make([][]Finding, len(journeys))
 	for i, j := range journeys {
 		metrics[i] = ComputeMetrics(j)
-		findingsPerJourney[i] = ComputeFindings(j, i18n.EN)
+		findingsPerJourney[i] = ComputeFindings(j)
 	}
 	stats.ProtocolShare = protocolShare(journeys)
 

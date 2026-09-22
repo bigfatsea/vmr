@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:00, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 // End-to-end coverage for the stitching acceptance criterion:
 // "s231 的两段被缝成一个 journey，边类型 compaction，置信度
@@ -183,7 +183,7 @@ func TestStitchedJourney_EndToEnd(t *testing.T) {
 		t.Errorf("Journey.ID = %q, want it to contain the chain head's start time %q", j.ID, wantStart)
 	}
 
-	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j, i18n.EN), nil, nil, nil)
+	sum := NewJourneySummary(j, ComputeMetrics(j), ComputeFindings(j), nil, nil, nil)
 	md := RenderMarkdownFromSummary(&sum, i18n.EN, false, true)
 	// "深入调研这个内存涨价这一波" is the opening instruction, shared by both
 	// lineages. "../../requests/details/" — P5.1: raw message bodies no longer

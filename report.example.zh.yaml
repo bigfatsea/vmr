@@ -1,4 +1,4 @@
-# Ver 2026-08-09, by Sonnet 5
+# Ver 2026-09-22 00:10, by Sonnet 5
 # vmr analyze 自己的侧车配置——复制为 report.yaml 后按需修改。
 # 提交进仓库的是这份示例文件本身；report.yaml 自己是 .gitignore 的，和
 # config.yaml 一样——它可以放一个真实的 llm_key。和 config.yaml 完全独立：
@@ -14,9 +14,16 @@
 language: en   # en（默认）| zh —— vmr-report.md / journeys/index.md /
                # journeys/details/j-*.md / compares/*.md /
                # journeys/benchmarks.md / requests/details/*.md 的输出语言。
-               # 叙述性的 JSON 字段（比如 Finding.Finding、MetricDiff.Label）
-               # 不管这里怎么设置永远保持英文，所以写脚本解析这些文件时完全
-               # 不需要考虑报告是用哪种语言生成的。会被 -lang 覆盖。
+               # JSON 切片（macro/*.json、manifest.json、j-*.json、
+               # compare-*.json）不管这里怎么设置都语言中立：叙述性字段
+               # （Finding.Finding、MetricDiff.Label）永远是英文基线，
+               # 各配一个结构化的 code/params，脚本可以自己拼出任意语言的
+               # 句子，完全不需要考虑报告是用哪种语言生成的。唯一的例外是
+               # LLM 生成的正文（llm_interpretation、llm_findings——只有用了
+               # -llm-addr 才有）：那是模型自己的原生成语言，没法重新推导，
+               # 改用 llm_lang 字段标注。会被 -lang 覆盖；`-render-only` 现在
+               # 也能对已有快照换语言——纯重渲染，不是重新聚合，因为上面这些
+               # 都不依赖它。
 
 output: reports   # -o 的默认值（内置默认："reports"）。一个共用设置——默认套件
                   # 与每个变焦选择器（-journey / -compare / -benchmark）都写在

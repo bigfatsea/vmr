@@ -1,4 +1,4 @@
-// Ver 2026-08-20, by Sonnet 5
+// Ver 2026-09-21 23:30, by Sonnet 5
 
 package journey
 
@@ -243,7 +243,7 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 	}
 
 	m := ComputeMetrics(j)
-	findings := ComputeFindings(j, i18n.EN)
+	findings := ComputeFindings(j)
 	summary := NewJourneySummary(j, m, findings, nil, nil, nil)
 
 	// Publish exactly what j-<id>.json publishes: marshal, write to disk,
@@ -335,8 +335,8 @@ func TestBuildStructure_VolumeBoundedByStepsNotProseLength(t *testing.T) {
 	small := buildJourneyWithArgsLen(t, 20)
 	huge := buildJourneyWithArgsLen(t, 200000) // two orders of magnitude beyond maxBodyExcerptChars
 
-	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small, i18n.EN), nil, nil, nil)
-	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge, i18n.EN), nil, nil, nil)
+	smallSummary := NewJourneySummary(small, ComputeMetrics(small), ComputeFindings(small), nil, nil, nil)
+	hugeSummary := NewJourneySummary(huge, ComputeMetrics(huge), ComputeFindings(huge), nil, nil, nil)
 
 	smallJSON, err := json.Marshal(smallSummary)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-22 00:10, by Sonnet 5
 
 package main
 
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/report"
 )
 
 func hashFile(t *testing.T, path string) string {
@@ -116,42 +117,74 @@ func TestRenderOnly_ByteEquivalenceWithFullRun(t *testing.T) {
 	}
 }
 
-// TestRenderOnly_LanguageMismatchRejected verifies D10:
-// -render-only inherits JSON language; explicit conflicting -lang is rejected.
-func TestRenderOnly_LanguageMismatchRejected(t *testing.T) {
+// TestRenderOnlyChangesLanguage verifies R1's headline consequence
+// (codebase-weight-analysis doc §7): -render-only can now switch language,
+// because the JSON data product it redraws from is language-invariant —
+// changing language is pure re-render, never re-aggregation. This test used
+// to pin the opposite (a conflicting -lang was rejected, D10) — reversed,
+// not deleted, so the fact that this was a deliberate policy correction
+// (not an accidental regression) stays visible in history.
+func TestRenderOnlyChangesLanguage(t *testing.T) {
 	logPath := fixtureAuditLogs(t)
 	outDir := filepath.Join(t.TempDir(), "reports-lang-test")
 
-	// Full run in English
+	// Full run in English.
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-o", outDir, "-lang", "en", logPath})
 	}); err != nil {
 		t.Fatalf("full cmdAnalyze: %v", err)
 	}
-
-	// -render-only with conflicting -lang zh must be rejected
-	err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-render-only", "-o", outDir, "-lang", "zh"})
-	})
-	if err == nil {
-		t.Fatal("expected error when -render-only is called with conflicting -lang zh, got nil")
+	mdPath := filepath.Join(outDir, "vmr-report.md")
+	enMD, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatalf("read vmr-report.md: %v", err)
 	}
-	if !strings.Contains(err.Error(), "cannot change language") {
-		t.Errorf("expected error message to mention language cannot change, got: %v", err)
+	if !strings.Contains(string(enMD), "# VMR Usage Report") {
+		t.Fatalf("expected English report, got:\n%s", enMD)
 	}
 
-	// -render-only with matching -lang en must succeed
+	// -render-only -lang zh must switch language WITHOUT re-aggregating —
+	// pin that by touching the audit log source out from under it: if this
+	// path re-read it, the run would either fail or reflect the tamper.
+	if err := os.WriteFile(logPath, []byte("not valid jsonl"), 0o600); err != nil {
+		t.Fatalf("tamper source log: %v", err)
+	}
 	if err := captureStdoutErr(t, func() error {
-		return cmdAnalyze([]string{"-render-only", "-o", outDir, "-lang", "en"})
+		return cmdAnalyze([]string{"-render-only", "-o", outDir, "-lang", "zh"})
 	}); err != nil {
-		t.Fatalf("expected -render-only -lang en to succeed, got: %v", err)
+		t.Fatalf("expected -render-only -lang zh to succeed (pure re-render, no re-aggregation): %v", err)
+	}
+	zhMD, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatalf("read vmr-report.md after -render-only -lang zh: %v", err)
+	}
+	if !strings.Contains(string(zhMD), "VMR 用量报告") {
+		t.Fatalf("expected -render-only -lang zh to switch vmr-report.md to Chinese, got:\n%s", zhMD)
 	}
 
-	// -render-only with no -lang inherits en and succeeds
+	// manifest.json's Lang field tracks the last render, not "this
+	// snapshot's language" (R1) — it must now read zh.
+	m, err := report.ReadManifest(outDir)
+	if err != nil {
+		t.Fatalf("ReadManifest: %v", err)
+	}
+	if m.Lang != "zh" {
+		t.Errorf("manifest.Lang = %q, want %q after -render-only -lang zh", m.Lang, "zh")
+	}
+
+	// -render-only with no -lang inherits the last-rendered language (zh)
+	// and succeeds.
 	if err := captureStdoutErr(t, func() error {
 		return cmdAnalyze([]string{"-render-only", "-o", outDir})
 	}); err != nil {
 		t.Fatalf("expected -render-only (no lang) to succeed, got: %v", err)
+	}
+	inheritedMD, err := os.ReadFile(mdPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(inheritedMD), "VMR 用量报告") {
+		t.Errorf("expected -render-only with no -lang to inherit zh, got:\n%s", inheritedMD)
 	}
 }
 
