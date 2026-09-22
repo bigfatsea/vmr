@@ -56,7 +56,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 			if !hasAny {
 				continue
 			}
-			sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
+			sec.Blocks = append(sec.Blocks, HeadingVM{Level: 2, Text: p})
 			tbl := &TableVM{Headers: t.ErrorByEndpointHeaders[:]}
 			for _, e := range rows {
 				for _, cls := range fmtutil.SortedKeys(e.ErrorClasses) {
@@ -97,7 +97,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 			if !hasAny {
 				continue
 			}
-			sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
+			sec.Blocks = append(sec.Blocks, HeadingVM{Level: 2, Text: p})
 			tbl := &TableVM{Headers: t.QuirkByEndpointHeaders[:]}
 			for _, e := range rows {
 				for _, marker := range fmtutil.SortedKeys(e.NormCounts) {
@@ -122,7 +122,8 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 			}
 		}
 		chartTitle, chartAxis := t.ErrorTimelineChart()
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.ErrorTimelineTitle + "\n\n" + mermaidHourBar(chartTitle, chartAxis, errs)})
+		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.ErrorTimelineTitle + "\n\n"})
+		sec.Blocks = append(sec.Blocks, ChartVM{Title: chartTitle, YLabel: chartAxis, Labels: hourLabels(), Parts: chartPartsInt(errs)})
 		// callout the peak hour
 		peakH, peakN := 0, int64(0)
 		for i, n := range errs {
@@ -141,7 +142,7 @@ func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.EndpointHealthTitle + "\n\n"})
 	protocols, byProto := protocolBuckets(rep.EndpointsAll)
 	for _, p := range protocols {
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
+		sec.Blocks = append(sec.Blocks, HeadingVM{Level: 2, Text: p})
 		var mainRows, lowNRows []EndpointRow
 		for _, e := range byProto[p] {
 			if e.Attempts >= 20 {

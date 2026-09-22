@@ -1,4 +1,4 @@
-// Ver 2026-09-07, by Claude (pi)
+// Ver 2026-09-21 21:30, by Sonnet 5
 
 package archtest
 
@@ -73,6 +73,71 @@ func TestArchitecture_ViewModelNoBareLiterals(t *testing.T) {
 			}
 		}
 	}
+}
+
+// paraVMBudget is the ceiling on ParaVM{...} construction points across
+// internal/report's viewmodel_*.go builders. R2 ("单一结构化 VM")
+// downgrades ParaVM from "delete it" to "explicit escape hatch": the type
+// stays, but new blocks are expected to be
+// structured (HeadingVM/NoteVM/ChartVM/FlowVM/TableVM/DetailsVM), so this
+// count must only go down, never up by accident. Raising it is allowed —
+// same policy as the file/function line budgets in
+// func_sizes_test.go/file_sizes_test.go — but it must be a deliberate PR
+// decision, not a silent drift. Current value is the real count after the
+// Phase 3 (R2-b) migration structured every group heading, blockquote note,
+// generative chart/flowchart and the one DetailsVM-bypass out of ParaVM
+// (56 → 43); the 43 remaining are the genuinely unstructured cases
+// (plain i18n-authored prose paragraphs, plus a handful with builder-owned
+// manual whitespace).
+const paraVMBudget = 43
+
+// TestParaVMBudget guards R2-a: new report VM blocks should be structured
+// rather than another ParaVM literal.
+// Reuses stringLiterals' file-selection logic (viewmodel_*.go, excluding
+// _test.go) but counts ParaVM{...} composite literals instead of string
+// literals.
+func TestParaVMBudget(t *testing.T) {
+	root := repoRootDir(t)
+	dir := filepath.Join(root, "internal", "report")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	total := 0
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "viewmodel") || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		total += countParaVMLiterals(t, filepath.Join(dir, name))
+	}
+	if total > paraVMBudget {
+		t.Errorf("internal/report/viewmodel_*.go carries %d ParaVM{...} construction points, budget is %d — new blocks should use a structured VM (TableVM/DetailsVM/a narrower type); if this one genuinely can't be structured, raise paraVMBudget with a reason", total, paraVMBudget)
+	}
+}
+
+// countParaVMLiterals parses f and counts ParaVM{...} composite literals —
+// an AST walk rather than a text grep so a ParaVM-shaped string inside a
+// comment or another literal never inflates the count.
+func countParaVMLiterals(t *testing.T, f string) int {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, f, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", f, err)
+	}
+	count := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		cl, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		if id, ok := cl.Type.(*ast.Ident); ok && id.Name == "ParaVM" {
+			count++
+		}
+		return true
+	})
+	return count
 }
 
 // stringLiterals parses f and returns every interpreted string literal's

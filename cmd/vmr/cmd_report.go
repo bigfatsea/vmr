@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-22 18:05, by coding
 package main
 
 import (
@@ -332,7 +332,7 @@ func runReport(paths []string, tw timestampWriter, opts reportRunOpts) (*report.
 	if err := ctxgraph.SaveCacheDir(cacheDir, cache); err != nil {
 		return nil, fmt.Errorf("parse cache: %w", err)
 	}
-	if err := report.WriteRequestsIndex(rep, sess, requestsDir, opts.lang, lineageToJourney, detailDir); err != nil {
+	if err := report.WriteRequestsIndex(rep, sess, requestsDir, lineageToJourney); err != nil {
 		return nil, fmt.Errorf("requests index: %w", err)
 	}
 	fmt.Fprintf(tw, "%s (%d rows)\n", reqPath, len(rows))

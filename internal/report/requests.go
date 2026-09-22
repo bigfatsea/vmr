@@ -1,4 +1,4 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-22 18:05, by coding
 
 // The per-request data layer: requests/index.json is the machine-readable
 // single source of truth for request rows (D7/§3.7 — the human-readable
@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"vmr/internal/fmtutil"
-	"vmr/internal/i18n"
 )
 
 // RequestsIndex is requests/index.json's whole shape: one row per request.
@@ -81,8 +80,9 @@ func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 // WriteRequestsIndex writes requests/index.json (the machine-readable single source of truth
 // for per-request drill-down, populated with session analysis projection and journey cross-links).
 // The legacy human-readable Markdown request indexes (vmr-requests.md, vmr-requests-<tag>.md,
-// vmr-requests-cron-*.md) are retired per D7 / §3.7.
-func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, lang i18n.Lang, journeyLink map[string]string, detailDir string) error {
+// vmr-requests-cron-*.md) are retired per D7 / §3.7, so unlike the macro slices there is no
+// language axis and no detail-page directory to link against — the index is pure JSON.
+func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, journeyLink map[string]string) error {
 	rows := rep.RequestRows()
 	sessions := make(map[string]SessionMeta)
 	if sess != nil {

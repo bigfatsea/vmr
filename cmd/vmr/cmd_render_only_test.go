@@ -117,11 +117,10 @@ func TestRenderOnly_ByteEquivalenceWithFullRun(t *testing.T) {
 	}
 }
 
-// TestRenderOnlyChangesLanguage verifies R1's headline consequence
-// (codebase-weight-analysis doc §7): -render-only can now switch language,
-// because the JSON data product it redraws from is language-invariant —
-// changing language is pure re-render, never re-aggregation. This test used
-// to pin the opposite (a conflicting -lang was rejected, D10) — reversed,
+// TestRenderOnlyChangesLanguage verifies R1's headline consequence:
+// -render-only can now switch language, because the JSON data product it
+// redraws from is language-invariant — changing language is pure
+// re-render, never re-aggregation. This test used to pin the opposite (a conflicting -lang was rejected, D10) — reversed,
 // not deleted, so the fact that this was a deliberate policy correction
 // (not an accidental regression) stays visible in history.
 func TestRenderOnlyChangesLanguage(t *testing.T) {

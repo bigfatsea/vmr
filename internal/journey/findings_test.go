@@ -1,4 +1,4 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-22 18:50, by coding
 
 package journey
 
@@ -95,6 +95,35 @@ func TestDetectExactRepeatToolCall(t *testing.T) {
 			if f.Code == FindingExactRepeatToolCall {
 				t.Fatalf("unexpected finding for scattered repeats: %+v", f)
 			}
+		}
+	})
+
+	t.Run("params stay raw regardless of Markdown-sensitive characters", func(t *testing.T) {
+		// Params holds original traffic values, never pre-escaped text — a
+		// tool name carrying Markdown structure (pipe, backtick, heading
+		// marker) must reach Params verbatim, backslash-free; any escaping
+		// for display happens later, at render time. This is the
+		// journey-side half of the report-side raw-Params assertion.
+		const sensitive = "tool|pipe`tick#head"
+		var steps []*Step
+		for i := 1; i <= exactRepeatThreshold; i++ {
+			steps = append(steps, &Step{Seq: i, ToolCalls: []chatmsg.ToolCall{tc(sensitive, `{"cmd":"go build"}`)}})
+		}
+		got := ComputeFindings(journeyOf(steps...))
+		var hit *Finding
+		for i := range got {
+			if got[i].Code == FindingExactRepeatToolCall {
+				hit = &got[i]
+			}
+		}
+		if hit == nil {
+			t.Fatal("no exact_repeat_tool_call finding for the sensitive-name fixture")
+		}
+		if hit.Params["tool"] != sensitive {
+			t.Errorf("params[tool] = %q, want the raw %q — Params must never carry escaping traces", hit.Params["tool"], sensitive)
+		}
+		if strings.Contains(hit.Params["tool"], `\`) {
+			t.Errorf("params[tool] = %q, contains a backslash — escaping must not happen at construction", hit.Params["tool"])
 		}
 	})
 
@@ -547,8 +576,7 @@ func TestComputeFindingsIsDeterministic(t *testing.T) {
 }
 
 // TestJourneySummaryIsLangInvariant is R1's machine-checkable acceptance
-// test for the journey side (codebase-weight-analysis doc §7). Two paths,
-// both must hold:
+// test for the journey side. Two paths, both must hold:
 //
 //  1. Source unset (rule-derived): ComputeFindings' JSON output is the
 //     English baseline plus Params, identical across repeated calls (no
@@ -621,21 +649,38 @@ func TestJourneySummaryIsLangInvariant(t *testing.T) {
 		t.Errorf("ZH render missing the Chinese '建议：' label:\n%s", mdZH)
 	}
 
-	// ② LLM-inferred: exempt from reconstruction, must carry LLMLang.
+	// ② LLM-inferred: exempt from reconstruction (Finding stays whatever
+	// language it was generated in, regardless of render lang), but its
+	// Evidence/Action/EvidenceAnchor get Markdown-structure escaping —
+	// R1's "don't re-translate the model's own words" and R2's "escaping
+	// is the serializer's job" are independent concerns, and this branch
+	// always does the second, never the first.
 	llmFinding := Finding{
 		Code: FindingToolResultMisinterpretation, StepSeq: 1,
 		Source: SourceLLMInferred, Confidence: ConfidenceHigh,
-		EvidenceAnchor: "anchor text",
+		EvidenceAnchor: "anchor with a | pipe and a `backtick`",
 		Finding:        "模型误解了工具结果",
-		Evidence:       "证据文本",
-		Action:         "建议文本",
+		Evidence:       "证据文本 with a | pipe",
+		Action:         "建议文本 with a `backtick`",
 		LLMLang:        "zh",
 	}
 	if llmFinding.LLMLang == "" {
 		t.Fatal("LLM-inferred finding must carry a non-empty LLMLang")
 	}
 	gotEN := localizeFinding(llmFinding, i18n.EN)
-	if gotEN.Finding != llmFinding.Finding || gotEN.Evidence != llmFinding.Evidence || gotEN.Action != llmFinding.Action {
-		t.Errorf("localizeFinding must pass an LLM-inferred finding through unchanged regardless of render lang:\nwant %+v\ngot  %+v", llmFinding, gotEN)
+	if gotEN.Finding != llmFinding.Finding {
+		t.Errorf("localizeFinding must not touch Finding for an LLM-inferred finding:\nwant %q\ngot  %q", llmFinding.Finding, gotEN.Finding)
+	}
+	if gotEN.Evidence == llmFinding.Evidence || gotEN.Action == llmFinding.Action || gotEN.EvidenceAnchor == llmFinding.EvidenceAnchor {
+		t.Errorf("localizeFinding must Markdown-escape an LLM-inferred finding's Evidence/Action/EvidenceAnchor, not pass them through raw:\nwant escaped, got unchanged %+v", gotEN)
+	}
+	if want := sanitizeMDStruct(llmFinding.Evidence); gotEN.Evidence != want {
+		t.Errorf("Evidence = %q, want sanitizeMDStruct(raw) = %q", gotEN.Evidence, want)
+	}
+	if want := sanitizeMDStruct(llmFinding.Action); gotEN.Action != want {
+		t.Errorf("Action = %q, want sanitizeMDStruct(raw) = %q", gotEN.Action, want)
+	}
+	if want := sanitizeMDStruct(llmFinding.EvidenceAnchor); gotEN.EvidenceAnchor != want {
+		t.Errorf("EvidenceAnchor = %q, want sanitizeMDStruct(raw) = %q", gotEN.EvidenceAnchor, want)
 	}
 }

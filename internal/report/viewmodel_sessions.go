@@ -10,7 +10,6 @@ package report
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"vmr/internal/fmtutil"
@@ -70,7 +69,7 @@ func vmSessionsSection(rep *Report2, journeyLink map[string]string, lang i18n.La
 		if len(rows) == 0 {
 			continue
 		}
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: "**" + ck + "**\n\n"})
+		sec.Blocks = append(sec.Blocks, HeadingVM{Level: 3, Text: ck})
 		head, tail := splitSessionLongTail(rows)
 		tbl := &TableVM{Headers: t.TableHeaders[:]}
 		for _, s := range head {
@@ -226,13 +225,7 @@ func vmCompactionChainBlocks(rep *Report2, lang i18n.Lang) []BlockVM {
 			chain[i], chain[j] = chain[j], chain[i]
 		}
 		if len(chain) >= 3 {
-			var b strings.Builder
-			fmt.Fprintf(&b, "```mermaid\nflowchart LR\n")
-			for i := 0; i < len(chain)-1; i++ {
-				fmt.Fprintf(&b, "    %s[\"%s\"] -->|compacted| %s[\"%s\"]\n", chain[i], chain[i], chain[i+1], chain[i+1])
-			}
-			fmt.Fprintf(&b, "```\n\n")
-			blocks = append(blocks, ParaVM{Text: b.String()})
+			blocks = append(blocks, FlowVM{Nodes: chain, Edge: "compacted"})
 		} else if len(chain) == 2 {
 			// text arrow, inline note
 			blocks = append(blocks, ParaVM{Text: t.CompactionChainNote(chain[1], chain[0])})

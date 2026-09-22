@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Claude
+// Ver 2026-09-22 19:10, by coding
 
 // Package dashboard delivers vmr analyze's static skeleton dashboard pages
 // (see the Analytics design doc's skeleton-page section): three self-contained
@@ -55,7 +55,7 @@ var skeletonPages = []string{
 	"journey-viewer.html",
 }
 
-// WriteSkeletons writes the six skeleton dashboard pages into dir's root,
+// WriteSkeletons writes the skeleton dashboard pages into dir's root,
 // overwriting whatever a previous run (or the user) put there — the pages
 // carry no business data, so overwrite is always safe, and idempotency is
 // what keeps /reports/ serving pages in sync with the running binary (§6.6

@@ -52,10 +52,9 @@ var fileLineExemptions = map[string]int{
 	// 900 -> 1000 for Agent Guard's GuardSummary/GuardRuleRow rows, 1000 ->
 	// 1010 for GuardInboundSummary.SanitizedRuneCounts (both M2 of
 	// the Agent Guard spec), 1010 -> 1050 for Finding.Params plus the new
-	// HighlightCode/Highlight types (R1: language-neutral data products,
-	// codebase-weight-analysis doc §7) — each a new field/type on the JSON
-	// contract, exactly the expected growth this exemption's own comment
-	// describes.
+	// HighlightCode/Highlight types (R1: language-neutral data products) —
+	// each a new field/type on the JSON contract, exactly the expected
+	// growth this exemption's own comment describes.
 	"internal/report/rows.go": 1050,
 	// detail.go was split into internal/reqdetail in P2, slimming it to ~286
 	// lines. internal/config/config.go used to carry a 750 exemption here; it
@@ -70,7 +69,7 @@ var fileLineExemptions = map[string]int{
 	"internal/journey/render_md.go":         60,
 	"internal/journey/render_spine.go":      70,
 	"internal/journey/render_spine_args.go": 70,
-	// 580 -> 620, 320 -> 340: R1 (codebase-weight-analysis doc §7) added
+	// 580 -> 620, 320 -> 340: R1 (language-neutral data products) added
 	// Finding.Params collection at each detector's construction site plus
 	// localizeFinding, the render-time reconstruction every rule-derived
 	// detector's Code now needs a case for — the same kind of "a new field

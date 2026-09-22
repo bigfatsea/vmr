@@ -34,11 +34,11 @@ func vmGuardSection(rep *Report2, lang i18n.Lang) SectionVM {
 	tier1 := guardRulesForTier(g.Rules, 1)
 	tier2 := guardRulesForTier(g.Rules, 2)
 	if len(tier1) > 0 {
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: "**" + t.Tier1Label + "**\n\n"})
+		sec.Blocks = append(sec.Blocks, HeadingVM{Level: 3, Text: t.Tier1Label})
 		sec.Blocks = append(sec.Blocks, guardRuleTable(tier1, t))
 	}
 	if len(tier2) > 0 {
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: "**" + t.Tier2Label + "**\n\n"})
+		sec.Blocks = append(sec.Blocks, HeadingVM{Level: 3, Text: t.Tier2Label})
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.Tier2Note})
 		sec.Blocks = append(sec.Blocks, guardRuleTable(tier2, t))
 	}
@@ -46,7 +46,7 @@ func vmGuardSection(rep *Report2, lang i18n.Lang) SectionVM {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.Amplification})
 	}
 	if len(g.Providers) > 0 {
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: "**" + t.ProvidersLabel + "**\n\n"})
+		sec.Blocks = append(sec.Blocks, HeadingVM{Level: 3, Text: t.ProvidersLabel})
 		sec.Blocks = append(sec.Blocks, guardProviderTable(g.Providers, t))
 	}
 	if g.Inbound != nil {
@@ -94,7 +94,7 @@ func guardProviderTable(rows []GuardProviderRow, t i18n.GuardText) *TableVM {
 // never anything blocked — there is no block path left to describe.
 func vmGuardInboundBlocks(in *GuardInboundSummary, t i18n.GuardText) []BlockVM {
 	var out []BlockVM
-	out = append(out, ParaVM{Text: "**" + t.InboundLabel + "**\n\n"})
+	out = append(out, HeadingVM{Level: 3, Text: t.InboundLabel})
 	out = append(out, ParaVM{Text: t.InboundIntro(in.ToolCallsInspected)})
 	if len(in.RuneCounts) > 0 {
 		names := make([]string, 0, len(in.RuneCounts))

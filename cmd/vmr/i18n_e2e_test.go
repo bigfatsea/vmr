@@ -349,9 +349,8 @@ func TestE2E_JourneyRenderAllLangZh(t *testing.T) {
 }
 
 // TestE2E_JourneyCompareLangZh_JSONLabelStaysEnglish covers -compare's
-// JSON/Markdown split (R1, codebase-weight-analysis doc §7):
-// compare-*.md's metric table switches to Chinese under -lang zh, but
-// compare-*.json's rows[].label (MetricDiff.Label) stays the English
+// JSON/Markdown split (R1): compare-*.md's metric table switches to
+// Chinese under -lang zh, but compare-*.json's rows[].label (MetricDiff.Label) stays the English
 // baseline Compare persisted — Markdown reconstructs the actual language
 // at render time from rows[].metric via i18n.MetricLabel
 // (render_compare.go) rather than reading Label back. This test used to
@@ -445,9 +444,8 @@ func TestE2E_JourneyCompareLangZh_JSONLabelStaysEnglish(t *testing.T) {
 // only in an isolated per-output test (P8, json_lang_policy_plan_sonnet-5.md
 // §3.5 — "each package's own tests passing individually is exactly how the
 // inconsistency this policy fixes went unnoticed for as long as it did").
-// All three are now language-invariant (R1, codebase-weight-analysis doc
-// §7, Steps 5+6 of this phase) — this test only checks that they parse and
-// carry the expected rows; TestSlicesAreLangInvariant (report) and
+// All three are now language-invariant (R1) — this test only checks that
+// they parse and carry the expected rows; TestSlicesAreLangInvariant (report) and
 // TestJourneySummaryIsLangInvariant (journey) are the byte-level machine
 // judges for each half, so this one stays a light cross-output sanity
 // check rather than duplicating either. Each output uses its own existing

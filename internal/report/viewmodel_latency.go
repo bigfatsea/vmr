@@ -38,7 +38,7 @@ func vmLatencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 		for _, p := range protocols {
 			rows := append([]EndpointRow(nil), byProto[p]...)
 			sort.SliceStable(rows, func(i, j int) bool { return rows[i].TokOutPerSec > rows[j].TokOutPerSec })
-			sec.Blocks = append(sec.Blocks, ParaVM{Text: "*" + p + "*\n\n"})
+			sec.Blocks = append(sec.Blocks, HeadingVM{Level: 2, Text: p})
 			var mainRows, lowNRows []EndpointRow
 			for _, e := range rows {
 				if e.Requests >= 20 || e.Attempts >= 20 {

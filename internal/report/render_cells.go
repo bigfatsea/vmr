@@ -11,7 +11,6 @@ import (
 	"math"
 	"sort"
 	"strconv"
-	"strings"
 
 	"vmr/internal/fmtutil"
 )
@@ -183,7 +182,7 @@ func tokP5095Cell(p50, p95 int64) string {
 	return fmtutil.FmtTokens(p50) + "/" + fmtutil.FmtTokens(p95)
 }
 
-// ---- mermaid charts ----
+// ---- chart data prep (rendering itself is ChartVM/renderChart, R2-b) ----
 
 // hourLabels returns the fixed 24-hour x-axis category list ("00".."23"),
 // shared by every hourly chart.
@@ -195,53 +194,24 @@ func hourLabels() []string {
 	return labels
 }
 
-// mermaidHourBar renders 24 hourly integer buckets (requests, error counts)
-// as a mermaid xychart-beta bar chart against the fixed 24-hour axis.
-func mermaidHourBar(title, yLabel string, vals []int64) string {
-	return mermaidBarLabeled(title, yLabel, hourLabels(), vals)
-}
-
-// mermaidBarLabeled renders an arbitrary-length integer series (hourly,
-// daily, …) as a mermaid xychart-beta bar chart with the given x-axis
-// category labels.
-func mermaidBarLabeled(title, yLabel string, labels []string, vals []int64) string {
+// chartPartsInt formats a plain integer series for ChartVM.Parts (request/
+// error counts).
+func chartPartsInt(vals []int64) []string {
 	parts := make([]string, len(vals))
 	for i, v := range vals {
 		parts[i] = strconv.FormatInt(v, 10)
 	}
-	return mermaidChart(title, yLabel, labels, parts)
+	return parts
 }
 
-// mermaidTokenHourBar is mermaidHourBar's token-count counterpart: raw
+// chartPartsTokensM formats a token-count series for ChartVM.Parts: raw
 // token counts run into the tens/hundreds of millions, unreadable as bare
 // integers against a chart axis, so values are scaled to millions (2
-// decimals) and the axis is labeled accordingly.
-func mermaidTokenHourBar(title string, vals []int64) string {
-	return mermaidTokenBarLabeled(title, hourLabels(), vals)
-}
-
-// mermaidTokenBarLabeled is mermaidBarLabeled's token-count counterpart —
-// see mermaidTokenHourBar.
-func mermaidTokenBarLabeled(title string, labels []string, vals []int64) string {
+// decimals) — pair with the fixed YLabel "Token (M)".
+func chartPartsTokensM(vals []int64) []string {
 	parts := make([]string, len(vals))
 	for i, v := range vals {
 		parts[i] = strconv.FormatFloat(float64(v)/1e6, 'f', 2, 64)
 	}
-	return mermaidChart(title, "Token (M)", labels, parts)
-}
-
-// mermaidChart renders the shared xychart-beta scaffold; parts are already-
-// formatted y-values (plain integers for counts, "M"-scaled decimals for
-// token charts) — mermaid's bar/line data is a bare numeric list, so no
-// thousands-separator can go in here without breaking the chart's own
-// comma-delimited syntax.
-func mermaidChart(title, yLabel string, labels []string, parts []string) string {
-	qlabels := make([]string, len(labels))
-	for i, l := range labels {
-		qlabels[i] = fmt.Sprintf("%q", l)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "```mermaid\nxychart-beta\n    title %q\n    x-axis [%s]\n    y-axis %q\n    bar [%s]\n```\n\n",
-		title, strings.Join(qlabels, ", "), yLabel, strings.Join(parts, ", "))
-	return b.String()
+	return parts
 }

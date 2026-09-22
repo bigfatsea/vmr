@@ -1,14 +1,13 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-22 19:10, by coding
 
 // §7 效率与浪费 view model: the findings list and the per-tool-shape
 // detail behind the declared-but-never-called tool waste figure. Pairs
 // with internal/i18n/report_efficiency.go (plus report_toolwaste.go's
 // stat labels for the top-line totals).
 //
-// This builder does NOT read rep.Efficiency even when it already holds
-// localized copy: Markdown's language correctness must not depend on
-// WriteJSON having run first with this exact lang (see
-// viewmodel_efficiency.go for the full reasoning, mirrored here).
+// This builder does NOT read rep.Efficiency (which holds the language-invariant
+// English baseline Findings for JSON slices, Phase 1 Step 5), but recomputes
+// findings with the requested display lang for Markdown rendering.
 package report
 
 import (
@@ -18,6 +17,7 @@ import (
 	"strings"
 
 	"vmr/internal/i18n"
+	"vmr/internal/reqdetail"
 )
 
 func vmEfficiencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
@@ -29,7 +29,14 @@ func vmEfficiencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	if len(findings) > 0 {
 		tbl := &TableVM{Headers: t.TableHeaders[:]}
 		for _, f := range findings {
-			tbl.row(f.Finding, f.Metric, f.Value, f.Implicated, f.Action)
+			// Implicated carries free-form traffic-derived text (worst
+			// session title, provider names, tool shapes); the Finding
+			// must stay raw for the JSON slice, so the HTML escape that
+			// used to sit on the title before it entered the Finding
+			// happens here at the Markdown projection instead — same
+			// treatment viewmodel_sessions.go gives session titles.
+			// EscapeCell (row) then adds the table-cell-only rules.
+			tbl.row(f.Finding, f.Metric, f.Value, reqdetail.EscapeHTML(f.Implicated), f.Action)
 		}
 		sec.Blocks = append(sec.Blocks, tbl)
 	}
@@ -73,7 +80,7 @@ func vmToolWasteTotals(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 		pct = float64(waste) / float64(shipped) * 100
 	}
 	tw := i18n.ToolWaste(lang)
-	sec.Blocks = append(sec.Blocks, ParaVM{Text: fmt.Sprintf("> **%s** %s · **%s** %s (%.0f%%) · **%s** %s · **%s** %d\n\n",
+	sec.Blocks = append(sec.Blocks, NoteVM{Text: fmt.Sprintf("**%s** %s · **%s** %s (%.0f%%) · **%s** %s · **%s** %d",
 		tw.StatShipped, fmtBytesGB(shipped),
 		tw.StatDead, fmtBytesGB(waste), pct,
 		tw.StatTokens, twTokens(waste),

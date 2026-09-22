@@ -979,18 +979,23 @@ data: [DONE]`},
 	if len(res) != 1 {
 		t.Fatalf("expected the hostile finding to survive verification (the anchor is real), got %+v", res)
 	}
+	// The raw, persisted result (what ComputeLLMFindings hands the caller,
+	// and what j-<id>.json serializes) is the model's text verbatim — R1's
+	// LLM-original-text exemption plus R2's "escaping is the serializer's
+	// job, not the data's": Markdown-structure escaping must NOT have
+	// happened yet at this point.
 	f := res[0]
-	for _, hostile := range []string{"\n> quoted", "\n| a | b |"} {
-		if strings.Contains(f.Action, hostile) {
-			t.Errorf("Action still carries structure-breaking content %q: %q", hostile, f.Action)
-		}
+	if !strings.Contains(f.Action, "> quoted") || !strings.Contains(f.Action, "| a | b |") {
+		t.Errorf("Action should still be the model's raw text before Markdown rendering, got %q", f.Action)
 	}
-	if strings.Contains(f.Evidence, "col | pipe") || strings.Contains(f.Evidence, "`code`") {
-		t.Errorf("Evidence still carries raw pipes/backticks: %q", f.Evidence)
+	if !strings.Contains(f.Evidence, "col | pipe") || !strings.Contains(f.Evidence, "`code`") {
+		t.Errorf("Evidence should still be the model's raw text before Markdown rendering, got %q", f.Evidence)
 	}
 
 	// Markdown artifact: the findings section must not gain a heading, list
-	// item or table row out of the model's text.
+	// item or table row out of the model's text — localizeFinding's
+	// SourceLLMInferred branch (called from buildVMFindings) is where
+	// escaping actually happens.
 	sumRes := JourneySummary{Findings: res}
 	mdStr := SerializeJourneyVM(&JourneyVM{Findings: buildVMFindings(&sumRes, i18n.ZH)})
 	for _, raw := range []string{"\n# injected heading", "\n- injected item", "| a | b |"} {

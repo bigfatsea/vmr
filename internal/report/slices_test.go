@@ -751,9 +751,8 @@ func TestFootnotesAndDisclaimersStructure(t *testing.T) {
 }
 
 // TestSlicesAreLangInvariant is R1's machine-checkable acceptance test for
-// the report side (codebase-weight-analysis doc §7): analyzing the same
-// input once per language must produce byte-identical macro/*.json slices
-// and an identical manifest.json apart from its Lang/GeneratedAt fields —
+// the report side: analyzing the same input once per language must produce
+// byte-identical macro/*.json slices and an identical manifest.json apart from its Lang/GeneratedAt fields —
 // language is a render-time (Markdown) concern only, never baked into the
 // JSON data product. Uses heartbeatDreamDiaryTiedRecords (aggregate_test.go)
 // since it's already proven to trigger both a Finding (FindingCronRedundancy)

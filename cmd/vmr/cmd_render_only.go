@@ -18,10 +18,9 @@ import (
 // runRenderOnly implements `vmr analyze -render-only` (§5.4).
 // Validates manifest.json, then re-renders in the requested language — or,
 // with no -lang, inherits the snapshot's last-rendered language (D10).
-// Changing language here is now a normal, cheap path (R1,
-// codebase-weight-analysis doc §7): the JSON data product is
-// language-invariant, so redrawing it in a different language is pure
-// re-render, never re-aggregation. This used to hard-error on any language
+// Changing language here is now a normal, cheap path (R1): the JSON data
+// product is language-invariant, so redrawing it in a different language
+// is pure re-render, never re-aggregation. This used to hard-error on any language
 // other than the snapshot's own — that guard predated R1, when the JSON
 // itself still carried narrative text baked in at the original language.
 func runRenderOnly(outDir string, requestedLang string, langPassed bool) error {

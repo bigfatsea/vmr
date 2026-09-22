@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-22 18:05, by coding
 
 package report
 
@@ -533,7 +533,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		t.Fatal(err)
 	}
 	requestsDir := filepath.Join(dir, "requests")
-	if err := WriteRequestsIndex(rep, sess, requestsDir, i18n.EN, nil, filepath.Join(requestsDir, "details")); err != nil {
+	if err := WriteRequestsIndex(rep, sess, requestsDir, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -843,7 +843,7 @@ func TestWriteFailedIndex(t *testing.T) {
 	}
 
 	requestsDir := filepath.Join(dir, "requests")
-	if err := WriteRequestsIndex(rep, sess, requestsDir, i18n.EN, nil, filepath.Join(requestsDir, "details")); err != nil {
+	if err := WriteRequestsIndex(rep, sess, requestsDir, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(requestsDir, "index.json")); err != nil {
@@ -1398,6 +1398,111 @@ func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	}
 	if s2.ContinuedFrom != s1.ID {
 		t.Errorf("session 2 ContinuedFrom = %q, want %q (linkStitchedLineages should still connect the two for display, even though their ContextGrowth figures stay separate)", s2.ContinuedFrom, s1.ID)
+	}
+}
+
+// TestContextGrowthFindingRawInJSONEscapedInMarkdown pins the §7 escape
+// boundary: the Finding (and its Params) carries the raw session title —
+// macro/summary.json must show what the traffic actually said, never
+// pre-escaped text — while the Markdown findings table escapes the
+// Implicated cell at projection time (viewmodel_efficiency.go), the same
+// treatment the §5 sessions table gives titles. The title deliberately
+// contains every character class each layer must handle: HTML-significant
+// (<, >, &) for the escape split, and a pipe for TableVM.row's EscapeCell.
+func TestContextGrowthFindingRawInJSONEscapedInMarkdown(t *testing.T) {
+	opening := `fix <b>bold & "quote" | pipe>`
+	mkTurn := func(ts time.Time, extra []any, promptTokens int) map[string]any {
+		msgs := append([]any{map[string]any{"role": "user", "content": opening}}, extra...)
+		return map[string]any{
+			"ts": ts.Format(time.RFC3339), "dur_ms": 100, "model": "agent", "protocol": "openai-completions", "outcome": "ok",
+			"client": map[string]any{
+				"request": map[string]any{"body": map[string]any{"model": "agent", "messages": msgs}},
+				"response": map[string]any{"status": 200, "body": map[string]any{
+					"model": "agent",
+					"choices": []any{map[string]any{"finish_reason": "stop",
+						"message": map[string]any{"role": "assistant", "content": "ok"}}},
+					"usage": map[string]any{"prompt_tokens": promptTokens, "completion_tokens": 5},
+				}},
+			},
+			"attempts": []map[string]any{{"endpoint": "openai-completions:p:m", "dur_ms": 100, "response": map[string]any{"status": 200}}},
+		}
+	}
+	t0 := time.Date(2026, 7, 24, 0, 0, 0, 0, time.UTC)
+	recs := []map[string]any{
+		mkTurn(t0, nil, 100),
+		mkTurn(t0.Add(time.Minute), []any{
+			map[string]any{"role": "assistant", "content": "ack"},
+			map[string]any{"role": "user", "content": "continue"},
+		}, 1000),
+	}
+	dir := t.TempDir()
+	path := writeTempJSONL(t, dir, recs)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found *Finding
+	for j := range rep.Efficiency {
+		if rep.Efficiency[j].Code == FindingContextGrowth {
+			found = &rep.Efficiency[j]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("no context growth finding (fixture grows 100 -> 1000, x10 >= 5)")
+	}
+	// The worst session's Title must have survived segmentation verbatim —
+	// otherwise the assertions below would pass against a title that never
+	// contained the sensitive characters.
+	var title string
+	for i := range rep.Sessions {
+		if rep.Sessions[i].ID == found.Params["session_id"] {
+			title = rep.Sessions[i].Title
+		}
+	}
+	if !strings.Contains(title, "<b>") || !strings.Contains(title, "|") {
+		t.Fatalf("session title = %q, want the raw opening text to survive into the title", title)
+	}
+	if strings.Contains(found.Implicated, "&lt;") || strings.Contains(found.Implicated, "&gt;") || strings.Contains(found.Implicated, "&amp;") {
+		t.Errorf("implicated = %q, want the raw unescaped title in the Finding narrative", found.Implicated)
+	}
+	for k, v := range found.Params {
+		if strings.Contains(v, "&lt;") || strings.Contains(v, "&amp;") {
+			t.Errorf("params[%s] = %q, Params must never hold pre-escaped text", k, v)
+		}
+	}
+	if found.Params["session_title"] != title {
+		t.Errorf("params[session_title] = %q, want %q (identical to the session's own Title)", found.Params["session_title"], title)
+	}
+
+	// The Markdown projection must neutralize the same text: the cell in
+	// the findings table carries the HTML-escaped title, with the pipe
+	// cell-escaped on top by TableVM.row.
+	sec := vmEfficiencySection(rep, rep.Overall, i18n.EN)
+	var cell string
+	for _, b := range sec.Blocks {
+		tbl, ok := b.(*TableVM)
+		if !ok {
+			continue
+		}
+		for _, r := range tbl.Rows {
+			if len(r) == 5 && r[1] == "context_growth" {
+				cell = r[3]
+			}
+		}
+	}
+	if cell == "" {
+		t.Fatal("no context_growth row in the §7 findings table")
+	}
+	if !strings.Contains(cell, "&lt;b&gt;") || !strings.Contains(cell, "&amp;") {
+		t.Errorf("markdown cell = %q, want the HTML-escaped title", cell)
+	}
+	if !strings.Contains(cell, `\|`) {
+		t.Errorf("markdown cell = %q, want the pipe cell-escaped", cell)
+	}
+	if strings.Contains(cell, "<b>") {
+		t.Errorf("markdown cell = %q, raw <b> must not reach the table", cell)
 	}
 }
 

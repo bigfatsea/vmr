@@ -8,7 +8,6 @@ package report
 import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/reqdetail"
 )
 
 func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
@@ -40,7 +39,7 @@ func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
 	if rep.Pricing.ProviderOverrides > 0 {
 		summary += t.ProviderRulesApplied(rep.Pricing.ProviderOverrides)
 	}
-	sec.Blocks = append(sec.Blocks, ParaVM{Text: reqdetail.Details(t.FrozenSnapshotSummary, summary) + "\n\n"})
+	sec.Blocks = append(sec.Blocks, DetailsVM{Summary: t.FrozenSnapshotSummary, Body: summary + "\n"})
 	return sec
 }
 

@@ -20,12 +20,12 @@ import (
 )
 
 // ManifestFormat is the current version of the report snapshot manifest
-// (§3.4, D2). 11 -> 12: R1 (codebase-weight-analysis doc §7) changed three
-// field shapes on the data product — macro/summary.json's efficiency[]
-// gained Params (additive, wouldn't alone need a bump) but highlights[]
-// changed from []string to []Highlight{code,text,params} (breaking), and
-// manifest.json's footnotes/disclaimers changed from bare localized strings
-// to {code,params} (breaking) — see KNOWN_ISSUES' "数据产品是对外契约" entry
+// (§3.4, D2). 11 -> 12: R1 changed three field shapes on the data product
+// — macro/summary.json's efficiency[] gained Params (additive, wouldn't
+// alone need a bump) but highlights[] changed from []string to
+// []Highlight{code,text,params} (breaking), and manifest.json's
+// footnotes/disclaimers changed from bare localized strings to
+// {code,params} (breaking) — see KNOWN_ISSUES' "数据产品是对外契约" entry
 // for the compatibility policy this follows.
 const ManifestFormat = 12
 

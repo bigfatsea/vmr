@@ -4,8 +4,10 @@
 // builders' output is compared as a STRUCTURED view model — JSON-serialized
 // for the golden — not as a final string, so a diff points at the exact
 // field that drifted and unrelated serializer changes don't break it. The
-// serializer keeps its own small end-to-end smoke (viewmodel_test.go), and
-// legacy-path byte equivalence is pinned separately (viewmodel_equiv_test.go).
+// serializer keeps its own small structural smoke (viewmodel_test.go's
+// TestRenderMarkdownStructure et al.), and the full builder chain's final
+// Markdown bytes are pinned end to end by e2e_markdown_test.go's
+// TestGoldenReportMarkdown, using this same goldenFixture().
 package report
 
 import (

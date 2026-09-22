@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-21 12:00, by Sonnet 5 -->
+<!-- Ver 2026-09-22 04:20, by Sonnet 5 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -143,13 +143,12 @@
 - **用量折算（精确 vs 降级）的跨包入口刻意只有一条，没有单标志合并形式**：`quota.TokenCountersSides`（纯标量入参）是唯一权威实现，`router.TokenCountersSides` 是 `chatmsg.Usage`→`quota.TokenUsage` 的唯一翻译层（`report` 直接调 `quota` 侧，`archtest` 禁它 import `router`）。合并后的「some usage was seen」单比特信号无法区分完整账本与部分账本，把 partial 当 exact 记账正是 sides 拆分要消灭的 bug 类。**不要以「API 对称」或「给未来消费者留入口」名义复活单标志包装**——只能给单比特的调用方本就该逐侧决策。
 - **quota parity 的非整数倍率差分用例直接驱动 `quota` 导出入口，不走 `buildProviderQuotaRows` 的 YAML 管线**：`cmd/vmr/quota_parity_test.go` 的 `TestQuotaParity_RequestsMetric_NonIntegerMultiplier` 用 `quota.ApplyModelMultiplier`/`quota.BaseAmount` 重算报表侧再与 `routerCharged` 对比（fixture 的 `quotaYAML` 不声明 `model_multipliers`，倍率轴经 YAML 表达不了）。取舍：这条用例的职责是钉住「N 次独立 float64 累加 vs 一次乘法」的公式级等价，报表侧必须复现 router 公式本身才能不与其实现漂移；端到端 basis（YAML → 行 → 与 router 对账）由不带倍率的 `TestQuotaParity_RequestsMetric_ReportMatchesRouter` 覆盖。**复核时机**：`buildProviderQuotaRows` 的倍率解析或 basis 计算发生变化时，重新评估是否补一条声明 `model_multipliers` 的 YAML 管线差分用例。
 - **金额展示统一收敛在 `fmtutil` 一处**：`FmtCurrency`（恒两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（报表「端点性价比」章的成本/1M out 与成本/成功请求）。跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**；表格列的货币也可在表头标注，此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
-- **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：Finding 文本同时进 Markdown 产物与机读 JSON，而 Markdown 的**结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`、主题分隔线 `---`）——在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`imgprep` 的 `map[string]json.RawMessage` 不与 `jsonscan` 的字节扫描统一**：图片降采样要重算尺寸并重编码，是深度结构化重写，字节 splice 做不到。这是三个 sanctioned deviation 里最大的一个。
 - **`imgprep.HasImageMarker` 的宽松预检维持「宁误报不漏报」，不收窄**：宽松的 `bytes.Contains` 预检会让正文里 `"image_path"` 之类的代码文本误触整套降采样反序列化——但误报只多付一次 JSON 解析成本，解析后结构化 dispatch 找不到真实图片块即原样放行，无正确性后果（`TestDownscaleTextMentioningMarkerIsNotAnImage` 钉死「误报≠误判」）。收窄需枚举全部已知图片引用形态 token，新增形态（如 Anthropic `tool_result` 子块 `type:"image"`）会重引漏报；漏报是硬路由 `HasImage` Condition 的正确性 bug，误报只是性能小税。
 - **不对 OpenAI 工具返回做 `error:` 关键字模糊嗅探**：实测全量生产语料近 50 万条 OpenAI 工具调用结果，结构化 JSON 错误字段 0 条，全部是自由文本 stdout/stderr。子串模糊嗅探会引入海量代码输出/测试用例的假阳性。只对协议原生结构化错误标记（如 Anthropic `is_error`）做确定性统计。**已量化的代价**：这直接导致 `error_recovery_count`、Context Rot 区间错误率、N-gram 尾步错误率这三个行为指标在纯 OpenAI 协议流量下结构性恒为 0/n-a——2026-09-11 review 用真实语料验证过，占比越高的部署这个盲区越大。曾提案的"结构化字段优先 + 受控 bash 错误锚点文本匹配"两层方案经复核认定：第一层就是已被证明的空集（同一批语料 0 命中），第二层换个说法就是被否决的子串嗅探本身，均未提供绕开假阳性风险的新路径，故维持不做；这不是没考虑过，是考虑过两次都没有找到出路。
 - **模型/端点展示面的一致性靠统一口径 + 契约测试，不靠共享结构体**：运行时视图以 `/status` 的 `models` 数组为唯一权威（`vmr status` CLI 与 `status.html` 直接消费同一 JSON）；人类可读模型标签 `"<name> [<protocol>]"` 只在 `fmtutil.ModelLabel` 一处定义。刻意不统一的三处：`/v1/models`（协议面 schema）、`vmr check` 的分层 config 视图（看配置缺口）与 `/status` 的聚合运行时视图（并集/最大值）、`vmr diagnose` 的扁平 Result 数组。`/status` JSON 形状由 `internal/server/admin_status_test.go` 契约测试锁定。
 - **`i18n` 的一批微文件不合并**：与 `internal/report/viewmodel_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿全局行预算，且改一节文案从打开小文件变成在大文件里找。
-- **`i18n` 的 `type XxxText` + `if lang == ZH` 样板不改写成 `map[Lang]T` + 泛型 `pick`**：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉，还新引入泛型 helper 与「key 缺失怎么办」。收益为负。
+- **`i18n` 里不含插值字段的 `type XxxText` + `if lang == ZH` 样板不改写**（`report_client_endpoint.go`/`report_compaction.go`/`report_toolwaste.go` 三个文件）：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉。收益为负，**这三个文件维持现状是刻意的，不是阶段 D 落下的**。**含插值字段（`func(...) string` 这类闭包）的文件不适用这条判据**——所有含插值字段的 i18n 文件均采用 `Table[T]`（`internal/i18n/table.go`）+ 一次成型的 accessor（由 `TestArchitecture_I18nTableAdoption` 机械守卫），收敛的是被复制了两遍的闭包逻辑本身（含内部条件分支），不是分支去留；两者是不同的改法，判据不冲突。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
 - **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
@@ -157,7 +156,7 @@
 ### 1.5 产出与工程惯例
 
 - **用 Go 结构化代码而非 `text/template` 渲染 Markdown**：复杂条件列、对齐与动态脚注在 Go 里更容易保持类型安全和可读性。
-- **不自建 Markdown→HTML 的渲染层**：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。**推论**：`journey-compare.html` 复刻 compare Markdown 的章节结构时，`llm_interpretation.text` 这类携带 markdown 表格/标题的正文按 `white-space: pre-wrap` 原样铺开，不做结构化渲染。
+- **不自建 Markdown→HTML 的渲染层**：Markdown 产物的人读入口就是 Markdown 阅读器与看板骨架页（后者直接消费 JSON 切片，不渲染 .md）；再要 web 化展示时，用现成渲染器做转换层，而不是在数据层养一个只覆盖子集的解析器。**推论**：`journey-viewer.html` 展示 LLM 解读等携带 markdown 表格/标题的正文时，按 `white-space: pre-wrap` 原样铺开，不做结构化渲染。
 - **看板骨架页的 chrome 是英文单版，数据侧才本地化**（`WriteSkeletons(dir)` 只吃目录不吃语言，同一份 HTML 同时写进 `reports/` 与 `reports-en/`）：导航、tab、表头、banner、章节标题、`formatDelta` 的 `new` 之类**渲染器计算出的**文本恒英文；`rows[].label`、findings 叙述、LLM 正文、excerpt 等**由 JSON 携带语言**的部分跟随 `-lang`。于是 `reports/`（中文数据）下看板是「英文 chrome + 中文数据」。**不要把它当 bug 报**；要 chrome 也双语，正解是 `common.js` 持 `UI_TEXT[lang]` 字典 + `WriteSkeletons` 按产物语言注入 `window.__LANG`、对带 `data-i18n` 属性的静态文本节点做替换，约 1 人天，已登记为 §2.95 待办。
 - **`-render-only` 在 L3 缓存命中时信任磁盘上已有 `.md` 产物**：L3 缓存以 ViewModel 指纹 + 渲染器版本 + 语言为判据；当 L3 命中且磁盘目标 `.md` 已存在时直接跳过渲染与写盘。手工改过 `.md` 需要强制重绘时用 `-no-cache`。
 - **配了 quota 的部署里，`vmr-quota.json` 变化会使 L2 缓存失效**：报表「账户（Provider）消耗与额度」章与 `macro/finance.json` 的 `provider_quotas` 直接读 `<log_dir>/vmr-quota.json`（路由半区每次计费请求都会重写它），其内容因此并入 L2 输入哈希集——否则同批日志隔时重跑会在 L2 命中路径上给出过期的额度进度与已用量。副作用：路由半区正在活跃承接流量时，对同一批历史日志反复 `vmr analyze` 会频繁 L2 miss（配额计数器确实在动，这一章本就该重算）；这是刻意的保守失效。不含 quota 限制的配置完全不受影响（`vmr-quota.json` 不进指纹）。`period_elapsed_pct` 这类纯 wall-clock 派生值仍是「as of 上次全量运行」——要 render-time 现算需把它移出切片、渲染侧按 `manifest.generated_at` 重算，属独立的低优改进。
@@ -187,14 +186,15 @@
 - **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流，给日志行加结构化字段牵动 stderr 格式与全部日志消费者；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
 - **`/stats.overall` 合并窗口块目前无内置消费者，作为 JSON 契约保留**：它是为控制台首屏那一段"全局 TTFT p50"加的（分位数不可跨 ring 合并，只能服务端在读时对样本并集算）；该 vitals段在 console polish 轮据用户反馈移除，`overall` 随之空转。删掉它是纯粹的契约收缩且要改测试，收益为零；留着无害（已测、可外部消费、首屏日后补延迟信号会重新用上）。无 ring 样本时为 `null`。见 LiveStats 设计文档 `/stats` 契约段。
 - **零 attempt 失败（全端点冷却等）的错误类别由 `sampleFromRecord` 合成为 `no_candidate`，audit.Record 不扩充顶层字段**：一批失败导致所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，路由半区未向上游发起任何 attempt，因而 `audit.Record.Attempts` 为空。`server.sampleFromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为 `livestats.Sample` 合成 `error_class="no_candidate"` 并由客户端侧 HTTP 响应码（503 等）兜底 `status`，使控制台 Recent Failures 能够准确区分并过滤最常见的级联冷却失败，而无需为了展示层需求扩充审计日志顶层 schema。
-- **分析半区渲染架构的四条判据，可机械执行**：R0（投影不互相派生）——HTML 不由 Markdown 转，Markdown 也不由 HTML 转，两者都只从数据产品或共享 VM 来；R1（语言不进数据产品）——判据是"换语言能否只重跑渲染、不重算聚合"，不能就是违反；R2（单一结构化 VM）——判据是"VM 里能否出现任何已经是某种格式的片段"，能就是违反；R3（交互式投影只为查询而非阅读存在）——判据是"把这页全部内容打印成纸，有无信息损失"，没有就该是文档不是应用。外加一条分界：**文档自带内容，只有应用才需要数据源**——文档的正确形态是自包含单文件（`file://` 直接打开），应用才必须有 HTTP。六张看板骨架页里五张其实是文档却套了应用的加载模式（零业务数据的骨架 + 运行时 fetch），这是可达性门槛的根因，不是"用得少"的旁证。
-- **`internal/report` 的 `ParaVM` 携带逐字 Markdown 片段是刻意的，不是 R2 的例外被忽略**：56 个构造点实测分类——28 处纯 i18n 文本段落、15 处靠序列化器接管块间空白即可覆盖、9 处强调式组标题、2 处可结构化的生成式图表（形状不同：一处是序列数据宜做 `Chart`，一处是图宜做 `Flow`）、1 处 blockquote 统计行、1 处绕过既有 `DetailsVM`——`ParaVM` 本身不删，降级为**显式逃生舱**：类型保留，`internal/archtest` 加一条构造点数量预算（`TestParaVMBudget`），像文件/函数行数预算一样可调但必须显式抬，只降不升。
+- **分析半区渲染架构的四条判据，可机械执行**：R0（投影不互相派生）——HTML 不由 Markdown 转，Markdown 也不由 HTML 转，两者都只从数据产品或共享 VM 来；R1（语言不进数据产品）——判据是"换语言能否只重跑渲染、不重算聚合"，不能就是违反；R2（单一结构化 VM）——判据是"VM 里能否出现任何已经是某种格式的片段"，能就是违反；R3（交互式投影只为查询而非阅读存在）——判据是"把这页全部内容打印成纸，有无信息损失"，没有就该是文档不是应用。外加一条分界：**文档自带内容，只有应用才需要数据源**——文档的正确形态是自包含单文件（`file://` 直接打开），应用才必须有 HTTP。部分看板骨架页其实是文档却套了应用的加载模式（零业务数据的骨架 + 运行时 fetch），这是可达性门槛的根因，不是"用得少"的旁证。
+- **`internal/report` 的 `BlockVM` 已按 R2 结构化到位，`ParaVM` 降级为显式逃生舱**：强调式组标题、blockquote 统计行、生成式图表（序列图与流程图形状不同，分别对应 `ChartVM`／`FlowVM`）、以及一处绕过既有 `DetailsVM` 的写法，均已从 `ParaVM` 里的手写 Markdown 片段搬到对应的结构化 `BlockVM`（`HeadingVM`／`NoteVM`／`ChartVM`／`FlowVM`／`DetailsVM`）。`ParaVM` 本身不删，仍是纯 i18n 文本段落与"builder 手工控制块间空白"这两类无法/不值得结构化的写法的**显式逃生舱**：类型保留，`internal/archtest` 的构造点数量预算（`TestParaVMBudget`，当前 43）像文件/函数行数预算一样可调但必须显式抬，只降不升。
+- **分析半区的 Markdown 渲染统一走三层护栏，新增/改造一个 section 或 finding 类别时三层都要过**：① builder→VM 结构化 golden（`internal/report/viewmodel_golden_test.go`＋`viewmodel_golden_data_test.go`；`internal/journey/golden_test.go` 的 `testdata/golden_vm{,_zh}.json`）——比对的是 JSON 序列化后的 VM 结构，不是最终字符串，diff 精确指向哪个字段漂移，不受无关序列化改动影响；② VM→序列化器结构断言（`internal/report/viewmodel_test.go`；`internal/journey/viewmodel_test.go`）——钉标题层级、表格几何、block 顺序这些结构规则本身；③ 端到端 `.md` 字节级 smoke（`internal/report/e2e_markdown_test.go` 的 `TestGoldenReportMarkdown`；`internal/journey/golden_test.go` 的 `TestGoldenMarkdown` 已把 ①③ 合并在同一个测试里）——这是最后一道网，捕获前两层各自局部正确、组合起来却错的情况。**不要因为"golden 已经很多了"就跳过端到端那一层，也不要为了图快只加端到端字节 golden、跳过结构化 VM golden**——后者定位更精准，前者兜底遗漏，两者互补不是重复。
 - **删除三张零交互看板页（`journey-compare.html`／`benchmarks.html`／`tool-waste.html`）后的回退态是终态，不是欠账**：若后续 HTML 序列化器最终被否决（未立项或立项后废弃），这三个产物的文档形态**永久只有 Markdown**——这是可接受的终态，因为按 R3 判据它们本来就是"文档"而非"应用"，不需要为它们再补一个 HTML 消费者才算完整。
 - **`analytics.serve` 与 `vmr analyze -open` 是两个不同场景，不是同一能力的两种开关**：前者是路由半区的常驻 HTTP 挂载点（`server/reports.go`，`mountReports`），服务 `request-browser` 这一个真应用的长会话查询，需要鉴权、需要进程常驻；后者是分析半区命令的一次性查看，绑 `127.0.0.1` 随机端口、前台运行、`Ctrl-C` 退出，不鉴权（本机单用户，产物已在本机磁盘上）、服务范围限定在这次 `analyze` 产出的目录内。两者共享"文档需要 HTTP 才能 fetch 相对路径 JSON"这同一个根因，但生命周期与信任模型都不同，不合并成一个开关。
-- **R1（语言不进数据产品）的语言载体处置表，逐行冻结——这张表就是 R1 的验收定义**：`summary.json` 的 `efficiency[].finding/action`、`highlights[]` 与 `manifest.json` 的 `footnotes`／`disclaimers`，以及 `j-*.json` 里 `Finding.Source` 留空（规则派生）的 findings 叙述，一律降级为 `(rule, severity, params)`，句子在 Project 层按语言组装（`manifest.json` 是契约文件，schema 变更须走 `format` 版本步进）；`compares/*.json` 的 `rows[].label` 已有 `rows[].metric` 作中立 id，渲染期改由 metric 查文案目录；`sessions[].title`、请求正文摘录是**透传内容**，显式豁免，翻译它是错的；`llm_interpretation.text` 与 `llm_findings[]` 里 `Finding.Source == SourceLLMInferred` 的条目是**LLM 原文**，豁免并标注 `llm_lang`（见下一条分流规则）；journey 兜底标题（`ToolLoopTitle`／`StitchedTaskTitle`）是潜在载体，结构化为标记 + 渲染期本地化，但实测 633 条候选 0 命中，优先级最低、本期不动。**R1 判据的最终措辞**：换语言重渲染后，除透传内容与标注了 `llm_lang` 的 LLM 原文外，产物逐字节中立。
+- **R1（语言不进数据产品）的语言载体处置表，逐行冻结——这张表就是 R1 的验收定义**：`summary.json` 的 `efficiency[].finding/action`、`highlights[]` 与 `manifest.json` 的 `footnotes`／`disclaimers`，以及 `j-*.json` 里 `Finding.Source` 留空（规则派生）的 findings 叙述，一律降级为 `(rule, severity, params)`，句子在 Project 层按语言组装（`manifest.json` 是契约文件，schema 变更须走 `format` 版本步进）；`compares/*.json` 的 `rows[].label` 已有 `rows[].metric` 作中立 id，渲染期改由 metric 查文案目录；`sessions[].title`、请求正文摘录是**透传内容**，显式豁免，翻译它是错的；`llm_interpretation.text` 与 `llm_findings[]` 里 `Finding.Source == SourceLLMInferred` 的条目是**LLM 原文**，豁免并标注 `llm_lang`（见下一条分流规则）；journey 兜底标题（`NoTitle`／`ToolLoopTitle`／`StitchedTaskTitle`／`UnreadableTitle`）确实是真实载体——全量语料 `-lang` 差分测出 1,413 条候选里 5 条命中（0.35%）；已修复，但不是结构化为标记 + 渲染期本地化：这四处从不像 findings 那样在渲染期按 `-lang` 重新本地化，同一份文案直接写进 `Journey`/`Task.Title`，一路沿用到 `journeys/index.json` 和渲染出的 Markdown，Code+Params 式的双语行会是从未被读取的死文本——故直接冻结为 `internal/i18n` 包顶层的英文常量/函数（`JourneyNoTitle` 等），不再挂在 `Table[T]` 上。**R1 判据的最终措辞**：换语言重渲染后，除透传内容与标注了 `llm_lang` 的 LLM 原文外，产物逐字节中立。
 - **LLM 原文的豁免按 `Finding.Source` 分流，不按数组分**：`llm_interpretation.text` 与 `llm_findings[]` 里 `Source == SourceLLMInferred` 的条目同属 LLM 原文，走 `llm_lang` 豁免；同一个 `[]Finding` 里 `Source` 留空（规则派生）的条目仍属投影层文案，走 Code+Params 重组。对整个数组一刀切（要么全豁免要么全不豁免）会让 R1 判据在 journey 半边不成立。
-- **边界澄清（两条，防止已有裁决被误读成自己的反面）**：① 本节上文「不自建 Markdown→HTML 的渲染层」否决的是"在数据层养一个只覆盖子集的 Markdown 解析器"；VM→HTML 序列化器**不解析 Markdown，它序列化 VM**——从共享结构直接产出第二种格式，这是被允许、甚至被鼓励的形态，两者不是同一件事。② §1.0「永久不做」清单里的 "Web UI" 指管理控制台（RBAC、多租户后台一类），不指分析半区的渲染产物——本仓已在发六张报表页（含四个控制台页），加一个 HTML 序列化器不违反这条红线。
-- **裁决并排期「Markdown 转义从构造时移到序列化器」**：本节上文「LLM 自由文本的 Markdown 结构转义做在 Finding 构造时」（`sanitizeMDStruct`，`internal/journey/llm.go`，16 处调用点）给出的理由是"`i18n` 模板层修不了，转义必须发生在插进模板句子之前"。单一结构化 VM 完成后这个理由自动失效——LLM 文本进的是带类型的字段而非模板句子，序列化器天然知道自己在往什么结构位置写，转义因此应该是序列化器的职责。**本条只登记裁决与排期，执行随后续的 VM 结构化逼近工作**；届时与 §2.73（"在转换层做转义，不提前在数据层碰文本"，方向相反）一并统一。过渡期新增的 `Finding.Params` 字段存**原始值**，旧的叙述字段仍是**已转义文本**——两者语义不同，不可混用，这是过渡期的临时状态，不是最终形态。
+- **边界澄清（两条，防止已有裁决被误读成自己的反面）**：① 本节上文「不自建 Markdown→HTML 的渲染层」否决的是"在数据层养一个只覆盖子集的 Markdown 解析器"；VM→HTML 序列化器**不解析 Markdown，它序列化 VM**——从共享结构直接产出第二种格式，这是被允许、甚至被鼓励的形态，两者不是同一件事。② §1.0「永久不做」清单里的 "Web UI" 指管理控制台（RBAC、多租户后台一类），不指分析半区的渲染产物——本仓已在分发看板骨架页与控制台静态页面，加一个 HTML 序列化器不违反这条红线。
+- **LLM 自由文本的 Markdown 结构转义做在序列化（渲染）时，不做在 Finding 构造时**：`sanitizeMDStruct`（`internal/journey/llm.go`）不再在 `llm_findings.go` 的 Finding 构造点调用——`journeys/details/j-*.json` 里 `llm_findings[]` 的 `evidence`／`action`／`evidence_anchor` 现在是模型的原始输出，不带任何转义痕迹（R1：JSON 应该展示模型实际说了什么，不是转义后的改写版）。转义改在 Markdown 渲染路径上执行：`internal/journey/findings.go` 的 `localizeFinding` 对 `Source == SourceLLMInferred` 的条目在返回前对 `Evidence`／`Action`／`EvidenceAnchor` 三个字段调用 `sanitizeMDStruct`（`Finding` 字段不转义——它从不被任何 Markdown 渲染路径读取，只服务 JSON）。这条改动在单一结构化 VM 落地后才成立：LLM 文本进的是带类型的字段而非拼进一句模板句子，序列化器因此天然知道自己在往什么结构位置写，转义顺理成章成为它的职责，不再需要在构造时抢先做。`Finding.Params` 存原始值这条既有约定不受影响；旧的"叙述字段是已转义文本、不可与 `params` 混用"那句过渡期警告在 journey 侧已经结束——两者现在语义一致，都是原始值。
 - **冻结「读者四」（给别的团队用，零配置可打开）这条承重假设本身**：依据是 `docs/VirtualModelRouter_Design_v4_Strategy.md` 的目标用户画像"100 人以内的中小型 AI 研发团队"及其中的竞争格局对位（One-API／LiteLLM／OpenRouter）——这确立了"给别的团队用"是产品定位的一部分，不是臆测。**它不覆盖**多语种需求本身——多语种的依据是团队构成（中文母语 + 全球触达）与既有双语产物，与读者四是两条独立的理由链。**假设动摇时的降级表**：R1（语言不进数据产品）不依赖读者四，三条独立理由单独成立（语言是读者属性、产物腐烂是症状不是需求消失的证据、机械判据本身成立）；已否决的「砍语种」方案依赖读者四；R2（单一结构化 VM）强依赖读者四（收益前提是"会有第二种格式或第二个语种消费者"）；HTML 序列化器几乎是纯押注——没有读者四，它应当直接否决而非推迟。
 - **数据产品是对外契约，`manifest.json` 的 `format` 是它的版本号**：加性变更（新增字段、新增可选切片）不必步进；删除字段、改变既有字段语义、改变产物目录布局属破坏性变更，必须步进 `format` 并在 `CHANGELOG.md` 标注 Breaking。`internal/report/rows.go` 的 `Format` 常量是 `manifest.go` 的 `ManifestFormat` 的别名，两处不独立改。
 
@@ -380,15 +380,15 @@
 - **现状**：`⭐` 超额度 / `‡` 配置变更 / `†` 无时间交集 / `◇` 部分流量未计价，各配一条按需渲染脚注。信息都必要，但四个符号叠一张表可能已到「标记多到没人看脚注」的临界。
 - **为什么待定**：主观展示密度判断，四个标记都按需渲染，健康报表一个都不出现。真实报表读起来觉得吵了再动（`◇` 是最可能降级为纯 JSON 字段的候选）。
 
-#### 2.93 [低] 跨运行累积产物的语言混排（render-only 重渲染时）
+#### 2.93 [低，风险面已收窄] 跨运行累积产物的 LLM 原文语言混排（render-only 重渲染时）
 
-- **现状**：`compares/*.json`、`journeys/details/j-<id>.json` 是跨调用累积的产物，各自携带生成时的语言；`-render-only`（及全量运行的 renderAllFromDisk）统一以 manifest.lang 重渲染 Markdown，且保留旧文件里的 `## LLM ` 段（旧语言）。同一输出目录换过语言并累积过产物时，重渲染结果可能中英混排。
-- **为什么待定**：「渲染继承 JSON 语言」的规则里，累积产物的「JSON 语言」不是一个值；逐文件采用各自 JSON 的 lang 字段需要 compare JSON 增加语言字段（schema 加性变更），且触发条件苛刻（同目录换语言 + 有跨语言累积）。
-- **触发条件**：出现真实的双语交替使用场景，或用户报告混排造成误读；在那之前「换语言请全量重跑并清理输出目录」是够用的指引。
+- **现状**：R1（`internal/journey`/`internal/report` 数据产品语言中立化）落地后，`-render-only -lang <换语言>` 已是受支持、无需全量重跑的正常操作——`compares/*.json`、`journeys/details/j-<id>.json` 里规则派生的叙述（`Finding.Source` 留空）不再携带任何语言，`renderAllFromDisk` 用请求的新语言重渲染时对这部分内容永远正确、不再混排。**剩下唯一仍可能混排的**是 LLM 原文（`llm_interpretation.text`、`llm_findings[]` 里 `Source == "llm_inferred"` 的条目）——这部分文本是模型在生成时那次调用的语言产物，无法重新推导，`-render-only` 换语言时只能原样保留，并用 `llm_lang` 字段如实标注它的真实语言。同一份文档因此可能出现「结构性内容随 `-lang` 正确切换，LLM 解读段落仍是上次调用时的语言」——这是 R1 的 LLM 原文豁免的直接后果，不是遗留 bug。
+- **为什么标为「已收窄」而不是「已解决」**：LLM 原文混排本身不可解——除非重新调用一次 LLM（`-llm-addr`），没有别的办法在不产生新调用的前提下把已生成的模型原文翻译成另一种语言。`llm_lang` 字段已经把这种情况变成可判定、可告知的事实，而不是静默的语言错乱。
+- **触发条件**：真实需求出现「同一份 journey/compare 文档，结构文字与 LLM 解读段落语言不一致」的可读性投诉时，可考虑在 Markdown 的 LLM 小节前加一条「本节生成于 {llm_lang}」的提示行——渲染层已经有 `llm_lang` 可读，纯展示层改动，不涉及数据产品。
 
 #### 2.94 [低，登记待办] 看板 `wireHashReload` 用 `location.reload()` 解决路由刷新
 
-- **现状**：`journey-viewer.html` / `journey-compare.html` 内用户在同页切换 `#data=` 链接（如候选列表点开某个任务）时，`common.js` 的 `wireHashReload` 监听 `hashchange` 后直接 `location.reload()` 整页重载——功能可用，但销毁了滚动位置、筛选器状态与展开状态。
+- **现状**：`journey-viewer.html` 内用户在同页切换 `#data=` 链接（如候选列表点开某个任务）时，`common.js` 的 `wireHashReload` 监听 `hashchange` 后直接 `location.reload()` 整页重载——功能可用，但销毁了滚动位置、筛选器状态与展开状态。
 - **根因**：骨架页早期是一次性 IIFE 绑定生命周期，没有组件化「数据拉取 → DOM 局部清空与重绘」的函数。
 - **可能方案**：把各页数据加载与渲染封装为显式的无状态渲染函数（如 `renderJourneyViewer(data)`），`hashchange` 时仅局部 fetch + 内存内替换 DOM 节点。需重构两到三个页面的生命周期。
 - **第二处症状（2026-09-12 review）**：journey-viewer 的 Touched Artifacts 表内 `#step-N` 页内锚点也被同一 `wireHashReload` 劫持——点击后整页 reload，异步数据未就绪导致 fragment 定位静默失败、滚动位置丢失。render 函数化重构应一并覆盖（`wireHashReload` 只对 `#data=` 前缀的 hash 变更 reload，页内锚点走 `scrollIntoView`）。
@@ -404,6 +404,7 @@
 - **现状**：`sanitizeMDStruct`（`internal/journey/llm.go`）只处理 Markdown **结构**破坏（反引号/竖线/行首标记），不处理 `<`/`>`。LLM 判别器输出的类 HTML 片段会原样进入 `.md` 文件。
 - **为什么暂不做**：`.md` 产物没有 HTML 渲染面（看板骨架页消费的是 JSON 切片，不渲染 Markdown），Markdown 阅读器对裸 `<...>` 的降级仅是显示瑕疵。
 - **触发条件**：产物开始被 web 化渲染，或出现把 `.md` 直接转 HTML 的新消费方——届时在转换层做 HTML 转义，而不是提前在数据层碰文本。
+- **这条原则现在与仓库其余部分一致，不再方向相反**：本节上一条「Markdown 结构转义做在序列化时」落地后，本条"HTML 转义该做在转换层"的判断与之同向——两者都是"转义是投影层的职责，不提前在数据层碰文本"。本条仍然不做，只是触发条件（产物 web 化）尚未出现，不是原则本身有分歧。
 
 #### 2.7 [低] 报表成本表结构化透传 `CostEstimateEst`
 
@@ -435,8 +436,8 @@
 
 #### 2.151 [低] macro-dashboard 单切片加载失败静默停留 Loading，错误态/降级呈现缺失
 
-- **现状**：`loadAll()` 用 `Promise.allSettled` 包五个切片 loader——allSettled 永不 reject，外层 banner-err 不可达；任一切片 404/损坏时对应 tab 停在初始 Loading/空白，无提示。同族小项：benchmarks.html 缺数据源时仅一张 stat 卡、Highlights 区把 Markdown 星号原样当 HTML 渲染（`**bold**` 裸露）。
-- **可能方案**：每 loader 单独 catch 并渲染错误/空态文案（参照 tool-waste.html 的 Failed to load 行）；空数据给一句「本套件未生成此产物」。
+- **现状**：`macro-dashboard.html` 的 `loadAll()` 用 `Promise.allSettled` 包五个切片 loader——allSettled 永不 reject，外层 banner-err 不可达；任一切片 404/损坏时对应 tab 停在初始 Loading/空白，无提示。同族小项：Highlights 区把 Markdown 星号原样当 HTML 渲染（`**bold**` 裸露）。
+- **可能方案**：每 loader 单独 catch 并渲染错误/空态文案；空数据给一句「本套件未生成此产物」。
 - **触发条件**：看板体验专项（§2.94/§2.95/§2.130 同批）。
 
 #### 2.152 [低] request-browser 时间筛选要求输入 epoch 毫秒，与展示的 ts_display 格式脱节
@@ -964,8 +965,8 @@
 
 #### 2.135 [中，建议尽快] `internal/dashboard` 的 `macro-dashboard.html` 动态审计日志字段内联 innerHTML 缺少 `esc()` 转义
 
-- **现状**：`internal/dashboard` 的资源模板 `assets/macro-dashboard.html` 多处动态日志字段（如 `m.model`、`c.client_key`、`q.provider`、`e.endpoint`、`s.highlights` 等）未经 `common.js` 的 `esc()` 转义直接拼入 `innerHTML`。其它页面（如 `status.html`）均对动态内容做了严格 HTML 转义。恶意或异常的 upstream 模型名/客户端标识可能导致 DOM XSS。**2026-09-12 review 复核**：该问题在当前产物仍在；且有新增量点——`tool-waste.html` 的 `${shape}`（审计派生工具集名）插值未过同文件已定义的 `esc()`，共享运行时 `svgBarChart`/`svgLineChart` 的 `${shortLabel}` 与 `<title>${label}`（模型/端点名）同样未转义。修复范围按「全部 innerHTML 插值统一过 esc()（含 SVG title/text）」处理。
-- **可能方案**：在 `macro-dashboard.html` 与 `tool-waste.html` 各处模板插值及共享 SVG 助手中补充 `esc(...)` 过滤。
+- **现状**：`internal/dashboard` 的资源模板 `assets/macro-dashboard.html` 多处动态日志字段（如 `m.model`、`c.client_key`、`q.provider`、`e.endpoint`、`s.highlights` 等）未经 `common.js` 的 `esc()` 转义直接拼入 `innerHTML`。其它页面（如 `status.html`）均对动态内容做了严格 HTML 转义。恶意或异常的 upstream 模型名/客户端标识可能导致 DOM XSS。**2026-09-12 review 复核**：该问题在当前产物仍在；共享运行时 `svgBarChart`/`svgLineChart` 的 `${shortLabel}` 与 `<title>${label}`（模型/端点名）同样未转义。修复范围按「全部 innerHTML 插值统一过 esc()（含 SVG title/text）」处理。
+- **可能方案**：在 `macro-dashboard.html` 各处模板插值及共享 SVG 助手中补充 `esc(...)` 过滤。
 - **ROI**：高。纯前端防守，零后端依赖，消除安全隐患。
 
 #### 2.136 [低] `recorder.Write` 的 `ttftMS` 哨兵在亚毫秒首包下被后续 chunk 覆盖

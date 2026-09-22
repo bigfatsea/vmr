@@ -74,12 +74,68 @@ type SectionVM struct {
 // composed — typesetting decisions live in the builder (D4).
 type BlockVM interface{ isBlock() }
 
-// ParaVM is a verbatim Markdown fragment: prose, a group heading, a
-// blockquote, a mermaid chart. Text is written as-is — leading/trailing
-// blank lines included — so the builder owns all whitespace.
+// ParaVM is a verbatim Markdown fragment — the explicit escape hatch for
+// prose that doesn't fit HeadingVM/NoteVM/ChartVM/FlowVM/TableVM/DetailsVM
+// (R2-c: internal/archtest's TestParaVMBudget caps new uses, see that
+// test's doc comment). Text is written as-is — leading/trailing blank
+// lines included — so the builder owns all whitespace. R2-b tried moving
+// this to the serializer (auto-detecting a missing blank line) and found
+// a real counter-example: some ParaVM blocks are deliberately followed by
+// the next block with a single "\n", no blank line (e.g. the interactive-
+// share note directly above the "†" footnote marker) — an auto-detector
+// can't tell that apart from a genuinely missing blank line, so the
+// builder keeps full control instead.
 type ParaVM struct{ Text string }
 
 func (ParaVM) isBlock() {}
+
+// HeadingVM is an inline group heading inside a section — smaller than a
+// SectionVM's own "## " title, used to break up a long section's blocks.
+// Level selects the Markdown notation, matching three genuinely different
+// notations the legacy ParaVM call sites used (not interchangeable —
+// italic and bold render differently): 1 = "### " (a real h3 heading), 2 =
+// "*italic*" (a sub-group label, e.g. a protocol/endpoint name), 3 =
+// "**bold**" (an emphasis-style label). Text is already localized.
+type HeadingVM struct {
+	Level int
+	Text  string
+}
+
+func (HeadingVM) isBlock() {}
+
+// NoteVM is a single blockquote line: composed and localized, no leading
+// "> " and no trailing blank line — renderBlock adds both.
+type NoteVM struct{ Text string }
+
+func (NoteVM) isBlock() {}
+
+// ChartVM is a mermaid xychart-beta bar chart: one titled bar series
+// against a shared label axis. Parts are already-formatted y-values (plain
+// integers for counts, "M"-scaled decimals for token charts) — mermaid's
+// bar data is a bare numeric list, so no thousands separator can go in
+// here without breaking the chart's own comma-delimited syntax. This
+// mirrors the legacy mermaidBarLabeled/mermaidTokenBarLabeled split: the
+// builder picks which formatting a series gets, ChartVM just carries the
+// result.
+type ChartVM struct {
+	Title  string
+	YLabel string
+	Labels []string
+	Parts  []string
+}
+
+func (ChartVM) isBlock() {}
+
+// FlowVM is a mermaid flowchart LR: a chain of nodes connected by
+// identically labeled edges. Nodes double as both the mermaid node id and
+// its display label (today these are session ids, already safe as mermaid
+// node ids).
+type FlowVM struct {
+	Nodes []string
+	Edge  string
+}
+
+func (FlowVM) isBlock() {}
 
 // DetailsVM is a collapsible <details> block. Body is the inner content
 // including its trailing whitespace; the serializer wraps it.
@@ -153,6 +209,21 @@ func renderBlock(b *strings.Builder, blk BlockVM) {
 	switch x := blk.(type) {
 	case ParaVM:
 		b.WriteString(x.Text)
+	case HeadingVM:
+		switch x.Level {
+		case 1:
+			fmt.Fprintf(b, "### %s\n\n", x.Text)
+		case 2:
+			fmt.Fprintf(b, "*%s*\n\n", x.Text)
+		default:
+			fmt.Fprintf(b, "**%s**\n\n", x.Text)
+		}
+	case NoteVM:
+		fmt.Fprintf(b, "> %s\n\n", x.Text)
+	case ChartVM:
+		renderChart(b, x)
+	case FlowVM:
+		renderFlow(b, x)
 	case DetailsVM:
 		b.WriteString("<details><summary>" + x.Summary + "</summary>\n\n")
 		b.WriteString(x.Body)
@@ -162,6 +233,29 @@ func renderBlock(b *strings.Builder, blk BlockVM) {
 	default:
 		panic(fmt.Sprintf("RenderMarkdown: unknown block type %T", blk))
 	}
+}
+
+// renderChart writes one mermaid xychart-beta block — byte-identical to
+// the legacy mermaidChart (internal/report/render_cells.go, removed once
+// every caller went through ChartVM).
+func renderChart(b *strings.Builder, c ChartVM) {
+	qlabels := make([]string, len(c.Labels))
+	for i, l := range c.Labels {
+		qlabels[i] = fmt.Sprintf("%q", l)
+	}
+	fmt.Fprintf(b, "```mermaid\nxychart-beta\n    title %q\n    x-axis [%s]\n    y-axis %q\n    bar [%s]\n```\n\n",
+		c.Title, strings.Join(qlabels, ", "), c.YLabel, strings.Join(c.Parts, ", "))
+}
+
+// renderFlow writes one mermaid flowchart LR — byte-identical to the
+// legacy hand-built compaction chain string (internal/report/
+// viewmodel_sessions.go's vmCompactionChainBlocks).
+func renderFlow(b *strings.Builder, f FlowVM) {
+	b.WriteString("```mermaid\nflowchart LR\n")
+	for i := 0; i < len(f.Nodes)-1; i++ {
+		fmt.Fprintf(b, "    %s[\"%s\"] -->|%s| %s[\"%s\"]\n", f.Nodes[i], f.Nodes[i], f.Edge, f.Nodes[i+1], f.Nodes[i+1])
+	}
+	b.WriteString("```\n\n")
 }
 
 // renderTable writes one table: optional title line, optional <details>

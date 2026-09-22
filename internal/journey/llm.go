@@ -589,13 +589,18 @@ func downgradeHeadingLevels(text string) string {
 // line-leading structural markers — ATX headings, bullet items (- * +),
 // ordered-list items (1. ), blockquotes (> with or without a following
 // space) and thematic breaks (---). Backslash escaping, deliberately not
-// HTML entities: the same finding text also renders through the HTML
-// dashboard, which applies its own HTML escaping — entities here would
-// double-escape there. Applied to every LLM-authored finding component
-// (explanations, suggested actions, evidence anchors) at Finding-
-// construction time in llm_findings.go — the render layer cannot do it,
-// because these strings also feed the HTML target and the JSON summary.
-// Ordinary prose without these characters passes through byte-identical.
+// HTML entities: journey-viewer.html reads the same finding text straight
+// out of j-<id>.json and applies its own HTML escaping — a literal
+// backslash is inert there, so entities here would double-escape instead.
+//
+// Applied at Markdown-render time (localizeFinding's SourceLLMInferred
+// branch, findings.go), not at Finding-construction time (llm_findings.go)
+// — R2: once findings render through a structured VM instead of a
+// hand-composed template sentence, the serializer always knows it's about
+// to write into Markdown structure, so escaping is its job. j-<id>.json
+// therefore carries the model's raw, unescaped output; only the rendered
+// .md gets the escaped copy. Ordinary prose without these characters
+// passes through byte-identical either way.
 func sanitizeMDStruct(s string) string {
 	if s == "" {
 		return s

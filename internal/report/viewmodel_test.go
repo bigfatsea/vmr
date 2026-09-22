@@ -1,8 +1,9 @@
 // Ver 2026-09-15, by Opus 5
 
 // Unit tests for the ViewModel types and the fixed serializer: structure —
-// heading levels, table geometry, fold/details wrappers, block order — plus
-// a couple of targeted lang-following regression guards (most copy
+// heading levels, table geometry, fold/details wrappers, block order,
+// HeadingVM/NoteVM/ChartVM/FlowVM's exact mermaid/Markdown output — plus a
+// couple of targeted lang-following regression guards (most copy
 // correctness is pinned by the golden and byte-equivalence tests instead).
 package report
 
@@ -59,6 +60,37 @@ func TestRenderMarkdownStructure(t *testing.T) {
 		"## Two\n\n",
 		"- method note\n",
 		"- self-traffic off\n",
+	}, "")
+	if got != want {
+		t.Errorf("serializer output mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// TestRenderMarkdownNewBlockTypes pins HeadingVM/NoteVM/ChartVM/FlowVM's
+// exact output — the four block types R2-b added so builders stop
+// hand-writing Markdown/mermaid syntax into ParaVM.Text.
+func TestRenderMarkdownNewBlockTypes(t *testing.T) {
+	vm := &MacroReportVM{
+		Title: "R",
+		Sections: []SectionVM{{ID: "s", Title: "S", Blocks: []BlockVM{
+			HeadingVM{Level: 1, Text: "Quota vs. Consumption"},
+			HeadingVM{Level: 2, Text: "openai-completions"},
+			HeadingVM{Level: 3, Text: "Tier 2 (audit-only)"},
+			NoteVM{Text: "**Total shipped** 1 MB"},
+			ChartVM{Title: "chart", YLabel: "reqs", Labels: []string{"00", "01"}, Parts: []string{"3", "5"}},
+			FlowVM{Nodes: []string{"a", "b", "c"}, Edge: "compacted"},
+		}}},
+	}
+	got := RenderMarkdown(vm)
+	want := strings.Join([]string{
+		"# R\n\n",
+		"## S\n\n",
+		"### Quota vs. Consumption\n\n",
+		"*openai-completions*\n\n",
+		"**Tier 2 (audit-only)**\n\n",
+		"> **Total shipped** 1 MB\n\n",
+		"```mermaid\nxychart-beta\n    title \"chart\"\n    x-axis [\"00\", \"01\"]\n    y-axis \"reqs\"\n    bar [3, 5]\n```\n\n",
+		"```mermaid\nflowchart LR\n    a[\"a\"] -->|compacted| b[\"b\"]\n    b[\"b\"] -->|compacted| c[\"c\"]\n```\n\n",
 	}, "")
 	if got != want {
 		t.Errorf("serializer output mismatch:\n got: %q\nwant: %q", got, want)
@@ -183,4 +215,63 @@ func TestMacroMarkdownFindingsFollowLang(t *testing.T) {
 	if !strings.Contains(mdZH, "定时任务冗余") {
 		t.Errorf("ZH render missing the Chinese cron-redundancy finding title:\n%s", mdZH)
 	}
+}
+
+// TestVmCompactionChainBlocks_FlowVM pins vmCompactionChainBlocks' two
+// branches: a ≥3-node chain (≥2 compaction hops) becomes a FlowVM, a
+// 2-node chain stays an inline ParaVM note. No real corpus in this repo's
+// test fixtures has a chain this long (real-corpus verification during
+// Phase 3 Step 3.4 found zero matches in two days of production audit
+// logs), so this is the only test exercising renderFlow's mermaid output.
+func TestVmCompactionChainBlocks_FlowVM(t *testing.T) {
+	t.Run("three node chain becomes FlowVM", func(t *testing.T) {
+		rep := &Report2{Sessions: []SessionRow{
+			{ID: "l-aaa"},
+			{ID: "l-bbb", ContinuedFrom: "l-aaa"},
+			{ID: "l-ccc", ContinuedFrom: "l-bbb"},
+		}}
+		blocks := vmCompactionChainBlocks(rep, i18n.EN)
+		if len(blocks) != 1 {
+			t.Fatalf("got %d blocks, want 1", len(blocks))
+		}
+		flow, ok := blocks[0].(FlowVM)
+		if !ok {
+			t.Fatalf("block is %T, want FlowVM", blocks[0])
+		}
+		wantNodes := []string{"l-aaa", "l-bbb", "l-ccc"}
+		if len(flow.Nodes) != len(wantNodes) {
+			t.Fatalf("Nodes = %v, want %v", flow.Nodes, wantNodes)
+		}
+		for i, n := range wantNodes {
+			if flow.Nodes[i] != n {
+				t.Errorf("Nodes[%d] = %q, want %q", i, flow.Nodes[i], n)
+			}
+		}
+		if flow.Edge != "compacted" {
+			t.Errorf("Edge = %q, want %q", flow.Edge, "compacted")
+		}
+		var b strings.Builder
+		renderBlock(&b, flow)
+		want := "```mermaid\nflowchart LR\n" +
+			"    l-aaa[\"l-aaa\"] -->|compacted| l-bbb[\"l-bbb\"]\n" +
+			"    l-bbb[\"l-bbb\"] -->|compacted| l-ccc[\"l-ccc\"]\n" +
+			"```\n\n"
+		if got := b.String(); got != want {
+			t.Errorf("renderBlock(FlowVM) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("two node chain stays a ParaVM note", func(t *testing.T) {
+		rep := &Report2{Sessions: []SessionRow{
+			{ID: "l-aaa"},
+			{ID: "l-bbb", ContinuedFrom: "l-aaa"},
+		}}
+		blocks := vmCompactionChainBlocks(rep, i18n.EN)
+		if len(blocks) != 1 {
+			t.Fatalf("got %d blocks, want 1", len(blocks))
+		}
+		if _, ok := blocks[0].(ParaVM); !ok {
+			t.Fatalf("block is %T, want ParaVM", blocks[0])
+		}
+	})
 }

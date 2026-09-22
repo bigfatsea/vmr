@@ -53,9 +53,9 @@ func vmWorkloadSection(rep *Report2, _ Row, lang i18n.Lang) SectionVM {
 			}
 		}
 		reqTitle, reqAxis := t.HourlyReqChart()
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.HourlyTitle + "\n\n" +
-			mermaidHourBar(reqTitle, reqAxis, vol) +
-			mermaidTokenHourBar(t.HourlyTokChart, tokIn)})
+		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.HourlyTitle + "\n\n"})
+		sec.Blocks = append(sec.Blocks, ChartVM{Title: reqTitle, YLabel: reqAxis, Labels: hourLabels(), Parts: chartPartsInt(vol)})
+		sec.Blocks = append(sec.Blocks, ChartVM{Title: t.HourlyTokChart, YLabel: "Token (M)", Labels: hourLabels(), Parts: chartPartsTokensM(tokIn)})
 	}
 	// by date: mermaid + folded table fallback
 	if len(rep.ByDate) > 0 {
@@ -68,9 +68,9 @@ func vmWorkloadSection(rep *Report2, _ Row, lang i18n.Lang) SectionVM {
 			tokIn[i] = d.TokensIn
 		}
 		dayTitle, dayAxis := t.DailyReqChart()
-		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.DailyTitle + "\n\n" +
-			mermaidBarLabeled(dayTitle, dayAxis, labels, vol) +
-			mermaidTokenBarLabeled(t.DailyTokChart, labels, tokIn)})
+		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.DailyTitle + "\n\n"})
+		sec.Blocks = append(sec.Blocks, ChartVM{Title: dayTitle, YLabel: dayAxis, Labels: labels, Parts: chartPartsInt(vol)})
+		sec.Blocks = append(sec.Blocks, ChartVM{Title: t.DailyTokChart, YLabel: "Token (M)", Labels: labels, Parts: chartPartsTokensM(tokIn)})
 		dtbl := &TableVM{Fold: fmt.Sprintf(t.DailyTableOpen, len(rep.ByDate)), Headers: t.DailyTableHeaders[:]}
 		for _, d := range rep.ByDate {
 			dtbl.row(d.Date, strconv.Itoa(d.Requests), pctStr2(d.OK, d.Requests),

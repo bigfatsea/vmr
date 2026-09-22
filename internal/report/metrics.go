@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-22 18:05, by coding
 
 // Derived-metric helpers, true per-bucket percentiles, and the small
 // per-record extraction helpers shared by Build. Every finish* computes the
@@ -15,7 +15,6 @@ import (
 	"vmr/internal/chatmsg"
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/reqdetail"
 )
 
 // freshTokens returns in - cached - cacheWrite, floored at 0 — a thin
@@ -487,15 +486,15 @@ func findContextGrowth(rep *Report2, lang i18n.Lang) *Finding {
 		return nil
 	}
 	ft := i18n.Efficiency(lang).ContextGrowthFinding(
-		strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, reqdetail.EscapeHTML(worst.Title))
+		strconv.FormatFloat(float64(worst.ContextGrowth), 'f', 1, 64), worst.ID, worst.Title)
 	return &Finding{
 		Code: FindingContextGrowth, Finding: ft.Title, Metric: "context_growth",
 		Value: ft.Value, Implicated: ft.Implicated, Action: ft.Action,
 		Params: map[string]string{
 			// session_title is the RAW value, unescaped — Params holds
-			// original values, never pre-escaped text (R2-b will move
-			// escaping to the serializer; storing it raw here already
-			// matches that end state).
+			// original values, never pre-escaped text, and so does the
+			// narrative built above now that the Markdown table escapes
+			// its Implicated cell at projection time (viewmodel_efficiency.go).
 			"context_growth": strconv.FormatFloat(float64(worst.ContextGrowth), 'f', -1, 64),
 			"session_id":     worst.ID,
 			"session_title":  worst.Title,

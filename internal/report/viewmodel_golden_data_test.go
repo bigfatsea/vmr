@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-22 13:05, by Sonnet 5
 
 // Golden VM structures for TestGoldenVMStructure (viewmodel_golden_test.go):
 // the full MacroReportVM JSON for the compact golden fixture, one constant
@@ -23,7 +23,11 @@ const (
       "Body": "a.jsonl, b.jsonl\n"
     },
     {
-      "Text": "Request-level data is in ` + "`" + `requests/index.json` + "`" + `; browse it interactively with ` + "`" + `request-browser.html` + "`" + `\n\n"
+      "Text": "Request-level data is in ` + "`" +
+		`requests/index.json` + "`" +
+		`; browse it interactively with ` + "`" +
+		`request-browser.html` + "`" +
+		`\n\n"
     },
     {
       "Text": "Task narratives in [journeys/index.md](journeys/index.md) (2 task(s) indexed · covers 2026-07-23 02:39:00 – 2026-07-24 10:00:00)\n\n"
@@ -285,7 +289,8 @@ const (
           "Text": "> Estimated cost includes requests where usage was not sniffed (priced via fallback estimation); the fresh/out columns only count confirmed token usage. Calculating unit price as \"Est. Cost ÷ Tokens\" may yield an inflated figure.\n\n"
         },
         {
-          "Text": "<details><summary>Pricing sources used for this report</summary>\n\nstandard table generated 2026-08-01; 1 provider rate rule(s) applied\n</details>\n\n\n"
+          "Summary": "Pricing sources used for this report",
+          "Body": "standard table generated 2026-08-01; 1 provider rate rule(s) applied\n"
         }
       ]
     },
@@ -328,10 +333,13 @@ const (
           "Notes": null
         },
         {
-          "Text": "### Quota vs. Consumption\n\n"
+          "Level": 1,
+          "Text": "Quota vs. Consumption"
         },
         {
-          "Text": "Every account that declares a ` + "`" + `quota:` + "`" + `, with two independently-windowed consumption figures placed side by side — never subtracted or ratioed, each labeled with its own source.\n\n"
+          "Text": "Every account that declares a ` + "`" +
+		`quota:` + "`" +
+		`, with two independently-windowed consumption figures placed side by side — never subtracted or ratioed, each labeled with its own source.\n\n"
         },
         {
           "Title": "",
@@ -359,8 +367,16 @@ const (
             ]
           ],
           "Notes": [
-            "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the router's own ` + "`" + `multiplier × forwarded-attempt count` + "`" + ` formula literally (the router charges once per forwarded upstream success, failed attempts were never charged in the first place, and the multiplier is applied by exact multiplication with no rounding). **tokens** — requests whose upstream returned no exact usage are counted here with the same byte-count estimate the router charged (no longer counted as 0); the estimated share is shown as \"X% est.\" in parentheses. Both sides run the same formula; the one residual drift is that the router counts UPSTREAM bytes while this column can only count the bytes forwarded to the client, so the two differ by whatever response normalization rewrote (model-name rewrite, ` + "`" + `<think>` + "`" + ` stripping, ...). Common to both metrics: config weights/multipliers changed mid-window.\n",
-            "> ² Used This Period: the router's own real-time counter from ` + "`" + `<log_dir>/vmr-quota.json` + "`" + ` — the authoritative account, in a different window than the column to its left. Never subtract or ratio the two. Shows ` + "`" + `-` + "`" + ` when the stored counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a degraded estimate (a byte-count fallback used when upstream didn't return exact usage), not authoritative metering.\n",
+            "> ¹ Window Consumed: recomputed from this run's audit-log input — a RECOMPUTED figure, not a replay of the router's actual charge history. Accuracy differs per metric. **requests: no drift** — it reproduces the router's own ` + "`" +
+		`multiplier × forwarded-attempt count` + "`" +
+		` formula literally (the router charges once per forwarded upstream success, failed attempts were never charged in the first place, and the multiplier is applied by exact multiplication with no rounding). **tokens** — requests whose upstream returned no exact usage are counted here with the same byte-count estimate the router charged (no longer counted as 0); the estimated share is shown as \"X% est.\" in parentheses. Both sides run the same formula; the one residual drift is that the router counts UPSTREAM bytes while this column can only count the bytes forwarded to the client, so the two differ by whatever response normalization rewrote (model-name rewrite, ` + "`" +
+		`<think>` + "`" +
+		` stripping, ...). Common to both metrics: config weights/multipliers changed mid-window.\n",
+            "> ² Used This Period: the router's own real-time counter from ` + "`" +
+		`<log_dir>/vmr-quota.json` + "`" +
+		` — the authoritative account, in a different window than the column to its left. Never subtract or ratio the two. Shows ` + "`" +
+		`-` + "`" +
+		` when the stored counter is still on an earlier period. The parenthesized \"X% est.\" marks how much of that consumption came from a degraded estimate (a byte-count fallback used when upstream didn't return exact usage), not authoritative metering.\n",
             "> ⭐ marks Used% >= 100%: this account is over its configured quota for the current period.\n",
             "\n"
           ]
@@ -399,7 +415,8 @@ const (
           "Text": "**Endpoint Health** (merged across dates)\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -425,7 +442,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -454,7 +472,8 @@ const (
           "Text": "**Error Class × Endpoint** (non-zero only)\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -477,7 +496,8 @@ const (
           "Text": "**Quirk Fix × Endpoint** (non-zero only, % of this endpoint's successful attempts; see each request's detail page for the full narration)\n\n"
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -497,7 +517,63 @@ const (
           "Notes": null
         },
         {
-          "Text": "**Error Timeline** (errors / hour)\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Errors / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Errors\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Text": "**Error Timeline** (errors / hour)\n\n"
+        },
+        {
+          "Title": "Errors / hour",
+          "YLabel": "Errors",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "1",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
         },
         {
           "Text": "> Errors peak at 09:00 (1 total).\n\n"
@@ -537,7 +613,8 @@ const (
           "Text": "**By Endpoint** (merged across dates)\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -561,7 +638,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -645,10 +723,142 @@ const (
           "Notes": null
         },
         {
-          "Text": "**Hourly Activity**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Requests / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Requests\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / hour\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Text": "**Hourly Activity**\n\n"
         },
         {
-          "Text": "**Daily Activity**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Requests / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Requests\"\n    bar [50]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"Input Tokens / day\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Title": "Requests / hour",
+          "YLabel": "Requests",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "5",
+            "0",
+            "0",
+            "0",
+            "0",
+            "2",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        },
+        {
+          "Title": "Input Tokens / hour",
+          "YLabel": "Token (M)",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.09",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.03",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00"
+          ]
+        },
+        {
+          "Text": "**Daily Activity**\n\n"
+        },
+        {
+          "Title": "Requests / day",
+          "YLabel": "Requests",
+          "Labels": [
+            "07-23"
+          ],
+          "Parts": [
+            "50"
+          ]
+        },
+        {
+          "Title": "Input Tokens / day",
+          "YLabel": "Token (M)",
+          "Labels": [
+            "07-23"
+          ],
+          "Parts": [
+            "0.50"
+          ]
         },
         {
           "Title": "",
@@ -775,7 +985,8 @@ const (
           "Text": "> Session labels like s01 (l-...): sNN is a report-local row alias; l-<hash8> is the stable content-addressed ID.\n\n"
         },
         {
-          "Text": "**claw-a**\n\n"
+          "Level": 3,
+          "Text": "claw-a"
         },
         {
           "Title": "",
@@ -1008,7 +1219,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "**claw-b**\n\n"
+          "Level": 3,
+          "Text": "claw-b"
         },
         {
           "Title": "",
@@ -1175,7 +1387,7 @@ const (
       "Title": "§7 Efficiency & Waste ⭐",
       "Blocks": [
         {
-          "Text": "> **Total shipped** 48.0 KB · **Dead weight** 24.0 KB (50%) · **≈ tokens wasted** 6.0K · **Tool-set shapes** 1\n\n"
+          "Text": "**Total shipped** 48.0 KB · **Dead weight** 24.0 KB (50%) · **≈ tokens wasted** 6.0K · **Tool-set shapes** 1"
         },
         {
           "Title": "",
@@ -1262,10 +1474,28 @@ const (
       "Title": "§8 Request Detail Index",
       "Blocks": [
         {
-          "Text": "Machine-readable per-request detail is in ` + "`" + `requests/index.json` + "`" + ` (with the session/task title projection and journey cross-links); filter by client/model/endpoint/duration/tokens, sort, and locate one request with ` + "`" + `request-browser.html` + "`" + `.\n\n"
+          "Text": "Machine-readable per-request detail is in ` + "`" +
+		`requests/index.json` + "`" +
+		` (with the session/task title projection and journey cross-links); filter by client/model/endpoint/duration/tokens, sort, and locate one request with ` + "`" +
+		`request-browser.html` + "`" +
+		`.\n\n"
         },
         {
-          "Text": "This run did not write ` + "`" + `requests/details/*.md` + "`" + ` (generated on demand by default). Fetch a single record any time by its coordinate (the ` + "`" + `req` + "`" + ` field of ` + "`" + `requests/index.json` + "`" + `, ` + "`" + `basename:line` + "`" + `): ` + "`" + `vmr replay -print -req <coord>` + "`" + `, e.g. ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `; or pass ` + "`" + `-details` + "`" + ` to materialize all of them.\n\n"
+          "Text": "This run did not write ` + "`" +
+		`requests/details/*.md` + "`" +
+		` (generated on demand by default). Fetch a single record any time by its coordinate (the ` + "`" +
+		`req` + "`" +
+		` field of ` + "`" +
+		`requests/index.json` + "`" +
+		`, ` + "`" +
+		`basename:line` + "`" +
+		`): ` + "`" +
+		`vmr replay -print -req <coord>` + "`" +
+		`, e.g. ` + "`" +
+		`vmr replay -print -req a.jsonl:3` + "`" +
+		`; or pass ` + "`" +
+		`-details` + "`" +
+		` to materialize all of them.\n\n"
         }
       ]
     },
@@ -1288,11 +1518,16 @@ const (
   "Footnotes": [
     {
       "ID": "self-traffic",
-      "Text": "- Self-traffic: exclusion active; 2 analysis request(s) from ` + "`" + `vmr analyze -llm-addr` + "`" + ` itself removed from every total (disable with ` + "`" + `-include-self-traffic` + "`" + `).\n"
+      "Text": "- Self-traffic: exclusion active; 2 analysis request(s) from ` + "`" +
+		`vmr analyze -llm-addr` + "`" +
+		` itself removed from every total (disable with ` + "`" +
+		`-include-self-traffic` + "`" +
+		`).\n"
     }
   ]
 }
 `
+
 	goldenVMZH = `{
   "Title": "VMR 用量报告",
   "Meta": [
@@ -1307,7 +1542,11 @@ const (
       "Body": "a.jsonl, b.jsonl\n"
     },
     {
-      "Text": "请求明细数据见 ` + "`" + `requests/index.json` + "`" + `；交互式浏览用 ` + "`" + `request-browser.html` + "`" + `\n\n"
+      "Text": "请求明细数据见 ` + "`" +
+		`requests/index.json` + "`" +
+		`；交互式浏览用 ` + "`" +
+		`request-browser.html` + "`" +
+		`\n\n"
     },
     {
       "Text": "任务叙事见 [journeys/index.md](journeys/index.md)（2 个任务索引 · 覆盖 2026-07-23 02:39:00 – 2026-07-24 10:00:00）\n\n"
@@ -1569,7 +1808,8 @@ const (
           "Text": "> 估算成本包含了未嗅探到 usage 的请求（按降级估算定价计入）；而 fresh/out 列仅统计已确认的 Token 数量。若按「估算成本 ÷ Token」反推单价可能偏高。\n\n"
         },
         {
-          "Text": "<details><summary>本次使用的定价来源</summary>\n\n标准价目表生成于 2026-08-01；已套用 1 条 provider 费率规则\n</details>\n\n\n"
+          "Summary": "本次使用的定价来源",
+          "Body": "标准价目表生成于 2026-08-01；已套用 1 条 provider 费率规则\n"
         }
       ]
     },
@@ -1612,10 +1852,13 @@ const (
           "Notes": null
         },
         {
-          "Text": "### 额度与消耗对照\n\n"
+          "Level": 1,
+          "Text": "额度与消耗对照"
         },
         {
-          "Text": "只列配了 ` + "`" + `quota:` + "`" + ` 的账户，把两个不同时间窗口的消耗数字并排给出——不做减法、不算覆盖率，各自标注来源。\n\n"
+          "Text": "只列配了 ` + "`" +
+		`quota:` + "`" +
+		` 的账户，把两个不同时间窗口的消耗数字并排给出——不做减法、不算覆盖率，各自标注来源。\n\n"
         },
         {
           "Title": "",
@@ -1643,8 +1886,16 @@ const (
             ]
           ],
           "Notes": [
-            "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。两种口径的精度不同：**requests 口径无出入**——按 ` + "`" + `倍率 × 已转发尝试数` + "`" + ` 逐字复现路由半区的记账公式（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，当响应正规化改写过内容（模型名改写、` + "`" + `<think>` + "`" + ` 剥离等）时两者会差出这段字节。两种口径共同的出入源：config 里的权重/倍率在本窗口期内被改过。\n",
-            "> ² 本周期已用：来自 ` + "`" + `<log_dir>/vmr-quota.json` + "`" + ` 的实时计数器，是路由半区的权威记账——与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 ` + "`" + `-` + "`" + `。括号内的\"X% 估算\"标注这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
+            "> ¹ 本报表窗口消耗：从本次输入的审计日志重算得到，是**重算值**，不是路由半区当时记账的重放。两种口径的精度不同：**requests 口径无出入**——按 ` + "`" +
+		`倍率 × 已转发尝试数` + "`" +
+		` 逐字复现路由半区的记账公式（路由每转发一次上游成功响应记一次账，失败尝试本就不记，倍率精确相乘、不取整）；**tokens 口径**：上游未返回精确 usage 的请求，本列与路由半区一样按字节数估算计入（不再计 0），估算占比见括号内的\"X% 估算\"标注——两侧公式相同，唯一残留出入是路由半区数的是**上游原始字节**、本列只能数**转发给客户端的字节**，当响应正规化改写过内容（模型名改写、` + "`" +
+		`<think>` + "`" +
+		` 剥离等）时两者会差出这段字节。两种口径共同的出入源：config 里的权重/倍率在本窗口期内被改过。\n",
+            "> ² 本周期已用：来自 ` + "`" +
+		`<log_dir>/vmr-quota.json` + "`" +
+		` 的实时计数器，是路由半区的权威记账——与上一列的统计窗口不同，两者不可相减、不可求比值。计数器仍停留在更早周期时显示 ` + "`" +
+		`-` + "`" +
+		`。括号内的\"X% 估算\"标注这段消耗里有多少来自降级估算（上游未返回精确 usage 时的字节数粗估），不是精确记账。\n",
             "> ⭐ 已用% ≥ 100% 时的标记：该账户本周期已超出配置的额度上限。\n",
             "\n"
           ]
@@ -1683,7 +1934,8 @@ const (
           "Text": "**端点健康**（跨日合并）\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -1709,7 +1961,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -1738,7 +1991,8 @@ const (
           "Text": "**错误类别 × 端点**（仅非零）\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -1761,7 +2015,8 @@ const (
           "Text": "**Quirk 修复 × 端点**（仅非零，占该端点成功尝试的比例；详见每条请求的详情页）\n\n"
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -1781,7 +2036,63 @@ const (
           "Notes": null
         },
         {
-          "Text": "**错误时间线**（错误数 / 小时）\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"错误数 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"错误数\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Text": "**错误时间线**（错误数 / 小时）\n\n"
+        },
+        {
+          "Title": "错误数 / 小时",
+          "YLabel": "错误数",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "1",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
         },
         {
           "Text": "> 错误集中在 09:00（共 1 条）。\n\n"
@@ -1821,7 +2132,8 @@ const (
           "Text": "**按端点**（跨日合并）\n\n"
         },
         {
-          "Text": "*openai-completions*\n\n"
+          "Level": 2,
+          "Text": "openai-completions"
         },
         {
           "Title": "",
@@ -1845,7 +2157,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "*anthropic-messages*\n\n"
+          "Level": 2,
+          "Text": "anthropic-messages"
         },
         {
           "Title": "",
@@ -1929,10 +2242,142 @@ const (
           "Notes": null
         },
         {
-          "Text": "**每小时活跃度**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"请求\"\n    bar [0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 小时\"\n    x-axis [\"00\", \"01\", \"02\", \"03\", \"04\", \"05\", \"06\", \"07\", \"08\", \"09\", \"10\", \"11\", \"12\", \"13\", \"14\", \"15\", \"16\", \"17\", \"18\", \"19\", \"20\", \"21\", \"22\", \"23\"]\n    y-axis \"Token (M)\"\n    bar [0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.09, 0.00, 0.00, 0.00, 0.00, 0.03, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Text": "**每小时活跃度**\n\n"
         },
         {
-          "Text": "**按日期活跃度**\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"请求量 / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"请求\"\n    bar [50]\n` + "`" + `` + "`" + `` + "`" + `\n\n` + "`" + `` + "`" + `` + "`" + `mermaid\nxychart-beta\n    title \"输入Token / 天\"\n    x-axis [\"07-23\"]\n    y-axis \"Token (M)\"\n    bar [0.50]\n` + "`" + `` + "`" + `` + "`" + `\n\n"
+          "Title": "请求量 / 小时",
+          "YLabel": "请求",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "5",
+            "0",
+            "0",
+            "0",
+            "0",
+            "2",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0"
+          ]
+        },
+        {
+          "Title": "输入Token / 小时",
+          "YLabel": "Token (M)",
+          "Labels": [
+            "00",
+            "01",
+            "02",
+            "03",
+            "04",
+            "05",
+            "06",
+            "07",
+            "08",
+            "09",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
+            "15",
+            "16",
+            "17",
+            "18",
+            "19",
+            "20",
+            "21",
+            "22",
+            "23"
+          ],
+          "Parts": [
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.09",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.03",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "0.00"
+          ]
+        },
+        {
+          "Text": "**按日期活跃度**\n\n"
+        },
+        {
+          "Title": "请求量 / 天",
+          "YLabel": "请求",
+          "Labels": [
+            "07-23"
+          ],
+          "Parts": [
+            "50"
+          ]
+        },
+        {
+          "Title": "输入Token / 天",
+          "YLabel": "Token (M)",
+          "Labels": [
+            "07-23"
+          ],
+          "Parts": [
+            "0.50"
+          ]
         },
         {
           "Title": "",
@@ -2059,7 +2504,8 @@ const (
           "Text": "> 会话标识形如 s01 (l-...)：sNN 仅为本次报告内行号别名，括号内 l-<hash8> 为稳定内容寻址 ID。\n\n"
         },
         {
-          "Text": "**claw-a**\n\n"
+          "Level": 3,
+          "Text": "claw-a"
         },
         {
           "Title": "",
@@ -2292,7 +2738,8 @@ const (
           "Notes": null
         },
         {
-          "Text": "**claw-b**\n\n"
+          "Level": 3,
+          "Text": "claw-b"
         },
         {
           "Title": "",
@@ -2459,7 +2906,7 @@ const (
       "Title": "§7 效率与浪费 ⭐",
       "Blocks": [
         {
-          "Text": "> **累计发出** 48.0 KB · **其中死重** 24.0 KB (50%) · **≈ 浪费 token** 6.0K · **工具集形态** 1\n\n"
+          "Text": "**累计发出** 48.0 KB · **其中死重** 24.0 KB (50%) · **≈ 浪费 token** 6.0K · **工具集形态** 1"
         },
         {
           "Title": "",
@@ -2546,10 +2993,28 @@ const (
       "Title": "§8 请求详单",
       "Blocks": [
         {
-          "Text": "每条请求的机读明细在 ` + "`" + `requests/index.json` + "`" + `（含会话/任务标题投影与 journey 交叉链接）；按客户端/模型/端点/耗时/token 筛选、排序、定位单条请求用 ` + "`" + `request-browser.html` + "`" + `。\n\n"
+          "Text": "每条请求的机读明细在 ` + "`" +
+		`requests/index.json` + "`" +
+		`（含会话/任务标题投影与 journey 交叉链接）；按客户端/模型/端点/耗时/token 筛选、排序、定位单条请求用 ` + "`" +
+		`request-browser.html` + "`" +
+		`。\n\n"
         },
         {
-          "Text": "本次运行未生成 ` + "`" + `requests/details/*.md` + "`" + `（默认按需生成）。用坐标（` + "`" + `requests/index.json` + "`" + ` 的 ` + "`" + `req` + "`" + ` 字段，形如 ` + "`" + `basename:line` + "`" + `）随时取出单条记录：` + "`" + `vmr replay -print -req <坐标>` + "`" + `，例如 ` + "`" + `vmr replay -print -req a.jsonl:3` + "`" + `；或加 ` + "`" + `-details` + "`" + ` 全量生成。\n\n"
+          "Text": "本次运行未生成 ` + "`" +
+		`requests/details/*.md` + "`" +
+		`（默认按需生成）。用坐标（` + "`" +
+		`requests/index.json` + "`" +
+		` 的 ` + "`" +
+		`req` + "`" +
+		` 字段，形如 ` + "`" +
+		`basename:line` + "`" +
+		`）随时取出单条记录：` + "`" +
+		`vmr replay -print -req <坐标>` + "`" +
+		`，例如 ` + "`" +
+		`vmr replay -print -req a.jsonl:3` + "`" +
+		`；或加 ` + "`" +
+		`-details` + "`" +
+		` 全量生成。\n\n"
         }
       ]
     },
@@ -2572,7 +3037,11 @@ const (
   "Footnotes": [
     {
       "ID": "self-traffic",
-      "Text": "- 自指流量: 排除已启用，本次从全部统计中排除 2 条 ` + "`" + `vmr analyze -llm-addr` + "`" + ` 自身产生的分析请求（` + "`" + `-include-self-traffic` + "`" + ` 可关闭）。\n"
+      "Text": "- 自指流量: 排除已启用，本次从全部统计中排除 2 条 ` + "`" +
+		`vmr analyze -llm-addr` + "`" +
+		` 自身产生的分析请求（` + "`" +
+		`-include-self-traffic` + "`" +
+		` 可关闭）。\n"
     }
   ]
 }

@@ -78,7 +78,7 @@ func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 		return
 	}
 	t := i18n.ProviderQuota(lang)
-	sec.Blocks = append(sec.Blocks, ParaVM{Text: "### " + t.Title + "\n\n"})
+	sec.Blocks = append(sec.Blocks, HeadingVM{Level: 1, Text: t.Title})
 	intro := t.Intro
 	if rep.Meta.QuotaJSONPath != "" {
 		intro += t.SourcePathLine(rep.Meta.QuotaJSONPath)

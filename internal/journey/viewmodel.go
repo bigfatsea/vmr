@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-22 19:10, by coding
 
 // The journey-side ViewModel layer (design decisions D3/D4/D11/D12):
 // the single rendering path for j-<id>.md. BuildJourneyVM consumes ONLY the
@@ -10,11 +10,9 @@
 // structure with no copy, no formatting and no i18n of its own (D3 — no
 // template engine; the VM is Markdown's deterministic source).
 //
-// Two entry points, one path: RenderMarkdownFromSummary(s) builds the VM and
-// serializes it — the same path -render-only will take once cmd wiring lands
-// (Phase 3, D11). The pre-existing RenderMarkdown (render_md.go, eats the
-// in-memory *Journey) stays until 3C deletes it; the transition equivalence
-// between the two is pinned by test, not assumed.
+// Single entry point: RenderMarkdownFromSummary(s, lang, reportMDExists, linkDetails)
+// builds the VM and serializes it — the single path for j-<id>.md, consuming
+// the self-contained JourneySummary (D11).
 package journey
 
 import (

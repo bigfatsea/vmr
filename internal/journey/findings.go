@@ -158,16 +158,30 @@ func ComputeFindings(j *Journey) []Finding {
 // j-<id>.json back off disk and renders it in a different language than
 // whatever ComputeFindings happened to run with originally).
 //
-// LLM-inferred findings (Source == SourceLLMInferred) are returned
-// unchanged — their Finding/Evidence/Action is the model's own generated
-// text (see Finding.LLMLang's doc comment), not reconstructible from
-// Params. The LLM semantic detector Codes (FindingToolResultMisinterpretation
-// and friends, llm_findings.go) only ever appear with that Source set, so
-// the switch below never needs a case for them; an unrecognized Code (a
-// future addition this function hasn't been taught yet) falls back to the
+// LLM-inferred findings (Source == SourceLLMInferred) skip re-localization
+// — their Finding/Evidence/Action is the model's own generated text (see
+// Finding.LLMLang's doc comment), not reconstructible from Params. The LLM
+// semantic detector Codes (FindingToolResultMisinterpretation and friends,
+// llm_findings.go) only ever appear with that Source set, so the switch
+// below never needs a case for them; an unrecognized Code (a future
+// addition this function hasn't been taught yet) falls back to the
 // persisted text unchanged rather than blanking it.
+//
+// This function is the one caller that matters for the LLM-inferred
+// branch below: it runs only on the Markdown render path
+// (viewmodel_spine.go's buildVMFindings), never when building the
+// persisted j-<id>.json. That's why Markdown-structure escaping
+// (sanitizeMDStruct) happens here rather than at Finding-construction time
+// (llm_findings.go) — ComputeLLMFindings' own doc comment and
+// KNOWN_ISSUES §1.5 explain why: the JSON stays the model's raw text,
+// Markdown gets the escaped copy, and the two concerns (re-localize vs.
+// Markdown-escape) are independent — this branch always does the second,
+// never the first.
 func localizeFinding(f Finding, lang i18n.Lang) Finding {
 	if f.Source == SourceLLMInferred {
+		f.Evidence = sanitizeMDStruct(f.Evidence)
+		f.Action = sanitizeMDStruct(f.Action)
+		f.EvidenceAnchor = sanitizeMDStruct(f.EvidenceAnchor)
 		return f
 	}
 	tx := i18n.JourneyFindings(lang)
