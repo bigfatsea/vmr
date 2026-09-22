@@ -199,8 +199,8 @@ func LineageIndex(g *Graph) map[int]*Lineage {
 // is always the last element. A lineage with no stitched predecessor (the
 // common case) returns the single-element chain []*Lineage{l} — Step 1's
 // "one lineage, one Journey" behavior is the degenerate case of this, not a
-// separate code path (internal/journey.Build wraps a lone Lineage in a
-// 1-element chain for exactly this reason).
+// separate code path (internal/journey.BuildChain renders a 1-element chain
+// the same way it renders a longer one, for exactly this reason).
 func ChainFrom(l *Lineage, byIdx map[int]*Lineage) []*Lineage {
 	chain := []*Lineage{l}
 	cur := l

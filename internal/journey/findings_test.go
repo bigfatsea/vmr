@@ -14,7 +14,7 @@ import (
 
 // journeyOf wraps steps into a single-Task Journey — findings.go's
 // detectors only read Task/Step data, never Manifest/Rec, so a minimal
-// literal fixture (no full Build() pipeline) is enough for these tests.
+// literal fixture (no full BuildChain() pipeline) is enough for these tests.
 func journeyOf(steps ...*Step) *Journey {
 	return &Journey{Tasks: []*Task{{Title: "t", Steps: steps}}}
 }

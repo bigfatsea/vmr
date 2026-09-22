@@ -183,9 +183,8 @@ func TestCmdCheck_NoQuotaBlock_SectionAbsent(t *testing.T) {
 
 // TestCmdCheck_PrintsPricingTableLine verifies pricing table summary output
 // (pricingTableLine in cmd_check.go): the embedded standard table is
-// unconditional now (see docs/future-strategy/pricing_architecture_simplification_plan.md
-// decisions 1/2 — no more "does this config touch pricing at all" gate), so
-// even a config that never declares a providers[].pricing block gets a
+// unconditional now — no more "does this config touch pricing at all" gate —
+// so even a config that never declares a providers[].pricing block gets a
 // "pricing_table:" line naming the embedded table's generation date.
 func TestCmdCheck_PrintsPricingTableLine(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", minimalConfigYAML)

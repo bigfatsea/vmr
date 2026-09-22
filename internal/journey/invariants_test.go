@@ -64,22 +64,22 @@ func manyToolCallRecords(n int) []audit.Record {
 // regression, closing the gap that F9 had only ever been hand-verified
 // against one real record (57/57), never turned into a test that fails the
 // build if the invariant is ever violated. Runs chatmsg.CheckToolPairing
-// over every manifest a real Build() produces (re-fetching each Step's
-// record by its manifest coordinate — the same body journey.Build fed into
+// over every manifest a real BuildChain() produces (re-fetching each Step's
+// record by its manifest coordinate — the same body BuildChain fed into
 // rendering), so this also guards against any future change to
-// Build/chatmsg accidentally introducing a mismatch.
+// BuildChain/chatmsg accidentally introducing a mismatch.
 func TestInvariant_ToolCallPairingIsAlways100Percent(t *testing.T) {
 	const turns = 20
 	recs := manyToolCallRecords(turns)
 	path := writeJSONL(t, recs)
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
-		t.Fatalf("Build: %v", err)
+		t.Fatalf("BuildChain: %v", err)
 	}
 
 	// Step no longer carries its Record; re-fetch each manifest's body the
-	// same way Build did (ctxgraph.FetchRecords over the step manifests).
+	// same way BuildChain did (ctxgraph.FetchRecords over the step manifests).
 	stepRecs := fetchStepRecords(t, j)
 
 	checked := 0

@@ -1,7 +1,7 @@
 // Ver 2026-09-14, by Sonnet 5
 
 // Agent Guard's outbound mount point, end to end through the real HTTP
-// pipeline (docs/design/agent-guard-technical-spec-final-2.0.md ADR-4, M3.4).
+// pipeline (the Agent Guard spec ADR-4, M3.4).
 // These ride the same server/router/audit scaffolding every other
 // internal/server integration test uses (newAuditedServer/chat/
 // readRecords) rather than unit-testing applyOutboundGuard in isolation,

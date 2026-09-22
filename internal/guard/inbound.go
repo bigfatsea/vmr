@@ -1,6 +1,6 @@
 // Ver 2026-09-17, by Sonnet 5
 
-// Inbound: the online read-chain mount point (docs/design/agent-guard-technical-spec-final-2.0.md
+// Inbound: the online read-chain mount point (the Agent Guard spec
 // ADR-15, M4). Sits downstream of respnorm in the read chain (resp.Body ->
 // respnorm.Wrap -> guard.Inbound -> copyFlush) and independently of
 // respnorm's own mode selection: whether respnorm ends up streaming,

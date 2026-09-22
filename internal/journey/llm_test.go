@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -68,7 +69,7 @@ func TestBuildEvidencePack_FromRealJourney(t *testing.T) {
 		[]map[string]any{writeToolCall("exec", "", "")})
 	rec2 := mkExtrasRec(at2, "sys", "调研任务", "openai-completions:p:m", 110, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

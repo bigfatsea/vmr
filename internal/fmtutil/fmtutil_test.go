@@ -293,9 +293,6 @@ func TestFmtCurrency(t *testing.T) {
 		if got := FmtCurrency(tc.amount, tc.ccy...); got != tc.want {
 			t.Errorf("FmtCurrency(%v, %v) = %q, want %q", tc.amount, tc.ccy, got, tc.want)
 		}
-		if got := FmtCost(tc.amount, tc.ccy...); got != tc.want {
-			t.Errorf("FmtCost(%v, %v) = %q, want %q", tc.amount, tc.ccy, got, tc.want)
-		}
 	}
 }
 

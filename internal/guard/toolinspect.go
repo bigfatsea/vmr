@@ -90,7 +90,7 @@ func decodeUnicodeEscapes(args []byte) []byte {
 // protectedPathPattern matches the design spec's protected-path table
 // (the subset already exercised by the corpus scan — Windows paths,
 // crontab, and Agent-config globs beyond ~/.claude/.mcp.json are Backlog
-// item 1 of docs/design/agent-guard-technical-spec-final-2.0.md §6.3, not
+// item 1 of the Agent Guard spec §6.3, not
 // silently expanded here without corpus calibration). It is applied ONLY
 // to path-named argument values (pathArgKeys below), never to the raw
 // argument bytes.
@@ -101,8 +101,8 @@ var protectedPathPattern = regexp.MustCompile(`(?i)(~/\.ssh/|/etc/|~/\.bashrc|~/
 // write targets. Protected-path matching runs ONLY against these values,
 // never the raw argument bytes: a write tool whose document body merely
 // MENTIONS "~/.ssh/" or "/etc/" in its content is not a persistence
-// attempt, and the whole-string scan this replaced flagged exactly that
-// (docs/KNOWN_ISSUES.md §2.160). Keys outside this set are never scanned
+// attempt, and the whole-string scan this replaced flagged exactly that.
+// Keys outside this set are never scanned
 // as paths — a tool shape this misses is a false negative, never a new
 // false positive, and a fallback to whole-string matching would be
 // precisely the bug being fixed.

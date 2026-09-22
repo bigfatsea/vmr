@@ -16,9 +16,9 @@ func TestUnrecognizedShapeCounts_RecognizedShapesStayZero(t *testing.T) {
 	// either counter.
 	RenderPart(map[string]any{"type": "text", "text": "hello"})
 	RenderPart(map[string]any{"type": "tool_use", "name": "web_search", "input": map[string]any{}})
-	if _, u := ExtractUsageWithProtocol(map[string]any{
+	if _, inOK, outOK := ExtractUsageSides(map[string]any{
 		"usage": map[string]any{"prompt_tokens": float64(10), "completion_tokens": float64(5)},
-	}, "openai-completions"); !u {
+	}, "openai-completions"); !inOK && !outOK {
 		t.Fatal("recognized usage object should parse")
 	}
 	parts, holders := UnrecognizedShapeCounts()
@@ -56,10 +56,10 @@ func TestUnrecognizedShapeCounts_UnknownUsageHolderShapeCounted(t *testing.T) {
 	// JSON object (e.g. a gateway emitting "usage": "accounted-elsewhere").
 	// mergeUsage's 3-holder list skips it silently today — the counter makes
 	// it audible.
-	u, ok := ExtractUsageWithProtocol(map[string]any{
+	u, inOK, outOK := ExtractUsageSides(map[string]any{
 		"usage": "not-an-object",
 	}, "openai-completions")
-	if ok {
+	if inOK || outOK {
 		t.Fatalf("usage from a string holder should not parse, got %+v", u)
 	}
 	parts, holders := UnrecognizedShapeCounts()
@@ -75,10 +75,10 @@ func TestUnrecognizedShapeCounts_UnknownUsageHolderShapeCounted(t *testing.T) {
 func TestUnrecognizedShapeCounts_AbsentUsageNotCounted(t *testing.T) {
 	ResetUnrecognizedShapeCounts()
 
-	if _, ok := ExtractUsageWithProtocol(map[string]any{"error": map[string]any{"message": "boom"}}, "openai-completions"); ok {
+	if _, inOK, outOK := ExtractUsageSides(map[string]any{"error": map[string]any{"message": "boom"}}, "openai-completions"); inOK || outOK {
 		t.Fatal("error body without usage should not parse as usage")
 	}
-	if _, ok := ExtractUsageWithProtocol(map[string]any{"choices": []any{}}, "openai-completions"); ok {
+	if _, inOK, outOK := ExtractUsageSides(map[string]any{"choices": []any{}}, "openai-completions"); inOK || outOK {
 		t.Fatal("choices-only body without usage should not parse as usage")
 	}
 	_, holders := UnrecognizedShapeCounts()

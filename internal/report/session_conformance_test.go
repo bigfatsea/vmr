@@ -34,6 +34,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/taskseg"
 )
 
 // recLoc is defined in session.go (production code) — group() now needs the
@@ -58,13 +59,13 @@ type groupingComparison struct {
 
 func compareGrouping(t *testing.T, paths []string) groupingComparison {
 	t.Helper()
-	a, err := AnalyzeSessions(paths)
+	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
 	if err != nil {
-		t.Fatalf("AnalyzeSessions: %v", err)
+		t.Fatalf("AnalyzeSessionsCached: %v", err)
 	}
-	g, err := ctxgraph.Scan(paths)
+	g, _, err := ctxgraph.ScanCached(paths, nil)
 	if err != nil {
-		t.Fatalf("ctxgraph.Scan: %v", err)
+		t.Fatalf("ctxgraph.ScanCached: %v", err)
 	}
 
 	cmp := groupingComparison{
@@ -158,7 +159,7 @@ func TestConformance_ExistingFixtureSessionsMapOneToOneWithLineages(t *testing.T
 	path, _ := fixture(t)
 	cmp := compareGrouping(t, []string{path})
 
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +227,7 @@ func TestConformance_F6AnchorGluedLineageSplitMatchesCtxgraph(t *testing.T) {
 	path, total := f6AnchorGluedFixture(t)
 	cmp := compareGrouping(t, []string{path})
 
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}

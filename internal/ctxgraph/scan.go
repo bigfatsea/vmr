@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
-	"sync"
 
 	"vmr/internal/audit"
 )
@@ -27,44 +26,7 @@ type Graph struct {
 	NoBody int
 }
 
-// Scan reads paths (audit JSONL, optionally .zst-compressed — see
-// audit.OpenLogFile) and builds a Graph. Per-file reading runs on a bounded
-// worker pool (same rationale as internal/report/session.go's
-// AnalyzeSessions: each file's manifests are a pure function of that file
-// alone, so parallelizing which file gets read first cannot change the
-// final result once everything is merged and stably sorted by timestamp
-// afterward, single-threaded).
-func Scan(paths []string) (*Graph, error) {
-	if err := CheckPathCollisions(paths); err != nil {
-		return nil, err
-	}
-	results := make([]fileScanResult, len(paths))
-	sem := make(chan struct{}, scanWorkerCount(len(paths)))
-	var wg sync.WaitGroup
-	for i, path := range paths {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int, path string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			results[i] = scanFile(path)
-		}(i, path)
-	}
-	wg.Wait()
-
-	var all []*Manifest
-	noBody := 0
-	for _, res := range results {
-		if res.err != nil {
-			return nil, res.err
-		}
-		all = append(all, res.manifests...)
-		noBody += res.noBody
-	}
-	return buildGraph(all, noBody), nil
-}
-
-// buildGraph is Scan's shared tail: sort every already-parsed Manifest by
+// buildGraph is ScanCached's shared tail: sort every already-parsed Manifest by
 // timestamp, bucket by SessKey, and split each bucket into lineages — pure
 // in-memory work over Manifests, with no dependency on where they came from
 // (freshly parsed this call, or reused from a cache — see ScanCached in
@@ -110,8 +72,8 @@ func buildGraph(all []*Manifest, noBody int) *Graph {
 	return g
 }
 
-// scanWorkerCount bounds file-read concurrency the same way AnalyzeSessions
-// does: zstd decompression is CPU-bound, so more workers than cores (or
+// scanWorkerCount bounds file-read concurrency the same way
+// AnalyzeSessionsCached does: zstd decompression is CPU-bound, so more workers than cores (or
 // than files) just adds scheduling overhead.
 func scanWorkerCount(files int) int {
 	n := runtime.NumCPU()

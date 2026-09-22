@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -33,7 +34,7 @@ data: [DONE]`},
 		},
 	}
 	l := onlyLineage(t, writeJSONL(t, []audit.Record{r1}))
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

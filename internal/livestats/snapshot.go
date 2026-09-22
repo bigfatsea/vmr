@@ -30,7 +30,8 @@ type HourlyRow struct {
 	Counters Counters  `json:"counters"`
 }
 
-// RecentErrorRow is one recent_errors[] entry (contracts §1.4): the
+// RecentErrorRow is one recent_errors[] entry (the console's
+// /stats contract): the
 // failure/canceled detail the hourly counters flatten away. Purely
 // in-memory, never persisted, no bodies. ErrorClass quotes the routing
 // half's stamp verbatim — the stats side never re-classifies. Status 0
@@ -103,7 +104,8 @@ func (r *hourRow) add(h time.Time, c Counters) {
 }
 
 // snapshotLocked aggregates the whole ledger for /stats. hourlyTail is the
-// caller-chosen hourly window (contracts §1.5); dailyTail is fixed. Caller
+// caller-chosen hourly window (the console's /stats
+// contract); dailyTail is fixed. Caller
 // holds the mutex.
 func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	// request-face dimension profiles accumulate across every group; the
@@ -284,7 +286,8 @@ func sortedDaily(m map[string]*HourlyRow) []HourlyRow {
 }
 
 // recentErrorRows maps the in-memory ring (append order, oldest last) to
-// its wire shape, newest first (contracts §1.4), filtering out any samples
+// its wire shape, newest first (the console's /stats
+// contract), filtering out any samples
 // older than cutoff.
 func recentErrorRows(recentErrs []Sample, cutoff time.Time) []RecentErrorRow {
 	rows := make([]RecentErrorRow, 0, len(recentErrs))

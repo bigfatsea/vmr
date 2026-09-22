@@ -1,7 +1,7 @@
 // Ver 2026-09-14, by pi
 
 // Shared console assets: one console.css and one console.js for all console
-// pages (console-unification §7). Pages keep the injection markers
+// pages (see the console contract). Pages keep the injection markers
 // /*{{CONSOLE_CSS}}*/ and /*{{CONSOLE_JS}}*/ in their embedded source;
 // assembleConsolePage swaps them for the asset contents in one
 // server-startup pass — never per request (same one-time pattern as

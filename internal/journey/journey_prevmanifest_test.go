@@ -20,7 +20,7 @@ import (
 
 func TestStep_PrevManifest_NilAtStitchBoundary(t *testing.T) {
 	path := s231StyleFixture(t)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

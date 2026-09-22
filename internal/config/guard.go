@@ -1,6 +1,6 @@
 // Ver 2026-09-14, by Sonnet 5
 
-// Agent Guard's config schema (docs/design/agent-guard-technical-spec-final-2.0.md
+// Agent Guard's config schema (the Agent Guard spec
 // §4.5, ADR-15). Guard is a *Guard, not a value: a nil Config.Guard means
 // the guard: key is entirely absent from the YAML, which must mean zero
 // code path overhead and 100% original byte-faithful passthrough (ADR-2's

@@ -503,10 +503,8 @@ func (l *Logger) Write(rec *Record) error {
 			writeBufPool.Put(buf)
 		}
 	}()
-	// json.NewEncoder.Encode appends its own trailing '\n' — unlike
-	// json.Marshal + a manual append(line, '\n'), which reallocates and
-	// copies the whole (potentially multi-MB) record just to add one byte,
-	// since Marshal's returned slice has no spare capacity.
+	// json.NewEncoder.Encode appends its own trailing '\n', avoiding the
+	// realloc+copy json.Marshal + manual append would pay per multi-MB record.
 	//
 	// SetEscapeHTML(false) preserves byte-faithful fidelity to the
 	// request/response body the audit captures. The encoder defaults to

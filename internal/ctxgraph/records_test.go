@@ -159,7 +159,7 @@ func TestScanFile_PopulatesManifestBytes(t *testing.T) {
 		mkAuditRec(at.Add(time.Second), chatBody(sysMsg("sys"), userMsg(strings.Repeat("padding ", 500)))),
 	}
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

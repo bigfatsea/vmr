@@ -8,6 +8,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -39,7 +40,7 @@ func TestFillStepFacts_ExtractsWhatConsumersNeed(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -113,7 +114,7 @@ func TestStepContextPoint_MatchesLegacyContextCurve(t *testing.T) {
 	r2 := mkRec(at(1), "", []any{sys, u1, a1, u2}, sseText("reply two"))
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -169,7 +170,7 @@ func TestFillStepFacts_NewToolResultsScopedToDelta(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

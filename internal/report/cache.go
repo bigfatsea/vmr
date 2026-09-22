@@ -83,8 +83,6 @@ type AnalysisParams struct {
 	RenderAll  bool
 	Details    bool
 	Mode       string
-	From       string
-	To         string
 }
 
 // ComputePricingFingerprint computes the deterministic SHA-256 fingerprint
@@ -174,8 +172,6 @@ func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 		digest.EncodeBool(p.RenderAll),
 		digest.EncodeBool(p.Details),
 		digest.EncodeString(p.Mode),
-		digest.EncodeString(p.From),
-		digest.EncodeString(p.To),
 	)
 
 	// The daily-summary/activity-distribution sections bucket by calendar

@@ -115,7 +115,7 @@ func buildTestJourney(t *testing.T, n int, injectFinding bool) *Journey {
 		}
 	}
 	path := writeJSONL(t, recs)
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

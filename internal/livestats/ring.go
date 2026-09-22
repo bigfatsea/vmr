@@ -10,7 +10,8 @@ type provKey struct {
 }
 
 // windowBlock is the WindowBlock computation over a slice of RecentRequestEntry
-// (contracts §1.2): n is the window's actual entry count, tokens are the
+// (the console's /stats contract): n is the window's actual
+// entry count, tokens are the
 // four-way sums, ttft/toks percentiles are nearest-rank. ttft_ms==0 is
 // "unmeasured" and stays out of the ttft pools (design §4.2); a sample
 // with zero output tokens or a non-positive generation span stays out of

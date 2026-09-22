@@ -178,8 +178,9 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 	}
 }
 
-// TestSnapshot_OverallFromGlobalRing pins the contracts §1.3 invariant:
-// overall must agree numerically with windowBlock over recent_requests.
+// TestSnapshot_OverallFromGlobalRing pins the /stats contract's overall invariant
+// (the console contract): overall must agree numerically with
+// windowBlock over recent_requests.
 func TestSnapshot_OverallFromGlobalRing(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.Local)

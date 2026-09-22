@@ -59,8 +59,9 @@ func TestConsoleAssets_NoPrivateStyles(t *testing.T) {
 	}
 }
 
-// TestConsoleJS_APIs pins the frozen contracts §4 API surface by string
-// presence — the page tasks consume these names verbatim.
+// TestConsoleJS_APIs pins console.js's shared runtime public API surface
+// (the console contract) by string presence — the page tasks
+// consume these names verbatim.
 func TestConsoleJS_APIs(t *testing.T) {
 	loadConsoleAssets()
 	js := string(consoleJS)
@@ -77,7 +78,7 @@ func TestConsoleJS_APIs(t *testing.T) {
 		"function fmtInt", "function toast", // formatting & feedback
 	} {
 		if !strings.Contains(js, want) {
-			t.Errorf("console.js missing §4 API %q", want)
+			t.Errorf("console.js missing public API %q", want)
 		}
 	}
 }

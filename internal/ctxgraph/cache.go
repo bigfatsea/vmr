@@ -57,7 +57,7 @@ import (
 // rather than silently mixing pre/post-removal shapes.
 // v11 (2026-09): internal/report's recordFacts gains Guard (audit.Record.Guard
 // carried through verbatim, Agent Guard's M2 offline consumption — see
-// docs/design/agent-guard-technical-spec-final-2.0.md). A cached v10 fileFacts
+// the Agent Guard spec). A cached v10 fileFacts
 // blob decodes with Guard == nil regardless of the source record, which
 // would silently under-count guard aggregation on a warm cache; the bump
 // forces one fresh decode per file so guardcol.go sees real data everywhere.

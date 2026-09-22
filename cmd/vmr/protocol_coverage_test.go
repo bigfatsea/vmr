@@ -57,15 +57,14 @@ func TestChatmsgProtocolCoverage(t *testing.T) {
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
 					chatmsg.ResetUnrecognizedShapeCounts()
-					u, ok := chatmsg.ExtractUsageWithProtocol(tc.body, tc.protocol)
+					u, inOK, outOK := chatmsg.ExtractUsageSides(tc.body, tc.protocol)
 					if u.In != tc.wantIn || u.Out != tc.wantOut {
 						t.Errorf("In/Out = %d/%d, want %d/%d", u.In, u.Out, tc.wantIn, tc.wantOut)
 					}
-					if ok != tc.wantOK {
+					if ok := inOK || outOK; ok != tc.wantOK {
 						t.Errorf("ok = %v, want %v", ok, tc.wantOK)
 					}
 					if tc.wantInOK != nil && tc.wantOutOK != nil {
-						_, inOK, outOK := chatmsg.ExtractUsageSides(tc.body, tc.protocol)
 						if inOK != *tc.wantInOK {
 							t.Errorf("inOK = %v, want %v", inOK, *tc.wantInOK)
 						}
@@ -87,7 +86,7 @@ func TestChatmsgProtocolCoverage(t *testing.T) {
 }
 
 // buildProtocolShapes returns the per-protocol test-case table. Each
-// fixture exercises what chatmsg.ExtractUsageWithProtocol does with the
+// fixture exercises what chatmsg.ExtractUsageSides does with the
 // given body and protocol constant.
 func buildProtocolShapes() map[string][]protocolCoverageShape {
 	oai := core.ProtocolOpenAICompletions

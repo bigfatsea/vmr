@@ -33,60 +33,41 @@ func TestBuild_LogsClientEndpointRowCount(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	var progress bytes.Buffer
-	if _, _, err := Build([]string{path}, time.Now(), &progress, nil, nil, nil); err != nil {
-		t.Fatalf("Build: %v", err)
+	if _, _, _, err := BuildCached([]string{path}, time.Now(), &progress, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil); err != nil {
+		t.Fatalf("BuildCached: %v", err)
 	}
 	if !strings.Contains(progress.String(), "§5.5: 1 client(s) x 1 endpoint row(s)") {
 		t.Errorf("progress output missing the §5.5 row-count line, got:\n%s", progress.String())
 	}
 }
 
-// TestBuildCached_ColdMatchesBuild: with no prior cache, BuildCached must
-// produce byte-identical output to Build (everything is a miss) — the
-// caching path must never change results, only skip work.
-func TestBuildCached_ColdMatchesBuild(t *testing.T) {
+// TestBuildCached_ColdPopulatesOneCacheEntry: with no prior cache, every
+// path is a miss — BuildCached must still return a usable Report2 and
+// populate exactly one cache entry per scanned file.
+func TestBuildCached_ColdPopulatesOneCacheEntry(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	now := time.Now()
 
-	want, _, err := Build([]string{path}, now, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	got, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	_, _, cache, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached: %v", err)
-	}
-	wantJSON, err := json.Marshal(want)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotJSON, err := json.Marshal(got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(wantJSON) != string(gotJSON) {
-		t.Errorf("BuildCached (cold) differs from Build:\nBuild:       %s\nBuildCached: %s", wantJSON, gotJSON)
 	}
 	if len(cache.Files) != 1 {
 		t.Fatalf("expected 1 cache entry, got %d", len(cache.Files))
 	}
 }
 
-// TestBuildCached_WarmMatchesBuild: feeding a prior run's cache back in
-// (the normal repeat-invocation path) must still produce byte-identical
-// output to an uncached Build — this is the actual regression guard that
-// the cache is transparent, not a shortcut that changes results.
-func TestBuildCached_WarmMatchesBuild(t *testing.T) {
+// TestBuildCached_WarmMatchesCold: feeding a prior run's cache back in (the
+// normal repeat-invocation path) must produce byte-identical output to a
+// from-scratch cold run — the regression guard that the cache is
+// transparent, not a shortcut that changes results.
+func TestBuildCached_WarmMatchesCold(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 	now := time.Now()
 
-	want, _, err := Build([]string{path}, now, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	want, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildCached (cold): %v", err)
 	}
@@ -103,7 +84,7 @@ func TestBuildCached_WarmMatchesBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(wantJSON) != string(gotJSON) {
-		t.Errorf("BuildCached (warm) differs from Build:\nBuild:       %s\nBuildCached: %s", wantJSON, gotJSON)
+		t.Errorf("BuildCached (warm) differs from BuildCached (cold):\ncold: %s\nwarm: %s", wantJSON, gotJSON)
 	}
 	key := hashKey(t, path)
 	if cache2.Files[key].Hash != cache1.Files[key].Hash {
@@ -143,23 +124,16 @@ func TestAnalyzeSessionsCached_NilProfileErrors(t *testing.T) {
 	}
 }
 
-func TestAnalyzeSessionsCached_ColdCacheMatchesAnalyzeSessions(t *testing.T) {
+func TestAnalyzeSessionsCached_ColdCachePopulatesOneEntry(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
 
-	want, err := AnalyzeSessions([]string{path})
-	if err != nil {
-		t.Fatalf("AnalyzeSessions: %v", err)
-	}
 	got, cache, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatalf("AnalyzeSessionsCached: %v", err)
 	}
-	if len(got.Sessions) != len(want.Sessions) {
-		t.Errorf("AnalyzeSessionsCached produced %d sessions, AnalyzeSessions produced %d", len(got.Sessions), len(want.Sessions))
-	}
-	if len(got.Recs) != len(want.Recs) {
-		t.Errorf("AnalyzeSessionsCached produced %d recs, AnalyzeSessions produced %d", len(got.Recs), len(want.Recs))
+	if len(got.Sessions) == 0 {
+		t.Error("AnalyzeSessionsCached produced 0 sessions")
 	}
 	if len(cache.Files) != 1 {
 		t.Fatalf("expected 1 cache entry, got %d", len(cache.Files))

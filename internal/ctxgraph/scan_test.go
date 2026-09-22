@@ -82,7 +82,7 @@ func TestScan_AppendRunThenContractSplitsLineage(t *testing.T) {
 	recs = append(recs, mkAuditRec(at(31), chatBody(brokenSys, u1, assistantMsg("post-break reply"), userMsg("follow up"))))
 
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestScan_PureAppendStaysOneLineage(t *testing.T) {
 		msgs = append(msgs, assistantMsg("reply"), userMsg("more"))
 	}
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestScan_DifferentSessKeysAreIndependentBuckets(t *testing.T) {
 	recA := mkAuditRec(at(0), chatBody(sysMsg("sys"), userMsg("task A")))
 	recB := mkAuditRec(at(1), chatBody(sysMsg("sys"), userMsg("task B (unrelated)")))
 	path := writeJSONL(t, []audit.Record{recA, recB})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestScan_NoBodyRecordsCounted(t *testing.T) {
 		Client: audit.Exchange{Request: audit.Message{Body: nil}}}
 	good := mkAuditRec(at.Add(time.Second), chatBody(sysMsg("sys"), userMsg("hi")))
 	path := writeJSONL(t, []audit.Record{rejected, good})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -292,9 +292,9 @@ func TestScan_SameTimestampLineageIdxIsDeterministic(t *testing.T) {
 	pathB := write("audit-b.jsonl", mkAuditRec(ts, chatBody(sysMsg("sys"), userMsg("task B"))))
 
 	keyByIdx := func(paths []string) map[int]string {
-		g, err := Scan(paths)
+		g, _, err := ScanCached(paths, nil)
 		if err != nil {
-			t.Fatalf("Scan(%v): %v", paths, err)
+			t.Fatalf("ScanCached(%v): %v", paths, err)
 		}
 		if len(g.Lineages) != 2 {
 			t.Fatalf("got %d lineages, want 2", len(g.Lineages))
@@ -316,9 +316,9 @@ func TestScan_SameTimestampLineageIdxIsDeterministic(t *testing.T) {
 
 func TestScan_EmptyPaths(t *testing.T) {
 	t.Parallel()
-	g, err := Scan(nil)
+	g, _, err := ScanCached(nil, nil)
 	if err != nil {
-		t.Fatalf("Scan(nil): %v", err)
+		t.Fatalf("ScanCached(nil): %v", err)
 	}
 	if len(g.Lineages) != 0 {
 		t.Errorf("expected no lineages for empty input")
@@ -327,7 +327,7 @@ func TestScan_EmptyPaths(t *testing.T) {
 
 func TestScan_MissingFileReturnsError(t *testing.T) {
 	t.Parallel()
-	if _, err := Scan([]string{"/nonexistent/path.jsonl"}); err == nil {
+	if _, _, err := ScanCached([]string{"/nonexistent/path.jsonl"}, nil); err == nil {
 		t.Error("expected error for missing file")
 	}
 }

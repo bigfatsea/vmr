@@ -1,5 +1,5 @@
-/* console.css — single source for the console pages (design §3).
-   Extracted from docs/design/demo/{overview,log,help}.html shared blocks;
+/* console.css — single source for the console pages. Shared chrome styles for
+   all three console pages (see the console contract);
    page-private styles (terminal, chart, snippets, demo chrome) stay in
    each page's own <style>. Pages carry the CSS injection marker in a
    comment and get this file inlined once at server start. */

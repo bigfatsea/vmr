@@ -251,7 +251,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 	// r3.ClientKeyTag left "" — legacy/catch-all/no-auth traffic.
 
 	src := writeJSONL(t, []audit.Record{r1, r2, r3})
-	a, err := AnalyzeSessions([]string{src})
+	a, _, err := AnalyzeSessionsCached([]string{src}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +303,7 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	records := smallAuditRecords()
 	path := writeTempJSONL(t, dir, records)
 
-	sess, err := AnalyzeSessions([]string{path})
+	sess, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Build([]string{path}, time.Now(), nil, nil, nil, dw.Submit); err != nil {
+	if _, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, dw.Submit, taskseg.OpenClawAware, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	newN, err := dw.Close()
@@ -390,7 +390,7 @@ func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
 	otherPath := filepath.Join(dir, "other.jsonl")
 	writeRecordsTo(t, otherPath, []audit.Record{other})
 
-	fullSess, err := AnalyzeSessions([]string{targetPath, otherPath})
+	fullSess, _, err := AnalyzeSessionsCached([]string{targetPath, otherPath}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	subsetSess, err := AnalyzeSessions([]string{targetPath})
+	subsetSess, _, err := AnalyzeSessionsCached([]string{targetPath}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}

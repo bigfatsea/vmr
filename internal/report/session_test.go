@@ -159,7 +159,7 @@ func fixture(t *testing.T) (string, []audit.Record) {
 
 func TestAnalyzeSessionsGrouping(t *testing.T) {
 	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestAnalyzeSessionsGrouping(t *testing.T) {
 // session's first record, and every compaction record) keep them intact.
 func TestReleaseTextBuffersPreservesSessionFirstAndCompaction(t *testing.T) {
 	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,8 +264,7 @@ func TestReleaseTextBuffersPreservesSessionFirstAndCompaction(t *testing.T) {
 		t.Error("r1 (Recs[0]): firstText was cleared, but session first record must keep it")
 	}
 	// r1's respText may be empty or non-empty depending on the fixture
-	// (the opening record's response carries content). It's fine either way.
-	// The task spec says to keep both, so just verify nothing broke.
+	// (the opening record's response carries content); both are accepted.
 
 	// r2 (intermediate, non-Recs[0], non-compaction) must have firstText cleared.
 	if r2.firstText != "" {
@@ -384,7 +383,7 @@ func TestLinkCompactionsRejectsShortNeedle(t *testing.T) {
 
 func TestToolShapesAggregation(t *testing.T) {
 	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +421,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 	if err := os.WriteFile(src, []byte(line), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a, err := AnalyzeSessions([]string{src})
+	a, _, err := AnalyzeSessionsCached([]string{src}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,7 +438,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 
 func TestWriteDetailsGroupedIndex(t *testing.T) {
 	path, _ := fixture(t)
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +527,7 @@ func TestAnthropicMetadataSessionKey(t *testing.T) {
 	rec2.Client.Request.Body = body2
 
 	path := writeJSONL(t, []audit.Record{rec, rec2})
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +565,7 @@ func TestNoReplyMergesRetryIntoSameTask(t *testing.T) {
 	r2 := mkRec(at(6), "1111aaaa1111aaaa1111aaaa1111aaaa", []any{sys, u1, u2}, nil, sseText("好的，日报如下"))
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}

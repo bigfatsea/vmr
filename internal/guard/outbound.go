@@ -1,7 +1,7 @@
 // Ver 2026-09-16, by Sonnet 5
 
 // Outbound: the online orchestration surface M3.4 mounts at server.chatHandler
-// (docs/design/agent-guard-technical-spec-final-2.0.md ADR-4/§4.2/§4.3/ADR-5,
+// (the Agent Guard spec ADR-4/§4.2/§4.3/ADR-5,
 // M3.4/M3.6). Guard combines the detection Engine (M3.0/M1) and Fingerprint
 // (M1.6, deterministic — no salt lifecycle, K-G19) into the single object
 // server/router hold — K12's "≤5 lines at the call site" budget is what

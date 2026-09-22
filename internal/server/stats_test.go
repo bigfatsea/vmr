@@ -364,8 +364,9 @@ func TestStatsJSONContract(t *testing.T) {
 	}
 }
 
-// TestParseRangeTail pins the ?range= vocabulary (contracts §1.5): 24h/3d/7d
-// select the 24/72/168-hour tails; anything else — missing, malformed,
+// TestParseRangeTail pins the ?range= vocabulary
+// (the console's /stats contract): 12h/24h/3d/7d
+// select the 12/24/72/168-hour tails; anything else — missing, malformed,
 // out-of-vocabulary — falls back to the 48h default. The 7d cap is the
 // deliberate ceiling.
 func TestParseRangeTail(t *testing.T) {
@@ -392,7 +393,8 @@ func TestParseRangeTail(t *testing.T) {
 }
 
 // TestSampleFromRecordTerminalAttempt pins the recent_errors inputs
-// (contracts §1.6): error_class/status quote the terminal attempt — the
+// (the console's /stats contract): error_class/status quote
+// the terminal attempt — the
 // winning attempt when the request forwarded, else the last attempt —
 // verbatim (no re-classification), and Attempt is the 1-based try count.
 func TestSampleFromRecordTerminalAttempt(t *testing.T) {

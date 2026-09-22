@@ -21,11 +21,11 @@ func TestUsageFromObj_ProtocolSelectsInRule(t *testing.T) {
 			"cache_read_input_tokens": float64(50),
 		},
 	}
-	u, _ := ExtractUsageWithProtocol(obj, "anthropic-messages")
+	u, _, _ := ExtractUsageSides(obj, "anthropic-messages")
 	if u.In != 150 || u.CacheRead != 50 || u.Fresh() != 100 {
 		t.Errorf("anthropic: usage = %+v, want In=150 (100+50) Fresh=100", u)
 	}
-	u, _ = ExtractUsageWithProtocol(obj, "openai-responses")
+	u, _, _ = ExtractUsageSides(obj, "openai-responses")
 	if u.In != 100 || u.CacheRead != 50 || u.Fresh() != 50 {
 		t.Errorf("openai-responses: usage = %+v, want In=100 (already inclusive) Fresh=50", u)
 	}
@@ -42,7 +42,7 @@ func TestUsageFromObj_UnknownProtocolFallsBackToFieldPresence(t *testing.T) {
 			"input_tokens_details": map[string]any{"cached_tokens": float64(800)},
 		},
 	}
-	u, _ := ExtractUsageWithProtocol(responsesShape, "")
+	u, _, _ := ExtractUsageSides(responsesShape, "")
 	if u.In != 1000 {
 		t.Errorf("unknown protocol, responses shape: In = %d, want 1000 (details presence selects the inclusive rule)", u.In)
 	}
@@ -53,7 +53,7 @@ func TestUsageFromObj_UnknownProtocolFallsBackToFieldPresence(t *testing.T) {
 			"cache_creation_input_tokens": float64(20),
 		},
 	}
-	u, _ = ExtractUsageWithProtocol(anthropicShape, "")
+	u, _, _ = ExtractUsageSides(anthropicShape, "")
 	if u.In != 820 {
 		t.Errorf("unknown protocol, anthropic shape: In = %d, want 820 (500+300+20)", u.In)
 	}
@@ -73,7 +73,7 @@ func TestUsageFromObj_ProtocolBeatsFieldPresence(t *testing.T) {
 			"input_tokens_details":        map[string]any{"cached_tokens": float64(30)},
 		},
 	}
-	u, _ := ExtractUsageWithProtocol(gateway, "anthropic-messages")
+	u, _, _ := ExtractUsageSides(gateway, "anthropic-messages")
 	if u.In != 160 || u.CacheRead != 50 || u.CacheWrite != 10 {
 		t.Errorf("gateway mix: usage = %+v, want In=160 (100+50+10) — the anthropic rule must hold despite input_tokens_details", u)
 	}

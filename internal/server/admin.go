@@ -43,7 +43,7 @@ type (
 		// rows the quota section renders (differential discipline: never
 		// restate the formula). *float64+omitempty — a plain float64 would
 		// erase a genuinely exhausted account's 0.00, which is the one state
-		// the console must show in red (§8.5 color scale). nil = unmetered.
+		// the console must show in red. nil = unmetered.
 		Headroom         *float64 `json:"headroom,omitempty"`
 		Capabilities     []string `json:"capabilities"`
 		MaxContextTokens int64    `json:"max_context_tokens"`

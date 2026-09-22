@@ -9,7 +9,7 @@
 // macro data (D2), and LoadReport (viewmodel_doc.go) rebuilds an
 // in-memory Report2 from them on -render-only. The per-request detail
 // files in detail.go/render.go; session and task grouping in session.go;
-// token extraction in chatmsg.ExtractUsage; the optional pricing sidecar
+// token extraction in chatmsg.ExtractUsageSides; the optional pricing sidecar
 // in pricing.go. Per-bucket accumulation (TrafficStats.Ingest and friends)
 // lives in ingest.go; per-record extraction (buildRec2 and friends) lives
 // in recextract.go — this file is buildInternal's own orchestration:
@@ -416,11 +416,11 @@ func (st *aggState) ingestRowBuckets(rc *rec2) (mr, dr *Row) {
 // ingestEndpoints updates Endpoints/EndpointsAll from one record's attempts.
 func (st *aggState) ingestEndpoints(attempts []attemptFacts, rc *rec2) {
 	// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does NOT
-	// make the request-level half fire once. EndpointLabel is
-	// protocol:provider:model with no key component, so one provider's
-	// several api_keys all share ONE label and a failover between two of
-	// its keys matched twice, double-counting every request-level metric on
-	// that row (caught by cmd/vmr/quota_parity_test.go's tokens case).
+	// make the request-level half fire once. attempts[] may repeat one
+	// protocol:provider:model label (no per-attempt component; BuildSnapshot
+	// does not dedupe a (provider, model) pair listed in two endpoint groups
+	// of one route), so each repeat double-counted every request-level metric
+	// on the row (caught by cmd/vmr/quota_parity_test.go's tokens case).
 	reqAttributed := false
 	for _, a := range attempts {
 		k := rc.date + "\x00" + a.Endpoint

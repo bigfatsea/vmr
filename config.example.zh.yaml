@@ -151,7 +151,7 @@ fallback_endpoints:
       priority: 90              # fallback 记录必须显式声明且 > 0——见上面的说明段落
 
 # guard：Agent Guard 双向凭据/入向取证护栏
-# （docs/design/agent-guard-technical-spec-final-2.0.md）。完全不写这个键（如本文件）就是
+# （Agent Guard 设计规范，已归档不入库）。完全不写这个键（如本文件）就是
 # 100% 原始字节保真透传、零代码路径开销。出向干预阻止凭据流向不可信中转站（audit_only
 # 是唯一纯由离线证据校准过的模式，切勿从更激进的模式起步）；入向干预只剥离响应里的隐写
 # Unicode 字符（ADR-15）——从不阻断、从不改变 HTTP 状态码，也不检查工具调用本身：判断

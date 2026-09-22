@@ -13,8 +13,8 @@
 // nothing still groups by the generic rule, it just carries fewer tags.
 //
 // Grouping itself is a thin consumer of
-// internal/ctxgraph: AnalyzeSessions runs ctxgraph.Scan/StitchGraph over the
-// same paths and uses its already-split Lineages as the one-session-per-
+// internal/ctxgraph: AnalyzeSessionsCached runs ctxgraph.ScanCached/StitchGraph
+// over the same paths and uses its already-split Lineages as the one-session-per-
 // Lineage grouping unit, and ctxgraph.Classify for each record's delta
 // against its predecessor — replacing this package's own former private
 // message-hash vector + LCP window search (the exact duplication design doc
@@ -107,7 +107,7 @@ type ReqInfo struct {
 	// working state (analysis only, dropped from JSON)
 	//
 	// manifest is this record's ctxgraph.Manifest, correlated by (Path,Line)
-	// after ctxgraph.Scan runs — the message-hash vector, system-prompt
+	// after ctxgraph.ScanCached runs — the message-hash vector, system-prompt
 	// hash, and leading-system-message count all live there now; this
 	// package no longer computes its own copy. nil
 	// for a record ctxgraph couldn't build a Manifest for at all (body
@@ -192,27 +192,16 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 	return a.byKey[fmt.Sprintf("%s\x00%d", path, line)]
 }
 
-// AnalyzeSessions is AnalyzeSessionsCached with no prior file-hash cache,
-// always interpreting agent-dialect conventions through taskseg.OpenClawAware.
-// A test-only convenience — the same "always the default profile, no cache"
-// role Build plays relative to BuildCached; production goes through
-// AnalyzeSessionsCached (via report.BuildCached), which cmd/vmr always calls
-// with a resolved Profile and cache.
-func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
-	a, _, err := AnalyzeSessionsCached(paths, nil, taskseg.OpenClawAware)
-	return a, err
-}
-
 // AnalyzeSessionsCached reads the audit files and produces the session
-// grouping plus per-request features. Unparseable lines are skipped (Build
-// counts them); records without a chat body land in Ungrouped. prior may be
+// grouping plus per-request features. Unparseable lines are skipped
+// (BuildCached counts them); records without a chat body land in Ungrouped. prior may be
 // nil. prof is the taskseg.Profile collect() uses to recognize real user
 // instructions, a deliberate no-reply skip, and a framework-specific chat_id —
 // resolved once at cmd/vmr's composition root (see resolveTaskProfile), not
 // decided independently by report and journey.
 //
 // The file-hash-keyed cache (ctxgraph.FileCache/ScanCached) covers only the
-// ctxgraph.Scan pass. The analyzeFile pass below — report's own per-request
+// ctxgraph.ScanCached pass. The analyzeFile pass below — report's own per-request
 // parse into ReqInfo — is NOT cached and reparses every file on every call;
 // see docs/VirtualModelRouter_Design_v4_Analytics.md's requests/index.json
 // section for why only the ctxgraph.Manifest-based half is.
@@ -226,7 +215,7 @@ func AnalyzeSessions(paths []string) (*SessionAnalysis, error) {
 // stable sort by TS over that merged slice is order-independent, tie-breaks
 // included: which file is read first never changes what the sort sees.
 //
-// ctxgraph.Scan/StitchGraph read the same paths in a goroutine alongside
+// ctxgraph.ScanCached/StitchGraph read the same paths in a goroutine alongside
 // collect() (group() needs the resulting Graph to assign sessions by Lineage).
 // Concurrent rather than back-to-back keeps this from roughly doubling
 // wall-clock on a large corpus, at the cost of transiently oversubscribing CPU
@@ -446,7 +435,7 @@ func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *Re
 	}
 	// SessKey (metadata.user_id, else "anchor:" + first non-system message
 	// hash) is NOT computed here — group() sources it straight from this
-	// record's correlated ctxgraph.Manifest.SessKey once ctxgraph.Scan has
+	// record's correlated ctxgraph.Manifest.SessKey once ctxgraph.ScanCached has
 	// run (one computation, not two).
 
 	msgs := chatmsg.Messages(body) // anthropic system becomes message #0 — same shape both protocols
@@ -709,7 +698,7 @@ func attach(s *SessionInfo, r *ReqInfo) {
 // taskTitle resolves this task's title: r.NewInstruction (already
 // taskseg.LastInstruction-derived) when non-empty, else a fallback —
 // heartbeat first, then a generic placeholder. Not localized: this fallback
-// is computed inside AnalyzeSessions, the one full-corpus pass report.Build
+// is computed inside AnalyzeSessions, the one full-corpus pass report.BuildCached
 // deliberately runs only once (see build_cached.go's own "two-read design"
 // doc comment) — localizing it would mean re-running that whole pass a
 // second time per language just for a rare placeholder string. See

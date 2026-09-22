@@ -80,8 +80,8 @@ func TestInspectToolCall_ProtectedPath(t *testing.T) {
 	}
 }
 
-// TestInspectToolCall_ProtectedPathBodyMentionNoHit pins the §2.160 fix:
-// a write tool whose document CONTENT merely mentions a protected path is
+// TestInspectToolCall_ProtectedPathBodyMentionNoHit pins that a write tool
+// whose document CONTENT merely mentions a protected path is
 // not a persistence attempt -- matching runs only against path-named
 // argument values (toolinspect.go's pathArgKeys), never the raw bytes.
 func TestInspectToolCall_ProtectedPathBodyMentionNoHit(t *testing.T) {

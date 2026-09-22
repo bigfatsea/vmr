@@ -83,8 +83,6 @@ function FmtCurrency(n, ccy) {
   return currencySymbol(ccy) + goFixed(n, 2);
 }
 
-const FmtCost = FmtCurrency;
-
 // FmtCurrencyPrecise renders a micro-amount with 4 fixed decimals.
 function FmtCurrencyPrecise(n, ccy) {
   if (n === null || n === undefined || isNaN(n)) return currencySymbol(ccy) + '0.0000';
@@ -617,7 +615,6 @@ if (typeof module !== 'undefined' && module.exports) {
     FmtBytes,
     FmtPercent,
     FmtCurrency,
-    FmtCost,
     FmtCurrencyPrecise,
     setCurrency,
     FmtDuration,

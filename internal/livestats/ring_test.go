@@ -103,7 +103,8 @@ func TestWindowBlock_ToksStreamSubtractsTTFT(t *testing.T) {
 }
 
 // TestWindowBlock_ExclusionRules pins the percentile-pool admission rules
-// (contracts §1.2): ttft==0 (unmeasured) stays out of the ttft pools; a
+// (the console's /stats contract): ttft==0 (unmeasured) stays
+// out of the ttft pools; a
 // zero-token-total or non-positive dur_ms sample stays out of the toks
 // pools — while n still counts every sample in the window and tokens still
 // sums the four components.

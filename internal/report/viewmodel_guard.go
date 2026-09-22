@@ -1,7 +1,7 @@
 // Ver 2026-09-14, by Sonnet 5
 
 // Agent Guard's M2 offline bidirectional forensic audit section view model
-// (docs/design/agent-guard-technical-spec-final-2.0.md §4.7). Reads rep.Guard —
+// (the Agent Guard spec §4.7). Reads rep.Guard —
 // nil only when the Fallback Path never had a single record to cover (see
 // that field's own doc comment) — rendering, in order: coverage/source,
 // the Tier1/Tier2 outbound-credential ranking (M2.2), the M2.4 provider

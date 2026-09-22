@@ -115,7 +115,7 @@ func (gc *guardCollector) add(rc *rec2) {
 // contradict K-G14's own distinction between "already happened" and
 // "was intercepted" -- this keeps them two clearly labeled numbers instead
 // (independent review finding: this stamp previously had no consumer at
-// all, docs/KNOWN_ISSUES §2.163).
+// all; see KNOWN_ISSUES K-G25).
 func (gc *guardCollector) addSanitizedRunes(counts map[string]int) {
 	if gc.sanitizedRuneCounts == nil {
 		gc.sanitizedRuneCounts = map[string]int{}

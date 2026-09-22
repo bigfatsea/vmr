@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/taskseg"
 )
 
 var realLogPath = "../../logs/vmr-audit-2026-07-24.jsonl"
@@ -71,7 +72,7 @@ func TestBuild_InvariantsOnSyntheticCorpus(t *testing.T) {
 	}
 
 	path := writeJSONL(t, recs)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestRealLogE2E(t *testing.T) {
 		t.Skip("SKIP_SLOW_E2E set")
 	}
 
-	new, _, err := Build([]string{targetPath}, time.Now(), nil, nil, nil, nil)
+	new, _, _, err := BuildCached([]string{targetPath}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

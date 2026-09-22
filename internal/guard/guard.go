@@ -1,7 +1,7 @@
 // Ver 2026-09-17, by Sonnet 5
 
 // Package guard is Agent Guard's bidirectional credential/steganography
-// detection core (docs/design/agent-guard-technical-spec-final-2.0.md). It
+// detection core (the Agent Guard spec). It
 // is a dependency-white-listed leaf ({vmr/internal/jsonscan} only — see
 // internal/archtest's allowedDepPackages, ADR-1) so both the offline
 // calibration tool (tools/guard_corpus_scan) and the routing half's
@@ -67,7 +67,7 @@ func (t Tier) String() string {
 // leftBoundary is the left-edge anchor every rule's compiled pattern
 // carries (ADR-5's fifth anchor, added in this spec after real-corpus
 // analysis showed its absence causes ~8,000 false hits in this repo's own
-// logs — see docs/design/agent-guard-technical-spec-final-2.0.md §2.3). Go's
+// logs — see the Agent Guard spec §2.3). Go's
 // RE2 engine has no lookbehind, so the boundary alternative is written as
 // a non-capturing group ((?:...)) and matched inline; the credential body
 // that follows is the pattern's only capturing group (group 1) — callers

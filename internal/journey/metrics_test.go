@@ -39,7 +39,7 @@ func TestComputeMetrics_TimeSplitAndRatio(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestHumanInitiated_StitchBoundaryWithGenuinelyNewInstruction(t *testing.T) 
 	recs = append(recs, mkRec(at(30), "", succMsgs, sseText("continuing")))
 
 	path := writeJSONL(t, recs)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestComputeMetrics_ToolCallDistributionAndDuplicateRate(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestComputeMetrics_ErrorRecoveryCount(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestComputeMetrics_PlanExecRatio(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestComputeMetrics_ContextUtilization(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestComputeMetrics_CompactionTotals(t *testing.T) {
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestSummarize(t *testing.T) {
 	r2 := mkRec(at(1), "", []any{sys, u1, msg("assistant", "done")}, sseText("完成"))
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestSummarize_WithLLMFindings(t *testing.T) {
 	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("start"))
 	path := writeJSONL(t, []audit.Record{r1})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

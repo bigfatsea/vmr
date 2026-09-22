@@ -160,7 +160,6 @@ type statusResponse struct {
 		CapacityBytes int64  `json:"capacity_bytes"`
 		Capacity      string `json:"capacity"`
 	} `json:"image_cache,omitempty"`
-	CurrentTime string `json:"current_time"`
 }
 
 func cmdStatus(args []string) error {

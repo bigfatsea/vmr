@@ -12,7 +12,7 @@ import "fmt"
 const RulesVersion = 1
 
 // DefaultRules returns the built-in Tier1+Tier2 rule set: Appendix A of
-// docs/design/agent-guard-technical-spec-final-2.0.md, calibrated against this
+// the Agent Guard spec, calibrated against this
 // repo's own real audit corpus (tools/guard_corpus_scan; see the MVP
 // execution report linked from docs/KNOWN_ISSUES.md for the run that
 // confirmed Tier1 FP=0 and quantified the bare "sk-" prefix's noise).

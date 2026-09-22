@@ -66,7 +66,7 @@ type Report2 struct {
 	CostCoverage                  *CostCoverage       `json:"cost_coverage,omitempty"`
 	Highlights                    []string            `json:"highlights,omitempty"`
 	// Guard is Agent Guard's offline credential-exposure summary
-	// (docs/design/agent-guard-technical-spec-final-2.0.md M2). nil when no
+	// (the Agent Guard spec M2). nil when no
 	// records were ingested or guard produced no verdict; on any non-empty
 	// corpus, offline fallback scan covers records lacking online stamps,
 	// so GuardSummary is produced.
@@ -660,7 +660,7 @@ type StickyModelRow struct {
 }
 
 // GuardSummary is Agent Guard's offline credential-exposure aggregate
-// (docs/design/agent-guard-technical-spec-final-2.0.md M2; guardcol.go builds
+// (the Agent Guard spec M2; guardcol.go builds
 // it from every ingested record's audit.Record.Guard — the Authoritative
 // Fast Path — or, when that is nil, the Fallback Path's own scan of
 // Client.Request/Response.Body (ADR-12; guardscan.go).

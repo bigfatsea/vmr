@@ -1,7 +1,6 @@
-/* console.js — single source for the shared console runtime (contracts.md §4).
-   Formatting, overlay plumbing and VMRAuth are semantic copies of the demo
-   pages' inline blocks; mountConsole / guard / ConsoleAlerts implement the
-   frozen §4 API, consumed as-is by the page tasks. Pages carry the JS
+/* console.js — single source for the shared console runtime. Its public API
+   surface is pinned in the console contract; mountConsole /
+   guard / ConsoleAlerts implement that API, consumed as-is by the page tasks. Pages carry the JS
    injection marker in a comment and get this file inlined once at server
    start. mountConsole() is invoked by each page's own script. */
 'use strict';
@@ -234,7 +233,8 @@ function syncKeyBtn() {
 }
 
 /* ===================== ConsoleAlerts =====================
-   /status alerts[] (contracts §2.1) is actionable state only; a rolling
+   /status alerts[] (the console's alerts[] contract) is
+   actionable state only; a rolling
    metric would pin the badge permanently and train the operator to ignore
    it. The glyph carries the top severity, the count carries the volume. */
 const ConsoleAlerts = {

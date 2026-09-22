@@ -21,8 +21,8 @@ func TestExtractUsage_OpenAIJSON(t *testing.T) {
 			},
 		},
 	}
-	u, ok := ExtractUsage(body)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 1000 || u.Out != 200 || u.CacheRead != 800 {
@@ -40,8 +40,8 @@ func TestExtractUsage_AnthropicJSON(t *testing.T) {
 			"cache_creation_input_tokens": float64(20),
 		},
 	}
-	u, ok := ExtractUsage(body)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	// Anthropic: In excludes cache by default, so total = input_tokens + cacheRead + cacheWrite.
@@ -70,8 +70,8 @@ func TestExtractUsage_ResponsesJSON(t *testing.T) {
 			},
 		},
 	}
-	u, ok := ExtractUsage(body)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 1000 || u.Out != 200 || u.CacheRead != 800 || u.Reasoning != 50 {
@@ -92,8 +92,8 @@ func TestExtractUsage_ResponsesJSONNoCacheDetails(t *testing.T) {
 			"output_tokens": float64(1),
 		},
 	}
-	u, ok := ExtractUsage(body)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 5 || u.Out != 1 {
@@ -120,8 +120,8 @@ func TestExtractUsage_OpenAICompletionsGatewayDoubleCount(t *testing.T) {
 			"prompt_cache_hit_tokens": float64(800),
 		},
 	}
-	u, ok := ExtractUsageWithProtocol(body, core.ProtocolOpenAICompletions)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, core.ProtocolOpenAICompletions)
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 1000 || u.CacheRead != 800 {
@@ -143,8 +143,8 @@ func TestExtractUsage_OpenAICompletionsPromptTokens(t *testing.T) {
 			},
 		},
 	}
-	u, ok := ExtractUsageWithProtocol(body, core.ProtocolOpenAICompletions)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, core.ProtocolOpenAICompletions)
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 500 || u.CacheRead != 100 {
@@ -155,8 +155,8 @@ func TestExtractUsage_OpenAICompletionsPromptTokens(t *testing.T) {
 func TestExtractUsage_SSEStream(t *testing.T) {
 	t.Parallel()
 	raw := sseToolCall("exec")
-	u, ok := ExtractUsage(raw)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(raw, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	if u.In != 100 || u.Out != 10 || u.CacheRead != 80 || u.Reasoning != 4 {
@@ -166,7 +166,7 @@ func TestExtractUsage_SSEStream(t *testing.T) {
 
 func TestExtractUsage_NoUsage(t *testing.T) {
 	t.Parallel()
-	if _, ok := ExtractUsage(map[string]any{"foo": "bar"}); ok {
+	if _, inOK, outOK := ExtractUsageSides(map[string]any{"foo": "bar"}, ""); inOK || outOK {
 		t.Error("expected ok=false when no usage present")
 	}
 }
@@ -194,8 +194,8 @@ func TestExtractUsage_ResponsesNestedUsage(t *testing.T) {
 			},
 		},
 	}
-	u, ok := ExtractUsage(body)
-	if !ok {
+	u, inOK, outOK := ExtractUsageSides(body, "")
+	if !inOK && !outOK {
 		t.Fatal("expected ok=true")
 	}
 	// Responses semantics: input_tokens already includes cached tokens.
@@ -533,32 +533,6 @@ func TestExtractUsageSides_NoUsage(t *testing.T) {
 	} {
 		if u, inOK, outOK := ExtractUsageSides(body, ""); inOK || outOK || u != (Usage{}) {
 			t.Errorf("%s: = (%+v, %v, %v), want zero/false/false", name, u, inOK, outOK)
-		}
-	}
-}
-
-// TestExtractUsageSides_AgreesWithExtractUsageWithProtocol pins that the
-// side-aware form's merged Usage matches the plain form's Usage for every
-// fixture in this file's corpus, and that the single-bool ok is exactly
-// inOK || outOK — the two entry points share one parser, so they can
-// never disagree about the numbers (only the side split is new).
-func TestExtractUsageSides_AgreesWithExtractUsageWithProtocol(t *testing.T) {
-	t.Parallel()
-	fixtures := []any{
-		map[string]any{"usage": map[string]any{"prompt_tokens": float64(10), "completion_tokens": float64(2)}},
-		map[string]any{},
-		"data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":50,\"output_tokens\":1}}}\n\n",
-		"data: {\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}\n\n",
-		"",
-	}
-	for i, body := range fixtures {
-		wantU, wantOK := ExtractUsageWithProtocol(body, core.ProtocolAnthropicMessages)
-		gotU, inOK, outOK := ExtractUsageSides(body, core.ProtocolAnthropicMessages)
-		if gotU != wantU {
-			t.Errorf("fixture %d: ExtractUsageSides usage = %+v, ExtractUsageWithProtocol = %+v", i, gotU, wantU)
-		}
-		if (inOK || outOK) != wantOK {
-			t.Errorf("fixture %d: (inOK||outOK) = %v, ExtractUsageWithProtocol ok = %v", i, inOK || outOK, wantOK)
 		}
 	}
 }

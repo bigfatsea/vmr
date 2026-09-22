@@ -113,21 +113,6 @@ func TestDigest_ScalarEncoders(t *testing.T) {
 		t.Fatalf("EncodeInt64 roundtrip mismatch: got %d, want %d", got, i1)
 	}
 
-	// Uint64
-	u1 := uint64(1000)
-	u2 := uint64(2000)
-	bu1 := EncodeUint64(u1)
-	bu2 := EncodeUint64(u2)
-	if len(bu1) != 8 || len(bu2) != 8 {
-		t.Fatalf("EncodeUint64 must produce 8 bytes")
-	}
-	if bytes.Equal(bu1, bu2) {
-		t.Fatalf("Different uint64 values must produce different bytes")
-	}
-	if got := binary.BigEndian.Uint64(bu1); got != u1 {
-		t.Fatalf("EncodeUint64 roundtrip mismatch: got %d, want %d", got, u1)
-	}
-
 	// Float64
 	f1 := 3.141592653589793
 	f2 := -0.0001

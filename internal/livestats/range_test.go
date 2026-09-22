@@ -7,7 +7,8 @@ import (
 )
 
 // TestSnapshot_HourlyTailParameterized pins the ?range= read-side behavior
-// (contracts §1.5): the hourly tail keeps the N most recent distinct hours
+// (the console's /stats contract): the hourly tail keeps the
+// N most recent distinct hours
 // with data, daily[] stays fixed at dailyTail regardless of the tail, and
 // values outside the server's vocabulary are the caller's problem — the
 // aggregation honors whatever tail it is given.
@@ -56,8 +57,9 @@ func TestSnapshot_HourlyTailParameterized(t *testing.T) {
 	}
 }
 
-// TestCachedSnapshot_PerTailKeys pins the per-tail cache keying (contracts
-// §1.5): two tails never serve each other's payloads, Record stays
+// TestCachedSnapshot_PerTailKeys pins the per-tail cache keying
+// (the console's /stats contract): two tails never serve each
+// other's payloads, Record stays
 // invisible inside the TTL, and concurrent mixed-tail polling is
 // race-clean under -race.
 func TestCachedSnapshot_PerTailKeys(t *testing.T) {

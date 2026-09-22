@@ -37,7 +37,7 @@ func TestComputeModelUsage_DetectsSwitchDespiteConstantVirtualModel(t *testing.T
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

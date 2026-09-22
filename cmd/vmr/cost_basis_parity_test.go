@@ -117,17 +117,17 @@ func TestCostBasis_ReportAndJourneyAgreeCanceledAndError(t *testing.T) {
 	path := writeJourneyJSONL(t, recs)
 
 	res := costParityResolver(t)
-	rep, _, err := report.Build([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil)
+	rep, _, _, err := report.BuildCached([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
-		t.Fatalf("report.Build: %v", err)
+		t.Fatalf("report.BuildCached: %v", err)
 	}
 	if rep.Overall.CostEstimate == nil {
 		t.Fatal("report side priced nothing — fixture no longer exercises the pricing path")
 	}
 
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
-		t.Fatalf("ctxgraph.Scan: %v", err)
+		t.Fatalf("ctxgraph.ScanCached: %v", err)
 	}
 	byIdx := ctxgraph.LineageIndex(g)
 	tails := ctxgraph.StitchedSuccessorSet(g)
@@ -183,17 +183,17 @@ func TestCostBasis_ReportAndJourneyAgree(t *testing.T) {
 	}
 	path := writeJourneyJSONL(t, recs)
 	res := costParityResolver(t)
-	rep, _, err := report.Build([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil)
+	rep, _, _, err := report.BuildCached([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
-		t.Fatalf("report.Build: %v", err)
+		t.Fatalf("report.BuildCached: %v", err)
 	}
 	if rep.Overall.CostEstimate == nil {
 		t.Fatal("report side priced nothing — fixture no longer exercises the pricing path")
 	}
 
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
-		t.Fatalf("ctxgraph.Scan: %v", err)
+		t.Fatalf("ctxgraph.ScanCached: %v", err)
 	}
 	byIdx := ctxgraph.LineageIndex(g)
 	// Only chain TAILS become Journeys — a lineage some other lineage is

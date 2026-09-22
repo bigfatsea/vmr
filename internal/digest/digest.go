@@ -51,13 +51,6 @@ func EncodeInt64(v int64) []byte {
 	return b
 }
 
-// EncodeUint64 encodes a uint64 scalar as 8 bytes, big-endian.
-func EncodeUint64(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
-}
-
 // EncodeFloat64 encodes a float64 scalar via math.Float64bits, big-endian.
 func EncodeFloat64(v float64) []byte {
 	b := make([]byte, 8)

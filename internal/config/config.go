@@ -348,7 +348,7 @@ type Config struct {
 	// case-insensitively, same as the built-in list. Absent/empty (the
 	// default) changes nothing.
 	ExtraRedactHeaders []string `yaml:"extra_redact_headers"`
-	// Guard is Agent Guard's config (docs/design/agent-guard-technical-spec-final-2.0.md
+	// Guard is Agent Guard's config (the Agent Guard spec
 	// §4.5) — nil means the key is absent, which must mean zero code-path
 	// overhead and 100% byte-faithful passthrough (see guard.go's package
 	// doc comment). Still schema-only as of this field's introduction — no

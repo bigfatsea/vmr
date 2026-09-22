@@ -25,8 +25,12 @@ file only orients; it does not restate them.
 - `docs/VirtualModelRouter_Design_v4_Quota.md` — token-plan quota-aware routing. A routing-half
   subsystem with its own metering/pricing/period model; its only interface to Part 1 is one
   reordering step between `strategy.Sort` and sticky pinning.
+- `docs/VirtualModelRouter_Design_v4_LiveStats.md` — in-process live request telemetry
+  (`internal/livestats`). Another routing-half subsystem monograph, hanging off Part 1's
+  request lifecycle and completion hooks; shares the audit log's token/error-class data
+  contract with Part 1 and the Quota doc.
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` — the "why": positioning, competitive
-  landscape, and what is deliberately out of scope. The only one of the four that isn't a "how".
+  landscape, and what is deliberately out of scope. The only one of the five that isn't a "how".
 - `KNOWN_ISSUES` — the cross-cutting index of open issues and deliberate
   non-fixes (the design docs' own tables hold the per-subsystem detail). Check it before
   reporting something as new — and **register there when you decide something too**: a
@@ -60,11 +64,12 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `core` | Types both halves must agree on: `CanonicalRequest`, `Endpoint`, `ErrorClass`, `QuotaSpec`, `PricingSpec`, `RequestFacts`, plus the audit log's `protocol:provider:model` label (`EndpointLabel`). Its package doc states the admission rule — read it before adding anything here |
 | `fmtutil` | Display formatting (`FmtBytes`, `FmtTokens`/`FmtTokensPlain`/`FmtTokensCompact`, `FmtSeconds`, `FmtPercent`), UTF-8-safe `CapStr`, and `DisplayZone` |
 | `tokenutil` | Fast zero-allocation token estimation: `Estimate`, `EstimateText`, `Analyze`, `EstimateFromStats` |
-| `digest` | The system's one cache-digest construction (D8): length-prefixed ordered sha256 chain plus fixed-width scalar encoders. stdlib-only leaf; report and journey are both callers |
+| `digest` | The system's one cache-digest construction (D8): length-prefixed ordered sha256 chain plus fixed-width scalar encoders. stdlib-only leaf; `report`'s cache-fingerprint layer is its only caller |
 | `jsonscan` | JSON byte-range scan/splice engine: low-level structural byte scanning (`TopLevelValues`, `WalkArrayElements`, `Skip*` primitives) and zero-allocation byte-splice rewrites (`RewriteModel`, `RewriteStream`, `RewriteRoles`, `RewriteInputRoles`). Fuzz-tested. Zero internal dependencies |
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/viewmodel_*.go` (the ViewModel builders; `archtest` enforces the pairing), `i18n/journey_*.go` next to `internal/journey`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
 | `livestats` | Completed-request live telemetry ledger: zero-internal-dependency leaf owning slim WAL append, hourly lazy rollups, restart recovery with duplicate row last-wins assimilation, in-memory ring buffers with nearest-rank percentiles, and read-time `/stats` snapshot aggregation |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
+| `dashboard` | `vmr analyze`'s static skeleton dashboard pages: embeds six self-contained HTML files and writes them (`WriteSkeletons`) into the report output root on every run. All rendering happens browser-side against `manifest.json`/`macro/*.json`/etc; the Go side is embed + write only, stdlib-only leaf |
 
 Routing half:
 
@@ -84,7 +89,7 @@ Routing half:
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |
 | `diagnose`, `replay` | `vmr diagnose` / `vmr replay` — both reuse the same `Adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses, so what they show is byte-identical to what would really happen. `replay.ResolveAuditPath`/`LoadRecord` are also `vmr diff`'s one coordinate-to-record resolver — the single place a "basename:line" coordinate becomes a real file path and an `audit.Record` |
-| `guard` | Agent Guard's detection-and-intervention core (`docs/design/agent-guard-technical-spec-final-2.0.md`): anchored regex `Rule`s + JSON string-value walk (`Engine.Scan`) + deterministic `Fingerprint` (no salt — KNOWN_ISSUES K-G19), outbound observe/reject (`Outbound` — audit_only or block; the former mode: replace/pseudonym-restore machinery was removed, see the package doc), inbound (`Inbound`: SSE re-framing + Unicode-steganography sanitization only — the online Tool Call gate and circuit-break frames were removed, ADR-15; `InspectToolCall`'s command/path/credential-echo judgment survives as an offline-only detection function). Depends on `jsonscan` only (an explicit `archtest` allow-list entry, not the zero-dep tier). Wired online via `server`/`router` mount points, `config`'s `guard:` schema, and `vmr diagnose -guard` (probe library in `probe/guard.go`); consumed offline by `report`'s guardscan fallback and `tools/guard_corpus_scan` |
+| `guard` | Agent Guard's detection-and-intervention core (the Agent Guard design spec, archived out of the repository): anchored regex `Rule`s + JSON string-value walk (`Engine.Scan`) + deterministic `Fingerprint` (no salt — KNOWN_ISSUES K-G19), outbound observe/reject (`Outbound` — audit_only or block; the former mode: replace/pseudonym-restore machinery was removed, see the package doc), inbound (`Inbound`: SSE re-framing + Unicode-steganography sanitization only — the online Tool Call gate and circuit-break frames were removed, ADR-15; `InspectToolCall`'s command/path/credential-echo judgment survives as an offline-only detection function). Depends on `jsonscan` only (an explicit `archtest` allow-list entry, not the zero-dep tier). Wired online via `server`/`router` mount points, `config`'s `guard:` schema, and `vmr diagnose -guard` (probe library in `probe/guard.go`); consumed offline by `report`'s guardscan fallback and `tools/guard_corpus_scan` |
 
 Analytics half:
 

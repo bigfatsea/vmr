@@ -51,7 +51,7 @@ func TestSyntheticCorpus_LineageIDHasNoCollisions(t *testing.T) {
 	}
 
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestRealCorpus_LineageIDHasNoCollisions(t *testing.T) {
 	if os.Getenv("SKIP_SLOW_E2E") == "1" {
 		t.Skip("SKIP_SLOW_E2E set")
 	}
-	g, err := Scan(paths)
+	g, _, err := ScanCached(paths, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

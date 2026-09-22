@@ -10,6 +10,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/chatmsg"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -78,7 +79,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recA := mkExtrasRec(atA, "system prompt A", "do the research", "openai-completions:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
 	pathA := writeJSONL(t, []audit.Record{recA})
-	jA, err := Build(onlyLineage(t, pathA), taskseg.Generic, i18n.EN)
+	jA, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, pathA)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestComputeComparisonExtras(t *testing.T) {
 	recB := mkExtrasRec(atB, "system prompt B", "do the research", "openai-completions:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
 	pathB := writeJSONL(t, []audit.Record{recB})
-	jB, err := Build(onlyLineage(t, pathB), taskseg.Generic, i18n.EN)
+	jB, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, pathB)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}
@@ -161,7 +162,7 @@ func TestInitialInstructionStats_ExcerptTruncation(t *testing.T) {
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	rec := mkExtrasRec(at, "sys", long, "openai-completions:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -186,7 +187,7 @@ func TestSysPromptStats_ExcerptTruncation(t *testing.T) {
 	at := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
 	rec := mkExtrasRec(at, long, "hi", "openai-completions:p:m", 100, 10, 0, "stop", nil)
 	path := writeJSONL(t, []audit.Record{rec})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestDeliverableStats_PicksLastWriteLikeCall(t *testing.T) {
 	rec2 := mkExtrasRec(at2, "sys", "go", "openai-completions:p:m", 110, 10, 0, "stop",
 		[]map[string]any{writeToolCall("write", "final.md", "the real final content")})
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -464,14 +465,14 @@ func TestRenderComparisonMarkdown_WithExtras(t *testing.T) {
 	atA := time.Date(2026, 7, 28, 0, 5, 44, 0, time.UTC)
 	recA := mkExtrasRec(atA, "system prompt A", "research", "openai-completions:opencode:deepseek-v4-pro",
 		1000, 200, 800, "tool_calls", []map[string]any{writeToolCall("exec", "", "")})
-	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA})), taskseg.Generic, i18n.EN)
+	jA, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, writeJSONL(t, []audit.Record{recA}))}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
 	atB := time.Date(2026, 7, 28, 0, 5, 49, 0, time.UTC)
 	recB := mkExtrasRec(atB, "system prompt B", "research", "openai-completions:minimax:MiniMax-M3",
 		2000, 300, 360, "stop", []map[string]any{writeToolCall("write", "report.md", "# Report\nfindings here")})
-	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB})), taskseg.Generic, i18n.EN)
+	jB, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, writeJSONL(t, []audit.Record{recB}))}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}
@@ -533,7 +534,7 @@ func TestRenderComparisonMarkdown_WithSources(t *testing.T) {
 // journeyOfTasks builds a Journey directly from Task literals — 6a/6b's
 // divergence detection compares two independent Journeys position-by-
 // position, so these tests need full control over each side's Task/Step
-// shape without going through the audit-record Build() pipeline (findings_
+// shape without going through the audit-record BuildChain() pipeline (findings_
 // test.go's journeyOf covers the single-Task case; divergence tests need
 // multiple Tasks on at least one side).
 func journeyOfTasks(tasks ...*Task) *Journey { return &Journey{Tasks: tasks} }
@@ -683,7 +684,7 @@ func TestCompare_CacheAttribution(t *testing.T) {
 	// an established cache collapsing to near-zero with no structural cause.
 	recA1 := goldenRec(at(0), 1000, []any{sys, u1}, goldenSSE("a1", 1000, 10, 900))
 	recA2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("a2", 2000, 10, 100))
-	jA, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recA1, recA2})), taskseg.Generic, i18n.EN)
+	jA, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, writeJSONL(t, []audit.Record{recA1, recA2}))}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build A: %v", err)
 	}
@@ -693,7 +694,7 @@ func TestCompare_CacheAttribution(t *testing.T) {
 	recB1.Attempts = []audit.Attempt{{Endpoint: "openai-completions:provider_a:agent", DurMS: 1000, Response: &audit.Message{Status: 200}}}
 	recB2 := goldenRec(at(2), 1000, []any{sys, u1, a1, u2}, goldenSSE("b2", 1200, 10, 950))
 	recB2.Attempts = []audit.Attempt{{Endpoint: "openai-completions:provider_b:agent", DurMS: 1000, Response: &audit.Message{Status: 200}}}
-	jB, err := Build(onlyLineage(t, writeJSONL(t, []audit.Record{recB1, recB2})), taskseg.Generic, i18n.EN)
+	jB, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, writeJSONL(t, []audit.Record{recB1, recB2}))}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build B: %v", err)
 	}

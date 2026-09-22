@@ -6,7 +6,7 @@
 // bytes) that a from-scratch automaton is the right call over adding a
 // dependency for it. The automaton is built once at NewEngine construction
 // time and is immutable afterward, matching Engine's read-only-singleton
-// contract (docs/design/agent-guard-technical-spec-final-2.0.md §4.2): every
+// contract (the Agent Guard spec §4.2): every
 // per-call transition is a flat array lookup, no per-scan allocation, no
 // fail-link walk at match time (the classic optimization: goto[node][byte]
 // is precomputed for every node/byte pair during construction, so matching

@@ -37,7 +37,7 @@ func TestStitchGraph_CompactionCase(t *testing.T) {
 		assistantMsg("step reply 3"), assistantMsg("step reply 4"))))
 
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestStitchGraph_NoPredecessorFoundForGenuinelyNewLineage(t *testing.T) {
 	recB2 := mkAuditRec(at(11), chatBody(sys, userMsg("anchor B opening"), assistantMsg("B reply 1"), userMsg("B follow-up")))
 
 	path := writeJSONL(t, []audit.Record{recA, recB1, recB2})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestStitchGraph_SameChatAmbiguousMatch(t *testing.T) {
 	rec2 := mkAuditRec(at(5), body2) // within stitchSameChatWindow of rec1
 
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestStitchGraph_HeadPruneCase(t *testing.T) {
 	rec2 := mkAuditRec(at(5), body2)
 
 	path := writeJSONL(t, []audit.Record{rec1, rec2})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestStitchGraph_CrossBucketMatchRejectedBeyondMaxGap(t *testing.T) {
 	succRec := mkAuditRec(time.Date(2026, 7, 20, 8, 5, 0, 0, time.UTC), succBody)
 
 	path := writeJSONL(t, []audit.Record{predRec, openerRec, succRec})
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestChainFrom_CompactionCase(t *testing.T) {
 		assistantMsg("step reply 3"), assistantMsg("step reply 4"))))
 
 	path := writeJSONL(t, recs)
-	g, err := Scan([]string{path})
+	g, _, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestStitchGraph_TiedScoreCandidatesPickDeterministicWinner(t *testing.T) {
 
 	wantPred := -1
 	for i := 0; i < 8; i++ {
-		g, err := Scan([]string{path})
+		g, _, err := ScanCached([]string{path}, nil)
 		if err != nil {
 			t.Fatalf("run %d: Scan: %v", i, err)
 		}
@@ -643,7 +643,7 @@ func TestStitchGraph_SameBucketBeyondMaxGapDowngraded(t *testing.T) {
 				mkAuditRec(at(0), p1), mkAuditRec(at(1), p2),
 				mkAuditRec(at(1+int(tc.gap.Minutes())), succ),
 			})
-			g, err := Scan([]string{path})
+			g, _, err := ScanCached([]string{path}, nil)
 			if err != nil {
 				t.Fatalf("Scan: %v", err)
 			}

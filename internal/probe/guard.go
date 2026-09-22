@@ -1,7 +1,7 @@
 // Ver 2026-09-17, by Sonnet 5
 
 // Package probe extensions for Agent Guard's active diagnostic probes
-// (docs/design/agent-guard-technical-spec-final-2.0.md §4.10, M5), wired only
+// (the Agent Guard spec §4.10, M5), wired only
 // through `vmr diagnose -guard` (opt-in, sends real requests to configured
 // endpoints and consumes real upstream tokens -- same as any other `vmr
 // diagnose` connectivity check). Two of the five probes are credential/

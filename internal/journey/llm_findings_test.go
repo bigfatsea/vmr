@@ -105,7 +105,7 @@ data: [DONE]`},
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -159,7 +159,7 @@ data: [DONE]`},
 
 	path := writeJSONL(t, recs)
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -220,7 +220,7 @@ data: [DONE]`},
 
 	path := writeJSONL(t, recs)
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -286,7 +286,7 @@ data: [DONE]`},
 
 	path := writeJSONL(t, recs)
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestP1b4_CompactionConstraintDropped(t *testing.T) {
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestP1b5_PlanExecutionMisalignment(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -483,7 +483,7 @@ func TestP1b5_PlanExecutionMisalignment_DynamicReplan(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -548,7 +548,7 @@ data: [DONE]`},
 
 	path := writeJSONL(t, []audit.Record{r1})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -587,7 +587,7 @@ data: [DONE]`},
 	}
 	path := writeJSONL(t, []audit.Record{r1})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -654,7 +654,7 @@ data: [DONE]`},
 	}
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -898,7 +898,7 @@ data: [DONE]`},
 	}
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -962,7 +962,7 @@ data: [DONE]`},
 	}
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.ZH)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.ZH)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

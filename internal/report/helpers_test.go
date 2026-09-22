@@ -1,7 +1,7 @@
 // Ver 2026-08-20 00:00, report
 
-// Tests for chatmsg.ExtractUsageWithProtocol, the protocol-aware usage
-// variant; production uses the SSOT chatmsg.ExtractUsageSides (session.go).
+// Tests for chatmsg.ExtractUsageSides, the SSOT usage extractor production
+// uses (session.go), exercised here through its merged ok = inOK||outOK.
 package report
 
 import (
@@ -49,7 +49,8 @@ func TestExtractUsage(t *testing.T) {
 	for _, c := range cases {
 		tt := c
 		t.Run(tt.name, func(t *testing.T) {
-			u, ok := chatmsg.ExtractUsageWithProtocol(tt.body, tt.protocol)
+			u, inOK, outOK := chatmsg.ExtractUsageSides(tt.body, tt.protocol)
+			ok := inOK || outOK
 			if u.In != tt.in || u.Out != tt.out || u.CacheRead != tt.cacheRead || u.CacheWrite != tt.cacheWrite || ok != tt.ok {
 				t.Errorf("got %+v ok=%v, want in=%d out=%d cacheRead=%d cacheWrite=%d ok=%v",
 					u, ok, tt.in, tt.out, tt.cacheRead, tt.cacheWrite, tt.ok)

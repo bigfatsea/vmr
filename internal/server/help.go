@@ -17,8 +17,8 @@
 // third embedded file and two more routes, nothing else.
 //
 // Shared console chrome (console.css / console.js) is injected once at
-// first serve via assembleConsolePage (contracts.md §4); the page files
-// carry the {{CONSOLE_CSS}} / {{CONSOLE_JS}} markers.
+// first serve via assembleConsolePage (see the console contract);
+// the page files carry the {{CONSOLE_CSS}} / {{CONSOLE_JS}} markers.
 package server
 
 import (

@@ -89,51 +89,7 @@ func (u Usage) Fresh() int64 {
 	return f
 }
 
-// ExtractUsage pulls token usage from a recorded client response body.
-// Four shapes are understood (audit stores JSON bodies as objects, SSE
-// streams as strings):
-//
-//	OpenAI JSON:     {"usage":{"prompt_tokens":N,"completion_tokens":N,"prompt_tokens_details":{"cached_tokens":N}}}
-//	Anthropic JSON:  {"usage":{"input_tokens":N,"output_tokens":N,"cache_read_input_tokens":N,"cache_creation_input_tokens":N}}
-//	OpenAI SSE:      final chunk carries "usage" (when the provider emits it)
-//	Anthropic SSE:   message_start carries usage.input_tokens (+ cache fields),
-//	                 message_delta carries cumulative usage.output_tokens
-//
-// Streams without any usage-bearing event yield ok=false — byte counts are
-// the fallback measure there.
-//
-// This is the protocol-unknown form: the rule for whether reported input
-// tokens already include the cached portion is guessed from field presence
-// (see usageFromObj), which aggregated gateways can make guess wrong in
-// both directions. Callers that know the ingress protocol must use
-// ExtractUsageWithProtocol instead.
-//
-// The single merged bool here cannot distinguish a partially-reported ledger
-// from a complete one; router/quota, report, journey and replay all charge
-// and aggregate through ExtractUsageSides instead (see its doc comment).
-// This form remains for callers that only need "was anything reported at
-// all" and don't act on the result financially.
-func ExtractUsage(body any) (Usage, bool) {
-	return ExtractUsageWithProtocol(body, "")
-}
-
-// ExtractUsageWithProtocol is ExtractUsage with the record's ingress
-// protocol (core.Protocol* values; "" means unknown, falling back to the
-// field-presence guess). The protocol selects the In-additivity rule
-// outright — see usageFromObj — instead of leaving it to whether a
-// particular gateway happens to emit input_tokens_details.
-func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
-	var u Usage
-	switch b := body.(type) {
-	case map[string]any:
-		u = mergeUsage(b, u, protocol)
-	case string:
-		u = MergeUsageWithProtocol([]byte(b), u, protocol)
-	}
-	return u, u.In > 0 || u.Out > 0
-}
-
-// ExtractUsageSides is the side-aware form of ExtractUsageWithProtocol:
+// ExtractUsageSides is the side-aware form of usage extraction:
 // returns (usage, inOK, outOK) where each bool reports whether THAT side
 // of the usage ledger was actually parsed, not a merged "saw anything".
 // The router/quota side needs this split rather than the single-bool
@@ -153,7 +109,7 @@ func ExtractUsageWithProtocol(body any, protocol string) (Usage, bool) {
 //
 // body is either a map[string]any (a JSON object body) or a string
 // (raw bytes of an SSE stream, as audit.EncodeBody stores non-JSON
-// bodies). Matches ExtractUsageWithProtocol's two input shapes.
+// bodies).
 //
 // Used by router.live tokenCharge (via rbody.UsageSides, set by
 // respnorm) and by replay.chargeReplay, both of which now go through
@@ -179,17 +135,11 @@ func usageObjectSides(obj map[string]any, protocol string) (u Usage, inOK, outOK
 	u = mergeUsage(obj, u, protocol)
 	inOK = u.In > 0
 	outOK = u.Out > 0
-	// Anthropic message_start: the object carries a ~1 placeholder for
-	// output_tokens that is NOT a real generation count. The body shape
-	// (a parsed JSON object) cannot tell us whether this object was a
-	// message_start or some other Anthropic event, but the protocol
-	// is anthropic-messages — and the same message_start gate
-	// (a "type":"message_start" field, via isAnthropicMessageStart) is
-	// the rule. We only get a
-	// raw object here, not a byte slice, so we apply the conservative
-	// form: the object MUST carry the message_start type marker to
-	// qualify (rare on a JSON object body — this is a streamed-event
-	// rule mirrored defensively for safety).
+	// Anthropic message_start carries a ~1 placeholder for output_tokens that
+	// is NOT a real generation count. A parsed JSON object cannot prove which
+	// Anthropic event it was, so the object MUST carry the "type":
+	// "message_start" marker to qualify — the conservative form of the
+	// streamed-event rule, applied defensively to whole-body objects too.
 	if protocol == core.ProtocolAnthropicMessages {
 		if isAnthropicMessageStart(obj) {
 			outOK = false
@@ -273,7 +223,7 @@ func isAnthropicMessageStart(obj map[string]any) bool {
 // MergeUsageWithProtocol extracts usage from b (a complete JSON object body
 // or SSE text, depending on which transport mode is in play — see
 // internal/respnorm's doc comment) and folds it into acc, returning the
-// merged result. This and ExtractUsage's string case share this one
+// merged result. This and ExtractUsageSides's string case share this one
 // implementation rather than each parsing SSE lines independently — the
 // same "one parser, not two" rule this package exists to enforce (see
 // CLAUDE.md's chatmsg invariant: it is the one shared source of truth for
@@ -411,7 +361,7 @@ func usageFromObj(m map[string]any, protocol string) Usage {
 // BodyRaw normalizes one audit-record body — which the JSONL decoder hands
 // back as a string, a map, or nil depending on how it was written — into
 // the raw JSON bytes every estimator and parser downstream wants. Lives
-// here, next to ExtractUsage (the other function that has to cope with that
+// here, next to ExtractUsageSides (the other function that has to cope with that
 // same `any`), because THREE packages need it and the dependency graph only
 // admits one: internal/reqdetail imports internal/ctxgraph, so the helper
 // could not live in reqdetail and still be reachable from ctxgraph's

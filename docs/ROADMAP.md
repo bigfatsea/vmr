@@ -54,7 +54,7 @@
 
 ### R6. 供应链 typosquat 检测 + Provider 诚信 fraud 信号
 
-**状态**：明确延后，未排期。`docs/design/agent-guard-technical-spec-final-2.0.md` §1.1(c)/§4.7/M2.6 已给出方向但标注「可独立砍掉，默认不进 `vmr analyze` 默认产出」。
+**状态**：明确延后，未排期。Agent Guard 设计规范（已归档） §1.1(c)/§4.7/M2.6 已给出方向但标注「可独立砍掉，默认不进 `vmr analyze` 默认产出」。
 
 - **现状**：Agent Guard 的 M0（双向语料标定）、M1（`internal/guard` 双向检测核心：凭据识别、`ClassifyRunes`、`InspectToolCall`）、M2.1–M2.4（`audit.Record.Guard` 契约、`vmr analyze` 的离线补扫、入向取证、Provider 暴露面归因）均已完成并接入 `macro/guard.json`。M2.5（Journey 步骤级安全标注）仍未实现，见该设计文档 §5。该设计文档同时提议的两个信号——依赖包名 typosquatting 检测（按长度分档的编辑距离比对）、Provider fraud 信号（`thinking_missing`/`usage_ratio` 虚报比对）——均未实现。
 - **为什么还没做**：这两项是"新想法"而非护栏的必需品，且比对基准需要真实标定：typosquat 的判定阈值依赖包名长度分档表（设计文档故意不写具体规模数字，避免固化易变数据），`usage_ratio` 的告警阈值需要先标定 `tokenutil.Estimate` 的真实误差分布——按 provider 分层从存量语料中导出即可，无需现测（设计文档 M0.4，未做）。仓促上线一个未标定阈值的"诚信"信号，误报的代价（怀疑无辜 provider）比不做更糟。
@@ -62,7 +62,7 @@
 
 ### R7. Agent Guard 通用 PII 检测规则（email / 手机号 / 身份证等）
 
-**状态**：明确延后，未排位。`docs/design/agent-guard-technical-spec-final-2.0.md` 附录 A 早期草案曾把这些列为 Tier 2 候选。
+**状态**：明确延后，未排位。Agent Guard 设计规范（已归档） 附录 A 早期草案曾把这些列为 Tier 2 候选。
 
 - **现状**：`internal/guard.DefaultRules` 的 Tier 2 目前只有 `generic-sk-prefix`（泛化 `sk-` 前缀）一条；`generic-api-key`/`bearer-token`/`email`/`cn-mobile`/`cn-resident-id` 从未落地——设计文档给不出具体模式，且这些检测器把范围从「凭据外带」扩展到「通用 PII」，是与本方案（credential exfiltration）不同的功能轴。
 - **为什么还没做**：没有具体模式可实现，也没有真实语料校准过误报率（尤其 `email`/`cn-mobile` 这类形状宽松的模式，历史上 `sk-` 泛前缀就因缺少边界锚点产生过近万次英文单词误报——同样的坑没理由不为 PII 模式重踩一次）。

@@ -77,7 +77,7 @@ func TestBuildStructure_GraphLevelFactsCarried(t *testing.T) {
 	r2 := mkRecWithUsage(at(1), []any{sys, u1, msg("assistant", "ok"), u2}, "done", 120, 15)
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestBuildStructure_CacheBreak(t *testing.T) {
 	r2 := goldenRec(at(1), 1000, []any{sys2, u1, a1, u2}, goldenSSE("reply 2", 120, 10, 90))
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestBuildStructure_ToolCallRefHasNoResultText(t *testing.T) {
 	r2 := mkRec(at(1), "", []any{sys, u1, a1, t1}, sseText("the rate is 7.1"))
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestBuildStructure_LosslessReconstruction(t *testing.T) {
 	r3 := mkRec(at(2), "", []any{sys, u1, a1, t1, a2, u1}, sseText("sure, anything else?"))
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -392,7 +392,7 @@ func buildJourneyWithArgsLen(t *testing.T, argsLen int) *Journey {
 		msgsSoFar = append(msgsSoFar, map[string]any{"role": "tool", "tool_call_id": "c" + string(rune('a'+i)), "content": "ok"})
 	}
 	path := writeJSONL(t, recs)
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -715,7 +715,7 @@ func TestJourneySummary_TimePointsCarryDisplayForm(t *testing.T) {
 	r2 := mkRecWithUsage(at(5), []any{sys, u1, msg("assistant", "ok"), msg("user", "more")}, "ok", 120, 15)
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

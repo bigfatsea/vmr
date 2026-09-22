@@ -48,7 +48,7 @@ func TestGuardE2E_BuildPopulatesReportGuard(t *testing.T) {
 	}
 	path := writeJSONL(t, recs)
 
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestGuardE2E_FallbackScanCoversCleanRecord(t *testing.T) {
 			Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"model": "coding"}}}},
 	}
 	path := writeJSONL(t, recs)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGuardE2E_FallbackScanCoversCleanRecord(t *testing.T) {
 // Path never runs at all.
 func TestGuardE2E_NilOnEmptyLog(t *testing.T) {
 	path := writeJSONL(t, nil)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -30,7 +30,7 @@
 
 ### 1.0 永久不做（架构红线）
 
-语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上——**限定**：指不代理 MCP 协议、不介入客户端的工具执行路径；对标准 LLM API 响应体内 `tool_use.input` / `tool_calls.arguments` 等字段做内容审查不在此列，因为那 100% 发生在标准 LLM API 线路上，和 `respnorm` 检查 `usage` 字段属于同一类动作——`internal/guard` 的内容扫描正是在这条限定下立项的，见 `docs/design/agent-guard-technical-spec-final-2.0.md` §1.1(a)）｜Web UI / 内嵌 DB / RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / benchmark 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外——`macro/guard.json` 的理由是它的数据源是新产生的审计字段 `audit.Record.Guard`，不是对既有数据的再切分）。
+语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上——**限定**：指不代理 MCP 协议、不介入客户端的工具执行路径；对标准 LLM API 响应体内 `tool_use.input` / `tool_calls.arguments` 等字段做内容审查不在此列，因为那 100% 发生在标准 LLM API 线路上，和 `respnorm` 检查 `usage` 字段属于同一类动作——`internal/guard` 的内容扫描正是在这条限定下立项的，见 Agent Guard 设计规范（已归档） §1.1(a)）｜Web UI / 内嵌 DB / RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / benchmark 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外——`macro/guard.json` 的理由是它的数据源是新产生的审计字段 `audit.Record.Guard`，不是对既有数据的再切分）。
 
 ### 1.1 运行时与并发
 
@@ -71,27 +71,29 @@
 - **CLI 与 Server 版本必须匹配，不一致直接报错不做兼容**：单二进制、可随时重启，`vmr status` 与 `vmr start` 理应同版本——不一致说明升级没走完，报错正是暴露它。`json.RawMessage` 式兼容层只覆盖一个滚动升级窗口却永久留在代码里，违反 KISS。此原则不留任何字段级例外。
 - **`/status` 的 `instance.base_urls` 回显请求自身地址而非 `listen` 配置**：host 取自 HTTP Host 头、scheme 取自是否 TLS——调用方用什么地址访问 `/status` 就广告什么地址，这正是客户端该填的值。纯展示、不参与鉴权或路由，Host 可伪造无安全影响；刻意不做 `X-Forwarded-Host` 解析。
 - **`base_url` 内嵌凭据在加载期报错，而不是在审计侧脱敏**：`base_url` 是自由字符串，`https://u:p@host` 或 `?api_key=...` 会原样进 `Attempt.URL` 落盘——审计脱敏只覆盖 header，这是脱敏模型的唯一旁路。在源头消灭比运行期脱敏正确：脱敏是永远追不全的黑名单。**适用于**：固定的凭据键名清单（`api_key`/`token`/`secret`/`password` 等）与 userinfo 段。**不适用于**：自定义网关用非常规键名承载凭据的情形——刻意不做「值看起来像 key」的启发式判断，那会误杀 `api-version` 这类合法参数。错误信息只回显键名，绝不回显值。
-- **Agent Guard（`internal/guard`）的 `sk-` 泛前缀规则永远是 Tier 2（仅供离线人工复核），不得升为 Tier 1 或用作任何在线改写/阻断依据（K-G5）**：`tools/guard_corpus_scan` 对本仓真实审计日志的复现扫描证实了 `docs/design/agent-guard-technical-spec-final-2.0.md` §2.3 的结论——即使加上左边界锚点（`(?:^|[^A-Za-z0-9_+/=-])`，已消除「`task-specific`/`ask-user-question` 之类英文单词子串」这一类误命中），`sk-[A-Za-z0-9_-]{20,}` 仍然只是一个开放式形状匹配，锚定强度不如 `openai-legacy-key` 这类定长规则。**适用于**：任何"要不要把 `sk-` 泛前缀提到 Tier 1"的提议，先看这条。**不适用于**：五锚齐备（左边界+字面前缀+定长+字符集+熵）的具体厂商规则（`sk-ant-api03-`/`sk-proj-`/`AKIA`/`AIza`/`ghp_`/`hf_` 等），那些已经是 Tier 1。M0-M2 已全部实现：`guard.Engine`/`ScanText`/`ClassifyRunes`/`InspectToolCall`/`Fingerprint`（离线双向检测核心）、`audit.Record.Guard` 契约、`vmr analyze` 的出向权威盖章+离线补扫（M2.2）、入向 Unicode/Tool Call/凭据回显取证（M2.3）、Provider 暴露面归因（M2.4），`macro/guard.json` 在真实语料上确认产出非空数据。M3 出向干预（M3.0–M3.6）已在线落地（出向扫描/阻断、配置校验；此前的 replace/伪名还原模式已随第一性原理复审整体移除——见 K-G1；Salt 持久化机制后又随 K-G19 整体移除，`Hit.FP` 改为确定性哈希）。M4 入向干预已收窄为仅 Unicode 隐写净化（SSE 双级闸门、三协议熔断帧、非流式 403 已随第二轮第一性原理复审整体移除——见 K-G15/ADR-15）。**仍未实现**：Journey 步骤级安全标注（M2.5，`internal/journey` 行数预算紧张 + 需要先有真实数据验证渲染效果，优先级低于宏观三块）、供应链 typosquat/fraud（M2.6，登记 `docs/ROADMAP.md` R6）。
+- **Agent Guard（`internal/guard`）的 `sk-` 泛前缀规则永远是 Tier 2（仅供离线人工复核），不得升为 Tier 1 或用作任何在线改写/阻断依据（K-G5）**：`tools/guard_corpus_scan` 对本仓真实审计日志的复现扫描证实了 Agent Guard 设计规范（已归档） §2.3 的结论——即使加上左边界锚点（`(?:^|[^A-Za-z0-9_+/=-])`，已消除「`task-specific`/`ask-user-question` 之类英文单词子串」这一类误命中），`sk-[A-Za-z0-9_-]{20,}` 仍然只是一个开放式形状匹配，锚定强度不如 `openai-legacy-key` 这类定长规则。**适用于**：任何"要不要把 `sk-` 泛前缀提到 Tier 1"的提议，先看这条。**不适用于**：五锚齐备（左边界+字面前缀+定长+字符集+熵）的具体厂商规则（`sk-ant-api03-`/`sk-proj-`/`AKIA`/`AIza`/`ghp_`/`hf_` 等），那些已经是 Tier 1。M0-M2 已全部实现：`guard.Engine`/`ScanText`/`ClassifyRunes`/`InspectToolCall`/`Fingerprint`（离线双向检测核心）、`audit.Record.Guard` 契约、`vmr analyze` 的出向权威盖章+离线补扫（M2.2）、入向 Unicode/Tool Call/凭据回显取证（M2.3）、Provider 暴露面归因（M2.4），`macro/guard.json` 在真实语料上确认产出非空数据。M3 出向干预（M3.0–M3.6）已在线落地（出向扫描/阻断、配置校验；此前的 replace/伪名还原模式已随第一性原理复审整体移除——见 K-G1；Salt 持久化机制后又随 K-G19 整体移除，`Hit.FP` 改为确定性哈希）。M4 入向干预已收窄为仅 Unicode 隐写净化（SSE 双级闸门、三协议熔断帧、非流式 403 已随第二轮第一性原理复审整体移除——见 K-G15/ADR-15）。**仍未实现**：Journey 步骤级安全标注（M2.5，`internal/journey` 行数预算紧张 + 需要先有真实数据验证渲染效果，优先级低于宏观三块）、供应链 typosquat/fraud（M2.6，登记 `docs/ROADMAP.md` R6）。
 - **`guard.Engine` 的并发安全与 Aho-Corasick 字面量预筛不是 M2 的准入条件，维持 M3**：分析半区对 `Engine` 的唯一调用路径是 `internal/report/aggregate.go` 的 `scanFiles`→`ingestRecord`→`guardCollector.add`，**单 goroutine 顺序 `for` 循环**（`buildInternal` 先阻塞跑完按文件 fan-out 并行的 `AnalyzeSessionsCached` 拿到 `sess`，那个并行阶段只做会话/任务分组、从不调用 `Engine.Scan`，再调用 `st.scanFiles`，两者依次执行，不是并发）。因此离线补扫（M2.2/M2.3）用一个包级单例 `*guard.Engine`（`internal/report/guardscan.go` 的 `guardEngine()`）贯穿整个 `vmr analyze` 运行即可，零并发风险，不需要拆分"不可变规则表 + 调用方扫描态"，也不需要 AC 自动机；真实语料实测（62 文件/59,025 条记录）guard 扫描相对不含 guard 的基线增量 +22.4%，在性能预算内。**Engine 并发安全与 AC 自动机维持不做**：在线每请求 goroutine 的挂载方式还没定，提前设计只能是猜测——留到 M3 出向接线设计阶段与挂载方式一并定。**适用于**：任何"要不要把 AC 自动机/Engine 并发模型提前到 M2"的提议。
 - **`private-key-block` 规则的 `Hit.FP` 是"密钥类型指纹"，不是"单条私钥的唯一指纹"**：附录 A 的模式 `-----BEGIN [A-Z ]*PRIVATE KEY-----`（`internal/guard/rules.go`）只捕获 PEM 头部这一行，不含其后的 base64 密钥体，因此同类型（如都是 `RSA PRIVATE KEY`）的不同私钥会产出相同 `FP`——这是设计文档 Appendix A 规则定义本身的产物，不是实现偏差。**已决定维持现状，不改正则**：真实语料至今 0 命中，手写一条跨多行、跨 JSON 转义序列的正则却没有真实私钥泄露样本可供校准，出错的风险高于修正一个当前从未被触发过的精度缺口。**适用于**：任何"为什么同一类私钥的多次命中在 `vmr analyze` 里显示成同一个指纹"的疑问。**触发条件**：出现真实私钥泄露样本时，再评估是否值得扩展正则匹配完整 PEM 块。
 - **`tools/guard_corpus_scan -deep` 的 Tool Call/高危命令库/凭据回显检测对流式响应完全失效，产出不入库**：`-deep` 模式对响应体做 `json.Unmarshal(respBytes, &struct{})` 提取 Tool Call，要求 `respBytes` 是一个 JSON 对象——但本仓真实流量以流式（SSE）为主，流式响应存的是一整段 JSON 字符串，整体 `Unmarshal` 必然出错，因此这条路径对流式响应从未真正解析出过一次工具调用，只覆盖真实工具调用的约 0.06%。真正的检测路径（`vmr analyze`/`internal/report`）不受影响，因为它用 `chatmsg.ReassembleSSE` 正确重组后再交给 `guard.InspectToolCall`。历史 `-deep` 模式产出的分析报告与 JSON 数据集（`agent-guard-corpus-deep-analysis.json`/`-report.md`）因此(a) Tool Call/高危命令库/回显三项数字不可信，且 (b) 为便于人工复核保留了候选凭据的脱敏预览（首尾字符+长度+命中路径+时间戳），其中若干条未被确认为测试夹具——两个原因叠加，已把这两个文件加入 `.gitignore`，不提交入库（`-deep` 的默认输出路径也已从 `docs/design/` 改至 `reports/`，同样被 gitignore 覆盖——防止下次重跑再把含凭据预览的取证产物生成在易被 `git add -A` 误带入的位置），只留 `guard` 的 `testdata/corpus_scan.json`（纯聚合数字，不含任何预览/路径/时间戳）作为可复现的官方 M0 校准产物。**适用于**：任何"要不要把 `-deep` 产物提交入库"或"引用 `-deep` 的 Tool Call/回显数字"的提议。
 - **`InspectToolCall` 对未分类工具（`unknown` 类别）只做凭据外带与凭据回显检查，不跑命令模式匹配（K-G6）**：MCP 生态下工具名不可枚举，一个叫 `search_docs` 的工具参数里出现 `rm -rf /` 完全可能只是在搜索文档；命令模式库只对 `ClassifyToolName` 判为 `command` 的工具生效（`internal/guard/toolinspect.go`）。这是防误杀的刻意选择，不是覆盖不全的疏漏。
-- **变体选择符类字符（ZWNJ/ZWJ/LRM/RLM、`U+FE00`–`U+FE0F`、`U+E0100`–`U+E01EF`）只计数标记，不作为删除对象（K-G7）**：它们是波斯语、印地语、阿拉伯语排版与全部 ZWJ emoji 序列的必需字符（`internal/guard/runes.go` 的 `RuneCatVarSel`）；两个月良性语料里这类字符命中 2,947 次、几乎全是 emoji 表现选择符（`docs/design/agent-guard-technical-spec-final-2.0.md` §2.3），无差别删除会当场破坏这些正常内容。M4 的在线净化器已按此落地：只对 A/B 档做删除动作，C 档只计数标记绝不删除。
+- **变体选择符类字符（ZWNJ/ZWJ/LRM/RLM、`U+FE00`–`U+FE0F`、`U+E0100`–`U+E01EF`）只计数标记，不作为删除对象（K-G7）**：它们是波斯语、印地语、阿拉伯语排版与全部 ZWJ emoji 序列的必需字符（`internal/guard/runes.go` 的 `RuneCatVarSel`）；两个月良性语料里这类字符命中 2,947 次、几乎全是 emoji 表现选择符（Agent Guard 设计规范（已归档） §2.3），无差别删除会当场破坏这些正常内容。M4 的在线净化器已按此落地：只对 A/B 档做删除动作，C 档只计数标记绝不删除。
 - **Tool Call 护栏只审查结构化工具参数，纯文本 `content` 绝不拦截（K-G8）**：`internal/guard.InspectToolCall` 的输入固定是 `tool_calls[].function.arguments` / `tool_use.input` 一类已装配完整的实参，从不下探到助手的自由文本回复。模型解释"为什么不要执行 `rm -rf /`"是完全正常的输出，在纯文本里拦截是误杀之源。
-- **安全阻断相关的 `core` 错误类别 `ErrSecurity`（已删除）随入向在线拦截整体移除失效（K-G9，编号不复用）**：入向在线干预（Tool Call 闸门、协议熔断帧、非流式 403）随第一性原理复审（2026-09-16）整体移除——见 `docs/design/agent-guard-technical-spec-final-2.0.md` ADR-15；入向在线唯一剩下的动作是 Unicode 隐写净化，从不阻断、不合成协议帧、不改变状态码，因此不存在"安全阻断该不该罚健康分"这个问题了。**适用于**：任何"要不要恢复入向在线拦截"的提议，先读 K-G15。
-- **`GuardRecord.Ver` 标记指纹全集版本，规则集升级使新旧 `Hit.FP` 不可比（K-G4）**：规则集版本升级会改变规则/指纹全集，同一凭据在新旧版本下派生出不同 `Hit.FP`，跨版本聚合"同一凭据重复出现"时会漏配对——这是指纹的固有属性，不是 bug。`internal/audit/guard.go` 的 `Ver` 字段已按此前提设计（每条记录盖章生成时的规则集版本）；`vmr analyze` 在版本切换点给出提示是配套工作，不改变这条结论本身。参见 `docs/design/agent-guard-technical-spec-final-2.0.md` ADR-12。
+- **安全阻断相关的 `core` 错误类别 `ErrSecurity`（已删除）随入向在线拦截整体移除失效（K-G9，编号不复用）**：入向在线干预（Tool Call 闸门、协议熔断帧、非流式 403）随第一性原理复审（2026-09-16）整体移除——见 Agent Guard 设计规范（已归档） ADR-15；入向在线唯一剩下的动作是 Unicode 隐写净化，从不阻断、不合成协议帧、不改变状态码，因此不存在"安全阻断该不该罚健康分"这个问题了。**适用于**：任何"要不要恢复入向在线拦截"的提议，先读 K-G15。
+- **`GuardRecord.Ver` 标记指纹全集版本，规则集升级使新旧 `Hit.FP` 不可比（K-G4）**：规则集版本升级会改变规则/指纹全集，同一凭据在新旧版本下派生出不同 `Hit.FP`，跨版本聚合"同一凭据重复出现"时会漏配对——这是指纹的固有属性，不是 bug。`internal/audit/guard.go` 的 `Ver` 字段已按此前提设计（每条记录盖章生成时的规则集版本）；`vmr analyze` 在版本切换点给出提示是配套工作，不改变这条结论本身。参见 Agent Guard 设计规范（已归档） ADR-12。
 - **`mode: replace`（出向伪名化 + 响应端还原）已整体移除，唯一正确的出向干预是 `block`（K-G1）**：第一性原理复审（2026-09-15）裁定移除，理由有三：① 还原器本质上是一个解密预言机——中转站若在响应里回显伪名并诱导执行（例如塞进 `curl` 实参），还原等于主动把真钥双手奉上；且 ADR-6 早已承认 replace 防不了会篡改响应的主动中间人（AC-1），面对 AC-1 唯一正确的出向模式是 `block`；② replace 的唯一增量价值是"凭据在场时请求仍成功"，而真实语料中全部命中都是事故性粘贴（.env 模板、活跃 JWT 误发），对事故性粘贴来说"请求失败"正是期望行为，摩擦即特性；③ 独立复核（R-1/R-2/R-3/R-4/R-6）的缺陷密度高度集中在 replace/restore 机器上。移除后出向只剩 `off`/`audit_only`/`block`；配置里再声明 `replace` 是加载错误。经 Git 历史核实，`mode: replace` 从未进入任何已发版 Tag，没有真实生产记录需要兼容，相关兼容字段与 replay 影子分支已整体拔除。**适用于**：任何"要不要恢复伪名化/响应端还原"的提议——先重读上面三条。
-- **入向在线拦截（Tool Call 双级闸门、协议熔断帧、非流式阻断、opaque/oversize 阻断分支）已整体移除，入向在线唯一剩下的动作是 Unicode 隐写净化（K-G15）**：第一性原理复审（2026-09-16）裁定移除，三条理由：① 客户端自己的审批门与沙箱是更正确、信息量更大的拦截位置——同一个"要不要放行这条命令"的判断，VMR 在信息量更少的位置重做，只会拿到一份更差的判断；② 缺陷密度实证——两轮独立复核（发现已转登记本文件，报告本身不入库）合计十余条问题里九条集中在这套机制上：`protected_paths`/`blocked_command_categories` 两个配置项完整解析校验却从未接线（死配置）、在线三处凭据回显检查恒传 `known=nil`、一级预筛确认预算易被烧穿、确认窗口小于部分高危模式实际跨度、多 choice 场景硬编码只看 `Choices[0]`；③ 默认 `audit_only` 且从未在生产流量上验证过判定精度，没有可行的放量路径。移除后 `guard.inbound` 从 7 个字段收窄到 1 个（`sanitize_invisible_runes`），`config.GuardInbound` 的对应字段整体删除（不是保留字段拒绝新值）；`core` 的 `ErrSecurity` 错误类别、`audit` 的 `BlockInfo` 类型、`GuardRecord.Block` 字段一并删除，**不**留解码兼容位——核实后确认入向在线拦截从落地到移除之间没有任何一次真实 `vmr start` 运行产生过带这些字段的审计记录，与 K-G1 对 `mode: replace` 的处理（保留兼容位）是基于可验证事实的差异，不是标准不一致。检测层纯函数（`InspectToolCall`）与离线取证不受影响，继续由 `report/guardscan.go` 消费。**适用于**：任何"要不要把 Tool Call 闸门/协议熔断帧加回来"的提议，先读上面三条与 `docs/design/agent-guard-technical-spec-final-2.0.md` ADR-15。
+- **入向在线拦截（Tool Call 双级闸门、协议熔断帧、非流式阻断、opaque/oversize 阻断分支）已整体移除，入向在线唯一剩下的动作是 Unicode 隐写净化（K-G15）**：第一性原理复审（2026-09-16）裁定移除，三条理由：① 客户端自己的审批门与沙箱是更正确、信息量更大的拦截位置——同一个"要不要放行这条命令"的判断，VMR 在信息量更少的位置重做，只会拿到一份更差的判断；② 缺陷密度实证——两轮独立复核（发现已转登记本文件，报告本身不入库）合计十余条问题里九条集中在这套机制上：`protected_paths`/`blocked_command_categories` 两个配置项完整解析校验却从未接线（死配置）、在线三处凭据回显检查恒传 `known=nil`、一级预筛确认预算易被烧穿、确认窗口小于部分高危模式实际跨度、多 choice 场景硬编码只看 `Choices[0]`；③ 默认 `audit_only` 且从未在生产流量上验证过判定精度，没有可行的放量路径。移除后 `guard.inbound` 从 7 个字段收窄到 1 个（`sanitize_invisible_runes`），`config.GuardInbound` 的对应字段整体删除（不是保留字段拒绝新值）；`core` 的 `ErrSecurity` 错误类别、`audit` 的 `BlockInfo` 类型、`GuardRecord.Block` 字段一并删除，**不**留解码兼容位——核实后确认入向在线拦截从落地到移除之间没有任何一次真实 `vmr start` 运行产生过带这些字段的审计记录，与 K-G1 对 `mode: replace` 的处理（保留兼容位）是基于可验证事实的差异，不是标准不一致。检测层纯函数（`InspectToolCall`）与离线取证不受影响，继续由 `report/guardscan.go` 消费。**适用于**：任何"要不要把 Tool Call 闸门/协议熔断帧加回来"的提议，先读上面三条与 Agent Guard 设计规范（已归档） ADR-15。
 - **`macro/guard.json`（及其 Markdown 呈现）描述的是已经发生的事，不是被拦截的事（K-G14）**：报告里出现一条 `pipe_to_shell` 命中，含义是"客户端当时已经收到了它"，**从未被拦截过，也不会被拦截**——离线扫描只有取证能力，入向在线的唯一动作是 Unicode 隐写净化（ADR-15），没有任何拦截能力。`internal/i18n/report_guard.go` 与 `internal/report/viewmodel_guard.go` 的措辞均按此写（"本节只做离线呈现，不做任何在线拦截或改写"）。
 - **出向 guard 永不改写请求体，`Client.Request.Body` 与 `Attempt.Request.Body` 在现行模式下恒等（K-G3）**：`mode: replace` 移除后（K-G1），`internal/server/guard.go` 的 `applyOutboundGuard` 只观测（audit_only）或拒绝（block），三种模式都不改写 body；`vmr replay` 也始终只读 `Client.Request.Body`。**适用于**：任何"审计日志里怎么还能看到原始凭据"的疑问——这是设计使然（本地单机 0600 权限保护），不是泄露。
 - **在线/离线对 `\u` 转义编码凭据存在检出行为分歧（K-G16）**：在线引擎（`guard.Engine.Scan`）与标定工具工作在原始 JSON 字节流上，为了维持热路径零分配与高性能，不展开 JSON 字符串值内的 `\uXXXX` 转义；若凭据被写为转义形式（例如 `\u0073k-ant-...`），在线路径不会命中。而离线分析（`report.guardscan`）在遍历 Go `json.Unmarshal` 解码后的 AST 树时，叶子节点已是 UTF-8 解码文本，走 `ScanText` 扫描，能检出转义编码的凭据。威胁模型分析：本系统的主要防御场景是开发者或 Agent 事故性明文粘贴凭据（.env 文件、活跃 JWT 复制粘贴），刻意使用 `\u` 转义绕过出向阻断不在当前威胁模型内；为了边缘规避场景在热路径上引入全量转义解码开销属于过度设计，因此刻意接受该差异。两半区行为由差分测试锁定。
 - **Agent Guard 的 Aho-Corasick 字面量预筛（`prefilter.go`）保留，不降级为 11 次 `bytes.Contains` 线性扫描（K-G17）**：过度设计复核指出对当前 11 条规则、典型请求体量级而言两者吞吐差异可忽略，但 `scanValue` 是对每个 JSON 字符串叶子值单独调用——不能排除单个叶子值本身就是几百 KB（整段代码/日志粘贴）的退化输入，此时 AC 的 O(N) 保证优于线性扫描的 O(N×规则数)。降级只换来约 300 行代码量减少，不修复任何 bug、不提升任何指标，且改动正落在 fuzz 覆盖的热路径上，需要重新过一遍现有 fuzz/benchmark 才能确认行为不变。**决定**：维持现状，不做，不再作为待办反复提出。
 - **`toolinspect.go` 保留在 `internal/guard`，不物理搬迁到 `internal/report`（K-G18）**：过度设计复核确认 `toolinspect.go` 是 100% 离线消费（ADR-15 后），但它的两个调用方（`report/guardscan.go`、`tools/guard_corpus_scan`）**本来就已经** import `internal/guard`（要用 `Engine`/`Fingerprint` 等在线离线共用的检测层）——搬迁不会消除任何一条真实 import 边，只是把同一份代码换个目录，且文件顶部已有"Offline-only consumer since ADR-15"的清晰声明。**决定**：维持现状，不做。
-- **`Hit.FP` 为确定性裸哈希（SHA-256 前 16 字节），不加盐，彻底移除 Salt 生命周期（K-G19）**：过度设计复核确认派生产物（报告与 JSON 切片）只展示凭据计数整数，从不序列化输出 FP 字符串；审计文件本身已是 100% 明文（K-G3），加盐无实际安全增益，反而因在线持久盐与离线随机盐不一致、以及跨 run 随机盐产生指纹漂移（§2.168）。降级为确定性哈希后在线、离线与标定工具同口径，彻底消灭漂移，同时删除 Salt 落盘/配置/警告等全套生命周期代码（原 ADR-11 废止，见 ADR-12 与 §2.168 修复记录）。**适用于**：任何"要不要恢复加盐 HMAC"的提议。
-- **`guard.Hit`/`guard.Tier`/`guard.OutMode` 不下沉 `internal/core`，`guard` 维持 ADR-1 的 `{jsonscan}` 独立依赖白名单（K-G20）**：过度设计复核指出 `guard.Hit` 与 `audit.Hit` 镜像定义、`OutMode` 在 `config`/`guard` 两处各自声明、三处（在线/离线/标定工具）各自实现"按 (rule,fp) 折叠→计数→排序"的聚合算法。复核确认：① `OutMode` 部分的前提已随批次一（删除 `config.Guard.RulesVersion`）变化——`config` 现在完全不 import `guard`，统一会新增一条依赖换掉 `server/guard.go` 里一行零成本的类型转换，性价比比复核报告写作时更差；② `Hit`/`Tier` 结构体下沉的代价单方面压在 `guard` 头上（`report`/`audit` 早已 import `core`，零增量），而 `internal/core` 是持续演进的活跃包（全仓 800+ commit 里 60+ 个动过它），guard 依赖它会失去 ADR-1"不被 core 类型演化牵连"这条保证；③ `audit.Hit` 是永久落盘的 JSONL schema，`guard.Hit` 是内存态计算产物，`server/guard.go` 的 `toAuditHits()` 是两者之间唯一、显式的转换点——这是 wire format 与内存态类型分离的合理架构模式，不是意外重复，合并会让磁盘 schema 的稳定性隐式绑定到 `core` 的演化节奏上。三处聚合算法重复（~20 行 × 3）目前口径一致、从未观察到过真实漂移。**决定**：结构体/枚举维持现状不下沉；聚合逻辑重复维持观察，等出现真实漂移证据再抽公共函数，不预防性重构。`Hit.FP` 本身已按 K-G19 降级为确定性哈希（见 §2.168 的修复记录）——那是"指纹要不要加盐"的问题，与本条"类型定义要不要下沉 core"是两个独立问题。
+- **`Hit.FP` 为确定性裸哈希（SHA-256 前 16 字节），不加盐，彻底移除 Salt 生命周期（K-G19）**：过度设计复核确认派生产物（报告与 JSON 切片）只展示凭据计数整数，从不序列化输出 FP 字符串；审计文件本身已是 100% 明文（K-G3），加盐无实际安全增益，反而因在线持久盐与离线随机盐不一致、以及跨 run 随机盐产生指纹漂移。降级为确定性哈希后在线、离线与标定工具同口径，彻底消灭漂移，同时删除 Salt 落盘/配置/警告等全套生命周期代码（原 ADR-11 废止，见 ADR-12）。**适用于**：任何"要不要恢复加盐 HMAC"的提议。
+- **`guard.Hit`/`guard.Tier`/`guard.OutMode` 不下沉 `internal/core`，`guard` 维持 ADR-1 的 `{jsonscan}` 独立依赖白名单（K-G20）**：过度设计复核指出 `guard.Hit` 与 `audit.Hit` 镜像定义、`OutMode` 在 `config`/`guard` 两处各自声明、三处（在线/离线/标定工具）各自实现"按 (rule,fp) 折叠→计数→排序"的聚合算法。复核确认：① `OutMode` 部分的前提已随批次一（删除 `config.Guard.RulesVersion`）变化——`config` 现在完全不 import `guard`，统一会新增一条依赖换掉 `server/guard.go` 里一行零成本的类型转换，性价比比复核报告写作时更差；② `Hit`/`Tier` 结构体下沉的代价单方面压在 `guard` 头上（`report`/`audit` 早已 import `core`，零增量），而 `internal/core` 是持续演进的活跃包（全仓 800+ commit 里 60+ 个动过它），guard 依赖它会失去 ADR-1"不被 core 类型演化牵连"这条保证；③ `audit.Hit` 是永久落盘的 JSONL schema，`guard.Hit` 是内存态计算产物，`server/guard.go` 的 `toAuditHits()` 是两者之间唯一、显式的转换点——这是 wire format 与内存态类型分离的合理架构模式，不是意外重复，合并会让磁盘 schema 的稳定性隐式绑定到 `core` 的演化节奏上。三处聚合算法重复（~20 行 × 3）目前口径一致、从未观察到过真实漂移。**决定**：结构体/枚举维持现状不下沉；聚合逻辑重复维持观察，等出现真实漂移证据再抽公共函数，不预防性重构。`Hit.FP` 本身已按 K-G19 降级为确定性哈希——那是"指纹要不要加盐"的问题，与本条"类型定义要不要下沉 core"是两个独立问题。
 - **`vmr analyze` 不提供 `-no-guard`/`-skip-guard` 一类跳过离线补扫的开关（K-G21）**：`internal/report/factscache.go` 的磁盘 Facts 缓存只按审计文件内容哈希键入，与运行时 flag 无关；若加一个"跳过扫描"开关，开关生效那次运行写入的空 `GuardScan` 会被当成该文件内容的正确结果落盘缓存，用户后续不带开关正常运行时，只要文件内容不变就会命中缓存、直接复用这份空结果——`macro/guard.json` 因此永久归零，且没有任何提示说明数据是被跳过而非真的干净。要安全地支持这类开关需要把开关状态编码进缓存 key 或 `CacheSchemaVersion`，复杂度和开关本来想省的那点耗时不成比例（guard 补扫相对不含 guard 的基线整体开销 +22.4%，已确认在性能预算内，见上面 M2 的并发安全条目）。**决定**：不做。**适用于**：任何"给非 guard 用户加个跳过开关"的提议，先看这条。
 - **`scanInboundFacts`（`internal/report/guardscan.go`）对已在线盖章的记录仍无条件重扫 `Client.Request.Body`，不能靠 `len(arec.Guard.Hits) > 0` 短路（K-G22）**：这次重扫的目的不是重算 `Hits`——这条路径根本不写 `out.Hits`——而是拿到 `known`（本次请求里出现过的凭据明文），喂给入向凭据回显检测；`arec.Guard.Hits` 只存 `FP`（哈希），无法反推明文，`known` 只能靠重新扫描 body 得到。更关键的是 K-G16：在线扫描不解码 `\u` 转义，凭据若被转义会让在线 `Hits` 恒为 0——这恰好是离线复扫最该补上的场景，不是可以跳过的场景。任何"`Hits==0` 就跳过这次扫描"的优化提案，实质是关掉 K-G16 在回显检测这一层的补偿能力，是真实的能力回归，不是零风险的性能优化。**决定**：不做。整体 guard 扫描开销已评估为在性能预算内（见上面 M2 的条目），不为这一小块单独开洞。
 - **M5 五探针矩阵（`internal/probe/guard.go`）维持一个命令，不按"安全 vs 保真度/计费诚实度"物理拆分成独立子命令（K-G23）**：探针 1（Tool Call 篡改）、5（隐写注入）是凭据/隐写安全检测，探针 2（长上下文截断）、3（思维链剥离）、4（Token 虚报）是中转站保真度/计费诚实度检测，两类威胁模型确实不同，但拆分理由站不住——五个探针共享同一套请求/校验机制，都通过显式 opt-in 的 `vmr diagnose -guard` 触发，都向真实端点发送真实请求、消耗真实 Token（这是 `vmr diagnose` 一直以来的既定行为，不是探针矩阵带来的新特性），拆分不会改变任何一个探针本身检测到什么、也不会降低任何风险。**决定**：维持一个命令；`-guard` 的 flag 帮助文本与 `internal/probe/guard.go` 的包注释已把两类探针的性质分开说明。**适用于**：任何"把探针矩阵拆成 `vmr diagnose -fidelity` 之类独立命令"的提议，先看这条。
+- **入向净化重建 SSE 事件时，注释行（`:` 开头）在一种双重边缘情况下会被丢弃，不算遗留缺口（K-G24）**：`splitSSEEvent`/`rebuildSSEEvent` 只透传 `id:`/`event:`/`retry:`/`data:` 四类字段；`sanitizeEvent` 在一个事件块的 `data` 为空时直接原样返回整段原始字节（含任何注释行），只有 `data` 非空*且*该次扫描真的判定需要改写时才会走 `splitSSEEvent`→`rebuildSSEEvent` 的重建路径——真实上游的心跳注释（如 `: keepalive`）几乎总是独立、不带 `data:` 字段的事件块，因此从不触发重建，逐字节原样透传。唯一会丢注释行的场景是"同一事件块内既有注释行、又有命中隐写字符触发改写的 `data:` 字段"这种双重边缘情况，评估后判定影响面可忽略，不追加改动。
+- **`Record.Guard.SanitizedRuneCounts` 与 `RuneCounts` 是互补而非重叠的两个字段，不合并（K-G25）**：`RuneCounts` 是离线重扫 `Client.Response.Body`（净化已发生之后的最终字节）得到的"最终留在响应里的"计数，`SanitizedRuneCounts` 是在线净化器自己记录的"净化前存在、已被剥除"的计数——对已净化的记录而言前者天然看不到后者剥除的部分，合并会混淆 K-G14 的核心区分（"已经发生的事" vs. 不存在的"被拦截的事"）。两者在 `internal/report` 里各自独立聚合、独立渲染（`viewmodel_guard.go`）。
 - **价目表的数值防线建在 `pricing.ParseTable`，不下沉到 `internal/config`**：`ParseTable` 是标准/curated 表的唯一解析入口，config.yaml 的 `providers[].pricing.rates` 侧另有自己的 `positiveFinite`/`nonNegativeFinite`——两层各自的入口各自把关。NaN/±Inf/负费率一律加载期硬错误；定价与配额已彻底解耦，一条脏费率的影响面只污染离线 `vmr analyze` 的 $ 估算，触达不到 `quota.Counters`（该结构自身也不含任何价格分量）。
 - **`internal/config` 的二层费率解析不后置到 `router.BuildSnapshot`**：`config` import `pricing`、在 `validate()` 跑完解析，看似「配置层反向侵入用例层」，但只让 `cmd/vmr` 一侧另行解析、config 侧完全不校验会导致两份实现各自推断、容易漂移，是已否决的备选（Quota 设计文档决策表明文选定）。后置到 `BuildSnapshot` 还会摧毁「费率行四分量全给或全不给、`aliases` 目标必须存在」这些加载期校验——它们的价值就在于**加载期**能立刻报错，而不是等 `vmr analyze`/`vmr check` 跑一次才发现打错的字。
 - **org 前缀请求名的费率解析兜底是**递归**重跑裸名，且残余误匹配风险刻意接受**：带 org 前缀的上游名（openrouter 的 `meta-llama/...`、together 的 `google/gemma-...`）四步全落空后，`resolveCanonicalKey` 用 `pricing.ModelBasename` 掐成裸名**递归重跑全部四步**（含 `<provider>/<basename>` 步）——只重跑裸名/后缀步会让「同名不同写法在同一 provider 上解析到不同价」的不对称换个位置重现。不做的：按厂商维护 org 前缀注册表（太精确所以太脆）、全局归一化请求名（会失配账号层 `pricing.aliases`/`rates` 的原始名 key）。残余：网关自造 id 掐掉前缀后恰与另一模型裸名同名时会命中那家的价——与 substring 匹配同型的极小概率误匹配，可用 `pricing.aliases` 先钉（优先级更高）。
@@ -140,7 +142,7 @@
 - **降级 token 估算的 fallback 刻意不对称：请求侧回退原始字节、响应侧一律 0**：统一规则是「用对内容最忠实的可用表示估算内容 token；剩余字节量到的若不是内容本身（SSE 信封、压缩/损坏的 opaque 字节），宁可为 0——量错一个量比没有估算更糟」，且每一侧都必须镜像路由半区实际扣减的基。两侧信息状态不同，同一规则推导出的分支就不同：请求侧的原始字节是「内容 + 脚手架」，且路由侧输入扣减（`Facts.EstimatedTokens`）本来就是 raw 基——回退 0 会让报表与实扣劈叉；响应侧的原始字节在截断/opaque 场景量的是传输不是生成（实测可达 71 倍虚高），回退 raw 等于把它复活。规则全权落在 `EstimateDegradedTokens` 的 doc comment（`internal/chatmsg/tokenest.go`）；不对称行为由 `TestEstimateDegradedBasis_FallbackAsymmetry` 钉死，对齐情形（两侧可提取文本、两侧 opaque）由 quota parity 测试钉死。**不要「统一」两侧的 fallback**——任何统一方向都已论证过是复现已修过的 bug。
 - **用量折算（精确 vs 降级）的跨包入口刻意只有一条，没有单标志合并形式**：`quota.TokenCountersSides`（纯标量入参）是唯一权威实现，`router.TokenCountersSides` 是 `chatmsg.Usage`→`quota.TokenUsage` 的唯一翻译层（`report` 直接调 `quota` 侧，`archtest` 禁它 import `router`）。合并后的「some usage was seen」单比特信号无法区分完整账本与部分账本，把 partial 当 exact 记账正是 sides 拆分要消灭的 bug 类。**不要以「API 对称」或「给未来消费者留入口」名义复活单标志包装**——只能给单比特的调用方本就该逐侧决策。
 - **quota parity 的非整数倍率差分用例直接驱动 `quota` 导出入口，不走 `buildProviderQuotaRows` 的 YAML 管线**：`cmd/vmr/quota_parity_test.go` 的 `TestQuotaParity_RequestsMetric_NonIntegerMultiplier` 用 `quota.ApplyModelMultiplier`/`quota.BaseAmount` 重算报表侧再与 `routerCharged` 对比（fixture 的 `quotaYAML` 不声明 `model_multipliers`，倍率轴经 YAML 表达不了）。取舍：这条用例的职责是钉住「N 次独立 float64 累加 vs 一次乘法」的公式级等价，报表侧必须复现 router 公式本身才能不与其实现漂移；端到端 basis（YAML → 行 → 与 router 对账）由不带倍率的 `TestQuotaParity_RequestsMetric_ReportMatchesRouter` 覆盖。**复核时机**：`buildProviderQuotaRows` 的倍率解析或 basis 计算发生变化时，重新评估是否补一条声明 `model_multipliers` 的 YAML 管线差分用例。
-- **金额展示统一收敛在 `fmtutil` 一处**：`FmtCurrency`（恒两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（报表「端点性价比」章的成本/1M out 与成本/成功请求）。跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCost/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**；表格列的货币也可在表头标注，此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
+- **金额展示统一收敛在 `fmtutil` 一处**：`FmtCurrency`（恒两位小数 + 货币符号，`$124.36`/`¥34.20`）是所有「账面金额」的唯一格式；`FmtCurrencyPrecise`（四位小数）只用于单价/微额列（报表「端点性价比」章的成本/1M out 与成本/成功请求）。跨语言 fixture（dashboard testdata/fmt_cases.json）钉住 FmtCurrency/FmtCurrencyPrecise 两侧逐字节一致——两侧都按 Go strconv 的 half-to-even 口径对二进制精确平局舍入（`0.125` → `$0.12`），JS 侧不是裸 `toFixed`（那是 half-away-from-zero，平局值上会与 Go 差一分），而是 common.js 的 `goFixed` 全程 BigInt 精确复刻，fixture 内含平局 case 防回退。**不要在渲染层手写 `FormatFloat`/`toFixed`/`Sprintf("%.4f")` 渲染金额**；表格列的货币也可在表头标注，此时单元格内的符号属冗余但无害，不算漂移。非货币数字（token 数、统计量、配额余量）的 `toFixed(2)` 与此无关，不收编。
 - **LLM 文本的 Markdown 结构转义做在 Finding 构造时，不做在渲染侧**：Finding 文本同时进 Markdown 产物与机读 JSON，而 Markdown 的**结构**破坏——反引号、竖线、行首结构标记（ATX 标题、`-`/`*`/`+` 列表项、有序列表 `1.`、块引用 `>`、主题分隔线 `---`）——在 `i18n` 模板层修不了：模板把文本插进结构位置，转义必须发生在插进去之前。**已知代价**：finding 文本此后永久带反斜杠，非 Markdown 消费者（如 JSON 导出）会看到转义痕迹；行首的 `>`、数字+点+空格（如 `>= 5`、`2026. `）也会被转义，渲染结果不变但 JSON 侧可见。
 - **`imgprep` 的 `map[string]json.RawMessage` 不与 `jsonscan` 的字节扫描统一**：图片降采样要重算尺寸并重编码，是深度结构化重写，字节 splice 做不到。这是三个 sanctioned deviation 里最大的一个。
 - **`imgprep.HasImageMarker` 的宽松预检维持「宁误报不漏报」，不收窄**：宽松的 `bytes.Contains` 预检会让正文里 `"image_path"` 之类的代码文本误触整套降采样反序列化——但误报只多付一次 JSON 解析成本，解析后结构化 dispatch 找不到真实图片块即原样放行，无正确性后果（`TestDownscaleTextMentioningMarkerIsNotAnImage` 钉死「误报≠误判」）。收窄需枚举全部已知图片引用形态 token，新增形态（如 Anthropic `tool_result` 子块 `type:"image"`）会重引漏报；漏报是硬路由 `HasImage` Condition 的正确性 bug，误报只是性能小税。
@@ -181,7 +183,7 @@
 - **`last_byte_at` 与 `est_out` 逐块盖章、刻意不节流**：`last_byte_at` 的语义是"上游最后一块数据真实到达的时刻"，用于卡死检测；若按时间或字节数攒批，节流后的盖章时间反而滞后于真实末块到达时间，让已卡死的流显得"更新鲜"，方向恰好做反；成本上每块只有一次 `OutTokens()`（per-stream 互斥锁内读计数器，本来每块就进过一次）+ 几次 per-entry 原子写，零内存分配，千块/秒极端流下也远低于 JSON/SSE 协议开销，无需攒批。
 - **body 上传与 probe 阶段对 in-flight 注册表不可见**：注册点设在 `TopLevelProbe` + `authenticate` 之后、`AcquireSlot` 之前，因为未获得协议与虚拟模型名前的请求无法归属维度，且慢速客户端 body 上传并不占用并发槽，不属于并发门排队观测的对象。
 - **livestats rollup 文件只追加、永不删；内存只是它近 7 天的滑动窗口**：小时聚合行小（年万行级），文件当全量归档一直叠——唯一消费者是 `/stats`，`vmr analyze` 读的是 audit log。内存 `a.rollup` 启动按窗口过滤加载、运行中每次日切（`rollHourLocked` 里 `evictOldRollup`）逐出掉队的一天，所以读时 fold 是**不随部署年限增长的常数**（否则读缓存也兜不住一个越来越贵的 fold），`by_*` 累计口径因此是"滚动近 7 天"而非"自启动以来"。窗口按**日历日**对齐——`rollupRetentionDays`（7）个整天 + 当天，`now` 是 0:00 时正好 7 天、中午时 7 天半。文件的启动解析成本仍是 O(全历史)——`vmr start` 打一行"恢复行数 + 耗时"日志盯着，真到几百 ms 再上按天分文件（`vmr-stats-rollup-YYYYMMDD.jsonl`），现在不做。取 7 天不取 30：实测每 `(hour,dims)` 行 ~450B，7 天在小团队规模是 1–3 MB、内存里正好是控制台 `?range=` 最宽档能显示的量；lazy 从文件加载被否掉——为省几 MB 把读路径搞成带文件 I/O 的，比刚优化掉的 fold 还慢。理由与取舍见 LiveStats 设计文档的内存态一节与决策表。
-- **Overview 头部告警 pill 的端点告警只在 cooldown 期间在列**（`server/alerts.go`）：cooldown = 该端点此刻被排除在路由外，是「需要动手的状态」；`consecutive_failures>0` 但未冷却的降级态由拓扑表 Health 列（带因果悬停）承载——无流量时残留失败计数不消零，进告警会把徽章永久钉在非零，违反告警收敛纪律（已登记于 console-unification 实施契约 §5）。
+- **Overview 头部告警 pill 的端点告警只在 cooldown 期间在列**（`server/alerts.go`）：cooldown = 该端点此刻被排除在路由外，是「需要动手的状态」；`consecutive_failures>0` 但未冷却的降级态由拓扑表 Health 列（带因果悬停）承载——无流量时残留失败计数不消零，进告警会把徽章永久钉在非零，违反告警收敛纪律（见 console-unification 设计契约（已归档））。
 - **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流，给日志行加结构化字段牵动 stderr 格式与全部日志消费者；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
 - **`/stats.overall` 合并窗口块目前无内置消费者，作为 JSON 契约保留**：它是为控制台首屏那一段"全局 TTFT p50"加的（分位数不可跨 ring 合并，只能服务端在读时对样本并集算）；该 vitals段在 console polish 轮据用户反馈移除，`overall` 随之空转。删掉它是纯粹的契约收缩且要改测试，收益为零；留着无害（已测、可外部消费、首屏日后补延迟信号会重新用上）。无 ring 样本时为 `null`。见 LiveStats 设计文档 `/stats` 契约段。
 - **零 attempt 失败（全端点冷却等）的错误类别由 `sampleFromRecord` 合成为 `no_candidate`，audit.Record 不扩充顶层字段**：一批失败导致所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，路由半区未向上游发起任何 attempt，因而 `audit.Record.Attempts` 为空。`server.sampleFromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为 `livestats.Sample` 合成 `error_class="no_candidate"` 并由客户端侧 HTTP 响应码（503 等）兜底 `status`，使控制台 Recent Failures 能够准确区分并过滤最常见的级联冷却失败，而无需为了展示层需求扩充审计日志顶层 schema。
@@ -198,9 +200,9 @@
 
 #### 2.2 [中] `vmr analyze` 全内存聚合的记录量上限
 
-- **现状**：`AnalyzeSessions` 常驻全部记录关键信息 + 原始耗时/延迟/Token 样本切片（算真实百分位）。实测万级记录即 GB 级 RSS（`report` 单跑约 1.4GB / 1.1 万条；`analyze` 组合路径约 3.75GB / 1.5 万条）。
+- **现状**：`AnalyzeSessionsCached` 常驻全部记录关键信息 + 原始耗时/延迟/Token 样本切片（算真实百分位）。实测万级记录即 GB 级 RSS（`report` 单跑约 1.4GB / 1.1 万条；`analyze` 组合路径约 3.75GB / 1.5 万条）。
 - **journey 半边曾是更大的来源，已消除**：`Step` 不再持有 `audit.Record`，`-benchmark`/`-render-all` 按 `Manifest.Bytes` 字节预算分批构建，全部 Journey 常驻只剩约 300MB，与语料量解耦。
-- **剩下的**：report 半边的 `AnalyzeSessions` 样本切片仍是全内存。
+- **剩下的**：report 半边的 `AnalyzeSessionsCached` 样本切片仍是全内存。
 - **可能方案**：按审计日志的时间局部性分自然日分桶，跨日即时释放原始切片。
 - **为什么仍待定**：这个量级目前仍跑得完（16GB 机器有余量），且分桶释放依赖「记录时间严格单调递增」这个隐蔽正确性前提，不成立就是静默算错而非报错——押上方案前必须先把它证实或证伪。
 - **触发线是「该动手了」不是「已经坏了」**：单次 `report`/`analyze` 宏观半边语料 > 约 3 万条、或该半边峰值 RSS > 4GB 是不可越过的上限；实际立项要往回留约两成提前量（约 2.5 万条 / 3.3GB 起就排期），让「证前提 → 实现 → 补一套对等的 cold/warm 一致性测试」在撞墙前落地——撞墙时正是最缺内存、最需要跑分析的那一刻。
@@ -208,7 +210,7 @@
 
 #### 2.1 [低，已部分闭环] 会话分析那一趟（`collect()`）仍未缓存
 
-- **现状**：`report.Build`/`BuildCached` 跑三趟扫描——① `ctxgraph.ScanCached`（manifest，已缓存）② `collect()`（会话/任务分组用的每记录特征）**未缓存，每次全量重跑** ③ `aggState.scanFiles`（指标聚合，已接 `factscache.go` 缓存）。③ 接缓存后真实语料实测热耗时 5.2×，但 ② 未缓存使热耗时离个位数秒仍有差距。
+- **现状**：`report.BuildCached` 跑三趟扫描——① `ctxgraph.ScanCached`（manifest，已缓存）② `collect()`（会话/任务分组用的每记录特征）**未缓存，每次全量重跑** ③ `aggState.scanFiles`（指标聚合，已接 `factscache.go` 缓存）。③ 接缓存后真实语料实测热耗时 5.2×，但 ② 未缓存使热耗时离个位数秒仍有差距。
 - **为什么不顺手做**：`collect()` 产出（`ReqInfo`）直接喂 `group()`/`ctxgraph.StitchGraph` 做会话/任务边界判定，正确性敏感度高于纯指标聚合（算错是把不相关对话缝到同一 Journey）。
 - **触发条件**：投入前先补一套对等的 cold/warm 一致性测试（参照 `TestBuildCached_WarmMatchesBuild`）。
 
@@ -555,20 +557,20 @@
 
 #### 2.101 [低，待观察] Overview 告警 pill 的 quota 阈值上线后看噪音再调
 
-- **现状**：quota 告警阈值写死在 `server/alerts.go`（used ≥ 100% → error；≥ 90% → warning），是实施轮主控拍板值（contracts §2.1 / D4）。
+- **现状**：quota 告警阈值写死在 `server/alerts.go`（used ≥ 100% → error；≥ 90% → warning），是实施轮主控拍板值（依据见 console-unification 设计契约（已归档））。
 - **为什么待定**：阈值本身没有权威来源（quota 评分曲线只有 headroom=1 一个语义分界），90% 是否过吵取决于真实用量曲线；先跑真实流量再定，不预调。
 - **触发条件**：告警 pill 长期非零但无实际可操作事项（噪音），或濒临耗尽从未提前告警（漏报）。
 
 #### 2.102 [低，待决] recent_errors 与 Log 页之间无进程内请求号关联
 
-- **现状**：console-unification 设计 §8.4-d 提出 Recent Failures 条目保留进程内请求号、与 Log 页每行同号互跳；但 audit.Record 与 `/log` 行目前都不携带任何请求号，实施轮未为它加字段（加号牵动 audit 格式与日志消费者，越界）。
+- **现状**：曾提出过 Recent Failures 条目保留进程内请求号、与 Log 页每行同号互跳的设计；但 audit.Record 与 `/log` 行目前都不携带任何请求号，实施轮未为它加字段（加号牵动 audit 格式与日志消费者，越界）。
 - **可能方案**：给 Record 加进程级 seq 并在 logfmt 前缀携带（成本：日志格式变更 + audit schema 演进 + report 兼容）；或接受无关联（Log 页有子串过滤可按时间窗人工对齐）。
 - **为什么待定**：关联的实际排障收益未经验证，而格式变更成本确定。
 
 #### 2.104 [低] 拓扑表 Headroom 列只反映 bucket limit，不反映更紧的 gate
 
 - **现状**：`endpointHeadroom`（`server/alerts.go`）在账户无 limit 触顶时返回 **bucket limit** 的 headroom（经 `quota.BucketIndex` 选定），不取账户所有 applicable limit 里最小的那个。于是一个被近饱和的短周期 gate 限流的账户，端点行 Headroom 仍显示绿色的 bucket 值——比它实际的路由有效余量乐观。差分测试钉住的是"端点 headroom == 对应 QuotaStatus 行的 headroom（同源）"，没钉住"选的是哪一行"。
-- **为什么可接受**：与 Quota Budgets 表一致（那张表也逐 limit 各显各的 headroom）；gate 的紧迫感设计上由 Quota 表的 Progress 红条承担（console-unification §8.5）。端点表没有 Progress 列是这条的短板。
+- **为什么可接受**：与 Quota Budgets 表一致（那张表也逐 limit 各显各的 headroom）；gate 的紧迫感设计上由 Quota 表的 Progress 红条承担。端点表没有 Progress 列是这条的短板。
 - **可能方案**：改取 applicable limit 里 headroom 最小者；或端点表补一个迷你 gate 指示。
 - **触发条件**：运维因端点 Headroom 显示健康而没预判到 gate 限流。
 
@@ -605,27 +607,23 @@
 - **触发条件**：CI 上出现 `internal/ctxgraph` 的间歇性超时失败时，直接用本条登记的复现
   命令确认是否同一成因，而不必重新排查一遍。
 
+#### 2.179 [低，观察] 文档引用守卫对「无 `.md` 路径的裸文档名引用」与「非 `.go` 资产头注释」结构性不可达
+
+- **现状**：archtest 的文档引用守卫只扫描生产 `.go` 文件注释中**形似路径**的引用
+  （`docs/...`、`*.go` 等）。两类真实悬空引用它抓不到：① 注释里不带 `.md` 路径的裸文档名
+  ——`internal/livestats`/`internal/server` 曾有约 15 处 `(contracts §1.x)` 注释指向
+  gitignored 的 `_subtasks/console-unification/contracts.md`，2026-09-21 清理轮修掉了
+  全部字面含 `contracts.md` 的引用后，这一族仍整组存活（grep 字面串的方式对它们天然盲）；
+  ② 非 `.go` 的 embed 资产头注释——`internal/server` 下的 `help.html`/`help.zh.html`/
+  `assets/console.css` 引用已删除的 `docs/design/demo/*.html`，守卫不扫非 `.go` 文件。
+  两族均已改为指向 console-unification 设计契约（该文档已移出仓库、本机归档），但机制性盲区仍在。
+- **为什么可接受**：让守卫识别任意自然语言里的裸文档名会引入大量误报（注释里合法出现
+  `console.js`、`KNOWN_ISSUES` 等裸词的场景太多），收益比差；非 `.go` 资产的注释同理
+  不宜纳入静态扫描。改为「约定 + 复查轮人工全量裸词扫描」。
+- **触发条件**：再出现「清理轮修完所有字面引用后复查仍有悬空引用」的结果，说明该类又
+  积累起来，需要再做一轮全量裸文档名扫描。
+
 ### G. Agent Guard 在线接线（M3；M4 已收窄，见 ADR-15）
-
-#### 2.154 [低，已随 ADR-15 整体移除失效] Tool Call 双级闸门的凭据回显检查恒传 `known=nil`
-
-- **结论**：本条针对的入向在线 Tool Call 双级闸门（原 `internal/guard` 包内的
-  `toolgate.go`，已删除）已随第一性原理复审（2026-09-16）整体移除，见 `docs/design/agent-guard-technical-spec-final-2.0.md`
-  ADR-15、K-G15。条目失效，编号不复用。凭据回显检测本体（`InspectToolCall` 的 `known`
-  参数）保留在离线检测层，`report/guardscan.go` 正常传入非 nil 的 known 列表，未受影响。
-
-#### 2.155 [低，已随 ADR-15 整体移除失效] `InspectToolCall` 在 Tool Call 闸门的 terminal 事件同步路径上吞吐偏低
-
-- **结论**：本条针对的在线同步调用路径（原 `internal/guard` 包内 `toolgate.go` 的
-  `terminal`，已删除）已随 ADR-15 整体移除，条目失效，编号不复用。`InspectToolCall` 现在只在离线批处理
-  （`vmr analyze`）里被调用，不在请求热路径上，吞吐水平不是问题。
-
-#### 2.156 [低，已随 ADR-15 整体移除失效] `guard.inbound` 的三个配置旋钮是死配置：`protected_paths`、`blocked_command_categories`、`on_block: refusal_text`
-
-- **结论**：本条针对的三个死配置字段已随 ADR-15 从 `config.GuardInbound` 结构体里整体
-  删除（不是"保留字段但拒绝新值"，字段本身不存在了）——不再是"死配置"，因为它们已经
-  不是配置的一部分。`guard.inbound` 现在只剩 `sanitize_invisible_runes` 一个字段。条目
-  失效，编号不复用。
 
 #### 2.157 [中，已决策：维持现状] M5 探针强度与覆盖缺口（o 系列误报、追加注入检不出、needle 太短）
 
@@ -642,86 +640,6 @@
   探针 ~450 token 填充（≈1K+ 字节）已足够携带命令主体，真实注入命令大概率在该阶段即被
   检出，无需依赖更长填充。若实际模型池重新引入 o 系列、或运维反馈真实中转站误报/漏报，
   再按项重开。
-
-#### 2.158 [低，已随 replace 移除失效] `Table.HasPrefixMatch` 全表线性扫与大小写一致性
-
-- **结论**：本条针对的伪名反向表（原 `internal/guard` 的 `Table` 类型）已随 `mode: replace` 整体移除
-  （K-G1），条目失效，编号不复用。
-
-#### 2.159 [已修复 2026-09-16，注释行一项决定维持现状] 入向层杂项字节级偏差
-
-- **原状**（`internal/guard/inbound.go`）：(a) `inboundStream` 在非 EOF 读错误时直接返回
-  错误，`inbuf` 中已读到的半截事件字节被丢弃（无 guard 时客户端本可以收到的尾巴现在收
-  不到）；(d) `rebuildSSEEvent` 在事件被改写时会丢弃 `id:`/`retry:`/注释行，且即便保留
-  `id:` 字段本身，也无法区分"未携带 `id:`"与"显式携带空值 `id:`"——W3C 语义里后者是
-  重置客户端 Last-Event-ID 的指令，不是"没有 id"。原 (b)（非流式 blocked 时状态码双层
-  记录差异）与 (c)（`toolGate.terminalAll` map 遍历无序）随入向在线拦截整体移除
-  （ADR-15）一并失效——两者描述的都是已不存在的阻断路径的行为。原 (e)（还原层熔断审计
-  不可见）更早随 `mode: replace` 移除（K-G1）失效。
-- **修复**：(a) `fill` 新增 `pendingErr` 字段——非 EOF 错误发生时先把 `inbuf` 里剩余的
-  字节（同样走 `sanitizeEventSafe`）冲入 `outbuf`，错误本身留到下一次 `fill()` 调用
-  （`outbuf` 排空之后）才返回，调用方不再在同一次返回里既拿到空字节又丢掉已缓冲的内容
-  （见 `TestInbound_NonEOFReadErrorFlushesBufferedBytes`）。(d) `splitSSEEvent`/
-  `rebuildSSEEvent` 新增 `hasID bool` 返回值/形参，`rebuildSSEEvent` 判断是否输出
-  `id:` 行改用 `hasID` 而非 `id != ""`——显式空 `id:` 现在也能在净化改写后原样保留
-  （见 `TestSplitSSEEvent_ExplicitEmptyIDRoundTrips`）；`retry:` 字段随同一次改动一并
-  透传（`splitSSEEvent` 本就解析、`rebuildSSEEvent` 本就回写，不需要 `hasID` 式的
-  空值区分，因为 SSE 没有"显式空 `retry:`"这个语义位）。
-- **注释行（`:` 开头）维持不还原，非遗留缺口**：`splitSSEEvent`/`rebuildSSEEvent` 只透传
-  `id:`/`event:`/`retry:`/`data:` 四类字段；`sanitizeEvent` 在一个事件块的 `data` 为空
-  时直接原样返回整段原始字节（含任何注释行），只有 `data` 非空*且*该次扫描真的判定需要
-  改写时才会走 `splitSSEEvent`→`rebuildSSEEvent` 的重建路径——真实上游的心跳注释
-  （如 `: keepalive`）几乎总是独立、不带 `data:` 字段的事件块，因此从不触发重建，逐字节
-  原样透传。唯一会丢注释行的场景是"同一事件块内既有注释行、又有命中隐写字符触发改写的
-  `data:` 字段"这种双重边缘情况，评估后判定影响面可忽略，不追加改动。
-
-#### 2.160 [低，已随 ADR-15 整体移除失效] `file_write` 的受保护路径检查对整个实参做裸正则
-
-- **结论**：本条针对的 `file_write` 受保护路径检查（曾于 2026-09-15 修复为定向匹配）
-  连同它所属的整个入向在线 Tool Call 闸门已随 ADR-15（2026-09-16）整体移除。条目失效，
-  编号不复用。受保护路径/高危命令库的判定逻辑本体（`InspectToolCall`）保留在离线检测层，
-  定向匹配的修复内容随实现一并保留（`internal/guard/toolinspect.go`）。
-
-#### 2.161 [低，已随 ADR-15 整体移除失效] 一级预筛 armed 后类别无关地每 delta 重确认，长文档含字面量会烧预算使整个响应降级
-
-- **结论**：本条针对的一级预筛（原 `internal/guard` 包内 `toolgate.go` 的 `feedDelta`，
-  已删除）已随 ADR-15 整体移除，条目失效，编号不复用。这也是两轮独立复核里指出的九条问题之一
-  （512 字节确认窗口小于部分高危模式实际跨度、确认预算易被烧穿）——ADR-15 的移除
-  理由之一正是这类判定精度问题，见 `docs/design/agent-guard-technical-spec-final-2.0.md`
-  ADR-15。
-
-#### 2.162 [已修复] `ClassifyToolName` 的 command 片段表曾含裸 `"sh"` 子串，含 sh 子串的工具名会被误分类为 command 类
-
-- **原状**：command 判定的子串表曾含裸 `"sh"`，任何名字含 sh 子串的工具（如 `push`、
-  `freshdata`）都会落入 command 类并对其跑高危命令正则。
-- **现状**（`internal/guard/toolinspect.go` 的 `ClassifyToolName`，离线检测层，ADR-15
-  后仍是 `InspectToolCall` 的一部分）：裸 `"sh"` 已从子串表中移除，改为独立的词边界
-  判断——`lower == "sh"` 或以 `sh_`/`sh-` 开头、`_sh`/`-sh` 结尾、含 `_sh_`/`-sh-` 才
-  判为 command，`push`、`freshdata` 不再落入此类。本条目仅登记该状态已与代码核实
-  一致，不代表本轮改动——修复本体早于本次复核已落地。
-
-#### 2.163 [已修复 2026-09-16] `Record.Guard.SanitizedRunes` 在 `internal/report` 尚无消费方
-
-- **原状**：在线入向净化器统计的 `SanitizedRunes`（A/B 档实际剥除计数）由 server 完成
-  钩子记入 `Record.Guard.SanitizedRunes`；但 `internal/report/guardcol.go` 的聚合逻辑
-  仅折叠离线 fallback 扫描产出的 `InboundRunes`（基于 `ClassifyRunes` 的全文三档分类
-  计数），未消费在线盖章的 `SanitizedRunes`。
-- **修复**：`guardCollector` 新增 `sanitizedRuneCounts` 累加与 `addSanitizedRunes`
-  方法，`GuardInboundSummary` 新增平行字段 `SanitizedRuneCounts`，
-  `viewmodel_guard.go` 渲染成独立的一张表（中英文案见
-  `i18n.GuardText.SanitizedRunesLabel`）。**没有合并进 `RuneCounts`**：两者是互补而非
-  重叠的事实——`RuneCounts` 是离线重扫 `Client.Response.Body`（净化已发生之后的最终
-  字节）得到的"最终留在响应里的"计数，`SanitizedRuneCounts` 是净化器自己记录的"净化前
-  存在、已被剥除"的计数，对已净化的记录而言前者天然看不到后者剥除的部分，合并会混淆
-  K-G14 的核心区分（"已经发生的事" vs. 不存在的"被拦截的事"）。
-
-#### 2.164 [低，已随 ADR-15 整体移除失效] 高危命令库的 JSON `\uXXXX` 转义解码只覆盖终结事件闸门（L2）
-
-- **结论**：本条针对的一级预筛转义感知缺口（原 `internal/guard` 包内 `toolgate.go` 的
-  `toolGateAC`/`feedDelta`，已删除）已随 ADR-15 整体移除，条目失效，编号不复用。转义解码修复
-  本体（`decodeUnicodeEscapes`）保留在 `InspectToolCall`（离线检测层），离线扫描对
-  完整实参一次性解转义再匹配，不存在"L1/L2 分层覆盖不一致"这个问题——离线从来只有
-  一次全量扫描，没有 L1 增量预筛的概念。
 
 #### 2.165 [低，待修，ADR-15 后降级为离线报表精度问题] `InspectToolCall` 的受保护路径检查零工作区逃逸检测、零路径规范化
 
@@ -809,30 +727,6 @@
   令牌（§2.3 的语料扫描范围不含这类组合）；若未来校准语料证实这是高频场景，再评估收窄
   `pipe_to_shell` 的捕获组（只保留协议+域名，丢弃查询串）而不是引入打码启发式。
 
-#### 2.168 [已修复 2026-09-17] 离线 Fallback 扫描的 HMAC 内存随机盐与 Facts 磁盘缓存导致跨 Run 指纹去重漂移
-
-- **原状**（`internal/report/guardscan.go`、`internal/report/factscache.go`、`internal/ctxgraph/cache.go`）：
-  离线补扫（Fallback Path）使用的 HMAC 盐由 `guardscan.go` 的 `guardSalt()` 在分析进程内
-  通过 `crypto/rand` 随机生成。设计原意认为该盐仅用于在单次 `vmr analyze` 运行内将相同凭据
-  关联聚合（`Hit.FP`），故故意不落盘持久化。但 `internal/report/factscache.go` 与
-  `internal/ctxgraph/cache.go` 会把每个审计文件提取出的事实（`recordFacts.GuardScan`，含基于
-  当次随机盐计算出的 `FP`）作为分片缓存持久化到磁盘（`.cache/parse/<hash>.json`）。
-  当多次运行分析（例如新日志生成、或二次运行）时，命中的旧缓存保留了上一次运行的随机盐指纹，
-  而全新扫描的文件使用本次运行的新随机盐指纹。两者汇总到 `guardcol.go` 的 `uniqueFP` 与
-  `providerFP` 集合时，同一个凭据因盐不同派生出不同指纹，被误判为两个不同的凭据，
-  导致报表中的"唯一凭据数（Unique Credentials）"虚高且无法跨 Run 稳定去重。复核过程中还发现
-  一个比"跨 Run 漂移"更隐蔽的同源问题：在线盖章一直用 `<rundir>/guard.salt` 持久盐，离线补扫
-  用本条描述的随机盐，两者从未一致过——同一个凭据只要同时出现在一条在线盖章记录与一条离线
-  补扫记录里，哪怕在**同一次** `vmr analyze` 运行内也会被算成两个不同的凭据。
-- **修复**（K-G19）：批次五第一性原理复审判定，`Hit.FP` 的 HMAC 加盐从未有过真实消费方——
-  `grep` 全仓确认 FP 字符串本身从未被序列化进任何输出，唯一消费方是 `guardcol.go` 的
-  map-key 去重计数；审计文件本身已是 100% 明文（K-G3），加盐不增加任何保护。`guard.Fingerprint`
-  改为确定性的 `SHA256(rule||secret)[:16]`，不再接受 salt 参数，一并解决本条与上述同源问题——
-  在线/离线/跨 Run 三条路径永远对同一凭据算出同一指纹。随之整体删除：`cmd/vmr/guardsalt.go`
-  及其测试、`config.GuardOutbound.Salt` 字段、`report/guardscan.go` 的 `guardSalt()` 单例、
-  `tools/guard_corpus_scan` 的每次运行随机盐。`internal/ctxgraph.CacheSchemaVersion` 同步
-  13→14，使旧盐算出的磁盘 Facts 缓存失效，避免新旧指纹混用。
-
 #### 2.169 [低，架构定调] trusted_providers 仅作为在线路由不阻断放行名单，离线安全取证坚持全量感知并归因
 
 - **现状**（`internal/server/guard.go`、`internal/report/guardscan.go`）：在线出向干预中，若虚拟
@@ -881,7 +775,7 @@
 - **实际后果**：若中转站在 Tool Call 参数的 JSON 键名里塞入隐写字符（如
   `{"\u200bparam": "val"}`），在线净化不会剥除，客户端原样收到；离线扫描会把这段
   残留字符计入 `InboundRunes`，而在线 `SanitizedRuneCounts` 对这次事件是 0——报表
-  会呈现"客户端收到了隐写字符"但"净化剥除表"里这一条计 0 次。这与 §2.163 登记的
+  会呈现"客户端收到了隐写字符"但"净化剥除表"里这一条计 0 次。这与 K-G25 登记的
   "`RuneCounts`/`SanitizedRuneCounts` 本就是互补而非重叠的两件事"是同一道理，不是
   数据矛盾；键名这个具体来源只是从未被明确点名过。
 - **为什么不直接改代码**：值得先确认这是不是故意的设计取舍——改写工具调用参数的
@@ -908,14 +802,6 @@
   需要词边界。
 - **触发条件**：待修——与 §2.170 合并排期，用 `tools/guard_corpus_scan` 跑一遍本仓
   真实工具调用名分布后一并处理，不单独立项。
-
-#### 2.173 [低，已随极简重构整体移除失效] 离线补扫 `scanOutbound` 从未把 `Finding.Path` 写进 `audit.Hit`，`Hit.Path` 在补扫产出的记录里恒为空
-
-- **结论**：本条针对的 `Finding.Path`/`Hit.Path`/`audit.Hit.Path` 字段与 `walk.go` 的
-  `pathSeg`/`sc.stack`/`pathString` 路径跟踪脚手架，经
-  经过度设计复核核实为全系统零消费
-  （报表从未渲染过 Path），已在极简重构批次一整体删除。字段本身不存在了，条目失效，
-  编号不复用。
 
 #### 2.174 [低，依赖既有 CacheSchemaVersion 纪律] `guardScanSafe` 的 panic 失败态随 Facts 缓存落盘，修复扫描逻辑后若忘记 bump CacheSchemaVersion 则不会重扫
 
@@ -944,7 +830,7 @@
   `body` 用精确长度量词（如 `AKIA[0-9A-Z]{16}`、`ghp_[A-Za-z0-9]{36}`），理论上一个更长
   的、恰好以同样字面前缀开头且随后 N 位落在同一字符集内的标识符会被前 N 位前缀命中，
   熵门只检查被捕获的那一段、救不了这种情况。
-- **不是违反 ADR-5**：设计规范（`docs/design/agent-guard-technical-spec-final-2.0.md`
+- **不是违反 ADR-5**：Agent Guard 设计规范（已归档）
   ADR-5）"五重锚定"里的"定长"锚，原文允许"固定或有明确下界（≥20 字符）"，从未把右
   边界列为第五个锚——这是一项值得考虑的额外加固，不是修一个违反现行规范的缺陷。
 - **现实影响**：real-corpus 标定（`tools/guard_corpus_scan`，附录 A 的校准记录）报告
@@ -985,7 +871,7 @@
 #### 2.111 [低，潜在路径，决定不补] `taskseg.Generic` 缺失 Anthropic tool_result 过滤
 
 - **现状**：`internal/taskseg/generic.go` 的 `RealUserText` 对非空文本直接返回 true；Anthropic 协议将 tool_result 置于 user 角色消息，通用 Profile 下工具轮次会被误切为新任务。
-- **裁决（2026-09-11 复核，不补）**：**现有组装根（`resolveTaskProfile`/`report.Build`）一律硬编码 `OpenClawAware`，`Generic` 生产完全不可达**——给一条零执行可能的路径加防御代码 + 测试正是 YAGNI 反对的过度设计。且真到启用 Detect-based profile 调度那一步，必然要系统性重审 `Generic` 的全部启发式（不止 tool_result 一处），届时一并处理更合理。§1.3「尤其不做 `prof == nil` 就回退到 `Generic` 这类静默兜底」的裁决同源。
+- **裁决（2026-09-11 复核，不补）**：**现有组装根（`resolveTaskProfile`/`report.BuildCached`）一律硬编码 `OpenClawAware`，`Generic` 生产完全不可达**——给一条零执行可能的路径加防御代码 + 测试正是 YAGNI 反对的过度设计。且真到启用 Detect-based profile 调度那一步，必然要系统性重审 `Generic` 的全部启发式（不止 tool_result 一处），届时一并处理更合理。§1.3「尤其不做 `prof == nil` 就回退到 `Generic` 这类静默兜底」的裁决同源。
 - **触发条件**：启用 Detect-based profile 调度（届时重审 `Generic` 全部启发式）。
 
 #### 2.120 [低] `core.PricingSpec/Rate/PricingOverride` 职责漂移
@@ -1005,7 +891,6 @@
 - **现状**：`internal/config/config.go` 注释已承认：`api_keys: [${VAR}]` 若环境变量含逗号可能分割出额外元素；生产与推荐配置一律使用 block 语法，当前拦截已满足安全边界。
 - **可能方案**：YAML Node 树反序列化后再做标量展开。
 - **ROI**：低——可暂不处理，登记防回归。
-
 
 #### 2.125 [低，登记待触发] `dataFieldMarkers` 只匹配紧凑 JSON，pretty-printed 请求体的附件 payload 会被整段当文本估算
 
@@ -1102,11 +987,12 @@
 - **2026-09-12 analyze 套件 Review（本轮）**：全量 44 文件语料（15,946 条）生成默认套件（zh/en）+ `-journey`/`-compare`（含 LLM 解读）+ `-benchmark` 全套产物，主控 + 3 路只读 subagent（HTML 看板/双语对照/journey 叙事）审阅。**批次 1**：§2.135 复核仍存在且修复范围扩充（tool-waste/SVG 插值点）。**批次 2（登记待办）**：§2.94 / §2.130 / §2.57 各自的新症状扩充；§2.141–§2.144（B 组口径与呈现）、§2.148–§2.152（D 组产出契约与看板）。**LLM 解读层（与 §2.18 黄金样本校准同批）**：§2.145 / §2.146 / §2.147——本轮实测产出的负例样本可直接进校准集。双语 wall-clock 漂移（周期已过% 跨运行不一致）复核确认与 §1.5 既有取舍一致，未新增。
 - **2026-09-15 Agent Guard 独立复核（R-1~R-17，G 组扩充）**：三个 S0（R-1 还原器跨字段
   ReplaceAll、R-2 分帧尾部/CRLF 旁路、R-3 跨事件转义域错配）与 R-4/R-6/R-8(a)(e)/R-9/
-  R-10/R-11/R-12/R-13/R-14 已就地修复并附对抗性回归测试；R-7 → §2.156、R-8(b)(c)(d) →
-  §2.157、R-16 → §2.158、R-17 → §2.159 建档跟踪；R-5（Block/SanitizedRunes 盖章）、
+  R-10/R-11/R-12/R-13/R-14 已就地修复并附对抗性回归测试；R-7、R-16、R-17 所针对的入向
+  在线拦截机制均已随 ADR-15（K-G15）整体移除，条目随之删除，不再保留编号占位；
+  R-8(b)(c)(d) → §2.157 建档跟踪；R-5（Block/SanitizedRunes 盖章）、
   R-15（文档错误声明）随本轮修复闭环，R-15 的逐条修正已并入执行总报告 Final 2.0。
   **复核后续**：R-1/R-3/R-4/R-6 所针对的 restore 机器已随 `mode: replace` 整体移除
-  （K-G1），R-16 一并失效（§2.158）。
+  （K-G1），R-16 一并失效。
 - **多数条目不是「不值得做」，是「收益未经测量」**：§2.2 / §2.3 / §2.7 / §2.10 / §2.17 的共同点是收益尚未实测——而先做优化再测量正是这个项目一贯拒绝的顺序；触发条件到了先测再说。
 - **触发即做**（成本主要等触发，触发条件写在条目里）：§2.2（上限 3 万条 / RSS 4GB，留两成提前量即约 2.5 万条 / 3.3GB 起排期）、§2.55（语料再涨约 5 倍）、§2.56（时间成首要痛点）、§2.48（词表互相干扰 / sticky 往返可观测）、§2.57（脚注不够用）、§2.58（主力上游长期无价）、§2.18（黄金样本窗口）、§2.99（灰区振荡在 5s 首档下仍规律复现，触发条件写在条目里）。
 - **需要先设计**（价值高、易做错，禁止仓促）：§2.86 保活帧旁路。

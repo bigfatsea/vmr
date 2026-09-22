@@ -1,6 +1,6 @@
 // Ver 2026-09-16, by Sonnet 5
 
-// Agent Guard's outbound mount point (docs/design/agent-guard-technical-spec-final-2.0.md
+// Agent Guard's outbound mount point (the Agent Guard spec
 // ADR-4/§4.3/ADR-10, M3.4/M3.5/M3.6). chatHandler's own call site is two
 // lines (the call, then a blocked-check) — K12's ≤5-line budget for the
 // change at chatHandler itself — with the scan/aggregate/record/trust-

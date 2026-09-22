@@ -43,7 +43,7 @@ func TestDisplayFormatFixture(t *testing.T) {
 	// not carry; 1 is the dashboard JS's default and the value every
 	// FmtPercent case in the file was written against.
 	//
-	// FmtCurrency/FmtCost pin currency display across Go and the dashboard's
+	// FmtCurrency pins currency display across Go and the dashboard's
 	// common.js runtime, ensuring consistent financial formatting.
 	dispatch := map[string]func(t *testing.T, input json.Number, want string){
 		"FmtTokens": func(t *testing.T, input json.Number, want string) {
@@ -82,15 +82,6 @@ func TestDisplayFormatFixture(t *testing.T) {
 				t.Errorf("FmtCurrency(%v) = %q, want %q", f, got, want)
 			}
 		},
-		"FmtCost": func(t *testing.T, input json.Number, want string) {
-			f, err := input.Float64()
-			if err != nil {
-				t.Fatalf("FmtCost input %s is not a number: %v", input, err)
-			}
-			if got := FmtCost(f); got != want {
-				t.Errorf("FmtCost(%v) = %q, want %q", f, got, want)
-			}
-		},
 		"FmtCurrencyPrecise": func(t *testing.T, input json.Number, want string) {
 			f, err := input.Float64()
 			if err != nil {
@@ -115,7 +106,7 @@ func TestDisplayFormatFixture(t *testing.T) {
 	// Every fmtutil function the fixture was written to pin must actually
 	// have been exercised — a renamed fn key would otherwise silently
 	// unpin it while the file still parses.
-	for _, fn := range []string{"FmtTokens", "FmtBytes", "FmtPercent", "FmtCurrency", "FmtCost", "FmtCurrencyPrecise"} {
+	for _, fn := range []string{"FmtTokens", "FmtBytes", "FmtPercent", "FmtCurrency", "FmtCurrencyPrecise"} {
 		if !seen[fn] {
 			t.Errorf("fixture holds no %q case — the shared contract no longer covers %s", fn, fn)
 		}

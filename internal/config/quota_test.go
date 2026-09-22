@@ -267,10 +267,9 @@ func TestQuota_NoQuotaBlock_UnaffectedByDefault(t *testing.T) {
 
 // --- §2.2 reject cases: every one must be a load-time error, never silent. ---
 
-// TestQuota_MetricCost_Rejected pins decision 6 (see
-// docs/future-strategy/pricing_architecture_simplification_plan.md):
-// metric: cost is no longer a supported Limit metric at all — a load-time
-// error with migration guidance, not a structural-then-completeness gate.
+// TestQuota_MetricCost_Rejected pins that metric: cost is no longer a
+// supported Limit metric at all — a load-time error with migration
+// guidance, not a structural-then-completeness gate.
 func TestQuota_MetricCost_Rejected(t *testing.T) {
 	yaml := withQuotaBlock(`limits:
   - {metric: cost, every: 1mo, amount: 100}`)

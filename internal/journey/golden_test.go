@@ -90,14 +90,14 @@ func TestGoldenMarkdown(t *testing.T) {
 		t.Run(tc.lang.String(), func(t *testing.T) {
 			path := writeJSONL(t, goldenFixture())
 
-			g, err := ctxgraph.Scan([]string{path})
+			g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 			if err != nil {
 				t.Fatalf("Scan: %v", err)
 			}
 			if len(g.Lineages) != 1 {
 				t.Fatalf("want 1 lineage in the golden fixture, got %d", len(g.Lineages))
 			}
-			j, err := Build(g.Lineages[0], taskseg.Generic, tc.lang)
+			j, err := BuildChain([]*ctxgraph.Lineage{g.Lineages[0]}, taskseg.Generic, tc.lang)
 			if err != nil {
 				t.Fatalf("Build: %v", err)
 			}

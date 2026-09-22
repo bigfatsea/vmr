@@ -45,7 +45,8 @@ type statsResponse struct {
 }
 
 // parseRangeTail resolves ?range= to the hourly tail it selects
-// (contracts §1.5): 12h|24h|3d|7d → 12/24/72/168 hours; absent or unrecognized
+// (the console's /stats contract): 12h|24h|3d|7d →
+// 12/24/72/168 hours; absent or unrecognized
 // values fall back to the 48h default. 7d is the cap because the in-memory
 // rollup only holds ~7 days — it is also the widest window the console offers.
 func parseRangeTail(q string) int {
@@ -141,7 +142,8 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 // is the separate, authoritative gate livestats uses to decide whether
 // tokens/dur/ttft may be counted as service-quality signal (design §4.2) —
 // only the winning attempt's data ever populates s.Tokens. ErrorClass/
-// Status/Attempt feed only the recent_errors ring (contracts §1.6): class
+// Status/Attempt feed only the recent_errors ring
+// (the console's /stats contract): class
 // and status quote the terminal attempt verbatim, never re-classified;
 // Attempt is the 1-based ordinal of the attempt that ended the request
 // (0 when there were none). When no attempt was built at all (every

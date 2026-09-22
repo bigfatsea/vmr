@@ -1,7 +1,7 @@
 // Ver 2026-09-14, by Sonnet 5
 
 // BuildSnapshot coverage for Agent Guard's M3.5 trusted-providers
-// precondition (docs/design/agent-guard-technical-spec-final-2.0.md §4.3):
+// precondition (the Agent Guard spec §4.3):
 // ModelRoute.GuardAllTrusted, computed once here rather than per-request,
 // since the entry point doesn't yet know which candidate Failover will
 // land on.

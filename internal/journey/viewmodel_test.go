@@ -57,7 +57,7 @@ func vmEquivalenceFixture(t *testing.T) *Journey {
 	}, sseText("deploy looks stable now"))
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3, r4})
-	j, err := Build(onlyLineage(t, path), taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{onlyLineage(t, path)}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -114,14 +114,14 @@ func vmStepHeaderSeq(blk VMBlock) (int, bool) {
 func buildGoldenJourney(t *testing.T) *Journey {
 	t.Helper()
 	path := writeJSONL(t, goldenFixture())
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
 	if len(g.Lineages) != 1 {
 		t.Fatalf("want 1 lineage in the golden fixture, got %d", len(g.Lineages))
 	}
-	j, err := Build(g.Lineages[0], taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{g.Lineages[0]}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -65,24 +65,20 @@ func TestManifest_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-// TestScanCached_ColdCacheMatchesScan: with no prior cache, ScanCached must
-// produce byte-for-byte the same Graph shape as Scan (everything is a
-// miss) — the caching path must never change results, only skip work.
-func TestScanCached_ColdCacheMatchesScan(t *testing.T) {
+// TestScanCached_ColdCachePopulatesOneEntryPerFile: with no prior cache,
+// every path is a miss — ScanCached must still return a usable Graph and
+// populate exactly one cache entry per scanned file, keyed by content hash.
+func TestScanCached_ColdCachePopulatesOneEntryPerFile(t *testing.T) {
 	t.Parallel()
 	path := writeJSONL(t, []audit.Record{
 		mkAuditRec(time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC), chatBody(sysMsg("sys"), userMsg("hi"))),
 	})
-	want, err := Scan([]string{path})
-	if err != nil {
-		t.Fatalf("Scan: %v", err)
-	}
 	got, cache, err := ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("ScanCached: %v", err)
 	}
-	if len(got.Lineages) != len(want.Lineages) {
-		t.Fatalf("ScanCached produced %d lineages, Scan produced %d", len(got.Lineages), len(want.Lineages))
+	if len(got.Lineages) != 1 {
+		t.Fatalf("ScanCached produced %d lineages, want 1", len(got.Lineages))
 	}
 	if len(cache.Files) != 1 {
 		t.Fatalf("expected 1 cache entry, got %d", len(cache.Files))
@@ -219,7 +215,7 @@ func TestScanCached_NewFileIsParsedAndMerged(t *testing.T) {
 		t.Fatalf("expected 2 cache entries after adding B, got %d", len(cacheAB.Files))
 	}
 	// Same SessKey (both open with sys+u1) — should merge into one lineage
-	// spanning both files, same as a cold Scan([]string{pathA, pathB}) would.
+	// spanning both files, same as a cold ScanCached([]string{pathA, pathB}, nil) would.
 	if len(g.Lineages) != 1 {
 		t.Fatalf("got %d lineages across A+B, want 1 (same anchor)", len(g.Lineages))
 	}

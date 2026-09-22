@@ -6,7 +6,8 @@ import (
 )
 
 // TestRecentErrors_NewestFirstAndAdmission pins the ring's shape (design
-// §8.1 / contracts §1.4): ok samples are never collected, error and canceled
+// §8.1 / the console's /stats contract): ok samples are never
+// collected, error and canceled
 // both are, output is newest first, and fields (including error_class and a
 // non-HTTP status 0) pass through verbatim.
 func TestRecentErrors_NewestFirstAndAdmission(t *testing.T) {

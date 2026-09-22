@@ -216,16 +216,6 @@ type Event struct {
 	Revises *ctxgraph.Hash
 }
 
-// Build renders one Lineage into a Journey using prof for the
-// agent-specific real-instruction/no-reply judgment calls, WITHOUT
-// stitching — the degenerate len(Chain)==1 case of BuildChain, kept as its
-// own entry point for callers previewing/testing a single lineage in
-// isolation. Rendering a lineage's actual stitched chain needs
-// BuildChain(ctxgraph.ChainFrom(l, byIdx), prof) instead.
-func Build(l *ctxgraph.Lineage, prof taskseg.Profile, lang i18n.Lang) (*Journey, error) {
-	return BuildChain([]*ctxgraph.Lineage{l}, prof, lang)
-}
-
 // BuildChain renders a full stitched chain — oldest lineage first, exactly
 // as ctxgraph.ChainFrom returns it — into one continuous Journey. It
 // re-fetches every manifest's full audit.Record (a Lineage on its own only

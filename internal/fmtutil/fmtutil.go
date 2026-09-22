@@ -107,11 +107,6 @@ func FmtCurrency(amount float64, currency ...string) string {
 	return fmt.Sprintf("%s%.2f", CurrencySymbol(ccy), amount)
 }
 
-// FmtCost is an alias of FmtCurrency, matching the dashboard's common.js export.
-func FmtCost(amount float64, currency ...string) string {
-	return FmtCurrency(amount, currency...)
-}
-
 // FmtCurrencyPrecise renders a micro-amount with 4 fixed decimals ("$1.2345", "¥0.0012"),
 // used when unit rates or sub-cent allocations require higher precision.
 func FmtCurrencyPrecise(amount float64, currency ...string) string {

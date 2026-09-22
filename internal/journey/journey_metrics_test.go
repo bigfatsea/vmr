@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/i18n"
 	"vmr/internal/taskseg"
 )
@@ -38,7 +39,7 @@ func metricTestJourney(t *testing.T) (*Journey, Metrics, []Finding) {
 	r3 := mkRec(at(2), "", []any{sys, u1, aCall("c1"), res("c1"), aCall("c2"), res("c2")}, sseText("done reviewing"))
 
 	l := onlyLineage(t, writeJSONL(t, []audit.Record{r1, r2, r3}))
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

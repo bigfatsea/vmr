@@ -171,7 +171,7 @@ fallback_endpoints:
       priority: 90              # required and must be > 0 on a fallback entry — see the header comment above
 
 # guard: Agent Guard's bidirectional credential/inbound-forensics layer
-# (docs/design/agent-guard-technical-spec-final-2.0.md). Omit entirely (as here) for
+# (the Agent Guard design spec, archived out of the repository). Omit entirely (as here) for
 # 100% original byte-faithful passthrough with zero code-path overhead. Outbound
 # intervention keeps credentials away from untrusted relays (audit_only is the
 # only mode calibrated purely from offline evidence — never start higher up the

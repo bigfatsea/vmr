@@ -45,7 +45,7 @@ func TestSysChanged_WithinLineage(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestSysChanged_SameSystemPromptStaysFalse(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCompactionInfo_TokensAndEntities(t *testing.T) {
 	recs = append(recs, mkRecWithUsage(at(30), succMsgs, "continuing", 500, 20))
 
 	path := writeJSONL(t, recs)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestRevision_SpliceEdgeTagsTheReplacedMessage(t *testing.T) {
 		t.Fatalf("test setup: want a single Splice edge, got %+v", l.Edges)
 	}
 
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -64,7 +64,7 @@ var forbiddenImports = map[string][]string{
 	//
 	// journey→pricing is deliberately NOT forbidden: cost.go takes a
 	// *pricing.Resolver for its per-journey $ estimate exactly the way
-	// report.Build already does, and pricing is a near-leaf (its only
+	// report.BuildCached already does, and pricing is a near-leaf (its only
 	// internal dependency is core). config stays out — the resolver is built
 	// in cmd/vmr and threaded in, same as the report half.
 	"vmr/internal/journey": {
@@ -207,7 +207,7 @@ var forbiddenImports = map[string][]string{
 // allowedDepPackages generalizes what used to be zeroInternalDepPackages (a
 // flat "must have zero vmr/internal deps" list) into a per-package allow
 // list, an empty slice still meaning zero. Agent Guard's internal/guard
-// (docs/design/agent-guard-technical-spec-final-2.0.md's ADR-1) needed exactly
+// (the Agent Guard spec's ADR-1) needed exactly
 // one non-zero entry — {jsonscan}, since CLAUDE.md already states
 // "jsonscan is the system's one JSON byte-scanning engine; a private
 // reimplementation is a whole bug class" and guard's Engine.Scan walks

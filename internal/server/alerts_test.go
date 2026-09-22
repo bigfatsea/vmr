@@ -1,6 +1,6 @@
 // Ver 2026-09-15
 
-// /status's alerts[] contract (console-unification G2, contracts.md §2.1):
+// /status's alerts[] contract (see the console contract):
 // the three sources trigger/don't-trigger as specified, severity grading,
 // the error-first/kind+ref ordering, the per-account quota merge, and the
 // content discipline — only actionable state, never rolling statistics.

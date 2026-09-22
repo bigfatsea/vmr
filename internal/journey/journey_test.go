@@ -73,7 +73,7 @@ func msg(role, content string) map[string]any {
 // test if there isn't exactly one.
 func onlyLineage(t *testing.T, path string) *ctxgraph.Lineage {
 	t.Helper()
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestBuild_TaskSplittingOnNewInstruction(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestBuild_NoReplyMergesRetryIntoSameTask(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.OpenClawAware, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.OpenClawAware, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestBuild_TraceChangeAlwaysOpensNewTask(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestBuild_EventStreamDeduplicatesAcrossSteps(t *testing.T) {
 
 	path := writeJSONL(t, []audit.Record{r1, r2, r3})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestBuild_TitleFromEarliestInstruction(t *testing.T) {
 	r1 := mkRec(at(0), "", []any{sys, u1}, sseText("好的"))
 	path := writeJSONL(t, []audit.Record{r1, mkRec(at(1), "", []any{sys, u1, msg("user", "继续")}, sseText("ok"))})
 	l := onlyLineage(t, path)
-	j, err := Build(l, taskseg.Generic, i18n.EN)
+	j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -261,11 +261,11 @@ func TestDeriveID_StableAcrossIndependentScans(t *testing.T) {
 
 	l1 := onlyLineage(t, path1)
 	l2 := onlyLineage(t, path2)
-	j1, err := Build(l1, taskseg.Generic, i18n.EN)
+	j1, err := BuildChain([]*ctxgraph.Lineage{l1}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
-	j2, err := Build(l2, taskseg.Generic, i18n.EN)
+	j2, err := BuildChain([]*ctxgraph.Lineage{l2}, taskseg.Generic, i18n.EN)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestDeriveID_KeepsWriteTimeOffsetNotDisplayZone(t *testing.T) {
 
 		path := writeJSONL(t, []audit.Record{r1, r2})
 		l := onlyLineage(t, path)
-		j, err := Build(l, taskseg.Generic, i18n.EN)
+		j, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("offset %+d: Build: %v", off, err)
 		}
@@ -333,7 +333,7 @@ func TestListCandidates_ExcludesSingleRequestLineages(t *testing.T) {
 	multi2 := mkRec(at(2), "", []any{msg("system", "sys2"), msg("user", "real task"), msg("assistant", "working")}, sseText("ok2"))
 
 	path := writeJSONL(t, []audit.Record{single, multi1, multi2})
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 	pathA := writeJSONL(t, []audit.Record{rA1, rA2})
 	pathB := writeJSONL(t, []audit.Record{rB1, rB2})
 
-	g, err := ctxgraph.Scan([]string{pathA, pathB})
+	g, _, err := ctxgraph.ScanCached([]string{pathA, pathB}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestBuildAll_MatchesIndividualBuild(t *testing.T) {
 		t.Fatalf("BuildAll returned %d journeys, want 2", len(got))
 	}
 	for i, l := range g.Lineages {
-		want, err := Build(l, taskseg.Generic, i18n.EN)
+		want, err := BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, i18n.EN)
 		if err != nil {
 			t.Fatalf("Build[%d]: %v", i, err)
 		}
@@ -473,11 +473,11 @@ func TestSortByRootThenTime_TieBreaksOnRootHash(t *testing.T) {
 
 	pathA := writeJSONL(t, []audit.Record{rA})
 	pathB := writeJSONL(t, []audit.Record{rB})
-	gA, err := ctxgraph.Scan([]string{pathA})
+	gA, _, err := ctxgraph.ScanCached([]string{pathA}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gB, err := ctxgraph.Scan([]string{pathB})
+	gB, _, err := ctxgraph.ScanCached([]string{pathB}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

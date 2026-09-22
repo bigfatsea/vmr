@@ -1,10 +1,10 @@
 // Ver 2026-09-15
 
-// /status alerts[] (G2) and the endpoint headroom join (G4) —
-// contracts.md §2.1/§2.2, console-unification §4/§8.5. Kept out of admin.go
-// on purpose (see internal/archtest's line budgets); the alert-content
-// discipline (actionable state only — no rolling statistics) is pinned by
-// tests in alerts_test.go.
+// /status alerts[] and the endpoint headroom join — see
+// the console contract. Kept out of admin.go on purpose (see
+// internal/archtest's line budgets); the alert-content discipline
+// (actionable state only — no rolling statistics) is pinned by tests in
+// alerts_test.go.
 package server
 
 import (
@@ -19,7 +19,7 @@ import (
 	"vmr/internal/router"
 )
 
-// Alert severity/kind vocabulary — contracts.md §2.1 fixes these values.
+// Alert severity/kind vocabulary — the console contract fixes these values.
 const (
 	alertSeverityError   = "error"
 	alertSeverityWarning = "warning"
@@ -28,8 +28,8 @@ const (
 	alertKindQuota       = "quota"
 )
 
-// Quota alert thresholds. Both are the console-unification master's pinned
-// values (D4), deliberately not tunables: a limit at ≥90% of its period is
+// Quota alert thresholds. Both are pinned values (see
+// the console contract), deliberately not tunables: a limit at ≥90% of its period is
 // "act this week", a blown one is "act now" — the quota score itself carries
 // exactly one boundary (used == amount), and 0.9 is the single agreed
 // "nearly there" line ahead of it.
@@ -38,7 +38,7 @@ const (
 	quotaAlertErrFrac  = 1.0
 )
 
-// statusAlert is one /status alerts[] row (contracts.md §2.1).
+// statusAlert is one /status alerts[] row (the console's alerts[] section).
 type statusAlert struct {
 	Severity string `json:"severity"` // "error" | "warning"
 	Kind     string `json:"kind"`     // "config" | "endpoint" | "quota"
@@ -47,7 +47,7 @@ type statusAlert struct {
 }
 
 // statusAlerts builds /status's top-level alerts[] from three sources, in
-// the shape contracts.md §2.1 fixes:
+// the shape the console's alerts[] section fixes:
 //
 //   - config: one warning per snap.Cfg.Check() issue, ref = the config file
 //     path the instance is running from ("" when the server was built
@@ -139,7 +139,7 @@ func endpointAlertCause(fails int, lastErr string) string {
 // quotaAlerts folds QuotaProviderStatus rows into one alert per account
 // (provider): the same provider can carry several limits and each triggered
 // one is a fact about the same account, so they merge into a single row
-// whose message lists each (contracts.md §2.1's merge rule). Severity is the
+// whose message lists each (the alerts[] contract's merge rule). Severity is the
 // worst across the account's triggered limits: any blown limit (used ≥
 // amount, headroom 0) → error, else the ≥0.9 warning.
 //
@@ -210,9 +210,9 @@ func quotaLimitDesc(row router.QuotaProviderStatus) string {
 }
 
 // endpointHeadroom joins ep's account headroom out of the QuotaProviderStatus
-// rows adminStatus already renders (§8.5: a pure read-side join — the value
+// rows adminStatus already renders — a pure read-side join: the value
 // comes from the same rows the quota section shows, never recomputed, which
-// is also why the returned float is bit-identical to that row's headroom).
+// is also why the returned float is bit-identical to that row's headroom.
 //
 // Selection among the account's rows: a limit whose scope doesn't cover
 // ep.Model doesn't constrain this endpoint, so candidates are the rows of

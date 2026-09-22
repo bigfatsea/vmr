@@ -5,8 +5,7 @@
 # accounting-grade source: rates drift daily, this table doesn't. It exists
 # so a deployment that only cares about a rough $ estimate in vmr analyze (or
 # a provider whose pricing.currency isn't USD) doesn't have to look up and
-# type in a rate just to get started — see
-# docs/future-strategy/pricing_architecture_simplification_plan.md §2.3.
+# type in a rate just to get started.
 #
 # A currency the user declares in their own top-level exchange_rate: block
 # always wins over the value here (see pricing.EffectiveExchangeRate). A

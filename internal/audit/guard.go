@@ -1,6 +1,6 @@
 // Ver 2026-09-13, by Sonnet 5
 
-// Agent Guard's audit contract (docs/design/agent-guard-technical-spec-final-2.0.md
+// Agent Guard's audit contract (the Agent Guard spec
 // §4.6, ADR-12). Every field is omitempty and Guard itself is a nilable
 // pointer — a historical record with no Guard field at all decodes to
 // Record.Guard == nil. Block/BlockInfo (the online Tool Call gate's
@@ -34,7 +34,7 @@ type Hit struct {
 	Tier int    `json:"tier"`
 	// Count is how many times Rule matched within this single request —
 	// the raw data behind the "context amplification factor" metric
-	// (docs/design/agent-guard-technical-spec-final-2.0.md §2.3 point 3): a
+	// (the Agent Guard spec §2.3 point 3): a
 	// long session can resend the same credential dozens of times per
 	// request as history accumulates, which is evidence of amplification,
 	// not of "N distinct leaks."

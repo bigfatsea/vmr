@@ -2,7 +2,7 @@
 
 // Pairs with internal/report/viewmodel_guard.go (Agent Guard's M2 offline
 // bidirectional forensic audit section --
-// docs/design/agent-guard-technical-spec-final-2.0.md).
+// the Agent Guard spec).
 package i18n
 
 // GuardText is viewmodel_guard.go's text, in one language.

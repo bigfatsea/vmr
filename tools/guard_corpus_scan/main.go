@@ -1,7 +1,7 @@
 // Ver 2026-09-14, by Sonnet 5 & Claude
 
 // guard_corpus_scan is Agent Guard's M0.1 calibration and corpus analysis tool
-// (docs/design/agent-guard-technical-spec-final-2.0.md): it reproduces the spec's
+// (the Agent Guard spec): it reproduces the spec's
 // §2.3 real-corpus scan against this repo's historical audit logs
 // (logs/vmr-audit-*.jsonl[.zst]), and performs multi-dimensional security
 // analysis to prepare data for M3 (outbound protection) and M4 (inbound guard).
@@ -271,7 +271,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "scanning %d file(s) under %s with %d workers\n", len(files), *dir, *workers)
 
 	// One Engine shared by every worker goroutine (M3.0's concurrency
-	// model, docs/design/agent-guard-technical-spec-final-2.0.md §4.2): the
+	// model, the Agent Guard spec §4.2): the
 	// rule table and its Aho-Corasick prefilter are immutable after
 	// construction, so building it once here instead of once per worker
 	// both amortizes the regexp compiles and exercises the exact

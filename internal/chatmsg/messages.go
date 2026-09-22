@@ -372,7 +372,7 @@ func jsonIndent(v any) string {
 
 // Nested walks a chain of map keys, returning nil the moment any link isn't
 // a map[string]any. Exported so internal/ctxgraph (which already imports
-// chatmsg for Messages/ExtractUsage) doesn't need its own private copy —
+// chatmsg for Messages/ExtractUsageSides) doesn't need its own private copy —
 // report package used to keep a third copy in its own usage-extraction
 // file, deleted as tech-debt cleanup during the Step 3 migration onto
 // ctxgraph; at that point two independent copies for a 12-line helper

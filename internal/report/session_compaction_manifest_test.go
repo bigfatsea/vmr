@@ -8,6 +8,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/taskseg"
 )
 
 // TestGroup_CompactionRecordGetsManifestAndPrevManifest pins R72(b): the
@@ -51,7 +52,7 @@ func TestGroup_CompactionRecordGetsManifestAndPrevManifest(t *testing.T) {
 	r2.Client.Request.Body.(map[string]any)["metadata"] = meta
 
 	path := writeJSONL(t, []audit.Record{r1, comp, r2})
-	a, err := AnalyzeSessions([]string{path})
+	a, _, err := AnalyzeSessionsCached([]string{path}, nil, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}

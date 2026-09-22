@@ -70,7 +70,7 @@ func main() {
 
 	fmt.Printf("=== VMR Phase 1b REAL Calibration Run ===\n")
 	fmt.Printf("scanning %d file(s) matching %q...\n", len(paths), *input)
-	g, err := ctxgraph.Scan(paths)
+	g, _, err := ctxgraph.ScanCached(paths, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: scan: %v\n", err)
 		os.Exit(1)
@@ -78,7 +78,7 @@ func main() {
 
 	var journeys []*journey.Journey
 	for _, l := range g.Lineages {
-		j, err := journey.Build(l, taskseg.Generic, lang)
+		j, err := journey.BuildChain([]*ctxgraph.Lineage{l}, taskseg.Generic, lang)
 		if err != nil || j.Partial || countSteps(j) < *minSteps {
 			continue
 		}
@@ -161,7 +161,7 @@ func countSteps(j *journey.Journey) int {
 // audit.Record: a streamed response's text arrives as many small SSE
 // "delta.content" fragments, so a real, faithfully-quoted multi-word phrase
 // almost never survives as one contiguous run in the raw JSON — only in the
-// already-reassembled RespText/Reasoning fields journey.Build produces. The
+// already-reassembled RespText/Reasoning fields journey.BuildChain produces. The
 // raw record IS still marshaled and appended too, since tool_result text
 // (delivered as one complete string in the FOLLOWING step's request body,
 // never streamed) and raw tool-call arguments are only visible there.

@@ -106,6 +106,7 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 | `internal/respnorm` | 响应流归一化：流式状态机、顶层模型名改写、厂商特定思考块剥离与用量嗅探。 |
 | `internal/audit` | 双层原始字节审计记录落盘（JSONL）与按日归档压缩（zstd）。 |
 | `internal/imgprep` | 内联图片特征识别、解码缩放与本地磁盘缓存。 |
+| `internal/guard` | Agent Guard 双向安全护栏：锚定规则检测核心、出向干预与入向隐写净化挂载点（详见 Agent Guard 一节）。 |
 | `internal/quota` | 额度感知路由记账、周期时间数学与 Headroom 配速打分。 |
 | `internal/livestats` | 瞬态小时 WAL、轻量 Rollup 账本与遥测聚合（零内部依赖）。 |
 
@@ -117,6 +118,14 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 * **实时遥测与日志**：`GET /stats`（指标聚合与活跃请求）、`GET /log`（实时控制台日志流）。
 * **统一控制台**：`GET /status.html`（系统全景监控）、`GET /models.html`（模型与配额拓扑）、`GET /log.html`（日志终端）、`GET /help.html`（Agent 配置向导）。
 * **静态分析报告托管**：`GET /reports/*`（可选，只读托管本地生成的分析报告，受鉴权保护）。
+
+### 4.5 统一控制台契约
+四个控制台页面共享一套内嵌运行时与一组数据契约：
+
+* **共享运行时**：`console.css`/`console.js` 单一来源（`go:embed`），每页在首次服务时经注入标记内联一次，无标记的页面原样返回。公共面：`mountConsole`（页头、导航栏、页脚、鉴权弹窗；`refresh` 三态 `countdown`/`stream`/`static`）、`VMRAuth`（401 → 密钥弹窗 → 重试一次的统一流程，`localStorage` 单键跨页共享）、共享数字格式化（两位小数、整体去尾零、千分位——页面禁止各自手搓）与共享弹窗机制（Esc、点击外部、焦点管理）。
+* **刷新纪律**：Overview 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests/Recent Failures/并发区附加自适应轮询（活跃 ~1s、空闲 15s）；Log 页由流状态驱动；Help 静态。
+* **`/status` `alerts[]` 纪律**：只放**可操作状态**，滚动统计量绝不进——config 校验问题各一条（`kind: config`）；端点仅在 cooldown 期间在列（`consecutive_failures > 0` 但未冷却的降级态由拓扑表 Health 列承载，否则无流量时残留失败计数不消零，会把徽章永久钉在非零，违反告警收敛纪律）；quota `used_frac ≥ 1` 为 error、`≥ 0.9` 为 warning，阈值刻意写死不作配置项。排序：error 优先，再按 `kind`+`ref` 稳定排序；同一账号多限额触发合并为一条。
+* **`/status` 端点行契约**：`provider`/`key_label`/`model` 取自 `core.Endpoint`；`from_fallback` 恒出现（含 `false` 零值，供前端切分）；`headroom` 从路由半区既有的配额导出读取（禁止第二套公式重推，与配额差分测试纪律一致），未配额端点省略该字段。
 
 ---
 
@@ -236,11 +245,57 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ---
 
-## 9. 审计日志规范（Audit Log）
+## 9. Agent Guard（双向安全护栏）
+
+面向 Agent 流量的双向安全层，**默认关闭**：配置中省略整个 `guard:` 键（或不接线）时，请求路径保持零开销、字节保真透传。立项边界与 `respnorm` 的用量嗅探同类——只审查标准 LLM API 线路上的内容（如 `tool_use.input`/`tool_calls.arguments`），不代理 MCP 协议、不介入客户端的工具执行路径。
+
+### 9.1 检测核心（`internal/guard`）
+
+* **锚定规则**：凭据规则按五重锚定准入（左边界 + 字面前缀 + 定长 + 字符集 + 熵）。五锚齐备为 Tier 1（可作在线依据）；缺锚者为 Tier 2（仅供离线人工复核，永不在线改写/阻断）——`sk-` 泛前缀是开放式形状匹配，永远停留 Tier 2；五锚齐备的厂商规则（`sk-ant-api03-`/`AKIA`/`ghp_` 等）已是 Tier 1。
+* **扫描机制**：锚定正则规则 + JSON 字符串值遍历（`Engine.Scan`）+ Aho-Corasick 字面预筛；`InspectToolCall` 提供工具调用风险与凭据回显的**离线**判定（在线闸门已移除，见 9.3）。
+* **指纹**：`Hit.FP` 为确定性无盐哈希（无 Salt 持久化机制，KNOWN_ISSUES K-G19）；`GuardRecord.Ver` 标记规则集版本——版本升级使新旧 `FP` 不可比，跨版本聚合"同一凭据重复出现"会漏配对，是指纹固有属性而非 bug。
+
+### 9.2 出向干预（Outbound）
+
+挂载于 `chatHandler`（图片降采样之前），配置 `guard:` 后扫描每个请求：
+
+* `mode: audit_only`——命中记入审计（唯一纯由离线证据校准过的模式）；`mode: block`——仅 Tier 1 命中在进入路由前以 HTTP 400 拒绝（Tier 2 永不阻断，K-G5）。
+* `guard.trusted_providers`：虚拟模型的全部候选端点（含 fallback）均为可信 provider 时整体豁免，Snapshot 构建时预计算。
+* 早期的 replace/伪名还原模式已整体移除（K-G1）：网关侧改写凭据的收益远低于其复杂度与误还原风险。
+
+### 9.3 入向干预（Inbound）
+
+挂载于响应归一化下游，**唯一**的在线入向动作是 Unicode 隐写净化：
+
+* 重帧 SSE 事件（非流式体直接净化），剥离不可见/隐写字符：A 档（Tags 区、C0 控制）与 B 档（Bidi 覆盖/隔离、零宽空格、BOM、软连字符）无条件删除；C 档（ZWNJ/ZWJ/LRM/RLM、变体选择符）**只计数标记绝不删除**（K-G7）——它们是波斯语/印地语/阿拉伯语排版与全部 ZWJ emoji 序列的必需字符。
+* 双线格式解析（字面 UTF-8 与 JSON `\uXXXX`/代理对转义），ASCII 快路径零分配。
+* 从不阻断、不改变 HTTP 状态码；内部错误或压缩（不透明）响应一律 fail-open；异常上游无 SSE 空行分隔符时由内部持有上限兑底而非无界增长。唯一配置旋钮：`guard.inbound.sanitize_invisible_runes`（默认开）。
+* 在线的 Tool Call 双级闸门、三协议熔断帧与非流式阻断已整体移除（K-G15/ADR-15）：客户端自己的审批门与沙箱掌握严格更多的上下文，网关在信息量更少的位置重做同一判断只会得到更差的判断——检测层 `InspectToolCall` 保留为离线取证函数。
+
+### 9.4 审计盖章与数据源双路
+
+接线后每个请求在审计记录顶层盖章 `guard` 字段（检测命中、档位、指纹、规则集版本）；`vmr analyze` 优先读该盖章（权威路径），对缺少盖章的记录（未接线时期的历史数据）按需对 `Client.Request`/`Client.Response.Body` 现场补扫（Fallback Path）——补扫无论护栏是否配置都会运行，只有连请求体都为空的记录才真正跳过。
+
+### 9.5 离线消费面
+
+* `vmr analyze`：`macro/guard.json` 可选切片（见 Part 2 的宏切片说明）；
+* `vmr diagnose -guard`：5 探针矩阵主动审计上游中转安全（工具调用篡改、静默上下文截断、思考剥离、用量膨胀、隐写字符注入）；
+* `tools/guard_corpus_scan`：对本仓真实审计语料的校准复现工具，检测全部委托 `internal/guard`，不携带第二份私有实现。
+
+| 决策 | 选择 | 理由 |
+| --- | --- | --- |
+| 默认关闭 | 省略 `guard:` 键即零开销透传 | 安全层必须是显式 opt-in；不配置不进请求路径 |
+| 放量上限 audit_only 起步 | block 仅对 Tier 1、仅入路由前 | 在线改写/阻断从未在生产流量上验证过判定精度，宁缺勿滥 |
+| C 档字符只计数 | 绝不删除变体选择符类 | 无差别删除会当场破坏正常语言排版与 ZWJ emoji |
+| 无盐确定性指纹 | 不配置、不持久化 Salt | replace 模式移除后伪名还原不复存在，盐失去存在理由 |
+
+---
+
+## 10. 审计日志规范（Audit Log）
 
 审计日志（`audit.Record`）为系统对外发布的唯一持久化事实源，按日轮转并采用 JSONL 存储。它是 Routing Half 与 Analytics Half 之间**唯一的物理契约**。
 
-### 9.1 核心 Record 结构与分层模型
+### 10.1 核心 Record 结构与分层模型
 ```jsonc
 {
   "ts": "2026-07-07T12:15:20.123+08:00",
@@ -250,6 +305,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
   "client": { "addr": "...", "request": {...}, "response": {...} },
   "images": [ { "format": "jpeg", "bytes": 812000, "width": 3024, "height": 4032, "downscaled": true } ],
   "facts": { "has_image": false, "has_tools": true, "estimated_tokens": 1280 },
+  "guard": { "ver": 3, "hits": [...] }, // Agent Guard 盖章（guard: 接线时才有，见 Agent Guard 一节）
   "attempts": [                           // 每次 failover 尝试一条
     {
       "endpoint": "anthropic-messages:minimax:MiniMax-M3", // 展示标签（:分隔）
@@ -262,7 +318,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 }
 ```
 
-### 9.2 六大核心契约约定（跨半区唯一契约）
+### 10.2 六大核心契约约定（跨半区唯一契约）
 1. **成功响应体单存去重**：上游成功 Attempt 不重复存储 Body（透传恒等，与 `client.response.body` 字节完全一致），两者的字节差异完整由 `norm` 列表解释（`model_rewrite`, `think_strip`, `done_appended` 等）；纯观测标记（如 `soft_block_detected`, `crlf_framing_suspected`, `truncated_withheld`）仅记录不改变转发字节。失败 Attempt 的错误体设 128KB 截断保护。
 2. **容量与截断口径**：入站请求体不设记录截断上限（只要 vmr 接受即完整记录）；出站响应体审计副本设 16MiB 上限（`server.recorderBodyCap`，超出追加截断标记，但客户端转发链路始终完整无损）。
 3. **严格凭据脱敏**：敏感认证头（`Authorization`、`x-api-key`、`Cookie` 等）在审计中仅保留末 4 字符掩码；`audit.IsCredentialHeader` 与路由转发黑名单解耦，`vmr replay` 重建请求时依此彻底剔除脱敏占位符。
@@ -272,7 +328,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ---
 
-## 10. 诊断与重放工具
+## 11. 诊断与重放工具
 
 * **静态检查（`vmr check`）**：无网络 I/O 的静态配置扫描与生效路由表预览。
 * **网络诊断（`vmr diagnose`）**：连通性探针，按阶段测试代理可达性、DNS、TLS 及最小模型回显。走代理的 Provider 自动跳过直连检测。
@@ -286,7 +342,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ---
 
-## 11. 核心架构决策汇总
+## 12. 核心架构决策汇总
 
 | 决策点 | 采纳方案 | 放弃方案与核心权衡 |
 | --- | --- | --- |
@@ -312,7 +368,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ---
 
-## 12. 已识别、暂不落地的清理项
+## 13. 已识别、暂不落地的清理项
 
 判定“动它的收益低于扰动成本”的项。每项都不是 Bug，改与不改行为一致；在此沉淀避免后续重复论证（分析半区清单见 `docs/KNOWN_ISSUES.md`）。
 

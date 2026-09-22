@@ -442,7 +442,7 @@ func TestAdminStatus_HeadroomJoinDifferential(t *testing.T) {
 
 // TestAdminStatus_HeadroomExhaustedIsZeroNotOmitted pins the *float64 choice:
 // an exhausted account's headroom IS 0.00 — the one state the console must
-// show in red (§8.5 color scale). A plain float64+omitempty would erase it.
+// show in red. A plain float64+omitempty would erase it.
 func TestAdminStatus_HeadroomExhaustedIsZeroNotOmitted(t *testing.T) {
 	cfg, err := config.Parse([]byte(quotaStatusYAML))
 	if err != nil {

@@ -71,7 +71,7 @@ func TestStitchedJourney_NewInstructionOpensTask(t *testing.T) {
 		sseText("continuing")))
 	path := writeJSONL(t, recs)
 
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestStitchedJourney_NewInstructionOpensTask(t *testing.T) {
 // acceptance criterion.
 func TestStitchedJourney_EndToEnd(t *testing.T) {
 	path := s231StyleFixture(t)
-	g, err := ctxgraph.Scan([]string{path})
+	g, _, err := ctxgraph.ScanCached([]string{path}, nil)
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}

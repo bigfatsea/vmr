@@ -68,7 +68,8 @@ func New() *Registry {
 	}
 }
 
-// NewBounded creates a Registry with a custom maximum capacity (used in tests or resource-constrained setups).
+// NewBounded creates a Registry with a custom maximum capacity — no config
+// reaches it; the eviction tests are its only callers.
 func NewBounded(maxEntries int) *Registry {
 	if maxEntries <= 0 {
 		maxEntries = MaxEntries

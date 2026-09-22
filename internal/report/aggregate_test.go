@@ -17,6 +17,7 @@ import (
 	"vmr/internal/i18n"
 	"vmr/internal/pricing"
 	"vmr/internal/reqdetail"
+	"vmr/internal/taskseg"
 )
 
 // smallAuditRecords returns a few synthetic records covering ok/error,
@@ -107,7 +108,7 @@ func TestBuild_LegacyProtocolNamesNormalized(t *testing.T) {
 		"attempts": []map[string]any{{"endpoint": "openai:acct:real-model", "protocol": "openai", "dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	path := writeTempJSONL(t, dir, []map[string]any{rec})
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +167,7 @@ func TestBuild(t *testing.T) {
 	dir := t.TempDir()
 	records := smallAuditRecords()
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,7 @@ func TestBuild(t *testing.T) {
 func TestMarkdownAndJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +275,7 @@ func TestToolWaste(t *testing.T) {
 		}
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +332,7 @@ rates:
 
 	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, pricingInfo, resolver, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, pricingInfo, resolver, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +366,7 @@ rates:
 	}
 	resolver := pricing.NewResolver(table, nil)
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, &Pricing{Currency: "CNY"}, resolver, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, &Pricing{Currency: "CNY"}, resolver, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +450,7 @@ rates:
 func TestWriteRequestsJSONL(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, smallAuditRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ func TestWriteRequestsIndexGrouping(t *testing.T) {
 		mk(at(2, 0), "bob", "heartbeat check [OpenClaw heartbeat poll]"),
 	}
 	path := writeTempJSONL(t, dir, records)
-	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, sess, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +615,7 @@ func failureSurfaceRecords() []map[string]any {
 func TestFailedRequestRows(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,7 +647,7 @@ func TestFailedRequestRows(t *testing.T) {
 func TestTruncatedRequestAttributesToServingEndpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -727,7 +728,7 @@ func quirkNormRecords() []map[string]any {
 func TestEndpointNormCounts(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, quirkNormRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -773,7 +774,7 @@ func TestEndpointNormCounts(t *testing.T) {
 func TestRenderReliabilityQuirkSection(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, quirkNormRecords())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +798,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 	dir2 := t.TempDir()
 	clean := []map[string]any{quirkNormRecords()[3]} // the openrouter record, only model_rewrite
 	path2 := writeTempJSONL(t, dir2, clean)
-	rep2, _, err := Build([]string{path2}, time.Now(), nil, nil, nil, nil)
+	rep2, _, _, err := BuildCached([]string{path2}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +815,7 @@ func TestRenderReliabilityQuirkSection(t *testing.T) {
 func TestWriteFailedIndex(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, failureSurfaceRecords())
-	rep, sess, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, sess, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +906,7 @@ func containsSub(s, sub string) bool {
 }
 
 // tiedAuditRecords returns records deliberately constructed so several
-// Build() buckets end up with genuine ties on their primary sort value:
+// BuildCached() buckets end up with genuine ties on their primary sort value:
 // two client tags each with exactly 1 request (ByClient ties on Requests),
 // two distinct endpoints each attempted exactly once (EndpointsAll ties on
 // Attempts), and — as a side effect of two different first-user-messages —
@@ -944,10 +945,10 @@ func tiedAuditRecords() []map[string]any {
 // (whose iteration order the language spec deliberately leaves unspecified) and
 // then sorted only by a count/byte-size value that can legitimately tie
 // across distinct rows — without a secondary tie-break on the bucket's own
-// identity field, two Build() calls against byte-identical input could
+// identity field, two BuildCached() calls against byte-identical input could
 // (and, before the fix, empirically did — caught comparing
 // loadtest-report.md across two runs of the same unmodified binary)
-// disagree on which tied row comes first. Running Build() several times
+// disagree on which tied row comes first. Running BuildCached() several times
 // and requiring byte-identical JSON output is the direct test of that
 // property — it doesn't matter whether any particular run's map iteration
 // happened to "get lucky"; it must never be allowed to matter.
@@ -966,9 +967,9 @@ func TestBuildIsDeterministic(t *testing.T) {
 	now := time.Now()
 	var want []byte
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, now, nil, nil, nil, nil)
+		rep, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 		if err != nil {
-			t.Fatalf("run %d: Build: %v", i, err)
+			t.Fatalf("run %d: BuildCached: %v", i, err)
 		}
 		got, err := json.Marshal(rep)
 		if err != nil {
@@ -979,7 +980,7 @@ func TestBuildIsDeterministic(t *testing.T) {
 			continue
 		}
 		if string(got) != string(want) {
-			t.Fatalf("run %d produced different JSON than run 0 — Build() is not deterministic.\nrun 0: %s\nrun %d: %s", i, want, i, got)
+			t.Fatalf("run %d produced different JSON than run 0 — BuildCached() is not deterministic.\nrun 0: %s\nrun %d: %s", i, want, i, got)
 		}
 	}
 }
@@ -1033,9 +1034,9 @@ func TestBuildFindingsIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+		rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 		if err != nil {
-			t.Fatalf("run %d: Build: %v", i, err)
+			t.Fatalf("run %d: BuildCached: %v", i, err)
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
@@ -1122,9 +1123,9 @@ func TestBuildFindingsWorstToolTieIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+		rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 		if err != nil {
-			t.Fatalf("run %d: Build: %v", i, err)
+			t.Fatalf("run %d: BuildCached: %v", i, err)
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
@@ -1184,9 +1185,9 @@ func TestBuildFindingsDomModelTieIsDeterministic(t *testing.T) {
 
 	const runs = 8
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+		rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 		if err != nil {
-			t.Fatalf("run %d: Build: %v", i, err)
+			t.Fatalf("run %d: BuildCached: %v", i, err)
 		}
 		var found *Finding
 		for j := range rep.Efficiency {
@@ -1264,9 +1265,9 @@ func TestBuildFindingsContextGrowthTieIsDeterministic(t *testing.T) {
 	const runs = 8
 	var wantImplicated string
 	for i := 0; i < runs; i++ {
-		rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+		rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 		if err != nil {
-			t.Fatalf("run %d: Build: %v", i, err)
+			t.Fatalf("run %d: BuildCached: %v", i, err)
 		}
 		if len(rep.Sessions) != 2 {
 			t.Fatalf("run %d: sessions = %d, want 2", i, len(rep.Sessions))
@@ -1363,7 +1364,7 @@ func contextGrowthContractFixture() []map[string]any {
 func TestContextGrowthDoesNotCrossContractBreak(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, contextGrowthContractFixture())
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1424,7 +1425,7 @@ func TestBuildCompactionsEntitySplitAndTokens(t *testing.T) {
 
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, []map[string]any{rec})
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1593,7 +1594,7 @@ func TestBuildDateHourBucketsUseDisplayZone(t *testing.T) {
 			"dur_ms": 100, "response": map[string]any{"status": 200}}},
 	}
 	path := writeTempJSONL(t, dir, []map[string]any{record})
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1618,7 +1619,7 @@ func BenchmarkBuild(b *testing.B) {
 	}
 	f.Close()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = Build([]string{path}, time.Now(), nil, nil, nil, nil)
+		_, _, _, _ = BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	}
 }
 
@@ -1660,7 +1661,7 @@ func TestAddAttempt_ForwardedCountsTruncated(t *testing.T) {
 		mk(t0.Add(2*time.Minute), "upstream 429", 429),   // neither
 		mk(t0.Add(3*time.Minute), "network: refused", 0), // no response at all: neither
 	})
-	rep, _, err := Build([]string{path}, t0.Add(time.Hour), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, t0.Add(time.Hour), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1795,7 +1796,7 @@ func TestContextGrowthFallsBackToEstimateEndToEnd(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, recs)
-	rep, _, err := Build([]string{path}, time.Now(), nil, nil, nil, nil)
+	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
