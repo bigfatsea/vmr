@@ -1,4 +1,4 @@
-// Ver 2026-09-15 23:45, by coding
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /health, /status, /status.html, /models.html, /help, /help.html, /help.zh,
@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"vmr/internal/adapter"
@@ -26,20 +25,11 @@ import (
 	"vmr/internal/router"
 )
 
-// defaultBodyReadTimeout bounds the time allowed to read the full incoming request body.
-// Defends against Slowloris-style slow body delivery holding connections and goroutines open.
-var bodyReadTimeout atomic.Int64 // nanoseconds; 0 means default 60s
-
-func getBodyReadTimeout() time.Duration {
-	if d := bodyReadTimeout.Load(); d > 0 {
-		return time.Duration(d)
-	}
-	return 60 * time.Second
-}
-
-func setBodyReadTimeout(d time.Duration) {
-	bodyReadTimeout.Store(int64(d))
-}
+// defaultBodyReadTimeout bounds the time allowed to read the full incoming
+// request body when the Server's bodyReadTimeout field is unset. Defends
+// against Slowloris-style slow body delivery holding connections and
+// goroutines open.
+const defaultBodyReadTimeout = 60 * time.Second
 
 type Server struct {
 	rt     *router.Router
@@ -49,7 +39,7 @@ type Server struct {
 	// liveStats holds the completed-request aggregator (nil = live stats
 	// persistence disabled, e.g. lightweight tests).
 	liveStats *livestats.Aggregator
-	// guard is Agent Guard's online engine (M3.4), built once at
+	// guard is Agent Guard's online engine, built once at
 	// startup — nil in every test and embedding that doesn't opt in via
 	// WithGuard, which is the same as guard: being entirely absent from
 	// config (applyOutboundGuard's nil check treats them identically).
@@ -60,6 +50,11 @@ type Server struct {
 	// conditional shape to fall back on, so it needs a value that always
 	// exists. The two differ by however long config loading took.
 	started time.Time
+
+	// bodyReadTimeout overrides defaultBodyReadTimeout when positive —
+	// tests tighten it to keep slow-body scenarios fast; production leaves
+	// it zero and gets the default.
+	bodyReadTimeout time.Duration
 }
 
 func New(rt *router.Router, auditLog *audit.Logger) *Server {
@@ -150,10 +145,10 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 // A client sending nothing still gets "".
 //
 // The caller loads the snapshot once per request and passes the same
-// instance through authentication, body handling, and routing (Q14) — a hot
+// instance through authentication, body handling, and routing — a hot
 // reload in between must not give one request two views. snap must be
 // non-nil; both entry points that dereference it (chatHandler, auth) nil-
-// check at their own outermost layer (Q15) before calling in.
+// check at their own outermost layer before calling in.
 func (s *Server) authenticateWithSnap(r *http.Request, snap *router.Snapshot) (tag string, ok bool) {
 	cfg := snap.Cfg
 	got := trimBearerPrefix(r.Header.Get("Authorization"))
@@ -185,10 +180,10 @@ func trimBearerPrefix(auth string) string {
 }
 
 // auth guards the non-chat endpoints (/v1/models, /status, /log): these
-// handlers don't route, so the single-load rule (Q14) doesn't apply and
+// handlers don't route, so the single-load rule doesn't apply and
 // loading the snapshot here is fine. This middleware is the outermost layer
 // that dereferences the snapshot for everything it guards, so it carries the
-// same nil-snapshot defense as chatHandler's entry (Q15) — without it a nil
+// same nil-snapshot defense as chatHandler's entry — without it a nil
 // snapshot (router.New before the first Install) would panic one frame
 // deeper, in authenticateWithSnap. 503, not 401: the credential isn't the
 // problem, the router isn't up yet.
@@ -209,47 +204,41 @@ func (s *Server) auth(next http.HandlerFunc) http.HandlerFunc {
 
 func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		s.rt.Telemetry.RecordRequest(protocol)
 		// Load the routing snapshot exactly once, at the request's entry
 		// point, and pass the same instance through authentication, body
 		// handling, and routing — a hot reload mid-request must not tear
-		// one request across two config views (Q14). The nil check lives
+		// one request across two config views. The nil check lives
 		// here, at the outermost layer that actually dereferences it,
 		// instead of buried in Serve where the server would have panicked
-		// first (Q15).
+		// first.
 		snap := s.rt.Snapshot()
 		if snap == nil {
-			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
 			return
 		}
-		var rec *audit.Record
-		var done func()
-		rec, w, done = s.beginAudit(w, protocol, r, snap)
-		if done != nil {
-			defer done()
-		}
+		rec, w, done := s.beginAudit(w, protocol, r, snap)
+		defer done()
 
 		tag, authed := s.authenticateWithSnap(r, snap)
-		if rec != nil {
-			rec.ClientKeyTag = tag
-		}
+		rec.ClientKeyTag = tag
 		if !authed {
-			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusUnauthorized, "authentication_error", "invalid or missing API key")
 			return
 		}
 
 		// Buffer the whole body up front (streaming included): failover replay needs it.
 		rc := http.NewResponseController(w)
-		_ = rc.SetReadDeadline(time.Now().Add(getBodyReadTimeout()))
+		brt := s.bodyReadTimeout
+		if brt <= 0 {
+			brt = defaultBodyReadTimeout
+		}
+		_ = rc.SetReadDeadline(time.Now().Add(brt))
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, snap.Cfg.MaxRequestBodyBytes()))
 		_ = rc.SetReadDeadline(time.Time{})
-		if rec != nil && s.audit != nil {
+		if s.audit != nil {
 			rec.Client.Request.Body = audit.EncodeBody(body)
 		}
 		if err != nil {
-			s.rt.Telemetry.RecordOutcome(false, false)
 			var tooBig *http.MaxBytesError
 			if errors.As(err, &tooBig) {
 				router.WriteError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds limit")
@@ -268,34 +257,26 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// independent top-level scan for tools later in computeRequestFacts.
 		probeModel, probeStream, probeHasTools, probeOK := adapter.TopLevelProbe(body)
 		if !probeOK {
-			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
 			return
 		}
 		if probeModel == "" {
-			s.rt.Telemetry.RecordOutcome(false, false)
 			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "missing required field: model")
 			return
 		}
-		if rec != nil {
-			rec.Model, rec.Stream = probeModel, probeStream
-		}
+		rec.Model, rec.Stream = probeModel, probeStream
 
 		// Register in-flight request entry BEFORE entering the concurrency
-		// gate (LiveStats design §5.2): state starts as "queued" until the
+		// gate (the LiveStats design doc): state starts as "queued" until the
 		// first upstream attempt actually fires in tryOne.
-		if s.rt != nil && s.rt.Inflight != nil {
-			reqTS := time.Now()
-			if rec != nil {
-				reqTS = rec.TS
-			}
+		if s.rt.Inflight != nil {
 			h, remove := s.rt.Inflight.Register(router.InflightInitials{
 				Protocol:     protocol,
 				VModel:       probeModel,
 				Stream:       probeStream,
 				ClientKeyTag: tag,
 				Addr:         r.RemoteAddr,
-				TS:           reqTS,
+				TS:           rec.TS,
 			})
 			defer remove()
 			r = r.WithContext(router.WithInflightHandle(r.Context(), h))
@@ -308,12 +289,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// not client I/O.
 		release, ok := s.rt.AcquireSlot(r.Context())
 		if !ok {
-			s.rt.Telemetry.RecordOutcome(false, true)
 			return // client canceled while waiting; nothing to write
 		}
 		defer release()
 
-		// Agent Guard outbound scan (ADR-4/ADR-10, M3.4/M3.5/M3.6) — see applyOutboundGuard.
+		// Agent Guard outbound scan — see applyOutboundGuard.
 		var blocked bool
 		if body, blocked = s.applyOutboundGuard(w, rec, snap, protocol, probeModel, body); blocked {
 			return
@@ -325,7 +305,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// imageCount below, so the call cannot be skipped when auditing is off
 		// even if the effective cap is 0.
 		body, images := downscaleImages(body, protocol, snap, snap.Models[protocol][probeModel])
-		if rec != nil && len(images) > 0 {
+		if len(images) > 0 {
 			rec.Images = toAuditImages(images)
 		}
 
@@ -344,15 +324,12 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// same value (rec.Facts) — never a second, independent computation
 		// at write time. See audit.Record.Facts's doc comment for why it's
 		// a sibling of Client.Request rather than folded into it.
+		// (The in-flight entry's est-in stamp is router.Serve's job — one
+		// setter, not two.)
 		facts := computeRequestFacts(body, len(images), probeHasTools)
-		if rec != nil {
-			rec.Facts = &facts
-		}
-		if h := router.InflightHandleFrom(r.Context()); h != nil {
-			h.SetEstIn(facts.EstimatedTokens)
-		}
+		rec.Facts = &facts
 
-		s.rt.ServeWithSnap(w, r, &core.CanonicalRequest{
+		s.rt.Serve(w, r, &core.CanonicalRequest{
 			Model: probeModel, Stream: probeStream, Raw: body, Header: hdr,
 			Facts: facts, ClientKeyTag: tag,
 		}, protocol, snap, rec)
@@ -388,7 +365,7 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 	// or a header redact.
 	rw := newRecorder(w, rec.TS, s.audit != nil)
 	return rec, rw, func() {
-		// R-5 (K-G14): inbound rune-sanitization counts live on the last
+		// Inbound rune-sanitization counts live on the last
 		// Attempt as transient state (router-side stamping) — copy them
 		// into the persisted Record.Guard contract here. rec.Guard may be
 		// nil (inbound-only guard config: no outbound scan ever ran), so
@@ -460,7 +437,7 @@ func downscaleImages(body []byte, protocol string, snap *router.Snapshot, route 
 // toAuditImages converts imgprep's image descriptors to their audit-log
 // representation — a pure field copy, extracted from chatHandler so the
 // request handler reads as the request lifecycle, not this mechanical
-// translation (Q37).
+// translation.
 func toAuditImages(images []imgprep.ImageInfo) []audit.ImageInfo {
 	out := make([]audit.ImageInfo, len(images))
 	for i, img := range images {

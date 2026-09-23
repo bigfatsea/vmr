@@ -1,4 +1,4 @@
-// Ver 2026-09-09, by pi
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package server
 
@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,18 @@ import (
 	"vmr/internal/livestats"
 	"vmr/internal/router"
 )
+
+// freshFoldSeq hands each uncached ledger read its own hourly tail:
+// CachedSnapshot caches per tail, so an unseen tail forces a fresh fold.
+// Only the Hourly window width depends on the tail; every assertion below
+// is membership, not exact window shape. This is the cross-package stand-in
+// for livestats' unexported uncached read — that one belongs to livestats'
+// own tests, and no production caller needs it.
+var freshFoldSeq atomic.Int64
+
+func freshFold(a *livestats.Aggregator) livestats.Snapshot {
+	return a.CachedSnapshot(livestats.HourlyTailDefault + int(freshFoldSeq.Add(1)))
+}
 
 // TestStatsEndpointAuthAndContent verifies GET /stats authentication,
 // in-flight snapshot reflection during execution, and post-completion ledger
@@ -129,7 +142,7 @@ models:
 	// snapCacheTTL), so a cold key folds fresh and must carry the sample,
 	// with no dependence on the TTL window.
 	for i := 0; i < 200; i++ {
-		if len(lstats.Snapshot(livestats.HourlyTailDefault).ByProviderModel) > 0 {
+		if len(freshFold(lstats).ByProviderModel) > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -235,7 +248,7 @@ models:
 
 	// Give the done() hooks time to run, then confirm nothing was booked.
 	time.Sleep(50 * time.Millisecond)
-	snapshot := lstats.Snapshot(livestats.HourlyTailDefault)
+	snapshot := freshFold(lstats)
 	if len(snapshot.Hourly) != 0 || len(snapshot.Daily) != 0 || len(snapshot.ByProviderModel) != 0 {
 		t.Errorf("pre-probe failures booked: hourly=%d daily=%d providers=%d",
 			len(snapshot.Hourly), len(snapshot.Daily), len(snapshot.ByProviderModel))
@@ -246,7 +259,7 @@ models:
 		t.Fatalf("valid request status = %d, want 200", resp.StatusCode)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if got := lstats.Snapshot(livestats.HourlyTailDefault).Hourly; len(got) == 0 {
+	if got := freshFold(lstats).Hourly; len(got) == 0 {
 		t.Error("valid routed request was not booked into the ledger")
 	}
 }
@@ -295,7 +308,7 @@ models:
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if got := lstats.Snapshot(livestats.HourlyTailDefault).ByProviderModel; len(got) == 0 || got[0].OK != 1 {
+	if got := freshFold(lstats).ByProviderModel; len(got) == 0 || got[0].OK != 1 {
 		t.Errorf("audit-off request not booked: %+v", got)
 	}
 
@@ -306,7 +319,7 @@ models:
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 	time.Sleep(50 * time.Millisecond)
-	snapNoAudit := lstats.Snapshot(livestats.HourlyTailDefault)
+	snapNoAudit := freshFold(lstats)
 	if len(snapNoAudit.RecentErrors) == 0 {
 		t.Fatalf("recent_errors empty in status-only mode")
 	}

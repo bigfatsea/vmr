@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-06, VMR Forensics Request Browser (§6.2: filter/sort/facet are required capabilities) -->
+<!-- Ver 2026-09-24 10:00, by agent -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -367,7 +367,7 @@
           if (tTo !== null && r.TSNum > tTo) return false;
           if (search) {
             const sm = sessionMeta[r.session || ''] || {};
-            const hay = `${sm.title || ''} ${sm.alias || ''} ${r.session || ''} ${r.task || ''}`.toLowerCase();
+            const hay = [sm.title, sm.alias, r.session, r.task].filter(Boolean).join(' ').toLowerCase();
             if (!hay.includes(search)) return false;
           }
           return true;
@@ -416,25 +416,25 @@
           // journey-viewer wants the bare id's .json.
           const jRel = journeyLinks[sessionKey];
           const jId = jRel ? jRel.replace(/^details\//, '').replace(/\.md$/, '') : null;
-          const detailHref = r.detail_file ? `requests/details/${encodeURI(r.detail_file)}` : null;
-          const outcomeBadge = `<span class="badge-pill ${isErr ? 'badge-alert' : 'badge-ok'}">${esc(outcome)}</span>`;
+          const detailHref = r.detail_file ? 'requests/details/' + encodeURI(r.detail_file) : null;
+          const outcomeBadge = `<span class="badge-pill ${esc(isErr ? 'badge-alert' : 'badge-ok')}">${esc(outcome)}</span>`;
 
           return `
-            <tr class="${isErr ? 'row-error' : 'row-ok'}">
+            <tr class="${esc(isErr ? 'row-error' : 'row-ok')}">
               <td>${esc(r.ts_display || '—')}</td>
               <td title="${esc(r.client_key || '')}">${esc(r.client_key || '—')}</td>
               <td>${esc(r.model || '—')}</td>
               <td title="${esc(r.endpoint || '')}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${esc(r.endpoint || '—')}</td>
-              <td>${outcomeBadge}${r.error_class ? ` <code>${esc(r.error_class)}</code>` : ''}</td>
-              <td class="num">${r.dur_ms ? FmtDuration(r.dur_ms) : '—'}</td>
-              <td class="num">${r.ttft_ms ? FmtDuration(r.ttft_ms) : '—'}</td>
+              <td>${outcomeBadge}${r.error_class ? ' <code>' + esc(r.error_class) + '</code>' : ''}</td>
+              <td class="num">${esc(r.dur_ms ? FmtDuration(r.dur_ms) : '—')}</td>
+              <td class="num">${esc(r.ttft_ms ? FmtDuration(r.ttft_ms) : '—')}</td>
               <td class="num">${FmtTokens(r.tokens_in_fresh || 0)}</td>
               <td class="num">${FmtTokens(r.tokens_in_cached || 0)}</td>
               <td class="num">${FmtTokens(r.tokens_out || 0)}</td>
-              <td class="num">${r.cache_eff != null ? FmtPercent(r.cache_eff) : '—'}</td>
+              <td class="num">${esc(r.cache_eff != null ? FmtPercent(r.cache_eff) : '—')}</td>
               <td class="num">${r.fallbacks || 0}</td>
-              <td>${detailHref ? `<a href="${detailHref}">detail</a>` : '—'}</td>
-              <td>${jId ? `<a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(jId)}.json">${esc(jId.length > 20 ? jId.slice(0, 18) + '…' : jId)}</a>` : `<span title="${esc(sessionTitle)}" style="color:var(--ink-dim);">—</span>`}</td>
+              <td>${detailHref ? `<a href="${esc(detailHref)}">detail</a>` : '—'}</td>
+              <td>${jId ? `<a href="journey-viewer.html#data=journeys/details/${esc(encodeURIComponent(jId))}.json">${esc(jId.length > 20 ? jId.slice(0, 18) + '…' : jId)}</a>` : `<span title="${esc(sessionTitle)}" style="color:var(--ink-dim);">—</span>`}</td>
             </tr>
           `;
         }).join('');

@@ -1,4 +1,4 @@
-// Ver 2026-09-09, by pi
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Attempt.Tokens / Attempt.KeyLabel stamping: the LiveStats design doc's
 // §3.1 前置改动. Stamping happens at forwardSuccess (the same point that
@@ -163,7 +163,7 @@ models:
 
 	// Ledger side: read the raw counters the charge deposited (default
 	// all-1.0 token weights ⇒ stored counters are the raw values).
-	spec := router.BuildQuotaSpecs(cfg.Providers)["p1"]
+	spec := router.BuildQuotaSpecs(cfg.Providers, nil)["p1"]
 	if spec == nil || len(spec.Limits) == 0 {
 		t.Fatal("quota spec missing")
 	}

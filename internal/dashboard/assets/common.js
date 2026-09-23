@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, VMR Forensics Dashboard Common Runtime (§5.6, §6.2, §6.3, §6.6)
+// Ver 2026-09-23 01:50, by Pi Agent
 
 const EXPECTED_MANIFEST_FORMAT = 12;
 
@@ -379,19 +379,19 @@ function svgLineChart({
   const xStep = Math.max(1, Math.floor(n / 6));
   for (let i = 0; i < n; i += xStep) {
     const p = points[i];
-    xLabelsSvg += `<text x="${p.x}" y="${height - 8}" fill="var(--ink-dim)" font-size="10" font-family="var(--mono)" text-anchor="middle">${p.label}</text>`;
+    xLabelsSvg += `<text x="${p.x}" y="${height - 8}" fill="var(--ink-dim)" font-size="10" font-family="var(--mono)" text-anchor="middle">${esc(p.label)}</text>`;
   }
 
   // Points & tooltips
   const dotsSvg = points.map(p => `
     <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${stroke}">
-      <title>${p.label}: ${yFormatter(p.val)}</title>
+      <title>${esc(p.label)}: ${yFormatter(p.val)}</title>
     </circle>
   `).join('');
 
   return `
     <svg class="forensics-chart" viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
-      ${title ? `<text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${title}</text>` : ''}
+      ${title ? `<text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${esc(title)}</text>` : ''}
       ${gridSvg}
       <line x1="${pLeft}" y1="${pTop + plotH}" x2="${width - pRight}" y2="${pTop + plotH}" stroke="var(--rule)" stroke-width="1"/>
       ${fillArea ? `<path d="${areaD}" fill="${stroke}" opacity="0.12"/>` : ''}
@@ -450,18 +450,18 @@ function svgBarChart({
 
     barsSvg += `
       <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barH.toFixed(1)}" rx="3" fill="${barColor}">
-        <title>${label}: ${yFormatter(val)}</title>
+        <title>${esc(label)}: ${yFormatter(val)}</title>
       </rect>
       <text x="${(x + barWidth / 2).toFixed(1)}" y="${height - 10}" fill="var(--ink-dim)" font-size="10" font-family="var(--mono)" text-anchor="middle">
-        <title>${label}</title>
-        ${shortLabel}
+        <title>${esc(label)}</title>
+        ${esc(shortLabel)}
       </text>
     `;
   });
 
   return `
     <svg class="forensics-chart" viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
-      ${title ? `<text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${title}</text>` : ''}
+      ${title ? `<text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${esc(title)}</text>` : ''}
       ${gridSvg}
       <line x1="${pLeft}" y1="${pTop + plotH}" x2="${width - pRight}" y2="${pTop + plotH}" stroke="var(--rule)" stroke-width="1"/>
       ${barsSvg}
@@ -505,7 +505,7 @@ function svgHeatmap({
 
   return `
     <svg class="forensics-chart" viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
-      <text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${title}</text>
+      <text x="${pLeft}" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${esc(title)}</text>
       ${cellsSvg}
     </svg>
   `;
@@ -563,8 +563,8 @@ function svgLatencyPlot({
 
     rowsSvg += `
       <text x="${pLeft - 10}" y="${y + 3.5}" fill="var(--ink)" font-size="10" font-family="var(--mono)" text-anchor="end">
-        <title>${item.label}</title>
-        ${shortLabel}
+        <title>${esc(item.label)}</title>
+        ${esc(shortLabel)}
       </text>
       <!-- Line connecting P50 to Max -->
       <line x1="${x50.toFixed(1)}" y1="${y}" x2="${xmx.toFixed(1)}" y2="${y}" stroke="var(--rule)" stroke-width="2"/>
@@ -598,7 +598,7 @@ function svgLatencyPlot({
 
   return `
     <svg class="forensics-chart" viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
-      <text x="10" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${title}</text>
+      <text x="10" y="14" fill="var(--ink)" font-size="11" font-weight="700" font-family="var(--sans)">${esc(title)}</text>
       ${legendSvg}
       <line x1="${pLeft}" y1="${pTop}" x2="${pLeft}" y2="${pTop + plotH}" stroke="var(--rule)" stroke-width="1"/>
       ${rowsSvg}

@@ -1,8 +1,8 @@
-// Ver 2026-09-09, by pi
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // The live stats HTTP and collection surface: /stats (JSON API, auth-gated).
 //
-// Ownership split (LiveStats design §5.1): livestats.Aggregator owns the
+// Ownership split (the LiveStats design doc): livestats.Aggregator owns the
 // completed-request ledger (slim WAL, hourly rollups, ring percentiles);
 // router.InflightRegistry owns the in-flight per-request live entries.
 // GET /stats merges both into one JSON payload at read time.
@@ -24,7 +24,7 @@ func (s *Server) WithLiveStats(l *livestats.Aggregator) *Server {
 	return s
 }
 
-// statsResponse is the JSON wire contract for GET /stats (§8).
+// statsResponse is the JSON wire contract for GET /stats.
 type statsResponse struct {
 	Concurrency struct {
 		Limit    int   `json:"limit"`
@@ -134,13 +134,13 @@ func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // sampleFromRecord maps a completed audit.Record into a livestats.Sample
-// according to design §3.2 / §4.2 attribution rules. Provider/Model/KeyLabel
+// according to the design's attribution rules. Provider/Model/KeyLabel
 // are the terminal attempt's service identity — the winning one when the
 // request forwarded, else the last attempt tried — whenever at least one
 // attempt was made: a failed request still names the upstream endpoint that
 // actually failed, instead of collapsing into an anonymous bucket. Forwarded
 // is the separate, authoritative gate livestats uses to decide whether
-// tokens/dur/ttft may be counted as service-quality signal (design §4.2) —
+// tokens/dur/ttft may be counted as service-quality signal —
 // only the winning attempt's data ever populates s.Tokens. ErrorClass/
 // Status/Attempt feed only the recent_errors ring
 // (the console's /stats contract): class

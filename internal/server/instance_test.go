@@ -1,4 +1,4 @@
-// Ver 2026-08-23 13:05, by Gemini 3.7 Flash
+// Ver 2026-09-23 02:35, by Claude Opus 5.5
 
 // /status's "instance" block: the facts that let a caller who only
 // has a port tell which vmr answered it (vmr.sh ps is built entirely on
@@ -451,20 +451,6 @@ func TestStatus_SystemTrafficBlocks(t *testing.T) {
 			} `json:"disk"`
 		} `json:"system"`
 		Traffic struct {
-			Requests struct {
-				Total      uint64            `json:"total"`
-				ByProtocol map[string]uint64 `json:"by_protocol"`
-				ByStatus   map[string]uint64 `json:"by_status"`
-			} `json:"requests"`
-			Tokens struct {
-				Total struct {
-					In         uint64 `json:"in"`
-					CacheWrite uint64 `json:"cache_write"`
-					CacheRead  uint64 `json:"cache_read"`
-					Reasoning  uint64 `json:"reasoning"`
-					Out        uint64 `json:"out"`
-				} `json:"total"`
-			} `json:"tokens"`
 			Sticky struct {
 				Entries int `json:"entries"`
 			} `json:"sticky"`
@@ -481,9 +467,6 @@ func TestStatus_SystemTrafficBlocks(t *testing.T) {
 	}
 	if out.System.Memory.SysBytes <= 0 || out.System.Memory.Sys == "" {
 		t.Errorf("expected memory sys bytes/string, got %+v", out.System.Memory)
-	}
-	if out.Traffic.Requests.ByProtocol == nil || out.Traffic.Requests.ByStatus == nil {
-		t.Errorf("expected initialized protocol/status maps in traffic: %+v", out.Traffic)
 	}
 	if out.CurrentTime == "" {
 		t.Error("expected non-empty current_time")

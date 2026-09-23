@@ -1,4 +1,4 @@
-// Ver 2026-09-22 19:10, by coding
+// Ver 2026-09-23 04:20, by Claude Opus 5.5
 
 // Package dashboard delivers vmr analyze's static skeleton dashboard pages
 // (see the Analytics design doc's skeleton-page section): three self-contained
@@ -11,12 +11,12 @@
 // assets/*.html files, whose line budget archtest deliberately does
 // not track. Leaf package: stdlib only, zero vmr/internal dependencies.
 //
-// journey-compare.html, benchmarks.html, and tool-waste.html were removed
-// (KNOWN_ISSUES §1.5, R3): all three were zero-interaction pages — printing
-// them to paper loses no information — so per R3 they are documents, not
+// journey-compare.html, benchmarks.html, and tool-waste.html were removed:
+// all three were zero-interaction pages — printing
+// them to paper loses no information — so they are documents, not
 // applications, and their HTML consumer was a parallel hand-written
 // implementation of what compares/*.md, journeys/benchmarks.md, and the
-// report's §7 already rendered. Deleting the page loses no capability;
+// report's efficiency section already rendered. Deleting the page loses no capability;
 // it only stops a duplicate from drifting out of sync with the Markdown.
 package dashboard
 
@@ -34,20 +34,20 @@ var assets embed.FS
 
 // commonJSTag is the shared-runtime include every skeleton page carries in
 // the embed source. WriteSkeletons replaces it with the inlined contents of
-// assets/common.js so the written page is genuinely self-contained (§6.3):
+// assets/common.js so the written page is genuinely self-contained:
 // /reports/ only serves .html/.json/.jsonl/.md, and a page that 404s on a
 // sibling .js renders nothing. common.js guards its Node export with
 // `typeof module !== 'undefined'`, so inlining it into a browser <script> is
 // safe.
 const commonJSTag = `<script src="common.js"></script>`
 
-// skeletonPages are the three skeleton HTML pages (§6.2), written flat into
+// skeletonPages are the three skeleton HTML pages, written flat into
 // the report output root — never a subdirectory. Root placement is
 // deliberate: a page that loads both journeys/ and requests/ slices would
 // need ../-relative fetch paths from inside either one; at the root every
-// #data= path matches the on-disk layout (§4) byte-for-byte. Each file is
+// #data= path matches the on-disk layout byte-for-byte. Each file is
 // self-contained (inline CSS/JS): no extra .css/.js assets to serve, so the
-// HTML skeletons stay auth-exempt (§6.5) while only .json/.jsonl/.md data
+// HTML skeletons stay auth-exempt while only .json/.jsonl/.md data
 // requests carry the Bearer key.
 var skeletonPages = []string{
 	"macro-dashboard.html",
@@ -58,7 +58,7 @@ var skeletonPages = []string{
 // WriteSkeletons writes the skeleton dashboard pages into dir's root,
 // overwriting whatever a previous run (or the user) put there — the pages
 // carry no business data, so overwrite is always safe, and idempotency is
-// what keeps /reports/ serving pages in sync with the running binary (§6.6
+// what keeps /reports/ serving pages in sync with the running binary
 // renders "stale skeleton + fresh JSON" a non-issue on the normal path).
 // The shared common.js runtime is inlined into each page at write time so
 // the written file has no sibling-asset dependency (see commonJSTag).

@@ -1,3 +1,5 @@
+// Ver 2026-09-23 02:35, by Claude Opus 5.5
+
 // Package server provides the HTTP admin and routing surface.
 package server
 
@@ -113,14 +115,14 @@ func cachedDiskFreeSpace(dir string) uint64 {
 
 func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	snap, now, t := s.rt.Snapshot(), time.Now(), s.rt.Telemetry.Snapshot()
+	snap, now := s.rt.Snapshot(), time.Now()
 	// One QuotaStatus read feeds three consumers (quota section, endpoint
 	// headroom join, quota alerts) — same rows, same instant, so the three
 	// views can never disagree about an account's state.
 	qs := s.rt.QuotaStatus()
 	body := map[string]any{
 		"instance": s.instanceBlock(snap, instanceBaseURLs(requestScheme(r), r.Host)), "system": s.systemBlock(snap),
-		"traffic": map[string]any{"requests": t.Requests, "tokens": t.Tokens, "sticky": map[string]any{"entries": s.rt.Sticky.Len()}},
+		"traffic": map[string]any{"sticky": map[string]any{"entries": s.rt.Sticky.Len()}},
 		"models":  statusModels(snap, now, s.rt.Health, qs), "current_time": now,
 	}
 	if len(qs) > 0 {

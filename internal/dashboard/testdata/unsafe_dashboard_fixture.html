@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<!-- Ver 2026-09-24 10:00, by agent -->
+<!-- Deliberately unsafe test fixture to verify dashboard esc-guard detection -->
+<html lang="en">
+<body>
+  <div id="target"></div>
+  <script>
+    // 1. Direct innerHTML assignment with raw unescaped expression:
+    const userInput = "<img src=x onerror=alert(1)>";
+    document.getElementById('target').innerHTML = `<div>${userInput}</div>`;
+
+    // 2. .map callback with unescaped model name:
+    const list = [{ model: 'raw-model-name' }];
+    const rows = list.map(m => `<tr><td>${m.model}</td></tr>`).join('');
+    document.getElementById('target').innerHTML = `<table>${rows}</table>`;
+  </script>
+</body>
+</html>

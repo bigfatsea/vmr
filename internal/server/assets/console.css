@@ -118,7 +118,7 @@ a:hover{text-decoration:underline}
 .b-dim{background:var(--surface-2);color:var(--text-muted)}
 .badge.tight{padding:1px 7px}
 /* status pill — all four states defined; a missing one means bare text when
-   a stream pauses or dies (design §3 explicitly calls this out) */
+   a stream pauses or dies (the design doc explicitly calls this out) */
 .pill{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:var(--r-pill);border:1px solid transparent}
 .p-live{color:var(--green);border-color:rgba(63,185,80,.3);background:var(--green-bg)}
 .p-connecting{color:var(--yellow);border-color:rgba(210,153,34,.3);background:var(--yellow-bg)}

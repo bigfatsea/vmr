@@ -1,9 +1,7 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
-// Agent Guard's outbound mount point (the Agent Guard spec
-// ADR-4/§4.3/ADR-10, M3.4/M3.5/M3.6). chatHandler's own call site is two
-// lines (the call, then a blocked-check) — K12's ≤5-line budget for the
-// change at chatHandler itself — with the scan/aggregate/record/trust-
+// Agent Guard's outbound mount point. chatHandler's own call site is two
+// lines (the call, then a blocked-check) — with the scan/aggregate/record/trust-
 // exemption/block-response logic living here instead.
 package server
 
@@ -33,7 +31,7 @@ func (s *Server) WithGuard(g *guard.Guard) *Server {
 
 // applyOutboundGuard scans body for credential-shaped content when guard:
 // is configured in the CURRENT snapshot, stamps rec.Guard with the
-// result, and — under mode: block with a Tier1 hit (M3.6) — writes the 400
+// result, and — under mode: block with a Tier1 hit — writes the 400
 // response itself and reports blocked=true so chatHandler returns
 // without ever reaching downscaleImages/routing: an early reject here
 // never touches Failover or endpoint health, since no attempt has been
@@ -50,19 +48,19 @@ func (s *Server) WithGuard(g *guard.Guard) *Server {
 //
 // When snap.Cfg.Guard == nil (the common case today — no caller ships a
 // guard: block yet), this reads one pointer field and returns: the "zero
-// code-path overhead" guarantee ADR-2 requires is a property of this
+// code-path overhead" guarantee is a property of this
 // function's very first line, not of some deeper fast path.
 //
-// route.GuardAllTrusted (M3.5, nil-safe via ModelRoute's zero value) exempts
+// route.GuardAllTrusted (nil-safe via ModelRoute's zero value) exempts
 // a request entirely — no scan, no Record.Guard stamp at all — when every
 // candidate endpoint this (protocol, model) route could ever dispatch to
-// is a trusted provider (§4.3): trusting an upstream is an online routing
+// is a trusted provider: trusting an upstream is an online routing
 // decision (don't interrupt a request the operator already authorized to
 // reach it) — it says nothing about offline visibility. `vmr analyze`
 // doesn't import routing config (CLAUDE.md's "two halves, one contract"),
 // so it fallback-scans this exact record like any other unstamped one and
 // still attributes exposure to that provider in the report — trusted
-// upstream, but not blind to what reached it (KNOWN_ISSUES §2.169).
+// upstream, but not blind to what reached it (see KNOWN_ISSUES).
 func (s *Server) applyOutboundGuard(w http.ResponseWriter, rec *audit.Record, snap *router.Snapshot, protocol, model string, body []byte) (out []byte, blocked bool) {
 	if snap.Cfg.Guard == nil || s.guard == nil {
 		return body, false
@@ -106,7 +104,6 @@ func (s *Server) applyOutboundGuard(w http.ResponseWriter, rec *audit.Record, sn
 		}
 	}
 	if mode == guard.OutBlock && result.BlockedBy != "" {
-		s.rt.Telemetry.RecordOutcome(false, false)
 		router.WriteError(w, http.StatusBadRequest, "security_violation", "blocked by Agent Guard: credential-shaped content detected ("+result.BlockedBy+")")
 		return result.Body, true
 	}
@@ -114,7 +111,7 @@ func (s *Server) applyOutboundGuard(w http.ResponseWriter, rec *audit.Record, sn
 }
 
 // toAuditHits copies guard.Hit (a type internal/guard can declare without
-// importing internal/audit, ADR-1's dependency whitelist) into
+// importing internal/audit — its dependency whitelist) into
 // audit.Hit field-for-field. internal/server already imports both
 // packages, so this trivial mapping is the cheapest place for it to live.
 func toAuditHits(hits []guard.Hit) []audit.Hit {

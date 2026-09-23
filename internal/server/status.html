@@ -261,9 +261,7 @@ function serverDay(dateStr) {
 
 // sumDaily folds the daily[] ledger into today's and the ledger-total
 // counters. Both sides of the hero's "big / total" pair come from this one
-// durable source: process telemetry resets on restart while the ledger
-// recovers from disk, so mixing the two made the total read 0 after a
-// restart while the big number still showed the day's recovered traffic.
+// durable source: daily[] recovers from disk on restart.
 function sumDaily(statsData, todayStr) {
   const res = {
     todayReq: 0, todayOk: 0, todayCancel: 0, todayErr: 0,
@@ -349,36 +347,21 @@ function renderConcurrencyVitals(conc) {
 function renderVitalsAndSysline(statusData, statsData) {
   const inst = statusData.instance || {};
   const sys = statusData.system || {};
-  const traf = statusData.traffic || {};
-  const reqs = traf.requests || {};
-  const toks = (traf.tokens && traf.tokens.total) || {};
 
   // 1. Concurrency
   renderConcurrencyVitals(inst.concurrency || (statsData && statsData.concurrency) || {});
 
   // 2. Requests — big number and the breakdown line are TODAY's data; the
-  // small right-hand value is the ledger total. One durable source for both:
-  // process telemetry resets on restart while daily[] recovers from disk.
-  // When the ledger is completely empty (stats off, fresh install) fall back
-  // to telemetry — then since-start is all there is, and both sides agree.
+  // small right-hand value is the 7d ledger total.
   const todayStr = serverDay(statusData.current_time) || serverDay(new Date().toISOString());
   const led = sumDaily(statsData, todayStr);
-  const reqTotalSinceStart = reqs.total || 0;
-  const useLedger = led.hasRows;
-  // P1-1: the small right-hand number is either the durable ledger's
-  // rolling ~7-8 day window or (only when that ledger has no rows yet)
-  // process telemetry since this start — two different lifecycles that a
-  // bare "total" label conflated. Both the visible label and its title now
-  // say which one is actually showing.
-  const totalLabel = useLedger ? '7d' : 'since start';
-  const totalTitleFor = noun => useLedger
-    ? `${noun} recorded in the stats ledger (durable, rolling ~7-8 days — survives restarts)`
-    : `${noun} observed since this process started (resets on restart) — the durable stats ledger has no data yet`;
-  const todayReqTotal = useLedger ? led.todayReq : reqTotalSinceStart;
-  const reqGrandTotal = useLedger ? led.totalReq : reqTotalSinceStart;
-  const todayOk = useLedger ? led.todayOk : ((reqs.by_status && reqs.by_status.ok) || 0);
-  const todayCancel = useLedger ? led.todayCancel : ((reqs.by_status && reqs.by_status.canceled) || 0);
-  const todayErr = useLedger ? led.todayErr : ((reqs.by_status && reqs.by_status.error) || 0);
+  const totalLabel = '7d';
+  const totalTitleFor = noun => `${noun} recorded in the stats ledger (durable, rolling ~7-8 days — survives restarts)`;
+  const todayReqTotal = led.todayReq;
+  const reqGrandTotal = led.totalReq;
+  const todayOk = led.todayOk;
+  const todayCancel = led.todayCancel;
+  const todayErr = led.todayErr;
   const todayErrPct = todayReqTotal > 0 ? (todayErr / todayReqTotal * 100) : 0;
 
   document.getElementById('v-req').innerHTML =
@@ -390,17 +373,16 @@ function renderVitalsAndSysline(statusData, statsData) {
   // 3. Tokens — same ledger discipline as Requests. Bottom line:
   // "tok in X (hit%), out Y" where in = fresh + cache_write + cache_read
   // and the percentage is the cache-read share of prompt tokens.
-  const totalTokSinceStart = (toks.in || 0) + (toks.out || 0) + (toks.cache_read || 0) + (toks.cache_write || 0) + (toks.reasoning || 0);
   const todayPromptTotal = led.todayIn + led.todayCw + led.todayCr;
   const todayCacheHitPct = todayPromptTotal > 0 ? (led.todayCr / todayPromptTotal * 100) : 0;
 
-  const displayTokTotal = useLedger ? led.todayIn + led.todayCw + led.todayCr + led.todayOut : totalTokSinceStart;
-  const displayPromptTotal = useLedger ? todayPromptTotal : ((toks.in || 0) + (toks.cache_write || 0) + (toks.cache_read || 0));
-  const displayOut = useLedger ? led.todayOut : (toks.out || 0);
-  const displayHitPct = useLedger ? todayCacheHitPct : (displayPromptTotal > 0 ? ((toks.cache_read || 0) / displayPromptTotal * 100) : 0);
+  const displayTokTotal = led.todayIn + led.todayCw + led.todayCr + led.todayOut;
+  const displayPromptTotal = todayPromptTotal;
+  const displayOut = led.todayOut;
+  const displayHitPct = todayCacheHitPct;
 
   document.getElementById('v-tok').innerHTML =
-    `${fmtKMG(displayTokTotal)}<small title="${esc(totalTitleFor('tokens'))}"> / ${fmtKMG(useLedger ? led.totalTok : totalTokSinceStart)} ${totalLabel}</small>`;
+    `${fmtKMG(displayTokTotal)}<small title="${esc(totalTitleFor('tokens'))}"> / ${fmtKMG(led.totalTok)} ${totalLabel}</small>`;
   document.getElementById('v-tok-sub').innerHTML =
     `<span id="v-tok-detail">tok in ${fmtKMG(displayPromptTotal)} (${dec2(displayHitPct)}%), out ${fmtKMG(displayOut)}</span>`;
 
@@ -1240,7 +1222,7 @@ function updateRangeButtons() {
 // ended rows has nothing new to chase), just enough to notice activity start. Cost is bounded on the server side: /stats computes
 // in-flight and concurrency fresh every read, but the ledger fold behind the
 // rest of the payload is read-cached for longer than this cadence
-// (snapCacheTTL, LiveStats design §4.3), so a poll usually reuses the last
+// (snapCacheTTL, the LiveStats design doc), so a poll usually reuses the last
 // fold. A full SSE push was considered and rejected as overkill: in-flight
 // is a mutable state set, not an append-only stream, so a full-snapshot poll
 // is self-healing by construction while an event feed would need a client

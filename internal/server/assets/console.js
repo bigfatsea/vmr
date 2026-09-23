@@ -5,7 +5,7 @@
    start. mountConsole() is invoked by each page's own script. */
 'use strict';
 
-/* ===================== formatting (design §2-6) ===================== */
+/* ===================== formatting (design banner) ===================== */
 // Humanized values carry two decimals, but a trailing ".00" is noise on
 // structural constants (200K context, 100M budget) — strip it.
 function dec2(v) { return v.toFixed(2).replace(/\.00$/, ''); }
@@ -33,7 +33,7 @@ function fmtBytes(v) {
 }
 function fmtPct(v) { return dec2(v) + '%'; }
 function fmtInt(v) { return Math.round(v).toLocaleString('en-US'); }
-// Headroom is the same dec2 product as every other humanized ratio (§8.5).
+// Headroom is the same dec2 product as every other humanized ratio.
 function fmtHeadroom(v) { return (v == null || !isFinite(v)) ? '—' : dec2(v); }
 function fmtAge(rfc3339) {
   if (!rfc3339) return '—';
@@ -163,7 +163,7 @@ const VMRAuth = {
   // original request is retried exactly once per saved key — the loader
   // re-reads VMRAuth.get() when building the retry, so no key plumbing
   // crosses this boundary. A retry that still 401s reopens the modal with
-  // the error line (§6).
+  // the error line.
   async guard(doFetch) {
     let resp = await doFetch();
     if (resp.status !== 401) return resp;
@@ -321,7 +321,7 @@ function mountConsole(opts) {
 
   const header = document.createElement('header');
   header.className = 'console-header' + (full ? ' full' : '');
-  // one slot, one thing: what state is this page's data in right now (§4)
+  // one slot, one thing: what state is this page's data in right now
   const refreshSlot = refresh === 'countdown'
     ? `<button class="refresh-pill" id="hd-refresh" title="Time to the next automatic refresh — click to refresh now">
         <svg height="11" width="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 1 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg>
@@ -456,7 +456,7 @@ function mountConsole(opts) {
       const el = document.getElementById('ft-status');
       if (el) el.textContent = text;
     },
-    // instance identity (version · pid · go · os-arch · listen) — footer only (§8.1)
+    // instance identity (version · pid · go · os-arch · listen) — footer only
     setFooterIdentity(text) {
       const el = document.getElementById('ft-identity');
       if (el) el.textContent = text;

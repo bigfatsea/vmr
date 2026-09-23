@@ -13,11 +13,9 @@ import (
 
 func TestSlowloris_BodyReadTimeout(t *testing.T) {
 	u := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))
-
-	// Temporarily tighten read timeout for fast test execution.
-	setBodyReadTimeout(150 * time.Millisecond)
-	defer setBodyReadTimeout(60 * time.Second)
+	ts := newRouterServerTuned(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""), func(s *Server) {
+		s.bodyReadTimeout = 150 * time.Millisecond
+	})
 
 	conn, err := net.Dial("tcp", ts.Listener.Addr().String())
 	if err != nil {
@@ -59,10 +57,9 @@ func TestSlowloris_NormalBodyReadsSuccessfully(t *testing.T) {
 
 func TestSlowloris_SlowReaderWithinTimeout(t *testing.T) {
 	u := newUpstream(t)
-	ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""))
-
-	setBodyReadTimeout(500 * time.Millisecond)
-	defer setBodyReadTimeout(60 * time.Second)
+	ts := newRouterServerTuned(t, twoEndpointYAML(u.srv.URL, u.srv.URL, ""), func(s *Server) {
+		s.bodyReadTimeout = 500 * time.Millisecond
+	})
 
 	conn, err := net.Dial("tcp", ts.Listener.Addr().String())
 	if err != nil {

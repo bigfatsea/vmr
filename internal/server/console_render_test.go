@@ -1,4 +1,4 @@
-// Ver 2026-09-11, by Sonnet 5
+// Ver 2026-09-23 02:35, by Claude Opus 5.5
 package server
 
 // This file actually EXECUTES the Overview/Models pages' embedded JS
@@ -306,10 +306,6 @@ func statusFixture(now time.Time) map[string]any {
 			"disk":       map[string]any{"free_space": "108.4 GB", "free_space_bytes": 108_400_000_000},
 		},
 		"traffic": map[string]any{
-			"requests": map[string]any{"total": 5000, "by_status": map[string]any{"ok": 4800, "error": 150, "canceled": 50}},
-			"tokens": map[string]any{"total": map[string]any{
-				"in": 1_000_000, "out": 500_000, "cache_read": 300_000, "cache_write": 100_000, "reasoning": 0,
-			}},
 			"sticky": map[string]any{"entries": 3},
 		},
 		"current_time": now.Format(time.RFC3339),

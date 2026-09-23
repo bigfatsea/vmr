@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-15, by coding — console-unification Log page (real /log stream).
+<!-- Ver 2026-09-23 03:30, by Claude Opus 5.5 — console-unification Log page (real /log stream).
      Live Requests and Recent Failures moved back to Overview — this page
      is a pure full-width terminal. -->
 <html lang="en">
@@ -116,7 +116,7 @@ const BUFFER = 512;
    Real log lines from vmr carry no structured level field — they are plain
    Go log text. We classify by keyword inspection so level chips are useful,
    but this is *display-only*: the same line may match differently if the
-   format ever changes. See console-unification §8.6 task description. */
+   format ever changes. */
 function classifyLevel(text) {
   // ERR: explicit error= key, panic, or HTTP 5xx class marker
   if (/\berror=|\bpanic\b|class=.*5[0-9][0-9]/.test(text)) return 'ERR';

@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Shared test scaffolding for internal/server's integration tests: the base
 // upstream mock, the router-backed httptest.Server it talks to, and the
@@ -89,6 +89,14 @@ func newUpstream(t *testing.T) *upstream {
 
 func newRouterServer(t *testing.T, yaml string) *httptest.Server {
 	t.Helper()
+	return newRouterServerTuned(t, yaml, nil)
+}
+
+// newRouterServerTuned is newRouterServer with a hook for tests that need
+// to tweak the Server's unexported knobs (e.g. bodyReadTimeout) before it
+// starts serving.
+func newRouterServerTuned(t *testing.T, yaml string, tune func(*Server)) *httptest.Server {
+	t.Helper()
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +107,11 @@ func newRouterServer(t *testing.T, yaml string) *httptest.Server {
 		t.Fatal(err)
 	}
 	rt.Install(snap)
-	ts := httptest.NewServer(New(rt, nil).Handler())
+	srv := New(rt, nil)
+	if tune != nil {
+		tune(srv)
+	}
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

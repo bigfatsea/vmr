@@ -1,4 +1,4 @@
-// Ver 2026-09-15
+// Ver 2026-09-23 02:35, by Claude Opus 5.5
 
 // /status's alerts[] contract (see the console contract):
 // the three sources trigger/don't-trigger as specified, severity grading,
@@ -275,7 +275,7 @@ models:
 // surface as alerts. A busy-but-healthy server — thousands of requests and
 // errors recorded, every endpoint healthy — stays quiet.
 func TestAlerts_RollingStatsNeverAlert(t *testing.T) {
-	s, rt, snap := buildAlerts(t, `
+	s, _, snap := buildAlerts(t, `
 listen: 127.0.0.1:18817
 providers:
   - {name: p1, base_url: {openai-completions: http://127.0.0.1:1}, api_key: k1}
@@ -283,11 +283,6 @@ models:
   vm:
     endpoints: {openai-completions: [{providers: [p1], models: [m1]}]}
 `)
-	for i := 0; i < 1000; i++ {
-		rt.Telemetry.RecordRequest(core.ProtocolOpenAICompletions)
-		rt.Telemetry.RecordOutcome(false, false) // a full day of errors
-		rt.Telemetry.RecordTokens(100, 0, 0, 0, 200)
-	}
 	if got := s.statusAlerts(snap, time.Now(), nil); len(got) != 0 {
 		t.Fatalf("alerts = %v, want none — rolling statistics (24h error counts) are not actionable state", got)
 	}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-06, VMR Forensics Journey Viewer (§6.2: #data= param, manifest probe, candidate list with compare command) -->
+<!-- Ver 2026-09-24 10:00, by agent -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -282,16 +282,16 @@
       function overviewNodes(steps, metrics, cost) {
         const nodes = [];
         if (steps.length === 0) return nodes;
-        nodes.push('Started ' + esc(steps[0].ts_display || ''));
+        nodes.push('Started ' + (steps[0].ts_display || ''));
         const errStep = steps.find(s => s.outcome === 'error' || s.has_error_marker);
-        if (errStep) nodes.push(`First error marker · Step ${errStep.seq} · ${esc(errStep.ts_display || '')}`);
+        if (errStep) nodes.push('First error marker · Step ' + errStep.seq + ' · ' + (errStep.ts_display || ''));
         const trStep = steps.find(s => s.stitch_edge || (s.edit && s.edit.kind && s.edit.kind !== 'append'));
         if (trStep) {
           const kind = trStep.stitch_edge ? (trStep.stitch_edge.kind || 'stitch') : trStep.edit.kind;
-          nodes.push(`First non-routine transition (${esc(kind)}) · Step ${trStep.seq} · ${esc(trStep.ts_display || '')}`);
+          nodes.push('First non-routine transition (' + kind + ') · Step ' + trStep.seq + ' · ' + (trStep.ts_display || ''));
         }
         const last = steps[steps.length - 1];
-        nodes.push(`Ended · Step ${last.seq} · finish=${esc(last.finish || '-')} · ${esc(last.ts_display || '')}`);
+        nodes.push('Ended · Step ' + last.seq + ' · finish=' + (last.finish || '-') + ' · ' + (last.ts_display || ''));
         return nodes;
       }
 
@@ -316,7 +316,7 @@
           yFormatter: (v) => FmtTokens(v)
         });
         const ascii = totals.map(v => SPARK[Math.min(SPARK.length - 1, Math.max(0, Math.round(v / maxT * (SPARK.length - 1))))]).join('');
-        return chart + `<div class="sparkline-cap">\`${ascii}\` (start ${FmtTokens(totals[0])} tok → end ${FmtTokens(totals[totals.length - 1])} tok)</div>`;
+        return chart + `<div class="sparkline-cap">\`${esc(ascii)}\` (start ${FmtTokens(totals[0])} tok → end ${FmtTokens(totals[totals.length - 1])} tok)</div>`;
       }
 
       function stepRoleTag(s, repeated, reply) {
@@ -347,7 +347,7 @@
             const mark = res.is_error ? '❌' : '↩️';
             const badge = res.match === 'positional' ? ' (matched by position — ID unmatched)' : '';
             const cls = res.is_error ? 'result-err' : '';
-            resultHtml = `<details class="${cls}"><summary>${mark} result${esc(badge)} (${FmtBytes(text.length)})</summary><pre>${esc(text)}</pre></details>`;
+            resultHtml = `<details class="${esc(cls)}"><summary>${esc(mark)} result${esc(badge)} (${FmtBytes(text.length)})</summary><pre>${esc(text)}</pre></details>`;
           }
         }
         return `<div class="tool-call"><div class="tool-call-head">🔧 <code>${esc(name)}</code></div>${argsHtml}${resultHtml}</div>`;
@@ -364,18 +364,23 @@
         const nonAnthropic = allSteps.length > 0 && !allSteps.some(s => s.protocol === 'anthropic-messages');
         const out = [];
 
+        let costHtml = '';
+        if (cost && cost.total != null) {
+          costHtml = `<div class="stat-box"><strong>${FmtCurrency(cost.total, cost.currency)}</strong>Est. Cost (${esc(cost.currency || 'USD')})</div>`;
+        }
+
         // --- header ---
         out.push(`<div class="card jhead">
           <h1>${esc(j.title || id)}</h1>
-          <div class="jmeta">${esc(id)} · ${esc(j.from_display || j.from || '')} → ${esc(j.to_display || j.to || '')} ${j.partial ? '· ⚠️ partial (head-truncated)' : ''}</div>
+          <div class="jmeta">${esc(id)} · ${esc(j.from_display || j.from || '')} → ${esc(j.to_display || j.to || '')} ${esc(j.partial ? '· ⚠️ partial (head-truncated)' : '')}</div>
           <div class="stat-row">
-            <div class="stat-box"><strong>${metrics.net_working_ms ? secs(metrics.net_working_ms) : '—'}</strong>Net Working</div>
-            <div class="stat-box"><strong>${metrics.model_ms ? secs(metrics.model_ms) : '—'}</strong>Model Time</div>
-            <div class="stat-box"><strong>${metrics.human_idle_ms ? secs(metrics.human_idle_ms) : '—'}</strong>Human Idle</div>
+            <div class="stat-box"><strong>${esc(metrics.net_working_ms ? secs(metrics.net_working_ms) : '—')}</strong>Net Working</div>
+            <div class="stat-box"><strong>${esc(metrics.model_ms ? secs(metrics.model_ms) : '—')}</strong>Model Time</div>
+            <div class="stat-box"><strong>${esc(metrics.human_idle_ms ? secs(metrics.human_idle_ms) : '—')}</strong>Human Idle</div>
             <div class="stat-box"><strong>${(metrics.tool_call_count || 0).toLocaleString()}</strong>Tool Calls</div>
             <div class="stat-box"><strong>${pct0(metrics.duplicate_action_rate || 0)}</strong>Duplicate Actions</div>
             <div class="stat-box"><strong>${pct0(metrics.plan_exec_ratio || 0)}</strong>Plan/Exec Ratio</div>
-            ${cost && cost.total != null ? `<div class="stat-box"><strong>${FmtCurrency(cost.total, cost.currency)}</strong>Est. Cost (${esc(cost.currency || 'USD')})</div>` : ''}
+            ${costHtml}
           </div>`);
 
         // --- overview ---
@@ -384,11 +389,11 @@
         const failed = allSteps.filter(s => s.outcome === 'error').length;
         if (nodes.length || tags.length) {
           out.push(`<div class="section-title" style="margin-top:8px;">Overview</div><ul class="overview-list">`);
-          nodes.forEach(n => out.push(`<li>${n}</li>`));
+          nodes.forEach(n => out.push(`<li>${esc(n)}</li>`));
           if (failed > 0) out.push(`<li>${failed}/${allSteps.length} steps failed (HTTP/upstream error)</li>`);
           if (cost && cost.resolved) out.push(`<li>Estimated cost ≈ ${FmtCurrency(cost.total, cost.currency)} (list-price estimate, not your bill)</li>`);
           out.push(`</ul>`);
-          if (tags.length) out.push(`<div class="tags-line"><strong>Tags</strong>: ${tags.map(esc).join(' · ')}</div>`);
+          if (tags.length) out.push(`<div class="tags-line"><strong>Tags</strong>: ${esc(tags.join(' · '))}</div>`);
         }
 
         // --- findings ---
@@ -406,10 +411,18 @@
             const earliest = Math.min(...g.map(f => f.step_seq || 0));
             out.push(`<div style="margin-bottom:8px;"><div style="font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-bottom:3px;">${esc(code)} · ${g.length} hit${g.length > 1 ? 's' : ''} (earliest Step ${earliest})</div>`);
             g.forEach(f => {
+              let evidenceHtml = '';
+              if (f.evidence) {
+                evidenceHtml = `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">evidence: ${esc(f.evidence)}</div>`;
+              }
+              let actionHtml = '';
+              if (f.action) {
+                actionHtml = `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">action: ${esc(f.action)}</div>`;
+              }
               out.push(`<div class="finding-item">
                 <strong>Step ${f.step_seq} · ${esc(f.finding || f.code)}</strong>
-                ${f.evidence ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">evidence: ${esc(f.evidence)}</div>` : ''}
-                ${f.action ? `<div style="font-size:11px; color:var(--ink-dim); margin-top:2px;">action: ${esc(f.action)}</div>` : ''}
+                ${evidenceHtml}
+                ${actionHtml}
               </div>`);
             });
             out.push(`</div>`);
@@ -438,10 +451,10 @@
             out.push(`<div class="switch-line">No mid-journey model switches.</div>`);
           } else {
             sw.forEach(s => {
-              let line = `Step ${s.step_seq}: ${esc(s.from)} → ${esc(s.to)}`;
+              let line = 'Step ' + s.step_seq + ': ' + s.from + ' → ' + s.to;
               if (s.has_cache_data) line += ` · cache ${pct0(s.prev_cache_ratio || 0)} → ${pct0(s.cur_cache_ratio || 0)}`;
               if (s.on_failover_step) line += ' · on a failover step';
-              out.push(`<div class="switch-line">${line}</div>`);
+              out.push(`<div class="switch-line">${esc(line)}</div>`);
             });
           }
         }
@@ -451,9 +464,9 @@
           out.push(`<div class="section-title">Touched Artifacts (${j.artifacts.length})</div>`);
           out.push(`<table class="kv-table"><thead><tr><th>Target Path</th><th>Operation</th><th>First Step</th><th class="num">Calls</th><th>Detection</th></tr></thead><tbody>`);
           j.artifacts.forEach(a => {
-            const stepId = `step-${a.first_step}`;
+            const stepId = 'step-' + a.first_step;
             const basis = a.heuristic ? 'Shell heuristic' : 'Structured parameter';
-            out.push(`<tr><td><code>${esc(a.path)}</code></td><td>${esc(a.op)}</td><td><a href="#${stepId}" onclick="document.getElementById('${stepId}')?.scrollIntoView({behavior:'smooth'})">Step ${a.first_step}</a></td><td class="num">${a.count}</td><td>${basis}</td></tr>`);
+            out.push(`<tr><td><code>${esc(a.path)}</code></td><td>${esc(a.op)}</td><td><a href="#${esc(stepId)}" onclick="document.getElementById('${esc(stepId)}')?.scrollIntoView({behavior:'smooth'})">Step ${a.first_step}</a></td><td class="num">${a.count}</td><td>${esc(basis)}</td></tr>`);
           });
           out.push(`</tbody></table>`);
         }
@@ -480,7 +493,7 @@
                 cbClass = 'badge-alert';
                 const from = pct0(s.cache_break_ratio_from || 0);
                 const to = pct0(s.cache_break_ratio_to || 0);
-                cbText = `Cache: unexplained drop (${from}→${to})`;
+                cbText = 'Cache: unexplained drop (' + from + '→' + to + ')';
               } else if (cb === 'provider_switch') {
                 cbText = 'Cache: provider switched';
               } else if (cb === 'system') {
@@ -495,13 +508,13 @@
                 cbText = 'Cache: context stitched';
               }
               if (cbText) {
-                flags.push(`<span class="badge-pill ${cbClass}">${esc(cbText)}</span>`);
+                flags.push(`<span class="badge-pill ${esc(cbClass)}">${esc(cbText)}</span>`);
               }
             }
             const cls = (s.outcome === 'error' || s.has_error_marker) ? 'error' : ((s.compaction || s.stitch_edge) ? 'flagged' : '');
-            out.push(`<div class="step ${cls}" id="step-${s.seq}">
+            out.push(`<div class="step ${esc(cls)}" id="step-${s.seq}">
               <div class="step-top">
-                <span class="step-seq">${stepRoleTag(s, repeated, why)} Step ${s.seq}</span>
+                <span class="step-seq">${esc(stepRoleTag(s, repeated, why))} Step ${s.seq}</span>
                 <span class="step-ts">${esc(s.ts_display || '')}</span>
                 <span class="step-model">${esc(s.endpoint || s.model || '')}</span>
                 <span class="step-model">in ${FmtTokens(usage.in || 0)} · out ${FmtTokens(usage.out || 0)} · ${FmtDuration(s.dur_ms || 0)}</span>
@@ -509,7 +522,11 @@
               </div>`);
             if (s.compaction) {
               const c = s.compaction;
-              out.push(`<div class="step-transition">🧹 compaction: ${FmtTokens(c.tokens_before || 0)} → ${FmtTokens(c.tokens_after || 0)}${(c.swallowed_entities || []).length ? ` · dropped: ${esc((c.swallowed_entities || []).join(', '))}` : ''}</div>`);
+              let droppedEntities = '';
+              if ((c.swallowed_entities || []).length) {
+                droppedEntities = ' · dropped: ' + esc((c.swallowed_entities || []).join(', '));
+              }
+              out.push(`<div class="step-transition">🧹 compaction: ${FmtTokens(c.tokens_before || 0)} → ${FmtTokens(c.tokens_after || 0)}${droppedEntities}</div>`);
             }
             if (s.stitch_edge) {
               out.push(`<div class="step-transition">🔗 stitched (${esc(s.stitch_edge.kind || '')}) score ${pct0(s.stitch_edge.score || 0)} · confidence ${pct0(s.stitch_edge.confidence || 0)}</div>`);
@@ -518,10 +535,10 @@
               out.push(`<div class="step-instruction">💬 ${esc(s.instruction.length > 500 ? s.instruction.slice(0, 500) + '…' : s.instruction)}</div>`);
             }
             if ((s.tool_calls || []).length > 0) {
-              if (why) out.push(`<div class="resp-text">${esc(why.slice(0, 600))}${why.length > 600 ? '…' : ''}</div>`);
+              if (why) out.push(`<div class="resp-text">${esc(why.length > 600 ? why.slice(0, 600) + '…' : why)}</div>`);
               (s.tool_calls || []).forEach(tc => out.push(toolCallHtml(s, tc, bodies)));
             } else if (why) {
-              out.push(`<div class="resp-text">${esc(why.slice(0, 1500))}${why.length > 1500 ? '…' : ''}</div>`);
+              out.push(`<div class="resp-text">${esc(why.length > 1500 ? why.slice(0, 1500) + '…' : why)}</div>`);
             }
             out.push(`</div>`);
           });
@@ -531,9 +548,10 @@
         // --- final deliverable ---
         if (j.deliverable && j.deliverable.found) {
           const d = j.deliverable;
+          const truncBadge = d.truncated ? ' (truncated)' : '';
           out.push(`<div class="section-title">Final Deliverable</div>
             <p style="font-size:12px;">Step ${d.step_seq} · <code>${esc(d.tool_name)}</code></p>
-            <details><summary>Deliverable excerpt${d.truncated ? ' (truncated)' : ''}</summary><pre>${esc(d.excerpt || '')}</pre></details>`);
+            <details><summary>Deliverable excerpt${esc(truncBadge)}</summary><pre>${esc(d.excerpt || '')}</pre></details>`);
         }
 
         out.push(`<p class="note" style="font-size:11px; color:var(--ink-dim); margin-top:16px;">System Prompt eras and the tool-call timeline grid are in the <code>.md</code> report (linked below).</p>`);
@@ -582,7 +600,7 @@
                 <input type="checkbox" data-id="${esc(j.id)}" onchange="window.__toggleCand(this)">
                 <span class="cand-id">${esc(j.id)}</span>
                 <span class="cand-meta">${esc((j.title || '').slice(0, 40))} · ${(j.requests || 0)} reqs</span>
-                <a href="journey-viewer.html#data=journeys/details/${encodeURIComponent(j.id)}.json" style="margin-left:8px;">open →</a>
+                <a href="journey-viewer.html#data=journeys/details/${esc(encodeURIComponent(j.id))}.json" style="margin-left:8px;">open →</a>
               </label>
             `).join('');
             window.__toggleCand = (el) => {

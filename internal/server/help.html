@@ -1,20 +1,24 @@
 <!DOCTYPE html>
-<!-- Ver 2026-09-15, by pi — console-unification T6: one of the three console pages
-     sharing the injected chrome (see the console contract); guide
-     content carried over from the pre-unification help page. Shared chrome
-     (CSS/JS/header/footer/auth modal) is injected at server start via the
-     CONSOLE_CSS / CONSOLE_JS injection markers; the page owns only its private
-     styles, its markup, and the page script below. -->
-<html lang="en">
+<!-- Ver 2026-09-23 03:05, by pi — one template, two languages: this file is
+     the single source of the agent configuration guide in both English and
+     中文. All text that differs per language lives in the helpStringsEN /
+     helpStringsZH tables (helpstrings.go) and is substituted server-side
+     for the per-language tokens below; structure, styles, the JS fill
+     engine and the config snippets are shared, so the two served variants
+     cannot structurally diverge. Shared console chrome (CSS/JS/header/
+     footer/auth modal) is injected at server start via the CONSOLE_CSS /
+     CONSOLE_JS injection markers; the page owns only its private styles,
+     its markup, and the page script below. -->
+<html lang="{{T:html-lang}}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VMR Console — Help</title>
+<title>{{T:title}}</title>
 <link rel="icon" href="/vmr-logo.svg" type="image/svg+xml">
 <style>
 /*{{CONSOLE_CSS}}*/
 
-/* ===== help page-private styles — byte-identical across help.html / help.zh.html ===== */
+/* ===== help page-private styles ===== */
 /* one-shot layout utilities: the console discipline keeps inline style out of static markup */
 .t-right{text-align:right}
 .mt0{margin-top:0}
@@ -53,70 +57,61 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <body>
 
 <main class="page">
-  <div class="section-head" class="mt0">Agent Configuration Guides</div>
-  <p class="lede">
-    Point any AI coding agent at this VMR instance: the base URL below, an API key from your
-    administrator, and a virtual model name are all most clients need. Where an agent supports it,
-    also configure context window (e.g. <code>200k</code>), reasoning effort
-    (<code>high</code>, <code>budget_tokens</code>) and vision (<code>image</code>) to match VMR's
-    model metadata — the per-client notes live inside each guide below.
-    <a href="/help.zh.html" lang="zh" title="切换到中文版指南">中文版指南 →</a>
-  </p>
+  <div class="section-head" class="mt0">{{T:page-head}}</div>
+  <p class="lede">{{T:lede}}</p>
 
   <!-- connection: identity of this instance + whether this browser can talk to it -->
   <div class="card" id="connect" class="anchor">
-    <div class="card-title">Connection</div>
+    <div class="card-title">{{T:conn-title}}</div>
     <table class="c" class="mb12">
       <tbody id="help-base-urls">
         <tr>
           <td><span class="badge b-cyan">openai-completions</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">{{T:copy}}</button></td>
         </tr>
         <tr>
           <td><span class="badge b-purple">anthropic-messages</span></td>
           <td><code>{{BASE_URL_ANTHROPIC}}</code></td>
-          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_ANTHROPIC}}">{{T:copy}}</button></td>
         </tr>
         <tr>
           <td><span class="badge b-info">openai-responses</span></td>
           <td><code>{{BASE_URL_OPENAI}}</code></td>
-          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">Copy</button></td>
+          <td class="t-right"><button class="btn sm ghost" data-copy-value="{{BASE_URL_OPENAI}}">{{T:copy}}</button></td>
         </tr>
       </tbody>
       <tbody>
         <tr>
-          <td class="t-dim">models</td>
-          <td id="help-models" colspan="2"><span class="t-dim">loading…</span></td>
+          <td class="t-dim">{{T:label-models}}</td>
+          <td id="help-models" colspan="2"><span class="t-dim">{{T:loading}}</span></td>
         </tr>
         <tr>
-          <td class="t-dim">auth</td>
-          <td colspan="2"><code>Authorization: Bearer &lt;key&gt;</code> (or <code>x-api-key</code> for
-            Anthropic-protocol clients) — provisioned by your administrator
-            (<code>api_keys:</code> in config.yaml), never shown on this page.</td>
+          <td class="t-dim">{{T:label-auth}}</td>
+          <td colspan="2">{{T:auth-note}}</td>
         </tr>
       </tbody>
     </table>
     <div class="row-wrap">
-      <span class="pill p-paused" id="chk-state">no key stored</span>
-      <span class="sub-note" id="chk-detail">No API key in this browser yet — agents below need one in the <code>Authorization: Bearer</code> header.</span>
-      <button class="btn sm" id="chk-btn" class="ml-auto">Check connection</button>
-      <button class="btn sm ghost" id="chk-set">Set key</button>
+      <span class="pill p-paused" id="chk-state">{{T:chk-idle}}</span>
+      <span class="sub-note" id="chk-detail">{{T:chk-idle-detail}}</span>
+      <button class="btn sm" id="chk-btn" class="ml-auto">{{T:chk-btn}}</button>
+      <button class="btn sm ghost" id="chk-set">{{T:set-key-btn}}</button>
     </div>
   </div>
 
   <!-- quick reference: which protocol, configured where -->
   <div class="card" id="quickref" class="anchor">
-    <div class="card-title">Quick Reference</div>
-    <p class="hint" class="mb10">Which protocol to use, and where to configure it. Click an agent to open its guide below.</p>
+    <div class="card-title">{{T:qr-title}}</div>
+    <p class="hint" class="mb10">{{T:qr-hint}}</p>
     <table class="c">
-      <thead><tr><th>Agent</th><th>Protocol</th><th>Config location</th></tr></thead>
+      <thead><tr><th>Agent</th><th>{{T:qr-th-proto}}</th><th>{{T:qr-th-config}}</th></tr></thead>
       <tbody>
         <tr><td><a href="#agent-claude-code">Claude Code</a></td><td><span class="badge b-purple">anthropic-messages</span></td><td>env; ~/.claude/settings.json</td></tr>
         <tr><td><a href="#agent-codex">Codex</a></td><td><span class="badge b-cyan">openai-completions</span> <span class="badge b-info">openai-responses</span></td><td>env; ~/.codex/config.toml</td></tr>
         <tr><td><a href="#agent-openclaw">OpenClaw</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.openclaw/config.yaml</td></tr>
         <tr><td><a href="#agent-opencode">OpenCode</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>opencode.json</td></tr>
-        <tr><td><a href="#agent-cursor">Cursor</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>Settings → Models; env</td></tr>
+        <tr><td><a href="#agent-cursor">Cursor</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>{{T:qr-cursor-config}}</td></tr>
         <tr><td><a href="#agent-hermes">Hermes</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.hermes/config.yaml</td></tr>
         <tr><td><a href="#agent-pi">Pi Agent</a></td><td><span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></td><td>~/.pi/agent/models.json</td></tr>
         <tr><td><a href="#agent-workbuddy">WorkBuddy</a></td><td><span class="badge b-cyan">openai-completions</span></td><td>env; ~/.workbuddy/config.yaml</td></tr>
@@ -125,17 +120,15 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
   </div>
 
   <!-- ===== Anthropic Messages protocol ===== -->
-  <div class="sub-head">Anthropic Messages Protocol <span class="badge b-purple tight">anthropic-messages</span></div>
-  <p class="hint" class="mb10">Agents that natively speak the Anthropic Messages API. Point the base URL at VMR's Anthropic-compatible endpoint; the key is sent via the <code>x-api-key</code> header.</p>
+  <div class="sub-head">{{T:anthropic-head}} <span class="badge b-purple tight">anthropic-messages</span></div>
+  <p class="hint" class="mb10">{{T:anthropic-hint}}</p>
 
   <details class="disc" id="agent-claude-code" open>
     <summary>Claude Code <span class="badge b-purple">anthropic-messages</span></summary>
     <div class="body">
-      <p>Anthropic's official terminal coding agent. Route through VMR using environment variables or <code>~/.claude/settings.json</code>.
-        Claude Code automatically connects to <code>ANTHROPIC_BASE_URL</code>.
-        Tune reasoning budget with <code>MAX_THINKING_TOKENS</code> (fixed budget) or <code>CLAUDE_CODE_EFFORT_LEVEL</code> / <code>/effort</code> (adaptive reasoning).
-        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">~/.bashrc, ~/.zshrc, or shell profile (environment variables)</div>
+      <p>{{T:cc-desc}}
+        <a href="https://docs.anthropic.com/en/docs/claude-code/overview" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:cfg-env-file}}</div>
       <pre class="snippet" id="claude-code-env-snippet"><code><span class="comment"># Option 1: Shell Environment Variables</span>
 <span class="key">export</span> ANTHROPIC_BASE_URL={{BASE_URL_ANTHROPIC}}
 <span class="key">export</span> ANTHROPIC_AUTH_TOKEN=<span class="string">YOUR_VMR_API_KEY</span>
@@ -144,7 +137,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="comment"># Reasoning budget: token budget (e.g. 8192, 0 disables) or effort level (low, medium, high, max)</span>
 <span class="key">export</span> MAX_THINKING_TOKENS=<span class="string">32768</span>
 <span class="key">export</span> CLAUDE_CODE_EFFORT_LEVEL=<span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="claude-code-env-snippet">Copy</button>
+      <button class="btn sm" data-copy="claude-code-env-snippet">{{T:copy}}</button>
       <div class="cfg-file">~/.claude/settings.json</div>
       <pre class="snippet" id="claude-code-json-snippet"><code>{
   <span class="key">"env"</span>: {
@@ -154,50 +147,48 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
   },
   <span class="key">"model"</span>: <span class="string">"claude"</span>
 }</code></pre>
-      <button class="btn sm" data-copy="claude-code-json-snippet">Copy</button>
+      <button class="btn sm" data-copy="claude-code-json-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <!-- ===== OpenAI Completions protocol ===== -->
-  <div class="sub-head">OpenAI Completions Protocol <span class="badge b-cyan tight">openai-completions</span></div>
-  <p class="hint" class="mb10">Agents that natively speak the OpenAI Chat Completions API. Point the base URL at VMR's OpenAI-compatible endpoint; the key is sent via the <code>Authorization: Bearer</code> header.</p>
+  <div class="sub-head">{{T:openai-head}} <span class="badge b-cyan tight">openai-completions</span></div>
+  <p class="hint" class="mb10">{{T:openai-hint}}</p>
 
   <details class="disc" id="agent-codex">
     <summary>Codex <span class="badge b-cyan">openai-completions</span> <span class="badge b-info">openai-responses</span></summary>
     <div class="body">
-      <p>OpenAI's official terminal coding agent. Route through VMR via environment variables or <code>~/.codex/config.toml</code>.
-        Configure <code>model_reasoning_effort</code> (minimal / low / medium / high / xhigh) and <code>model_context_window</code> in <code>config.toml</code> to manage memory and thinking depth.
-        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">~/.bashrc, ~/.zshrc, or shell profile (environment variables)</div>
+      <p>{{T:codex-desc}}
+        <a href="https://github.com/openai/codex" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:cfg-env-file}}</div>
       <pre class="snippet" id="codex-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
-      <button class="btn sm" data-copy="codex-env-snippet">Copy</button>
+      <button class="btn sm" data-copy="codex-env-snippet">{{T:copy}}</button>
       <div class="cfg-file">~/.codex/config.toml</div>
-      <pre class="snippet" id="codex-toml-snippet"><code><span class="comment"># Model and provider defaults</span>
+      <pre class="snippet" id="codex-toml-snippet"><code><span class="comment">{{T:codex-toml-comment-1}}</span>
 <span class="key">model</span> = <span class="string">"coding"</span>
 <span class="key">model_provider</span> = <span class="string">"vmr"</span>
 <span class="key">model_reasoning_effort</span> = <span class="string">"high"</span>
 <span class="key">model_context_window</span> = <span class="bool">200000</span>
 <span class="key">model_auto_compact_token_limit</span> = <span class="bool">180000</span>
 
-<span class="comment"># VMR custom provider (wire_api: "responses" for /v1/responses, or "chat" for /v1/chat/completions)</span>
+<span class="comment">{{T:codex-toml-comment-2}}</span>
 [<span class="key">model_providers.vmr</span>]
 <span class="key">name</span> = <span class="string">"VMR"</span>
 <span class="key">base_url</span> = <span class="string">"{{BASE_URL_OPENAI}}"</span>
 <span class="key">env_key</span> = <span class="string">"OPENAI_API_KEY"</span>
 <span class="key">wire_api</span> = <span class="string">"responses"</span></code></pre>
-      <button class="btn sm" data-copy="codex-toml-snippet">Copy</button>
+      <button class="btn sm" data-copy="codex-toml-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="agent-openclaw">
     <summary>OpenClaw <span class="badge b-cyan">openai-completions</span></summary>
     <div class="body">
-      <p>An open-source, Claude Code-compatible terminal agent. Supports OpenAI-compatible API endpoints.
-        Configure context window, vision, reasoning effort, and thinking budget via environment variables or <code>config.yaml</code>.
-        <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">~/.bashrc, ~/.zshrc, or shell profile (environment variables)</div>
+      <p>{{T:openclaw-desc}}
+        <a href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:cfg-env-file}}</div>
       <pre class="snippet" id="openclaw-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> OPENCLAW_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENCLAW_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
@@ -206,7 +197,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="key">export</span> OPENCLAW_MAX_TOKENS=<span class="string">65536</span>
 <span class="key">export</span> OPENCLAW_VISION=<span class="bool">true</span>
 <span class="key">export</span> OPENCLAW_REASONING_EFFORT=<span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="openclaw-env-snippet">Copy</button>
+      <button class="btn sm" data-copy="openclaw-env-snippet">{{T:copy}}</button>
       <div class="cfg-file">~/.openclaw/config.yaml</div>
       <pre class="snippet" id="openclaw-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
@@ -217,17 +208,16 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="key">reasoning_effort:</span> <span class="string">high</span>
 <span class="key">thinking:</span>
   <span class="key">budget_tokens:</span> <span class="bool">32768</span></code></pre>
-      <button class="btn sm" data-copy="openclaw-yaml-snippet">Copy</button>
+      <button class="btn sm" data-copy="openclaw-yaml-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="agent-opencode">
     <summary>OpenCode <span class="badge b-cyan">openai-completions</span></summary>
     <div class="body">
-      <p>A terminal-based AI coding agent (<a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>).
-        Configure a custom provider in <code>opencode.json</code> with <code>limit</code> (context &amp; output), <code>modalities</code> (vision), and <code>reasoning</code> flags.
-        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">opencode.json (project root) or ~/.config/opencode/opencode.json</div>
+      <p>{{T:opencode-desc}}
+        <a href="https://opencode.ai/docs" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:opencode-cfg-file}}</div>
       <pre class="snippet" id="opencode-snippet"><code>{
   <span class="key">"$schema"</span>: <span class="string">"https://opencode.ai/config.json"</span>,
   <span class="key">"provider"</span>: {
@@ -265,17 +255,16 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
     }
   }
 }</code></pre>
-      <button class="btn sm" data-copy="opencode-snippet">Copy</button>
+      <button class="btn sm" data-copy="opencode-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="agent-cursor">
-    <summary>Cursor (IDE &amp; CLI) <span class="badge b-cyan">openai-completions</span></summary>
+    <summary>{{T:cursor-summary}} <span class="badge b-cyan">openai-completions</span></summary>
     <div class="body">
-      <p>Cursor supports routing AI requests to custom OpenAI-compatible endpoints directly from its IDE settings or terminal agent (<code>cursor-agent</code>).
-        In the IDE, override the OpenAI Base URL and add your VMR virtual model name.
-        <a href="https://docs.cursor.com" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">Cursor IDE settings (UI configuration)</div>
+      <p>{{T:cursor-desc}}
+        <a href="https://docs.cursor.com" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:cursor-cfg-ide}}</div>
       <pre class="snippet" id="cursor-ide-snippet"><code><span class="comment"># 1. Open Cursor Settings -&gt; Models</span>
 <span class="comment"># 2. Under 'OpenAI API Key', enter:</span>
 <span class="key">OpenAI API Key:</span> <span class="string">YOUR_VMR_API_KEY</span>
@@ -286,23 +275,22 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="comment"># 4. Under 'Model Names', click '+ Add Model' and enter your virtual model name:</span>
 <span class="key">Model:</span> <span class="string">coding</span>
 <span class="comment"># 5. Click 'Verify' to test connection</span></code></pre>
-      <button class="btn sm" data-copy="cursor-ide-snippet">Copy</button>
-      <div class="cfg-file">Terminal CLI (cursor-agent)</div>
+      <button class="btn sm" data-copy="cursor-ide-snippet">{{T:copy}}</button>
+      <div class="cfg-file">{{T:cursor-cfg-cli}}</div>
       <pre class="snippet" id="cursor-cli-snippet"><code><span class="comment"># Point Cursor CLI agent at VMR</span>
 <span class="key">export</span> OPENAI_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> OPENAI_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> CURSOR_API_KEY=<span class="string">YOUR_VMR_API_KEY</span></code></pre>
-      <button class="btn sm" data-copy="cursor-cli-snippet">Copy</button>
+      <button class="btn sm" data-copy="cursor-cli-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="agent-hermes">
     <summary>Hermes <span class="badge b-cyan">openai-completions</span></summary>
     <div class="body">
-      <p>A fast, extensible terminal AI coding agent. Supports OpenAI-compatible endpoints with
-        configurable context window, max tokens, reasoning depth, and vision flags.
-        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">Environment variables, or ~/.hermes/config.yaml</div>
+      <p>{{T:hermes-desc}}
+        <a href="https://github.com/bigfatsea/hermes" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:hermes-cfg-file}}</div>
       <pre class="snippet" id="hermes-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> HERMES_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> HERMES_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
@@ -313,7 +301,7 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="key">export</span> HERMES_MAX_OUTPUT_TOKENS=<span class="string">65536</span>
 <span class="key">export</span> HERMES_VISION=<span class="bool">true</span>
 <span class="key">export</span> HERMES_REASONING_EFFORT=<span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="hermes-env-snippet">Copy</button>
+      <button class="btn sm" data-copy="hermes-env-snippet">{{T:copy}}</button>
       <div class="cfg-file">~/.hermes/config.yaml</div>
       <pre class="snippet" id="hermes-yaml-snippet"><code><span class="key">base_url:</span> {{BASE_URL_OPENAI}}
 <span class="key">api_key:</span> <span class="string">YOUR_VMR_API_KEY</span>
@@ -322,18 +310,16 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 <span class="key">max_tokens:</span> <span class="bool">65536</span>
 <span class="key">vision:</span> <span class="bool">true</span>
 <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="hermes-yaml-snippet">Copy</button>
+      <button class="btn sm" data-copy="hermes-yaml-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="agent-pi">
     <summary>Pi Agent <span class="badge b-cyan">openai-completions</span> <span class="badge b-purple">anthropic-messages</span></summary>
     <div class="body">
-      <p>Pi is a minimalist, extensible terminal AI coding agent (<a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">earendil-works/pi-mono</a>).
-        Add VMR as a custom provider in <code>~/.pi/agent/models.json</code>, specifying <code>contextWindow</code>, <code>maxTokens</code>, <code>input</code> (modalities), and <code>reasoning</code> flags.
-        Pi keys providers by API protocol, so VMR appears as <code>vmr-openai</code> and/or <code>vmr-anthropic</code> — both <code>openai-completions</code> and <code>anthropic-messages</code> are supported.
-        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">~/.pi/agent/models.json (create if not exists)</div>
+      <p>{{T:pi-desc}}
+        <a href="https://github.com/earendil-works/pi-mono" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:pi-cfg-file}}</div>
       <pre class="snippet" id="pi-snippet"><code>{
   <span class="key">"providers"</span>: {
     <span class="key">"vmr-openai"</span>: {
@@ -376,26 +362,24 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
     }
   }
 }</code></pre>
-      <button class="btn sm" data-copy="pi-snippet">Copy</button>
-      <p>Virtual model names, context windows and token budgets in this block are refreshed from the live
-        <code>/status</code> model list once it is readable — one provider entry per protocol VMR actually serves.</p>
+      <button class="btn sm" data-copy="pi-snippet">{{T:copy}}</button>
+      <p>{{T:pi-note}}</p>
     </div>
   </details>
 
   <details class="disc" id="agent-workbuddy">
     <summary>WorkBuddy <span class="badge b-cyan">openai-completions</span></summary>
     <div class="body">
-      <p>A terminal-based AI coding assistant. Configure via environment variables or <code>~/.workbuddy/config.yaml</code>.
-        Supports context length, max output tokens, vision input, and reasoning effort.
-        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">Official Docs →</a></p>
-      <div class="cfg-file">~/.workbuddy/config.yaml or .workbuddy.yaml</div>
+      <p>{{T:workbuddy-desc}}
+        <a href="https://github.com/bigfatsea/workbuddy" target="_blank" rel="noopener">{{T:official-docs}}</a></p>
+      <div class="cfg-file">{{T:workbuddy-cfg-file}}</div>
       <pre class="snippet" id="workbuddy-env-snippet"><code><span class="comment"># Option 1: Environment variables</span>
 <span class="key">export</span> WORKBUDDY_BASE_URL={{BASE_URL_OPENAI}}
 <span class="key">export</span> WORKBUDDY_API_KEY=<span class="string">YOUR_VMR_API_KEY</span>
 <span class="key">export</span> WORKBUDDY_MODEL=<span class="string">coding</span>
 <span class="key">export</span> WORKBUDDY_CONTEXT_WINDOW=<span class="string">200000</span>
 <span class="key">export</span> WORKBUDDY_REASONING_EFFORT=<span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="workbuddy-env-snippet">Copy</button>
+      <button class="btn sm" data-copy="workbuddy-env-snippet">{{T:copy}}</button>
       <div class="cfg-file">~/.workbuddy/config.yaml</div>
       <pre class="snippet" id="workbuddy-yaml-snippet"><code><span class="key">llm:</span>
   <span class="key">provider:</span> <span class="string">openai</span>
@@ -406,19 +390,19 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
   <span class="key">max_output_tokens:</span> <span class="bool">65536</span>
   <span class="key">supports_vision:</span> <span class="bool">true</span>
   <span class="key">reasoning_effort:</span> <span class="string">high</span></code></pre>
-      <button class="btn sm" data-copy="workbuddy-yaml-snippet">Copy</button>
+      <button class="btn sm" data-copy="workbuddy-yaml-snippet">{{T:copy}}</button>
     </div>
   </details>
 
   <details class="disc" id="troubleshooting">
-    <summary>Troubleshooting</summary>
+    <summary>{{T:trouble-title}}</summary>
     <div class="body" class="sub-note">
-      <p>• <b>401 from every request</b> → the key in <code class="mono">Authorization: Bearer</code> must match an entry of <code class="mono">api_keys:</code>.</p>
-      <p>• <b>Unknown model</b> → virtual models are per-protocol; check <a href="/status.html#models">Overview → Virtual Models &amp; Endpoint Topology</a> for the protocol each name answers on.</p>
-      <p>• <b>401s appearing mid-session</b> → vmr was reloaded with a changed <code class="mono">api_keys:</code>; re-set the key (🔑 button, stored in this browser only).</p>
-      <p>• <b>A request feels slow or hangs</b> → open <a href="/status.html#live">Overview → Live Requests</a>: a red <i>stalled</i> badge means no upstream byte for over 5s; a long <i>queued</i> elapsed means the concurrency gate is full.</p>
-      <p>• <b>All requests suddenly fail over</b> → check <a href="/status.html#models">endpoint health</a> for cooldowns, and <a href="/status.html#quota">Quota Budgets</a> for a saturated gate.</p>
-      <p>• <b>A request just failed and you want to know why</b> → <a href="/status.html#failures">Overview → Recent Failures</a> lists the last failures with the router's own error class; the class chips double as a filter when one class floods the buffer.</p>
+      {{T:trouble-1}}
+      {{T:trouble-2}}
+      {{T:trouble-3}}
+      {{T:trouble-4}}
+      {{T:trouble-5}}
+      {{T:trouble-6}}
     </div>
   </details>
 </main>
@@ -429,7 +413,11 @@ details.disc .body p{font-size:var(--fs-sm);color:var(--text-muted);margin:4px 0
 /* ===== help page script =====
    Shared chrome above; below is everything page-private: base-URL fill,
    copy buttons, the snippet fill engine, the model × protocol table and the
-   connection check, all fed by the auth-gated GET /status.
+   connection check, all fed by the auth-gated GET /status. Page copy comes
+   from the server-side language table (helpstrings.go) baked into the
+   per-language tokens below; the I18N object carries the few messages that
+   interpolate live data, filled by fmtT so each language can order the
+   sentence around the values.
 
    Auth modal note: authentication is shared console chrome —
    console.js's keyOverlay (input id "vmr-key-input"), opened by VMRAuth.guard
@@ -442,6 +430,19 @@ const consoleAPI = mountConsole({
   rail: [],           // Quick Reference card is the page's own table of contents
 });
 
+// ---- language messages with live-data slots ({0}, {1}, ...) ----
+const I18N = {
+  chkOk: '{{T:chk-ok-detail}}',
+  keyStored: '{{T:chk-stored-state}}',
+  upTime: '{{T:uptime}}',
+  footerId: '{{T:footer-id}}',
+  toastOk: '{{T:toast-ok}}',
+};
+function fmtT(s, ...args) {
+  args.forEach((a, i) => { s = s.split('{' + i + '}').join(a); });
+  return s;
+}
+
 // ---- protocol metadata (badge class + URL shape per protocol) ----
 const PROTO_META = {
   'openai-completions': { badge: 'b-cyan', stripV1: false },
@@ -452,7 +453,7 @@ const PROTO_ORDER = ['openai-completions', 'anthropic-messages', 'openai-respons
 
 // ---- copy with ✓ feedback (snippet blocks and single values) ----
 function copyText(txt, btn) {
-  const done = () => { const o = btn.textContent; btn.textContent = 'Copied ✓'; setTimeout(() => btn.textContent = o, 1200); };
+  const done = () => { const o = btn.textContent; btn.textContent = '{{T:copied}}'; setTimeout(() => btn.textContent = o, 1200); };
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(txt).then(done).catch(() => fallback(txt, done));
   } else fallback(txt, done);
@@ -494,7 +495,7 @@ function fillBaseURLs() {
     const u = urls[p];
     return '<tr><td><span class="badge ' + def.badge + '">' + esc(p) + '</span></td>' +
       '<td><code>' + esc(u) + '</code></td>' +
-      '<td class="t-right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">Copy</button></td></tr>';
+      '<td class="t-right"><button class="btn sm ghost" data-copy-value="' + esc(u) + '">{{T:copy}}</button></td></tr>';
   }).join('');
   document.querySelectorAll('pre').forEach(pre => {
     pre.innerHTML = pre.innerHTML.replace(/\{\{BASE_URL_OPENAI\}\}/g, esc(origin + '/v1'));
@@ -506,7 +507,7 @@ function fillBaseURLs() {
 function renderModels(data) {
   const box = document.getElementById('help-models');
   if (!data || !data.models || !data.models.length) {
-    box.innerHTML = '<span class="t-dim">(no models configured)</span>';
+    box.innerHTML = '<span class="t-dim">{{T:no-models}}</span>';
     return;
   }
   // dedup by virtual model name across protocols — one row per name
@@ -523,21 +524,21 @@ function renderModels(data) {
       const def = PROTO_META[p] || { badge: 'b-dim' };
       return '<span class="badge ' + def.badge + '">' + esc(p) + '</span>';
     }).join(' ');
-    const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : 'unconstrained';
-    const caps = m.caps.size ? Array.from(m.caps).join('/') : 'unconstrained';
+    const ctx = m.ctx > 0 ? fmtKMG(m.ctx) + ' tok' : '{{T:unconstrained}}';
+    const caps = m.caps.size ? Array.from(m.caps).join('/') : '{{T:unconstrained}}';
     // Both are aggregated across every endpoint behind this virtual model —
     // the largest context window and the union of capabilities — not a
     // promise that any single endpoint has all of them at once; a request
     // routes to whichever endpoint actually supports what it needs.
     return '<div class="mrow"><b>' + esc(m.id) + '</b> ' + badges +
-      ' <span class="t-dim">· <span title="Largest max_context_tokens across this model\'s endpoints">' + esc(ctx) + '</span>' +
-      ' · <span title="Union of capabilities across this model\'s endpoints — not every endpoint necessarily has every one; routing picks whichever endpoint actually supports what a request needs">' + esc(caps) + '</span></span></div>';
+      ' <span class="t-dim">· <span title="{{T:m-title-ctx}}">' + esc(ctx) + '</span>' +
+      ' · <span title="{{T:m-title-caps}}">' + esc(caps) + '</span></span></div>';
   }).join('');
 }
 
 function showAuthPrompt() {
   const box = document.getElementById('help-models');
-  box.innerHTML = '<a href="javascript:void(0)" id="reveal-models-link">🔑 enter API key to reveal</a>';
+  box.innerHTML = '<a href="javascript:void(0)" id="reveal-models-link">{{T:reveal-key}}</a>';
   const link = document.getElementById('reveal-models-link');
   if (link) link.addEventListener('click', openKeyModal);
 }
@@ -553,20 +554,20 @@ function paintCheck() {
   const det = document.getElementById('chk-detail');
   const hasKey = VMRAuth.has();
   if (lastCheck === 'ok') {
-    st.className = 'pill p-live'; st.textContent = 'reachable';
-    det.innerHTML = '<code>GET /status</code> returned <b>' + lastModels + '</b> virtual model(s) across <b>' + lastProtocols + '</b> protocol(s).';
+    st.className = 'pill p-live'; st.textContent = '{{T:chk-ok-state}}';
+    det.innerHTML = fmtT(I18N.chkOk, lastModels, lastProtocols);
   } else if (lastCheck === 'auth') {
-    st.className = 'pill p-down'; st.textContent = '401 — key required';
-    det.innerHTML = 'This instance requires an API key. Set one (🔑) to load the live model list.';
+    st.className = 'pill p-down'; st.textContent = '{{T:chk-401-state}}';
+    det.innerHTML = '{{T:chk-401-detail}}';
   } else if (lastCheck === 'err') {
-    st.className = 'pill p-down'; st.textContent = 'unreachable';
-    det.innerHTML = '<code>GET /status</code> failed — network error or non-200 response.';
+    st.className = 'pill p-down'; st.textContent = '{{T:chk-err-state}}';
+    det.innerHTML = '{{T:chk-err-detail}}';
   } else if (hasKey) {
-    st.className = 'pill p-paused'; st.textContent = 'key ' + VMRAuth.tail() + ' stored';
-    det.innerHTML = 'Key stored in this browser. Press <b>Check connection</b> to verify it against <code>GET /status</code>.';
+    st.className = 'pill p-paused'; st.textContent = fmtT(I18N.keyStored, VMRAuth.tail());
+    det.innerHTML = '{{T:chk-stored-detail}}';
   } else {
-    st.className = 'pill p-paused'; st.textContent = 'no key stored';
-    det.innerHTML = 'No API key in this browser yet — agents below need one in the <code>Authorization: Bearer</code> header.';
+    st.className = 'pill p-paused'; st.textContent = '{{T:chk-idle}}';
+    det.innerHTML = '{{T:chk-idle-detail}}';
   }
 }
 function authHeaders() {
@@ -603,8 +604,8 @@ async function fetchStatus(allowPrompt) {
   paintCheck();
 }
 function renderFooterIdentity(inst) {
-  consoleAPI.setUptime(inst.uptime ? 'up ' + inst.uptime : '—');
-  consoleAPI.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
+  consoleAPI.setUptime(inst.uptime ? fmtT(I18N.upTime, inst.uptime) : '—');
+  consoleAPI.setFooterIdentity(fmtT(I18N.footerId, inst.version || '—', inst.pid || '—', inst.go_version || '', inst.os_arch || '', inst.listen || ''));
 }
 
 // ---- Live Snippet Fill ----
@@ -784,9 +785,9 @@ function renderSnippets(data) {
 // ---- buttons ----
 document.getElementById('chk-btn').addEventListener('click', async () => {
   await fetchStatus(true);
-  toast(lastCheck === 'ok' ? 'Connection OK — ' + lastModels + ' virtual model(s)'
-    : lastCheck === 'auth' ? 'API key required or invalid'
-    : 'Connection check failed');
+  toast(lastCheck === 'ok' ? fmtT(I18N.toastOk, lastModels)
+    : lastCheck === 'auth' ? '{{T:toast-auth}}'
+    : '{{T:toast-fail}}');
 });
 document.getElementById('chk-set').addEventListener('click', openKeyModal);
 // Key modal save/clear are console.js-owned; refresh the page's views when

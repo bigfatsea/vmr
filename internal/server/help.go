@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-23 02:55, by pi
 
 // The help surface: /help and /help.html (English), /help.zh and
 // /help.zh.html (中文). Split out of server.go the same way status_page.go
@@ -9,23 +9,25 @@
 // api_keys configured just shows the data (no key prompt at all), and one
 // with auth opens the shared key modal on 401 and retries once.
 //
-// The two language variants are plain embedded files (help.html /
-// help.zh.html), each carrying a link to the other — no runtime language
-// table, no query-param state. This mirrors the repo's established
-// .zh-sibling convention (README.zh.md, config.example.zh.yaml) and is
-// deliberately bounded at two languages: adding a third means adding a
-// third embedded file and two more routes, nothing else.
+// One embedded template serves both languages (help.html; see
+// helpstrings.go for the EN/ZH text tables it is filled from). The routes
+// stay language-addressed — no runtime negotiation, no query-param state —
+// and the two pages cross-link to each other. This keeps the .zh-sibling
+// convention of README.zh.md / config.example.zh.yaml while bounding a
+// third language to one more text table and nothing else.
 //
 // Shared console chrome (console.css / console.js) is injected once at
 // first serve via assembleConsolePage (see the console contract);
-// the page files carry the {{CONSOLE_CSS}} / {{CONSOLE_JS}} markers.
+// the page carries the {{CONSOLE_CSS}} / {{CONSOLE_JS}} markers.
 package server
 
 import (
 	"bytes"
 	_ "embed"
 	"html"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -33,10 +35,7 @@ import (
 )
 
 //go:embed help.html
-var helpHTMLPage []byte
-
-//go:embed help.zh.html
-var helpZHHTMLPage []byte
+var helpHTMLTemplate []byte
 
 var (
 	helpAssembleOnce sync.Once
@@ -44,17 +43,31 @@ var (
 	helpPageZH       []byte
 )
 
-// assembledHelpPages bakes the shared console assets into both help pages
-// exactly once per process. The assets are static for the process lifetime,
-// so the result is computed once and only read afterwards (per-request
+// assembledHelpPages bakes the shared console assets and the per-language
+// text table into the help template exactly once per process. The result is
+// static for the process lifetime and only read afterwards (per-request
 // base-URL substitution below allocates fresh slices and never mutates
 // these).
 func assembledHelpPages() (en, zh []byte) {
 	helpAssembleOnce.Do(func() {
-		helpPageEN = assembleConsolePage(helpHTMLPage)
-		helpPageZH = assembleConsolePage(helpZHHTMLPage)
+		tpl := assembleConsolePage(helpHTMLTemplate)
+		helpPageEN = applyHelpStrings(tpl, helpStringsEN)
+		helpPageZH = applyHelpStrings(tpl, helpStringsZH)
 	})
 	return helpPageEN, helpPageZH
+}
+
+// applyHelpStrings replaces every {{T:key}} token in the page with the
+// language table's value. Keys are sorted so the replacer's pair order (and
+// therefore the output) is deterministic regardless of map iteration order.
+// No {{T:...}} token may survive: TestHelpPage_NoUnresolvedTokens pins that
+// every template token exists in both tables.
+func applyHelpStrings(page []byte, table map[string]string) []byte {
+	pairs := make([]string, 0, 2*len(table))
+	for _, key := range slices.Sorted(maps.Keys(table)) {
+		pairs = append(pairs, "{{T:"+key+"}}", table[key])
+	}
+	return []byte(strings.NewReplacer(pairs...).Replace(string(page)))
 }
 
 // helpPageEN / helpPageZH are the two language variants of the agent

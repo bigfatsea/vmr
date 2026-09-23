@@ -1,4 +1,4 @@
-// Ver 2026-08-31
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // /reports/ static hosting of analyze-produced reports and dashboard
 // skeletons (analytics.serve opt-in). Deliberately reads ONLY the
@@ -96,7 +96,7 @@ func resolveReportsDir(dir string) string {
 
 // reportsHandler serves one file under serve_dir.
 //
-// Auth model (D9, layered):
+// Auth model (layered):
 //  1. No api_keys configured at all → 403 for EVERYTHING under /reports/*,
 //     skeletons included. This is deliberately NOT s.auth (whose len==0
 //     means "door open" for the routing API): reports carry full
@@ -106,7 +106,7 @@ func resolveReportsDir(dir string) string {
 //  3. Data files (.json/.jsonl/.md) → valid key required, checked against
 //     the same snapshot the routing auth uses.
 //
-// Path handling (D9, defense in depth — each check has its own test):
+// Path handling (defense in depth — each check has its own test):
 //   - the URL subpath is cleaned and joined onto the resolved serve_dir,
 //     then required to still sit under it (kills absolute-path escapes and
 //     any remaining traversal the mux's own cleaning didn't neutralize);
