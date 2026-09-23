@@ -1,36 +1,36 @@
-// Ver 2026-09-17, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // Package guard is Agent Guard's bidirectional credential/steganography
-// detection core (the Agent Guard spec). It
+// detection core. It
 // is a dependency-white-listed leaf ({vmr/internal/jsonscan} only — see
-// internal/archtest's allowedDepPackages, ADR-1) so both the offline
+// internal/archtest's allowedDepPackages) so both the offline
 // calibration tool (tools/guard_corpus_scan) and the routing half's
 // outbound/inbound hooks share one scanning engine without either side
 // reimplementing JSON string-value traversal or credential pattern
 // matching.
 //
-// Scope note: this package implements the full detection layer M2's
+// Scope note: this package implements the full detection layer the
 // offline bidirectional forensic audit needs — Rule/Engine/Scan/ScanText
 // (outbound + inbound text scanning), ClassifyRunes (Unicode steganography
 // classification), InspectToolCall (tool-call risk judgment, offline-only
-// consumer per ADR-15), and Fingerprint — plus the online intervention
-// layer actually wired: Outbound (audit_only/block aggregation, M3) and
-// Inbound (Unicode-steganography sanitization only, M4 as narrowed by
-// ADR-15). The spec's former `mode: replace` (outbound pseudonymization +
+// consumer), and Fingerprint — plus the online intervention
+// layer actually wired: Outbound (audit_only/block aggregation) and
+// Inbound (Unicode-steganography sanitization only). The former
+// `mode: replace` (outbound pseudonymization +
 // response-side restore) was removed after a first-principles review:
-// block is strictly safer against every threat replace covers (ADR-6
-// already conceded replace does not defend against an active upstream),
+// block is strictly safer against every threat replace covers (replace
+// does not defend against an active upstream),
 // and every real-corpus Tier1 hit was an accidental credential paste where
 // a visible request failure is the wanted behavior. The online Tool Call
 // double gate, circuit-breaker frames, and non-streaming block path
-// (originally M4.1–M4.5) were removed in the same spirit (ADR-15): a
+// were removed in the same spirit: a
 // client's own approval gate and sandbox judge whether to run a command
 // with strictly more context than this gateway ever has, and two
 // independent reviews found most of their findings concentrated in that
-// machinery. See the spec's Appendix B and docs/KNOWN_ISSUES.md for both.
+// machinery. See docs/KNOWN_ISSUES.md.
 //
-// The Aho-Corasick literal prefilter (ADR-13's Level 1) shipped with M3.0
-// (prefilter.go), shared by the outbound scan and (offline) the inbound
+// The Aho-Corasick literal prefilter (prefilter.go) is shared by the
+// outbound scan and (offline) the inbound
 // tool-call inspection library; the immutable-Engine / caller-held-Scratch
 // split (engine.go) is what makes one shared Engine safe across
 // per-request goroutines.
@@ -42,9 +42,9 @@ import (
 	"strings"
 )
 
-// Tier is a rule's admission class (ADR-5). Tier1 rules are anchored tightly
+// Tier is a rule's admission class. Tier1 rules are anchored tightly
 // enough that a hit is trustworthy evidence of a real credential; Tier2
-// rules are audit-only forever (K-G5) — never a basis for any online
+// rules are audit-only forever — never a basis for any online
 // block decision.
 type Tier uint8
 
@@ -65,9 +65,9 @@ func (t Tier) String() string {
 }
 
 // leftBoundary is the left-edge anchor every rule's compiled pattern
-// carries (ADR-5's fifth anchor, added in this spec after real-corpus
+// carries, added after real-corpus
 // analysis showed its absence causes ~8,000 false hits in this repo's own
-// logs — see the Agent Guard spec §2.3). Go's
+// logs. Go's
 // RE2 engine has no lookbehind, so the boundary alternative is written as
 // a non-capturing group ((?:...)) and matched inline; the credential body
 // that follows is the pattern's only capturing group (group 1) — callers
@@ -85,8 +85,8 @@ type Rule struct {
 	Tier Tier
 	// Literal is the mandatory literal prefix of the credential body,
 	// used for the cheap pre-check before running Re. Tier1 rules are
-	// expected (not compiler-enforced) to keep this at least 4 bytes per
-	// ADR-5, with sk-/hf_/eyJ (openai-legacy-key/huggingface-token/jwt) as
+	// expected (not compiler-enforced) to keep this at least 4 bytes,
+	// with sk-/hf_/eyJ (openai-legacy-key/huggingface-token/jwt) as
 	// the three documented, deliberate exceptions — each compensates with a
 	// fixed exact body length (or, for jwt, the three-dot-segment
 	// structure) and, for openai-legacy-key, the highest MinEntropy of any

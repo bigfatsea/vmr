@@ -41,7 +41,7 @@ func TestSnapshot_HourlyTailParameterized(t *testing.T) {
 	}
 	var dailyLen int
 	for _, c := range cases {
-		snap := agg.Snapshot(c.tail)
+		snap := agg.snapshot(c.tail)
 		if len(snap.Hourly) != c.wantHours {
 			t.Errorf("tail %d: hourly rows = %d, want %d", c.tail, len(snap.Hourly), c.wantHours)
 		}
@@ -116,7 +116,7 @@ func TestCachedSnapshot_PerTailKeys(t *testing.T) {
 					return
 				}
 				if i%5 == 0 {
-					agg.Snapshot(tail)
+					agg.snapshot(tail)
 					rec()
 				}
 			}

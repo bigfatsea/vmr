@@ -1,4 +1,4 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 package adapter
 
 import (
@@ -30,7 +30,7 @@ import (
 // 4 KB is generous for those; it stays small because the same body may echo
 // the client's own prompt back at us (an "Invalid value for messages[2].content:
 // …" 400 that quotes the offending message), and a wide window would let
-// ordinary words from that echo trip content keywords (Q06).
+// ordinary words from that echo trip content keywords.
 const classifySnippetBytes = 4 << 10
 
 // errorSnippet reduces a 4xx body to the text hint matching should actually

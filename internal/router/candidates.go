@@ -1,6 +1,6 @@
-// Ver 2026-09-01, by Stan: Q37
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
-// Candidate selection for one request, split out of ServeWithSnap so the
+// Candidate selection for one request, split out of Serve so the
 // failover loop reads as just the loop. The pipeline health filter → hard
 // conditions → context-length estimate → pin → sort → quota reorder → sticky
 // stays one function (it reads as one thing and its ordering is the design's
@@ -89,7 +89,7 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 			}
 		}
 	}
-	strategy.Sort(candidates, route.Dims)
+	strategy.Sort(candidates)
 
 	// Quota-Aware Routing: within each priority tier Sort just established,
 	// move quota-bearing endpoints to the front in headroom-score order —
@@ -98,7 +98,7 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 	// section for why this sits exactly here (after Sort, before Sticky).
 	// nil-safe: a no-op returning false when rt.Quota is nil (no
 	// quota.Registry wired up).
-	reason.quota = reorderByQuota(candidates, route.Dims, rt.Quota, now)
+	reason.quota = reorderByQuota(candidates, rt.Quota, now)
 
 	// Sticky Model: prefer whichever endpoint most recently, successfully
 	// served this same conversation, so the upstream prompt cache stays
@@ -113,9 +113,7 @@ func (rt *Router) buildCandidates(snap *Snapshot, protocol string, creq *core.Ca
 		if sysHash, firstMsgHash, ok := adapter.SessionFingerprint(creq.Raw, protocol); ok {
 			// ClientKeyTag is carried on the request itself (set by the
 			// server layer at authentication time), so the sticky bucket is
-			// identical whether or not auditing is enabled — previously it
-			// was read off the audit record, which left it empty (and all
-			// clients folded into one bucket) when rec was nil (Q30).
+			// identical whether or not auditing is enabled.
 			stickyKey = creq.ClientKeyTag + ":" + hex.EncodeToString(sysHash[:]) + ":" + hex.EncodeToString(firstMsgHash[:])
 			if epKey, lastUsed, found := rt.Sticky.Peek(stickyKey); found {
 				if ep := findByHealthKey(candidates, epKey); ep != nil && time.Since(lastUsed) < ep.StickyTTL {

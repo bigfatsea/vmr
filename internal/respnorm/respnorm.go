@@ -1,4 +1,4 @@
-// Ver 2026-07-17 02:00, by Sonnet 5
+// Ver 2026-09-23 12:05, by pi
 //
 // Package respnorm is the response normalizer. Guiding principle: what the
 // client receives through VMR must match what it would receive calling the
@@ -20,8 +20,8 @@
 //	rewrite. The mode is chosen as soon as the first payload-bearing SSE
 //	event proves the response is NOT one of the MiniMax thinking shapes.
 //
-//	buffered: the whole body is accumulated and normalized in one regex
-//	pass at EOF. Used for (a) non-SSE responses (single JSON object — the
+//	buffered: the whole body is accumulated and normalized in one pass
+//	at EOF. Used for (a) non-SSE responses (single JSON object — the
 //	client waits for the full body either way), (b) SSE responses whose
 //	first payload event starts with <think> or "Thinking Process:" (the
 //	client would see nothing during the thinking phase anyway, so buffering
@@ -30,7 +30,7 @@
 //
 // A response with a Content-Encoding header (upstream compressed it in a
 // coding Go's Transport didn't transparently decode) is opaque: forwarded
-// raw, no transforms — running regexes over compressed bytes can only
+// raw, no transforms — running rewrites over compressed bytes can only
 // corrupt them.
 //
 // The [DONE] sentinel is appended only for openai-completions SSE responses
@@ -71,17 +71,19 @@ package respnorm
 import (
 	"bytes"
 	"io"
-	"regexp"
-	"strings"
 	"sync"
 
 	"vmr/internal/chatmsg"
 	"vmr/internal/core"
+	"vmr/internal/jsonscan"
 	"vmr/internal/tokenutil"
 )
 
 // Options configures Wrap. ClientModel is the virtual model name the
-// client asked for (rewritten into every "model" field in the response);
+// client asked for (rewritten at the protocol's known model-field
+// locations — the top-level "model" key of a non-SSE body; for SSE, the
+// chunk top level on Chat Completions, message_start's message.model on
+// Anthropic, response.model on Responses; see modelrewrite.go);
 // UpstreamModel is the real model name vmr requested from this endpoint,
 // used only to detect when the upstream answered with something else (see
 // NormalizerStream.ObservedModel). IsSSE and Protocol decide framing/[DONE]
@@ -157,23 +159,10 @@ const (
 // upstream degrades to passthrough sooner instead of buffering longer.
 const bufferedCap = 8 << 20
 
-// modelFieldPattern matches every unescaped "model" field value in the
-// block — not just the top-level one; it has no JSON-depth tracking, so a
-// genuinely nested "model" key (not inside an escaped string) would be
-// rewritten too (see TestRespStream_NestedModelInDelta). This differs from
-// the request-side RewriteModel, which is a structural scanner limited to
-// the top-level key. Harmless in practice: every provider shape this
-// package targets only ever carries "model" at the top level. The capture
-// group preserves the `"model":"` opener; `[^"]*` stops at the closing
-// quote. JSON-escaped quotes inside string values (\") never match the
-// bare `"` the pattern requires, so content that merely *mentions* a
-// model field is not rewritten.
-var modelFieldPattern = regexp.MustCompile(`("model":\s*")([^"]*)"`)
-
-// Group 2 is the upstream's own model value, read once per response before
-// the rewrite overwrites it — see stream.noteUpstreamModel. Adding the
-// group is free for the rewrite itself: ReplaceAll's `${1}` still names the
-// same opener it always did.
+// The SSE model rewrite is confined to each protocol's known model-field
+// locations (structural locate + byte splice per data: payload) — see
+// modelrewrite.go. Non-SSE bodies use jsonscan's top-level scanner, as
+// they always did.
 
 var (
 	contentFieldMarker = []byte(`"content":"`)
@@ -198,14 +187,9 @@ var passthroughTokenMarkers = [][]byte{
 type stream struct {
 	src         io.Reader
 	clientModel string
-	// modelRewriteRepl is the regexp.ReplaceAll template used to rewrite the
-	// "model" field back to clientModel — precomputed once so a virtual
-	// model name containing "$" (a legal YAML `models:` key) can't be
-	// misread as a submatch reference (see newStream).
-	modelRewriteRepl []byte
-	isSSE            bool
-	protocol         string // ingress protocol: decides [DONE] policy
-	opaque           bool   // Content-Encoding present: no transforms at all
+	isSSE       bool
+	protocol    string // ingress protocol: decides [DONE] policy
+	opaque      bool   // Content-Encoding present: no transforms at all
 
 	mode    int
 	pending []byte // undecided: withheld bytes; passthrough: partial-event tail
@@ -252,15 +236,9 @@ type stream struct {
 }
 
 func newStream(src io.Reader, clientModel, upstreamModel string, isSSE bool, protocol string, opaque bool) *stream {
-	// "$" is a template metacharacter to regexp.ReplaceAll (see
-	// modelRewriteRepl's use in emitBlock/finalizeBuffered) — escape it so a
-	// virtual model name like "gpt$4" is emitted verbatim instead of being
-	// read as a (nonexistent) submatch reference and silently truncated.
-	escapedClientModel := strings.ReplaceAll(clientModel, "$", "$$")
 	rs := &stream{
 		src: src, clientModel: clientModel,
-		modelRewriteRepl: []byte(`${1}` + escapedClientModel + `"`),
-		upstreamModel:    upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true,
+		upstreamModel: upstreamModel, isSSE: isSSE, protocol: protocol, opaque: opaque, tailNL: true,
 	}
 	switch {
 	case opaque:
@@ -408,10 +386,19 @@ func (s *stream) flushRawOnError() {
 	if len(b) == 0 {
 		return
 	}
-	if !s.opaque && modelFieldPattern.Match(b) {
-		s.noteUpstreamModel(b)
-		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
-		s.noteApplied("model_rewrite")
+	if !s.opaque {
+		if !s.isSSE {
+			if mv, err := jsonscan.MarshalNoEscape(s.clientModel); err == nil {
+				if rewritten, ok := jsonscan.ReplaceTopLevelValuePrefix(b, []byte(`"model"`), mv); ok {
+					s.noteUpstreamModel(b)
+					b = rewritten
+					s.noteApplied("model_rewrite")
+				}
+			}
+		} else if rewritten, ok := s.rewriteSSEModels(b); ok {
+			b = rewritten
+			s.noteApplied("model_rewrite")
+		}
 	}
 	s.countTokens(b)
 	s.out = append(s.out, b...)
@@ -573,9 +560,8 @@ func (s *stream) emitBlock(block []byte) {
 	s.noteThinkingPatternIfSuspected(block)
 	s.noteUsage(block)
 	s.countTokens(block)
-	if modelFieldPattern.Match(block) {
-		s.noteUpstreamModel(block)
-		block = modelFieldPattern.ReplaceAll(block, s.modelRewriteRepl)
+	if rewritten, ok := s.rewriteSSEModels(block); ok {
+		block = rewritten
 		s.noteApplied("model_rewrite")
 	}
 	s.out = append(s.out, block...)
@@ -602,8 +588,10 @@ func (s *stream) emitBlock(block []byte) {
 }
 
 // noteUpstreamModel records what the upstream actually said its model was,
-// captured from the block about to have that value overwritten with the
-// virtual name. This is the only moment the information exists: the audit
+// read from a non-SSE body's top-level "model" range before the rewrite
+// overwrites it (SSE bodies capture through rewriteSSEModels, at the
+// protocol's known path — same latch, same ObservedModel trail). This is
+// the only moment the information exists: the audit
 // trail deliberately does not store a successful attempt's response body
 // (it is byte-identical to the client's, minus the steps in Norm), and the
 // client's copy has already been rewritten — so a value not read here is
@@ -619,7 +607,7 @@ func (s *stream) emitBlock(block []byte) {
 // belongs in vmr analyze, offline, over many requests, not in a per-request
 // heuristic on the streaming path.
 //
-// Costs one extra regex scan per response, not per SSE chunk: the model
+// Costs one structural scan per response, not per SSE chunk: the model
 // field repeats in every chunk and modelSeen latches after the first.
 // Identical values record nothing at all, so the common case adds no bytes
 // to the audit record.
@@ -627,16 +615,14 @@ func (s *stream) noteUpstreamModel(block []byte) {
 	if s.modelSeen || s.upstreamModel == "" {
 		return
 	}
-	m := modelFieldPattern.FindSubmatch(block)
-	if len(m) < 3 {
-		return
+	ranges, ok := jsonscan.TopLevelValues(block, modelKeyMarker)
+	if !ok || len(ranges) == 0 {
+		ranges, ok = jsonscan.TopLevelValuesPrefix(block, modelKeyMarker)
+		if !ok || len(ranges) == 0 {
+			return
+		}
 	}
-	s.modelSeen = true
-	if got := string(m[2]); got != s.upstreamModel {
-		s.mu.Lock()
-		s.observedModel = got
-		s.mu.Unlock()
-	}
+	s.noteModelValue(block[ranges[0][0]:ranges[0][1]])
 }
 
 // ObservedModel returns the upstream's observed model name when different from requested.
@@ -672,10 +658,27 @@ func (s *stream) finalizeBuffered() {
 	b := s.buf
 	s.buf = nil
 	raw := b // pre-strip snapshot; only kept (below) if a strip actually fires
-	if modelFieldPattern.Match(b) {
+	if !s.isSSE {
+		if ranges, ok := jsonscan.TopLevelValues(b, modelKeyMarker); ok && len(ranges) > 0 {
+			s.noteUpstreamModel(b)
+			if rewritten, err := jsonscan.RewriteModel(b, s.clientModel); err == nil {
+				b = rewritten
+				s.noteApplied("model_rewrite")
+			}
+		}
+	} else if hasDataLine(b) {
+		if rewritten, ok := s.rewriteSSEModels(b); ok {
+			b = rewritten
+			s.noteApplied("model_rewrite")
+		}
+	} else if ranges, ok := jsonscan.TopLevelValues(b, modelKeyMarker); ok && len(ranges) > 0 {
+		// SSE-declared but never SSE-framed (EOF before any data: line —
+		// tiny or malformed stream): same whole-object pass as non-SSE.
 		s.noteUpstreamModel(b)
-		b = modelFieldPattern.ReplaceAll(b, s.modelRewriteRepl)
-		s.noteApplied("model_rewrite")
+		if rewritten, err := jsonscan.RewriteModel(b, s.clientModel); err == nil {
+			b = rewritten
+			s.noteApplied("model_rewrite")
+		}
 	}
 	if thinkShapeGuard(b) {
 		if stripped, ok := stripFirstThink(b); ok {

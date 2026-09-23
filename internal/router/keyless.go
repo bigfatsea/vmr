@@ -1,4 +1,4 @@
-// Ver 2026-09-03, by pi-agent
+// Ver 2026-09-23 02:35, by Claude Opus 5.5
 
 package router
 
@@ -45,7 +45,6 @@ func (rt *Router) rejectIfAllKeyless(w http.ResponseWriter, creq *core.Canonical
 	}
 	for _, ep := range eps {
 		if !isLoopbackOrPrivateHost(hostOf(ep.FullURL)) {
-			rt.Telemetry.RecordOutcome(false, false)
 			WriteError(w, http.StatusServiceUnavailable, "vmr_no_api_key", fmt.Sprintf(
 				"all %d endpoint(s) for model %q have no api_key — set the provider api_key (or the ${ENV_VAR} it references) and reload",
 				len(eps), creq.Model))

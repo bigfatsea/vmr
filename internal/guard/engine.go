@@ -1,4 +1,4 @@
-// Ver 2026-09-13, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package guard
 
@@ -8,24 +8,24 @@ import (
 	"strings"
 )
 
-// binaryBlobMinLen and binaryBlobMinB64Frac implement ADR-5 step 2: a JSON
+// binaryBlobMinLen and binaryBlobMinB64Frac implement binary-blob
+// skipping: a JSON
 // string value shaped like a base64-encoded binary blob (an inline image,
 // typically) is skipped whole rather than scanned rule-by-rule. Scanning
 // it both wastes time on multi-MB payloads and risks an accidental
 // credential-shaped match inside random-looking image bytes corrupting
-// that image if a future mode ever rewrites in place (see the design
-// spec's §2.4 for the ~8%-per-4MB-image false-positive derivation this
-// guards against).
+// that image if a future mode ever rewrites in place (a false-positive
+// rate of roughly 8% per 4MB image is what this guards against).
 const (
 	binaryBlobMinLen     = 8 << 10 // 8 KiB
 	binaryBlobMinB64Frac = 0.98
 )
 
-// Engine holds a compiled rule set and its Aho-Corasick literal prefilter
-// (ADR-13). Immutable after NewEngine returns — every field is read-only
+// Engine holds a compiled rule set and its Aho-Corasick literal prefilter.
+// Immutable after NewEngine returns — every field is read-only
 // for the Engine's lifetime — so one Engine can be shared across
-// goroutines (M3.0's concurrency model: a package-level singleton reused
-// by every request goroutine, matching the design spec's §4.2 contract).
+// goroutines (a package-level singleton reused
+// by every request goroutine).
 // All per-scan mutable state (the in-progress Finding buffer, the
 // prefilter's hit set) lives in Scratch instead, one per calling
 // goroutine.
@@ -53,10 +53,10 @@ func NewScratch(nRules int) *Scratch {
 }
 
 // NewEngine validates rules and returns a ready Engine. The one check that
-// matters most (ADR-5 / §2.3): every Tier1 rule's compiled pattern must
+// matters most: every Tier1 rule's compiled pattern must
 // carry the exact leftBoundary anchor — the missing-anchor mistake that
-// produced ~8,000 false hits in this repo's own logs before this spec's
-// current revision. ver labels every Finding's provenance (RulesVersion
+// produced ~8,000 false hits in this repo's own logs. ver labels every
+// Finding's provenance (RulesVersion
 // for the built-in set; callers of a custom rule set choose their own).
 func NewEngine(rules []Rule, ver int) (*Engine, error) {
 	if len(rules) == 0 {
@@ -88,7 +88,7 @@ func NewEngine(rules []Rule, ver int) (*Engine, error) {
 }
 
 // Version reports the rule-set version this Engine was constructed with
-// (Record.Guard.Ver's source of truth once M3/M4 stamp it).
+// (Record.Guard.Ver's source of truth).
 func (e *Engine) Version() int { return e.ver }
 
 // Rules returns the engine's rule set (read-only use: calibration tooling
@@ -98,9 +98,8 @@ func (e *Engine) Rules() []Rule { return e.rules }
 
 // Scan walks every JSON string value in raw (one JSON document) and
 // returns every rule hit, using sc as scratch workspace (its dst buffer's
-// backing array is reused across calls with the same Scratch, matching
-// the design spec's "Finding 复用调用方提供的 slice" contract — the
-// returned slice is only valid until the next Scan/ScanText call on the
+// backing array is reused across calls with the same Scratch, so a hot
+// caller allocates no Finding slice per scan — the returned slice is only valid until the next Scan/ScanText call on the
 // same Scratch).
 //
 // Not safe for two goroutines to call concurrently with the same Scratch;
@@ -118,8 +117,8 @@ func (e *Engine) Scan(raw []byte, sc *Scratch) []Finding {
 // walk in Scan doesn't apply to: an SSE-reassembled assistant message
 // (chatmsg.StreamSummary.Content/Reasoning), a tool call's arguments once
 // unescaped, or any other plain string a caller wants scanned for the same
-// credential-shaped patterns Scan looks for inside JSON documents (M1.3;
-// ADR-14's inbound forensics path runs this over chatmsg's already-decoded
+// credential-shaped patterns Scan looks for inside JSON documents (the
+// offline inbound-forensics path runs this over chatmsg's already-decoded
 // output — guard itself never parses SSE or JSON message shapes, see the
 // package doc comment).
 func (e *Engine) ScanText(s []byte, sc *Scratch) []Finding {
@@ -130,7 +129,7 @@ func (e *Engine) ScanText(s []byte, sc *Scratch) []Finding {
 
 // scanValue runs every rule against one string value's bytes
 // (raw[start:end]), skipping binary-blob-shaped values outright, and
-// appends any hit to sc.dst. The Aho-Corasick prefilter (ADR-13 Level 1)
+// appends any hit to sc.dst. The Aho-Corasick prefilter
 // replaces the old per-rule bytes.Contains loop with one O(len(value))
 // pass that marks every rule whose literal occurs at least once; only
 // those rules then pay for FindAllSubmatchIndex + entropy — on the
@@ -180,7 +179,7 @@ func (e *Engine) scanValue(raw []byte, start, end int, sc *Scratch) {
 	}
 }
 
-// looksLikeBinaryBlob implements ADR-5 step 2 exactly: length over
+// looksLikeBinaryBlob implements binary-blob skipping exactly: length over
 // binaryBlobMinLen, at least binaryBlobMinB64Frac of characters in the
 // base64 alphabet, and no whitespace/newline anywhere (source text —
 // JSON, code, prose — always has both punctuation outside the base64

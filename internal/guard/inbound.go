@@ -1,7 +1,7 @@
-// Ver 2026-09-17, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
-// Inbound: the online read-chain mount point (the Agent Guard spec
-// ADR-15, M4). Sits downstream of respnorm in the read chain (resp.Body ->
+// Inbound: the online read-chain mount point. Sits downstream of respnorm
+// in the read chain (resp.Body ->
 // respnorm.Wrap -> guard.Inbound -> copyFlush) and independently of
 // respnorm's own mode selection: whether respnorm ends up streaming,
 // buffering, or degrading to raw opaque passthrough (overflow), the bytes
@@ -12,9 +12,10 @@
 // InboundOpts.Opaque means, decided from response headers before a single
 // body byte is read.
 //
-// ADR-15 (2026-09-16) removed the online Tool Call double gate, the
+// The online Tool Call double gate, the
 // three-protocol circuit-breaker frames, and the non-streaming one-shot
-// tool-call scan that used to live alongside this file: a client's own
+// tool-call scan that used to live alongside this file were removed: a
+// client's own
 // approval gate and sandbox are the correct place to judge whether a
 // command should run, not a gateway with strictly less context, and two
 // independent reviews found nine of their ~14 findings concentrated in
@@ -37,7 +38,7 @@ import (
 // pathological or malicious upstream that never sends one could otherwise
 // make this hold grow without bound -- a memory blowup AND a response
 // that never gets flushed to the client, exactly the kind of "unnecessary
-// factor breaking the pipe" the inbound side exists to avoid (ADR-15).
+// factor breaking the pipe" the inbound side exists to avoid.
 // Past this cap, fill gives up on re-framing and relays every remaining
 // byte raw, unsanitized, for the rest of this response -- not a config
 // knob, a robustness floor "sanitization must never become an
@@ -66,7 +67,7 @@ import (
 // before most non-SSE bodies have even finished arriving.
 const inboundSanitizeMaxHoldBytes = 256 << 10
 
-// InboundOpts configures one response's Inbound call (ADR-15: sanitization
+// InboundOpts configures one response's Inbound call (sanitization
 // only).
 type InboundOpts struct {
 	// Opaque is true when the upstream response carries a non-empty
@@ -74,7 +75,7 @@ type InboundOpts struct {
 	// transparently decompress -- guard cannot parse SSE structure inside
 	// genuinely compressed bytes, so Inbound skips sanitization entirely
 	// and returns a pure passthrough reader. There is nothing to strip and
-	// (post-ADR-15) nothing to gate either way.
+	// nothing to gate either way.
 	Opaque bool
 	// SanitizeInvisibleRunes mirrors config.GuardInbound.SanitizeRunes()
 	// -- the caller resolves the *bool-vs-default-true indirection before
@@ -86,7 +87,7 @@ type InboundOpts struct {
 // InboundStream wraps the upstream response body for the read chain. Read
 // is always a full relay of every byte the upstream sent -- sanitized
 // where sanitization changed something, byte-identical where it didn't or
-// wasn't attempted -- never a partial or truncated stream (ADR-15: no
+// wasn't attempted -- never a partial or truncated stream (no
 // blocking path exists here at all).
 type InboundStream interface {
 	io.Reader
@@ -157,7 +158,7 @@ type inboundStream struct {
 
 // Inbound wraps src per opts. Opaque bytes and sanitize-off both take the
 // zero-cost pure-passthrough path -- there is no partial-inspection
-// option, and (post-ADR-15) no reason to want one: sanitization either
+// option, and no reason to want one: sanitization either
 // runs on readable bytes or it doesn't run at all.
 func (g *Guard) Inbound(src io.Reader, opts InboundOpts) InboundStream {
 	s := &inboundStream{src: src}
@@ -308,7 +309,7 @@ func (s *inboundStream) RuneCounts() map[string]int {
 	return out
 }
 
-// findSSEDelimiter locates the earliest SSE delimiter: CRLFCRLF, LFLF, or CRCR (R-2).
+// findSSEDelimiter locates the earliest SSE delimiter: CRLFCRLF, LFLF, or CRCR.
 func findSSEDelimiter(buf []byte) (int, int) {
 	idxNN := bytes.Index(buf, []byte("\n\n"))
 	idxCRLF := bytes.Index(buf, []byte("\r\n\r\n"))
@@ -359,7 +360,7 @@ func looksLikeNonSSE(buf []byte) bool {
 }
 
 // sanitizeEventSafe wraps sanitizeEvent with a panic recovery that
-// Fail-Opens to the event's original, unsanitized bytes (spec §4.9: an
+// Fail-Opens to the event's original, unsanitized bytes (an
 // in-process guard bug must never become a client-visible failure). This
 // matters specifically because fill() runs on copyFlush's own reader
 // goroutine (transport.go): that goroutine's own recover() converts ANY

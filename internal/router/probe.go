@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Serve's background half (see router.go) — a dedicated, lightweight
 // request that verifies a half-open endpoint without making any real
@@ -107,7 +107,7 @@ func (rt *Router) runProbe(ep *core.Endpoint, snap *Snapshot) {
 		// vendor phrasing (e.g. reading a truncated 401 body as a lesser
 		// class). Treat it as the network failure it actually is — checked
 		// before the status-code branch below so a 200 OK that dies mid-read
-		// isn't misclassified as a successful probe (KNOWN_ISSUES §2.134).
+		// isn't misclassified as a successful probe (see KNOWN_ISSUES).
 		cd := rt.Health.ReportFailure(key, core.ErrTransient, 0, time.Now())
 		rt.logf("%s, status=%d, error=network:%v, dur=%s, cooldown=%s", logPrefix, resp.StatusCode, readErr, fmtDur(dur), cd)
 		return

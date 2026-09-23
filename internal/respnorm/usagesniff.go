@@ -1,4 +1,4 @@
-// Ver 2026-09-02 07:20, by pi-agent
+// Ver 2026-09-23 12:05, by pi
 
 package respnorm
 
@@ -19,8 +19,8 @@ import (
 // sniffing (see noteUsage below): almost every SSE token-delta event
 // carries no "usage" key at all, so this bytes.Contains check skips a
 // full JSON parse for the overwhelming majority of events — the same
-// "cheap substring gate before an expensive parse" idiom modelFieldPattern
-// and the other markers in this package already use.
+// "cheap substring gate before an expensive parse" idiom the other field
+// markers in this package use.
 var usageFieldMarker = []byte(`"usage"`)
 
 // noteUsage looks for a "usage" object in b and folds it into the running

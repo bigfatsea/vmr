@@ -1,12 +1,11 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
-// Tool-call inspection (M1.5; design spec's internal/guard module contract
-// section). InspectToolCall
+// Tool-call inspection. InspectToolCall
 // judges one already-assembled (name, arguments) pair — assembly (SSE
 // reassembly, JSON-escape decoding) is always the caller's job, never
-// this package's (ADR-14 §4 / the package doc comment's dependency-
+// this package's (see the package doc comment's dependency-
 // whitelist rationale: guard imports jsonscan only, never chatmsg).
-// Offline-only consumer since ADR-15 (report/guardscan.go, via
+// Offline-only consumer (report/guardscan.go, via
 // chatmsg.ReassembleSSE for assembly) — the online Tool Call gate that
 // used to call this during a live stream was removed; the judgment
 // function itself was not. The patterns below are ported verbatim from
@@ -24,13 +23,13 @@ import (
 	"unicode/utf8"
 )
 
-// High-risk command patterns, design spec's high-risk command library. Two CWE corrections the
-// spec itself calls out relative to earlier drafts: reverse_shell is
+// High-risk command patterns. Two CWE corrections relative to
+// earlier drafts: reverse_shell is
 // CWE-506 (malicious code), not CWE-319 (cleartext transmission);
 // pipe_to_shell is CWE-494 (download of code without integrity check).
 //
 // destructive_root_deletion's terminator group is `(/\*|/|~|\$HOME)(\s|"|$)`,
-// not the spec's literal `(/|~|\$HOME)(\s|/\*|$)`: as written there, group 1
+// not the earlier literal `(/|~|\$HOME)(\s|/\*|$)`: as written there, group 1
 // greedily consumes the leading "/" of "/*", leaving group 2's `/\*`
 // alternative nothing to match against — so the single most canonical
 // destructive command, a bare "rm -rf /" with nothing after it, never
@@ -87,10 +86,10 @@ func decodeUnicodeEscapes(args []byte) []byte {
 	return out
 }
 
-// protectedPathPattern matches the design spec's protected-path table
+// protectedPathPattern matches the calibrated protected-path table
 // (the subset already exercised by the corpus scan — Windows paths,
-// crontab, and Agent-config globs beyond ~/.claude/.mcp.json are Backlog
-// item 1 of the Agent Guard spec §6.3, not
+// crontab, and Agent-config globs beyond ~/.claude/.mcp.json are backlog
+// candidates, not
 // silently expanded here without corpus calibration). It is applied ONLY
 // to path-named argument values (pathArgKeys below), never to the raw
 // argument bytes.
@@ -141,10 +140,10 @@ const maxPathWalkDepth = 4
 // offline) always hands this a fully-assembled tool-call argument string,
 // so a parse failure here means genuinely malformed input, never an
 // in-flight fragment: the online Tool Call gate that used to see partial,
-// still-arriving arguments was removed by ADR-15, and with it the
+// still-arriving arguments was removed, and with it the
 // fragment-vs-complete distinction this function once had to make. Values
-// go through encoding/json unescaping before the regex, the same
-// "everything is scanned after JSON unescaping" rule as §4.4.2.
+// go through encoding/json unescaping before the regex — everything is
+// scanned after JSON unescaping.
 func protectedPathHit(args []byte) string {
 	var hit string
 	var walk func(raw []byte, depth int) bool
@@ -194,19 +193,19 @@ func protectedPathHit(args []byte) string {
 	return hit
 }
 
-// writeToolNamePattern flags a tool name as file_write-shaped (the design
-// spec's name-pattern table) — checked only to decide whether protected-path
+// writeToolNamePattern flags a tool name as file_write-shaped — checked
+// only to decide whether protected-path
 // matching applies, never used for command-category matching.
 var writeToolNameFragments = []string{"write", "create", "edit", "replace", "patch"}
 
 // ToolVerdict is InspectToolCall's judgment on one tool call.
 type ToolVerdict struct {
-	// Category is the tool's name-pattern class (the design spec's
-	// name-pattern table): "command" runs the high-risk command library,
+	// Category is the tool's name-pattern class: "command" runs the
+	// high-risk command library,
 	// "file_write" runs protected-path
 	// matching, "network"/"unknown" run neither — both still get the
-	// credential-echo check, which applies regardless of category (K-G6:
-	// an unclassified tool never runs command pattern matching, but
+	// credential-echo check, which applies regardless of category (an
+	// unclassified tool never runs command pattern matching, but
 	// credential exfiltration via an unrecognized tool is still worth
 	// flagging).
 	Category string
@@ -223,9 +222,9 @@ type ToolVerdict struct {
 	// "persistence_write_protected_path".
 	PathHit string
 	// Echoed is true when args contains one of the known secret values
-	// passed in (ADR-6's decryption-oracle signal: a credential the
+	// passed in (a decryption-oracle signal: a credential the
 	// request sent reappearing inside a tool-call argument is zero-
-	// baseline in real traffic — see §2.3 结论 6 — so any true here is
+	// baseline in real traffic, so any true here is
 	// worth surfacing regardless of Category).
 	Echoed bool
 	// Excerpt is a short, already-non-secret excerpt of the matched
@@ -234,7 +233,7 @@ type ToolVerdict struct {
 	Excerpt string
 }
 
-// ClassifyToolName maps a tool name to the design spec's category via name-pattern
+// ClassifyToolName maps a tool name to its category via name-pattern
 // matching. Matching is substring-based and case-insensitive, mirroring
 // the calibration tool's approach — real tool names in this repo's corpus
 // are things like "bash"/"terminal"/"write_file"/"str_replace_editor", not
@@ -266,8 +265,8 @@ func ClassifyToolName(name string) string {
 
 // InspectToolCall judges one already-decoded (name, arguments) tool call.
 // known is the set of credential values Scan already found in this same
-// request's outbound body (a per-request egress cache, per the design
-// spec's ADR-6) — pass nil when no outbound scan ran or nothing hit.
+// request's outbound body (a per-request egress cache) — pass nil when no
+// outbound scan ran or nothing hit.
 func InspectToolCall(name string, args []byte, known [][]byte) ToolVerdict {
 	v := ToolVerdict{Category: ClassifyToolName(name)}
 	// Decoded once and reused below for both the command-pattern scan and
@@ -292,8 +291,8 @@ func InspectToolCall(name string, args []byte, known [][]byte) ToolVerdict {
 			// Hit/CWE are also set here (not left to PathHit alone) so a
 			// caller grouping findings by risk category doesn't need a
 			// second notion of "category" beyond Hit/CWE — persistence via
-			// a protected-path write is CWE-269 (the design spec's own mapping),
-			// distinct from the command-pattern library's categories.
+			// a protected-path write is CWE-269, distinct from the
+			// command-pattern library's categories.
 			v.Hit, v.CWE = "persistence_write_protected_path", "CWE-269"
 		}
 	}
@@ -306,7 +305,7 @@ func InspectToolCall(name string, args []byte, known [][]byte) ToolVerdict {
 	return v
 }
 
-// excerptMaxBytes is Excerpt's byte cap, design spec §4.2/§4.7.
+// excerptMaxBytes is Excerpt's byte cap.
 const excerptMaxBytes = 256
 
 // trimExcerpt collapses newlines and truncates s to at most maxLen bytes —

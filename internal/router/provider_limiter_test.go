@@ -1,4 +1,4 @@
-// Ver 2026-09-12, by pi
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package router
 
@@ -19,16 +19,16 @@ func TestProviderLimiter_TryAcquire(t *testing.T) {
 	if !ok1 {
 		t.Fatal("first acquire failed")
 	}
-	if l.InFlight() != 1 {
-		t.Errorf("inFlight = %d, want 1", l.InFlight())
+	if l.inFlight.Load() != 1 {
+		t.Errorf("inFlight = %d, want 1", l.inFlight.Load())
 	}
 
 	rel2, ok2 := l.TryAcquire()
 	if !ok2 {
 		t.Fatal("second acquire failed")
 	}
-	if l.InFlight() != 2 {
-		t.Errorf("inFlight = %d, want 2", l.InFlight())
+	if l.inFlight.Load() != 2 {
+		t.Errorf("inFlight = %d, want 2", l.inFlight.Load())
 	}
 
 	// 3rd should fail immediately
@@ -39,21 +39,21 @@ func TestProviderLimiter_TryAcquire(t *testing.T) {
 
 	// Release one
 	rel1()
-	if l.InFlight() != 1 {
-		t.Errorf("after release, inFlight = %d, want 1", l.InFlight())
+	if l.inFlight.Load() != 1 {
+		t.Errorf("after release, inFlight = %d, want 1", l.inFlight.Load())
 	}
 
 	// Release second
 	rel2()
-	if l.InFlight() != 0 {
-		t.Errorf("after release both, inFlight = %d, want 0", l.InFlight())
+	if l.inFlight.Load() != 0 {
+		t.Errorf("after release both, inFlight = %d, want 0", l.inFlight.Load())
 	}
 
 	// Repeated release should be no-op
 	rel1()
 	rel2()
-	if l.InFlight() != 0 {
-		t.Errorf("after duplicate release, inFlight = %d, want 0", l.InFlight())
+	if l.inFlight.Load() != 0 {
+		t.Errorf("after duplicate release, inFlight = %d, want 0", l.inFlight.Load())
 	}
 }
 
@@ -96,8 +96,8 @@ func TestProviderLimiter_AcquireWithTimeout(t *testing.T) {
 	}
 	<-unblockDone
 	rel3()
-	if l.InFlight() != 0 {
-		t.Errorf("inFlight = %d, want 0", l.InFlight())
+	if l.inFlight.Load() != 0 {
+		t.Errorf("inFlight = %d, want 0", l.inFlight.Load())
 	}
 }
 
@@ -116,8 +116,8 @@ func TestProviderLimiter_AcquireContextCanceled(t *testing.T) {
 	if ok2 {
 		t.Fatal("canceled ctx acquire should fail")
 	}
-	if l.Waiting() != 0 {
-		t.Errorf("waiting = %d, want 0", l.Waiting())
+	if l.waiting.Load() != 0 {
+		t.Errorf("waiting = %d, want 0", l.waiting.Load())
 	}
 }
 
@@ -143,7 +143,7 @@ func TestProviderLimiter_ConcurrencyStress(t *testing.T) {
 			if !ok {
 				return
 			}
-			cur := l.InFlight()
+			cur := l.inFlight.Load()
 			for {
 				old := maxInFlight.Load()
 				if cur <= old || maxInFlight.CompareAndSwap(old, cur) {
@@ -160,11 +160,11 @@ func TestProviderLimiter_ConcurrencyStress(t *testing.T) {
 	if max := maxInFlight.Load(); max > cap {
 		t.Errorf("maxInFlight = %d exceeded cap %d", max, cap)
 	}
-	if l.InFlight() != 0 {
-		t.Errorf("final inFlight = %d, want 0 (leak)", l.InFlight())
+	if l.inFlight.Load() != 0 {
+		t.Errorf("final inFlight = %d, want 0 (leak)", l.inFlight.Load())
 	}
-	if l.Waiting() != 0 {
-		t.Errorf("final waiting = %d, want 0", l.Waiting())
+	if l.waiting.Load() != 0 {
+		t.Errorf("final waiting = %d, want 0", l.waiting.Load())
 	}
 }
 

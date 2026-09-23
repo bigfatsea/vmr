@@ -1,4 +1,4 @@
-// Ver 2026-09-13, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 package replay
 
@@ -44,8 +44,8 @@ func statAuditPathArg(raw string) (path string, isDir bool, err error) {
 // commonly what's being inspected than an already-rotated one).
 //
 // This is the single resolver both `vmr replay -req` and `vmr diff` use —
-// see KNOWN_ISSUES §2.138 for why a second, independently-drifted copy of
-// this search used to live in cmd/vmr/cmd_replay.go.
+// a second, independently-drifted copy of this search used to live in
+// cmd/vmr/cmd_replay.go (see KNOWN_ISSUES for why that was wrong).
 func ResolveAuditPath(basename, dirHint, configPath string) (string, error) {
 	if fi, err := os.Stat(basename); err == nil && !fi.IsDir() {
 		return basename, nil

@@ -1,4 +1,4 @@
-// Ver 2026-09-03, by pi-agent
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package router
 
@@ -17,7 +17,7 @@ import (
 
 func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 	reg := NewInflightRegistry()
-	if got := reg.Len(); got != 0 {
+	if got := reg.count(); got != 0 {
 		t.Fatalf("initial Len = %d, want 0", got)
 	}
 
@@ -37,7 +37,7 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 	if h.Seq() != 1 {
 		t.Errorf("seq = %d, want 1", h.Seq())
 	}
-	if got := reg.Len(); got != 1 {
+	if got := reg.count(); got != 1 {
 		t.Fatalf("after register Len = %d, want 1", got)
 	}
 
@@ -124,7 +124,7 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 
 	// 6. Idempotent remove
 	remove()
-	if got := reg.Len(); got != 0 {
+	if got := reg.count(); got != 0 {
 		t.Fatalf("after remove Len = %d, want 0", got)
 	}
 	if len(reg.Snapshot()) != 0 {
@@ -133,7 +133,7 @@ func TestInflightRegistry_BasicLifecycle(t *testing.T) {
 
 	// Calling remove a second time is a harmless no-op
 	remove()
-	if got := reg.Len(); got != 0 {
+	if got := reg.count(); got != 0 {
 		t.Fatalf("second remove Len = %d, want 0", got)
 	}
 
@@ -247,7 +247,7 @@ func TestInflightRegistry_EndedNilSafeAndEmpty(t *testing.T) {
 
 func TestInflightRegistry_NilSafe(t *testing.T) {
 	var reg *InflightRegistry
-	if got := reg.Len(); got != 0 {
+	if got := reg.count(); got != 0 {
 		t.Errorf("nil reg Len = %d, want 0", got)
 	}
 	if snaps := reg.Snapshot(); snaps != nil {
@@ -303,7 +303,7 @@ func TestInflightRegistry_ConcurrentRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := reg.Len(); got != 0 {
+	if got := reg.count(); got != 0 {
 		t.Errorf("final Len = %d, want 0", got)
 	}
 }
@@ -362,7 +362,7 @@ models:
 		Facts:  core.RequestFacts{EstimatedTokens: 250},
 	}
 
-	rt.Serve(w, req, creq, "openai-completions", nil)
+	rt.Serve(w, req, creq, "openai-completions", rt.Snapshot(), nil)
 
 	if w.Code != 200 {
 		t.Fatalf("status = %d, want 200", w.Code)
@@ -400,7 +400,7 @@ models:
 	}
 
 	remove()
-	if got := rt.Inflight.Len(); got != 0 {
+	if got := rt.Inflight.count(); got != 0 {
 		t.Errorf("after remove Len = %d, want 0", got)
 	}
 }
@@ -440,7 +440,7 @@ models:
 		Facts: core.RequestFacts{EstimatedTokens: 80},
 	}
 
-	rt.Serve(w, req, creq, "openai-completions", nil)
+	rt.Serve(w, req, creq, "openai-completions", rt.Snapshot(), nil)
 	if w.Code != 200 {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -464,7 +464,7 @@ models:
 	}
 
 	remove()
-	if got := rt.Inflight.Len(); got != 0 {
+	if got := rt.Inflight.count(); got != 0 {
 		t.Errorf("after remove Len = %d, want 0", got)
 	}
 }
@@ -505,7 +505,7 @@ models:
 		Raw:   []byte(`{"model":"vm"}`),
 	}
 
-	rt.Serve(w, req, creq, "openai-completions", nil)
+	rt.Serve(w, req, creq, "openai-completions", rt.Snapshot(), nil)
 	if w.Code != 200 {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
@@ -524,7 +524,7 @@ models:
 	}
 
 	remove()
-	if got := rt.Inflight.Len(); got != 0 {
+	if got := rt.Inflight.count(); got != 0 {
 		t.Errorf("after remove Len = %d, want 0", got)
 	}
 }
@@ -569,11 +569,11 @@ models:
 				t.Fatalf("recover() = %v, want http.ErrAbortHandler", r)
 			}
 		}()
-		rt.Serve(w, req, creq, "openai-completions", nil)
+		rt.Serve(w, req, creq, "openai-completions", rt.Snapshot(), nil)
 	}()
 
 	// Defer remove was run by the panic unwind: registry must be clean
-	if got := rt.Inflight.Len(); got != 0 {
+	if got := rt.Inflight.count(); got != 0 {
 		t.Errorf("after truncated panic unwind, Len = %d, want 0", got)
 	}
 }
@@ -610,10 +610,10 @@ models:
 
 	func() {
 		defer remove()
-		rt.Serve(w, req, creq, "openai-completions", nil)
+		rt.Serve(w, req, creq, "openai-completions", rt.Snapshot(), nil)
 	}()
 
-	if got := rt.Inflight.Len(); got != 0 {
+	if got := rt.Inflight.count(); got != 0 {
 		t.Errorf("after client cancel, Len = %d, want 0", got)
 	}
 }

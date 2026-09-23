@@ -1,12 +1,12 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
-// Aho-Corasick literal prefilter (ADR-13's Level 1, M1.1/M3.0). No external
-// dependency — go.mod carries no AC library and the rule set is small
-// enough (Appendix A: eleven Tier1/Tier2 literals, longest under twenty
+// Aho-Corasick literal prefilter. No external dependency — go.mod carries
+// no AC library and the rule set is small enough (eleven Tier1/Tier2
+// literals, longest under twenty
 // bytes) that a from-scratch automaton is the right call over adding a
 // dependency for it. The automaton is built once at NewEngine construction
 // time and is immutable afterward, matching Engine's read-only-singleton
-// contract (the Agent Guard spec §4.2): every
+// contract: every
 // per-call transition is a flat array lookup, no per-scan allocation, no
 // fail-link walk at match time (the classic optimization: goto[node][byte]
 // is precomputed for every node/byte pair during construction, so matching
@@ -122,17 +122,16 @@ func newACAutomaton(lits [][]byte) *acAutomaton {
 // re-slicing a []bool back to its zero value each Scan (see engine.go).
 //
 // Measured (BenchmarkOutboundPrefilter, Apple M4, 1 MiB no-hit JSON):
-// ~490 MB/s, 0 allocs/op -- short of the design spec's illustrative >=1
-// GB/s figure (an unverified target the spec itself says must come from a
-// real benchmark, not be assumed). The flat goTo table above already
+// ~490 MB/s, 0 allocs/op -- short of the >=1 GB/s once floated as an
+// illustrative target (never a measured requirement). The flat goTo table above already
 // replaced an earlier [][256]int32 (~40% faster) by removing a
 // slice-of-arrays index in the hot loop; closing the remaining gap would
 // mean unsafe-pointer indexing to shed bounds checks, which is not worth
 // the risk in credential-scanning code before there is a real per-request
-// online workload (M3.4+) to size the actual requirement against — this
-// is exactly the "don't design the online concurrency/perf story before
-// the mount point is real" call the design spec's M1.1/M1.2 deferral
-// already made once. Revisit if a real online p95 ever needs it.
+// online workload to size the actual requirement against — this is the
+// "don't design the online concurrency/perf story before the mount point
+// is real" call. Revisit if a real
+// online p95 ever needs it.
 func (a *acAutomaton) match(text []byte, hits []bool) {
 	cur := int32(acRoot)
 	goTo := a.goTo

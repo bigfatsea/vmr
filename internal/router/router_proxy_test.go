@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 package router
 
 import (
@@ -117,7 +117,7 @@ models:
 		body := []byte(`{"model":"` + model + `"}`)
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
 		w := httptest.NewRecorder()
-		rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", nil)
+		rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", rt.Snapshot(), nil)
 		return w
 	}
 

@@ -8,11 +8,11 @@ import (
 	"time"
 )
 
-// Aggregator is the completion-time ledger (§3.4/§4): in-memory counters for
+// Aggregator is the completion-time ledger: in-memory counters for
 // the current hour, the rollup history's memory image, the global
 // performance ring, and the recent_errors ring — plus the current hour's
 // slim file handle. One mutex covers all memory state and the file append
-// (§4.3: one lock per request, coarse by design); Record never blocks on
+// (one lock per request, coarse by design); Record never blocks on
 // anything but that mutex and the file write.
 type Aggregator struct {
 	mu         sync.Mutex
@@ -25,7 +25,7 @@ type Aggregator struct {
 	cur        map[dimsKey]Counters
 	globalRing *globalRing
 
-	// recentErrs is the recent_errors ring (§8.1): the last recentErrCap
+	// recentErrs is the recent_errors ring:the last recentErrCap
 	// non-ok samples, stored newest first. Purely in-memory — restart
 	// clears it, nothing is ever persisted, no bodies.
 	recentErrs []Sample
@@ -42,7 +42,7 @@ type Aggregator struct {
 
 	// recoveredRows / recoverDur record what startup recovery loaded, for the
 	// one-line startup log — the operator's signal for whether the rollup
-	// file has grown enough to want daily rolling (design §8).
+	// file has grown enough to want daily rolling (the design doc).
 	recoveredRows int
 	recoverDur    time.Duration
 }
@@ -57,7 +57,7 @@ type cachedSnap struct {
 // for the four range keys, so anything beyond that is a programming error.
 const snapCacheMax = 8
 
-// New builds the aggregator and performs synchronous restart recovery (§7):
+// New builds the aggregator and performs synchronous restart recovery:
 // load rollup (last-wins) → catch-up-roll older slim files → rebuild current
 // hour counters and rings from the current slim → open for writing.
 func New(dir string) (*Aggregator, error) {
@@ -79,10 +79,10 @@ func NewAt(dir string, now func() time.Time) (*Aggregator, error) {
 	return a, nil
 }
 
-// recover runs the §7 startup sequence. Rollup load and slim rebuild
+// recover runs the startup sequence. Rollup load and slim rebuild
 // degrade gracefully (unreadable history starts empty; a corrupt line is
 // skipped); only a failure to create the log dir is fatal. recentErrs
-// deliberately starts empty — the ring is purely in-memory (§8.1).
+// deliberately starts empty — the ring is purely in-memory.
 func (a *Aggregator) recover(now time.Time) error {
 	t0 := time.Now()
 	defer func() { a.recoveredRows, a.recoverDur = countRollupRows(a.rollup), time.Since(t0) }()
@@ -114,7 +114,7 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 	a.rollup = rm
 
-	// Step 2: catch-up roll every slim file older than the current hour (§6),
+	// Step 2: catch-up roll every slim file older than the current hour ,
 	// oldest first.
 	old, _ := listSlimFiles(a.dir, a.hour)
 	for _, name := range old {
@@ -137,7 +137,7 @@ func (a *Aggregator) recover(now time.Time) error {
 	}
 
 	// Step 4: open the current hour's slim for appending. Failure degrades
-	// this hour's persistence to memory-only (§9).
+	// this hour's persistence to memory-only.
 	f, err := openSlim(a.dir, a.hour)
 	if err != nil {
 		a.slim = nil
@@ -184,7 +184,7 @@ func (a *Aggregator) MemoryOnly() bool {
 // RecoveryInfo reports what startup recovery loaded: the number of in-memory
 // (hour, dims) rollup rows and how long recovery took. cmd/vmr logs one line
 // from this — the signal for whether the append-only rollup file has grown
-// enough to warrant daily rolling (design §8).
+// enough to warrant daily rolling (the design doc).
 func (a *Aggregator) RecoveryInfo() (rows int, dur time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -215,7 +215,7 @@ func (a *Aggregator) evictOldRollup() {
 	}
 }
 
-// Record books one completed request (§4.1): O(1) memory updates plus at
+// Record books one completed request: O(1) memory updates plus at
 // most one slim append under the aggregator's single mutex. A slim write
 // failure degrades only this sample's persistence — the memory update is
 // still applied, and the write side shuts down for the hour rather than
@@ -235,11 +235,11 @@ func (a *Aggregator) Record(s Sample) {
 		return
 	}
 	// sampleHour is before a.hour: a late-finishing long request whose arrival
-	// belonged to an already rolled hour (§9: hour attribution follows arrival).
+	// belonged to an already rolled hour (hour attribution follows arrival).
 	a.bookPastSampleLocked(s, sampleHour)
 }
 
-// bookSample applies the §4.2 attribution rules to the live maps and appends
+// bookSample applies the attribution rules to the live maps and appends
 // the slim line. Ring and service-face counters only see forwarded samples.
 func (a *Aggregator) bookSample(s Sample, appendFile bool) {
 	key := s.key()
@@ -306,7 +306,7 @@ func (a *Aggregator) bookPastSampleLocked(s Sample, hour time.Time) {
 }
 
 // bookRecentError appends one non-ok sample to the recent_errors ring
-// (§8.1): newest first, capped at recentErrCap (100) and within 24 hours,
+// newest first, capped at recentErrCap (100) and within 24 hours,
 // error and canceled both in, error_class/status/attempt passed through verbatim.
 func bookRecentError(ring []Sample, s Sample) []Sample {
 	if s.Outcome == OutcomeOK {
@@ -328,7 +328,7 @@ func bookRecentError(ring []Sample, s Sample) []Sample {
 }
 
 // rollHourLocked closes the open hour: roll slim files older than newHour
-// into rollup (from the file, not memory — §5), delete them, fold the
+// into rollup (from the file, not memory), delete them, fold the
 // live counters into the rollup map, evict hours past the retention window,
 // and open the new hour's file.
 func (a *Aggregator) rollHourLocked(newHour time.Time) {
@@ -362,21 +362,20 @@ func (a *Aggregator) rollHourLocked(newHour time.Time) {
 	}
 }
 
-// Snapshot aggregates the whole ledger, fresh every call. Read path, holds
-// the same coarse mutex (§4.3). hourlyTail bounds the hourly[] window
-// (HourlyTailDefault, or 12/24/72/168 via /stats?range=). Tests and callers
-// needing an exact read use this; the /stats HTTP path uses CachedSnapshot.
-func (a *Aggregator) Snapshot(hourlyTail int) Snapshot {
+// snapshot aggregates the whole ledger, fresh every call, holding the same
+// coarse mutex. Unexported: test-only introspection — production's
+// only read path (/stats) goes through CachedSnapshot.
+func (a *Aggregator) snapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.snapshotLocked(hourlyTail)
 }
 
-// CachedSnapshot is Snapshot for the /stats read path: it reuses the last
+// CachedSnapshot is the /stats read path: it reuses the last fold per
 // fold per hourly tail for up to snapCacheTTL so a burst of dashboard polls
 // (the Overview poller's ~2s cadence, several tabs, an external monitor)
 // costs one aggregation, not one each. Record never invalidates it — a
-// monitor tolerates a few seconds of lag (§4.3). Uses the injectable clock
+// monitor tolerates a few seconds of lag. Uses the injectable clock
 // so the window is testable.
 func (a *Aggregator) CachedSnapshot(hourlyTail int) Snapshot {
 	a.mu.Lock()

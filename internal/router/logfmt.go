@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Live router log line formatting. Split out of router.go — pure move, no
 // behavior change.
@@ -80,17 +80,8 @@ func capField(f core.RequestFacts) string {
 	if f.HasImage {
 		caps = append(caps, "image")
 	}
-	if f.HasAudio {
-		caps = append(caps, "audio")
-	}
-	if f.HasVideo {
-		caps = append(caps, "video")
-	}
 	if f.HasTools {
 		caps = append(caps, "tools")
-	}
-	if f.WantsThinking {
-		caps = append(caps, "think")
 	}
 	return strings.Join(caps, "|")
 }

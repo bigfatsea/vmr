@@ -1,4 +1,4 @@
-// Ver 2026-07-23 10:00, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package sticky
 
@@ -68,7 +68,7 @@ func TestRegistry_Len(t *testing.T) {
 
 func TestRegistry_MaxEntries_EvictsOldest(t *testing.T) {
 	t.Parallel()
-	r := NewBounded(3)
+	r := newBounded(3)
 
 	now := time.Now()
 	r.mu.Lock()
@@ -123,7 +123,7 @@ func TestRegistry_MaxEntries_EvictsOldest(t *testing.T) {
 
 func TestRegistry_MaxEntries_TTLSweepFirst(t *testing.T) {
 	t.Parallel()
-	r := NewBounded(3)
+	r := newBounded(3)
 
 	now := time.Now()
 	r.mu.Lock()

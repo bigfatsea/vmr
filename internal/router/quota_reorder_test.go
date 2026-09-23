@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
 package router
 
@@ -11,17 +11,7 @@ import (
 	"vmr/internal/adapter"
 	"vmr/internal/core"
 	"vmr/internal/quota"
-	"vmr/internal/strategy"
 )
-
-func priorityDims(t *testing.T) []strategy.Dimension {
-	t.Helper()
-	dims, err := strategy.Build([]string{"priority"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return dims
-}
 
 func epWithLimit(t *testing.T, provider string, priority int, l *core.Limit) *core.Endpoint {
 	t.Helper()
@@ -38,7 +28,7 @@ func TestReorderByQuota_NilRegistry_NoOp(t *testing.T) {
 	l := requestsLimit(100)
 	cands := []*core.Endpoint{epWithLimit(t, "a", 0, &l), epWithLimit(t, "b", 0, &l)}
 	orig := append([]*core.Endpoint(nil), cands...)
-	changed := reorderByQuota(cands, priorityDims(t), nil, chargeNow)
+	changed := reorderByQuota(cands, nil, chargeNow)
 	if changed {
 		t.Error("changed=true with nil Registry, want false")
 	}
@@ -51,7 +41,7 @@ func TestReorderByQuota_NilRegistry_NoOp(t *testing.T) {
 
 func TestReorderByQuota_EmptyCands_NoOp(t *testing.T) {
 	reg := quota.NewRegistry("")
-	if changed := reorderByQuota(nil, priorityDims(t), reg, chargeNow); changed {
+	if changed := reorderByQuota(nil, reg, chargeNow); changed {
 		t.Error("changed=true for empty candidate list, want false")
 	}
 }
@@ -69,7 +59,7 @@ func TestReorderByQuota_NeverCrossesPriorityTiers(t *testing.T) {
 		epWithLimit(t, "high-tier", 0, &lHigh), // priority 0: must stay first regardless of its bad score
 		epWithLimit(t, "low-tier", 1, &lLow),   // priority 1: must stay second regardless of its good score
 	}
-	reorderByQuota(cands, priorityDims(t), reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 	if cands[0].Provider != "high-tier" || cands[1].Provider != "low-tier" {
 		t.Fatalf("quota reordering crossed a priority tier: %v/%v", cands[0].Provider, cands[1].Provider)
 	}
@@ -85,7 +75,7 @@ func TestReorderByQuota_PlaceholderMembersUnchanged(t *testing.T) {
 		epWithLimit(t, "has-quota", 0, &lGood),
 		epWithLimit(t, "no-quota-2", 0, nil),
 	}
-	reorderByQuota(cands, priorityDims(t), reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 	// Only one quota-bearing member in this tier: nothing to reorder against
 	// (reorderTier requires >=2), so positions must be untouched entirely.
 	if cands[0].Provider != "no-quota-1" || cands[1].Provider != "has-quota" || cands[2].Provider != "no-quota-2" {
@@ -109,7 +99,7 @@ func TestReorderByQuota_PlaceholderSlotsUntouchedAmongMultipleQuotaMembers(t *te
 		epWithLimit(t, "placeholder-2", 0, nil),
 		epWithLimit(t, "better", 0, &lGood),
 	}
-	reorderByQuota(cands, priorityDims(t), reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 
 	if cands[0].Provider != "placeholder-1" || cands[2].Provider != "placeholder-2" {
 		t.Fatalf("placeholder slots were touched: %v", providerNames(cands))
@@ -144,31 +134,13 @@ func TestReorderByQuota_DescendingScoreOrder(t *testing.T) {
 		epWithLimit(t, "fresh", 0, &l),
 		epWithLimit(t, "half-used", 0, &l),
 	}
-	reorderByQuota(cands, priorityDims(t), reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 	got := providerNames(cands)
 	want := []string{"fresh", "half-used", "mostly-used"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want %v", got, want)
 		}
-	}
-}
-
-// --- empty dims: whole candidate set is one tier (baseline fact #4) ---
-
-func TestReorderByQuota_EmptyDims_WholeSetIsOneTier(t *testing.T) {
-	reg := quota.NewRegistry("")
-	l := requestsLimit(1000)
-	ps := quota.PeriodStart(l, chargeNow)
-	reg.Charge("used", "requests/1mo", ps, quota.Counters{Requests: 999}, 0)
-
-	cands := []*core.Endpoint{
-		epWithLimit(t, "used", 5, &l), // different Priority values, but dims=nil means priority is never consulted
-		epWithLimit(t, "fresh", 1, &l),
-	}
-	reorderByQuota(cands, nil, reg, chargeNow)
-	if cands[0].Provider != "fresh" {
-		t.Fatalf("with empty dims chain, quota should freely reorder regardless of Priority field: %v", providerNames(cands))
 	}
 }
 
@@ -185,7 +157,7 @@ func TestReorderByQuota_ExhaustedEndpointDemotedNotEvicted(t *testing.T) {
 		epWithLimit(t, "fresh", 0, &l),
 	}
 	before := len(cands)
-	reorderByQuota(cands, priorityDims(t), reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 	if len(cands) != before {
 		t.Fatalf("candidate set size changed: %d -> %d (quota must only reorder, never evict)", before, len(cands))
 	}

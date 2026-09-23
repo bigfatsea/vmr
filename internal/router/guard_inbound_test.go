@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 01:51, by Sonnet 5
 
 // Agent Guard's inbound mount point (M4, narrowed by ADR-15), end to end
 // through Serve — reuses router_serve_test.go's mustConfig/mustSnapshot/
@@ -228,4 +228,127 @@ guard:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Serve never returned -- the non-stream guard buffering read hung past its idle timeout")
 	}
+}
+
+// TestServe_InboundGuard_NonStream_WatchdogIdleReset tests that the
+// non-streaming guard watchdog is an idle timeout (resets on n > 0 bytes
+// read), not a total-duration deadline. A slow healthy upstream sending
+// chunks at intervals < idle but with total time > idle must complete
+// successfully with no TRUNCATED error, whereas a pause > idle must still truncate.
+func TestServe_InboundGuard_NonStream_WatchdogIdleReset(t *testing.T) {
+	const idle = 100 * time.Millisecond
+
+	t.Run("continuous writes exceeding total idle succeed", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			flusher, _ := w.(http.Flusher)
+			// Write 4 chunks with idle/2 (50ms) intervals:
+			// total duration across sleeps = 150ms > idle (100ms).
+			chunks := []string{
+				`{"id":"x",`,
+				`"model":"upstream-model",`,
+				`"choices":[{"message":{"role":"assistant",`,
+				`"content":"slow-but-healthy"}}]}`,
+			}
+			for i, ch := range chunks {
+				if i > 0 {
+					time.Sleep(idle / 2)
+				}
+				w.Write([]byte(ch))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+timeouts:
+  stream_idle: 100ms
+providers:
+  - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
+guard:
+  inbound: {sanitize_invisible_runes: true}
+`)
+		snap := mustSnapshot(t, cfg)
+		rt := New(nil)
+		rt.Guard = mustTestGuard(t)
+		rt.Install(snap)
+
+		w := serveReq(rt, "vm", []byte(`{"model":"vm","messages":[{"role":"user","content":"hi"}]}`))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 OK", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, "slow-but-healthy") {
+			t.Errorf("body = %q, want slow-but-healthy", body)
+		}
+		key := snap.Models["openai-completions"]["vm"].Endpoints[0].HealthKey()
+		st := rt.Health.Status(key, time.Now())
+		if st.Fails != 0 {
+			t.Errorf("endpoint had %d failures, want 0 (healthy slow stream must not be penalized)", st.Fails)
+		}
+	})
+
+	t.Run("pause exceeding idle is truncated", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			flusher, _ := w.(http.Flusher)
+			w.Write([]byte(`{"id":"x",`))
+			if flusher != nil {
+				flusher.Flush()
+			}
+			// Pause exceeding idle (200ms > 100ms).
+			time.Sleep(200 * time.Millisecond)
+			w.Write([]byte(`"model":"upstream-model"}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		cfg := mustConfig(t, `
+listen: 127.0.0.1:0
+timeouts:
+  stream_idle: 100ms
+providers:
+  - {name: p1, base_url: {openai-completions: `+srv.URL+`}, api_key: k1}
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [upstream-model]}
+guard:
+  inbound: {sanitize_invisible_runes: true}
+`)
+		snap := mustSnapshot(t, cfg)
+		rt := New(nil)
+		rt.Guard = mustTestGuard(t)
+		rt.Install(snap)
+
+		done := make(chan any, 1)
+		go func() {
+			defer func() { done <- recover() }()
+			serveReq(rt, "vm", []byte(`{"model":"vm","messages":[{"role":"user","content":"hi"}]}`))
+		}()
+		select {
+		case r := <-done:
+			if r != http.ErrAbortHandler {
+				t.Fatalf("recover() = %v, want http.ErrAbortHandler on truncated stream", r)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("Serve never returned -- stalled stream was not truncated by idle watchdog")
+		}
+
+		key := snap.Models["openai-completions"]["vm"].Endpoints[0].HealthKey()
+		st := rt.Health.Status(key, time.Now())
+		if st.Fails != 1 {
+			t.Errorf("endpoint had %d failures, want 1 (truncated stream must record transient failure)", st.Fails)
+		}
+	})
 }

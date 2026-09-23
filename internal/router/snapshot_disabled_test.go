@@ -1,11 +1,13 @@
-// Ver 2026-09-16, by Pkg-C
+// Ver 2026-09-23 02:30, by GPT-5.2
 package router
 
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"vmr/internal/config"
+	"vmr/internal/quota"
 
 	_ "vmr/internal/adapter/openai"
 )
@@ -58,16 +60,17 @@ func TestBuildSnapshot_DisabledAbsentFromRoutes(t *testing.T) {
 	}
 }
 
-// TestBuildSnapshot_DisabledNoQuotaSpec pins the quota half: a disabled
-// provider gets no core.QuotaSpec, so a takedown doesn't leave a stranded
-// counter bucket for an account carrying no traffic. Flipping disabled
-// back to false restores it — the documented evolution path.
+// TestBuildSnapshot_DisabledNoQuotaSpec pins the quota half of the route
+// expansion: a disabled provider gets no core.QuotaSpec on its (filtered)
+// resolution, so a takedown doesn't leave a stranded counter bucket for an
+// account carrying no traffic. Flipping disabled back to false restores it —
+// the documented evolution path.
 func TestBuildSnapshot_DisabledNoQuotaSpec(t *testing.T) {
 	cfg, err := config.Parse([]byte(disabledSnapYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs := BuildQuotaSpecsDisabled(cfg.Providers, enabledProviders(cfg.Providers))
+	specs := BuildQuotaSpecs(cfg.Providers, enabledProviders(cfg.Providers))
 	if _, ok := specs["p_off"]; ok {
 		t.Errorf("disabled provider p_off has a QuotaSpec, want none")
 	}
@@ -77,25 +80,59 @@ func TestBuildSnapshot_DisabledNoQuotaSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	specs2 := BuildQuotaSpecsDisabled(cfg2.Providers, enabledProviders(cfg2.Providers))
+	specs2 := BuildQuotaSpecs(cfg2.Providers, enabledProviders(cfg2.Providers))
 	if _, ok := specs2["p_off"]; !ok {
 		t.Errorf("re-enabled provider p_off has no QuotaSpec — flipping disabled back to false must restore quota accounting")
 	}
 }
 
-// TestBuildQuotaSpecs_IgnoresDisabledFlag pins the exported
-// BuildQuotaSpecs (internal/replay's entry point) as unfiltered: replay
+// TestBuildQuotaSpecs_NilFilterIgnoresDisabledFlag pins the unfiltered
+// resolution (enabled == nil, internal/replay's entry point): replay
 // targets one specific (provider,model) pair and must resolve its quota
 // spec regardless of the provider's live routing state. The disabled
-// filtering lives only in the BuildSnapshot path
-// (BuildQuotaSpecsDisabled) — two shapes for two consumers.
-func TestBuildQuotaSpecs_IgnoresDisabledFlag(t *testing.T) {
+// filtering lives only in the BuildSnapshot path (an explicit enabled set).
+func TestBuildQuotaSpecs_NilFilterIgnoresDisabledFlag(t *testing.T) {
 	cfg, err := config.Parse([]byte(disabledSnapYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := BuildQuotaSpecs(cfg.Providers)["p_off"]; !ok {
+	if _, ok := BuildQuotaSpecs(cfg.Providers, nil)["p_off"]; !ok {
 		t.Errorf("BuildQuotaSpecs dropped disabled provider p_off — replay needs the spec for its explicit target")
+	}
+}
+
+// TestInstall_DisabledProviderKeepsQuotaLedger pins the reload semantics:
+// installing a snapshot that disables a provider must NOT drop its quota
+// ledger. Prune keeps every provider ProviderLimits() reports, and that
+// deliberately includes disabled ones — disabling is a temporary removal
+// from rotation, and dropping the ledger would zero the period's already-
+// charged usage on re-enable, undercounting spend for the rest of the
+// period.
+func TestInstall_DisabledProviderKeepsQuotaLedger(t *testing.T) {
+	cfg, err := config.Parse([]byte(disabledSnapYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := BuildSnapshot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := BuildQuotaSpecs(cfg.Providers, nil)["p_off"]
+	if spec == nil || len(spec.Limits) == 0 {
+		t.Fatal("no quota spec for p_off")
+	}
+	l := spec.Limits[0]
+	now := time.Now()
+	reg := quota.NewRegistry("")
+	reg.Charge("p_off", quota.LimitKey(l, ""), quota.PeriodStart(l, now), quota.Counters{Requests: 42}, 0)
+
+	rt := New(nil)
+	rt.Quota = reg
+	rt.Install(snap)
+
+	used, _ := reg.Used("p_off", quota.LimitKey(l, ""), quota.PeriodStart(l, now))
+	if used.Requests != 42 {
+		t.Errorf("disabled provider p_off's ledger = %v requests, want 42 — Prune must not drop a disabled provider's period usage", used.Requests)
 	}
 }
 

@@ -22,6 +22,7 @@
 package jsonscan
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -97,5 +98,64 @@ func FuzzWalkArrayElements(f *testing.F) {
 			prevEnd = end
 			return false // visit every element
 		})
+	})
+}
+
+func FuzzReplaceTopLevelValuePrefix(f *testing.F) {
+	seeds := []struct {
+		raw    string
+		newVal string
+	}{
+		{`{"model":"upstream","choices":[{"content":"half`, `"agent"`},
+		{`{"id":"x","model":"old","tail":123}`, `"new"`},
+		{`{"nested":{"model":"inner"}}`, `"agent"`},
+		{`{"model":"a","model":"b","partial":`, `"c"`},
+		{`not json at all`, `"val"`},
+		{``, `"val"`},
+		{`{"model":`, `"val"`},
+		{`{"mod`, `"val"`},
+		{`{"model":"same"}`, `"same"`},
+		{`{"model":123,"unclosed":`, `"agent"`},
+		{`{"model":null}`, `"agent"`},
+		{`{"model":"a\"b\\c","arr":[`, `"agent"`},
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s.raw), []byte(s.newVal))
+	}
+
+	f.Fuzz(func(t *testing.T, raw, newVal []byte) {
+		ranges, pOk := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, newVal)
+		if !pOk || len(ranges) == 0 {
+			if ok {
+				t.Fatalf("TopLevelValuesPrefix declined but ReplaceTopLevelValuePrefix returned ok=true: raw=%q", raw)
+			}
+			if !bytes.Equal(out, raw) {
+				t.Fatalf("declined but out != raw: raw=%q out=%q", raw, out)
+			}
+			return
+		}
+		if !ok {
+			t.Fatalf("TopLevelValuesPrefix succeeded (%v) but ReplaceTopLevelValuePrefix returned ok=false: raw=%q", ranges, raw)
+		}
+		// Zero-copy check
+		if len(ranges) == 1 && bytes.Equal(raw[ranges[0][0]:ranges[0][1]], newVal) {
+			if !bytes.Equal(out, raw) {
+				t.Fatalf("single identical value should return raw unchanged: raw=%q out=%q", raw, out)
+			}
+			return
+		}
+		// Verify reconstructed bytes
+		var expected []byte
+		prev := 0
+		for _, r := range ranges {
+			expected = append(expected, raw[prev:r[0]]...)
+			expected = append(expected, newVal...)
+			prev = r[1]
+		}
+		expected = append(expected, raw[prev:]...)
+		if !bytes.Equal(out, expected) {
+			t.Fatalf("out does not match expected splice:\nraw=%q\nout=%q\nexpected=%q", raw, out, expected)
+		}
 	})
 }

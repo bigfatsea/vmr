@@ -12,7 +12,7 @@ import (
 // lockFileName is livestats' advisory-lock file inside log_dir. Separate from
 // audit's .vmr-audit.lock on purpose: livestats does not parasitize audit's
 // lock, because with -audit=false that lock is never taken and "keep no
-// bodies but still monitor" is a first-class scenario (design §1.2/§3.2).
+// bodies but still monitor" is a first-class scenario (the design doc).
 const lockFileName = ".vmr-stats.lock"
 
 // acquireDirLock takes an exclusive non-blocking advisory lock on dir so a

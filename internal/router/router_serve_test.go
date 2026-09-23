@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-23 02:40, by Claude Opus 5.5
 //
 // Direct unit tests for the router's Serve failover loop, copyFlush
 // watchdog, parseRetryAfter, IngressPath, and 3xx redirect passthrough.
@@ -96,7 +96,7 @@ func newMockUpstream(t *testing.T, status int, body string) *mockUpstream {
 func serveReq(rt *Router, model string, body []byte) *httptest.ResponseRecorder {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader(body))
 	w := httptest.NewRecorder()
-	rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", nil)
+	rt.Serve(w, req, &core.CanonicalRequest{Model: model, Raw: body}, "openai-completions", rt.Snapshot(), nil)
 	return w
 }
 
@@ -916,7 +916,8 @@ models:
 		}()
 		req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader([]byte(`{}`)))
 		w := httptest.NewRecorder()
-		rt.tryOne(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+		ac := newAttemptCtx(rt, w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+		rt.tryOne(ac)
 	}()
 
 	// After the panic, tryOne's defer func should have called ReportNeutral,

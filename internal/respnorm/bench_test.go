@@ -1,4 +1,4 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 12:05, by pi
 
 // Baseline benchmarks for the hot streaming-forward path — this package had
 // none until a B7 follow-up review flagged it: CLAUDE.md's "performance
@@ -45,8 +45,8 @@ func benchSSEPayload(n int) []byte {
 
 // BenchmarkStream_PassthroughStreaming is the hot-path default: SSE,
 // openai, no quirk shape detected — settles into passthrough after the
-// first event and streams the rest through with a per-block regex scan,
-// never buffering the whole body.
+// first event and streams the rest through with a per-event structural
+// model locate, never buffering the whole body.
 func BenchmarkStream_PassthroughStreaming(b *testing.B) {
 	payload := benchSSEPayload(200) // ~200 token deltas, a realistic reply length
 	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai-completions"}
@@ -58,7 +58,7 @@ func BenchmarkStream_PassthroughStreaming(b *testing.B) {
 }
 
 // BenchmarkStream_Buffered is the non-SSE path: a single JSON object,
-// normalized in one regex pass at EOF instead of per-event.
+// normalized in one pass at EOF instead of per-event.
 func BenchmarkStream_Buffered(b *testing.B) {
 	payload := []byte(`{"choices":[{"message":{"content":"` + strings.Repeat("token ", 500) + `"}}]}`)
 	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: false, Protocol: "openai-completions"}
@@ -71,7 +71,7 @@ func BenchmarkStream_Buffered(b *testing.B) {
 
 // BenchmarkStream_OpaquePassthrough is the zero-transform path (compressed
 // response body) — a pure byte copy with usage/byte-count sniffing but no
-// regex work at all, the cheapest of the three.
+// rewrite work at all, the cheapest of the three.
 func BenchmarkStream_OpaquePassthrough(b *testing.B) {
 	payload := benchSSEPayload(200)
 	opts := Options{ClientModel: "agent", UpstreamModel: "upstream-model", IsSSE: true, Protocol: "openai-completions", Opaque: true}

@@ -3,7 +3,7 @@ package livestats
 import "time"
 
 // slimNameLayout is the slim WAL file name: vmr-stats-YYYYMMDD-HH.jsonl in
-// the hour's own zone (design §3.2). The layout doubles as the parser.
+// the hour's own zone (the design doc). The layout doubles as the parser.
 const slimNameLayout = "vmr-stats-20060102-15.jsonl"
 
 // hourStartOf buckets t into its clock hour, keeping t's own location —

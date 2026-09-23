@@ -7,7 +7,7 @@ import (
 )
 
 // Snapshot is the JSON-ready read-time aggregation behind GET /stats
-// (design §8). Everything is computed at read time from the in-memory
+// (the design doc). Everything is computed at read time from the in-memory
 // ledger; nothing here mutates aggregator state. Hourly is parameterized
 // by the caller's tail (HourlyTailDefault, or 12/24/72/168 via ?range=);
 // daily[] is always the last dailyTail local-calendar days with data.
@@ -109,7 +109,7 @@ func (r *hourRow) add(h time.Time, c Counters) {
 // holds the mutex.
 func (a *Aggregator) snapshotLocked(hourlyTail int) Snapshot {
 	// request-face dimension profiles accumulate across every group; the
-	// provider profile covers forwarded samples only (§4.2).
+	// provider profile covers forwarded samples only.
 	type axis map[string]*Counters
 	byTag, byLabel := axis{}, axis{}
 	prov := map[provKey]*Counters{}

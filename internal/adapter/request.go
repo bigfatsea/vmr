@@ -1,11 +1,11 @@
-// Ver 2026-09-01, by Stan: Q36
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Shared upstream request construction. The three passthrough adapters
 // (openai-completions, anthropic-messages, openai-responses) differ only in
 // which role-bearing array they rewrite and how they carry the credential;
 // everything else — model rewrite, request assembly, passthrough header
 // copy, content-type — is identical. One helper keeps the three from
-// drifting (Q36).
+// drifting.
 package adapter
 
 import (

@@ -1,4 +1,4 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
 // Tests for P3's multi-Limit-per-provider support: charging every applicable
 // Limit on a successful response (ChargeResponse/applicableLimits), Scope
@@ -87,7 +87,7 @@ func TestReorderByQuota_ScopedLimit_TreatsNonMatchingEndpointAsUnmetered(t *test
 	epB := &core.Endpoint{Provider: "p1", Model: "unrelated-model", Quota: nil}
 	cands := []*core.Endpoint{epA, epB}
 
-	changed := reorderByQuota(cands, nil, reg, chargeNow)
+	changed := reorderByQuota(cands, reg, chargeNow)
 	if changed {
 		t.Fatalf("reorderByQuota changed order, want no-op — neither candidate has an applicable Limit")
 	}
@@ -121,7 +121,7 @@ func TestReorderByQuota_MultiLimit_BlownGateDeprioritizes(t *testing.T) {
 	// throttle exists to engage.
 	reg.Charge("gated", quota.LimitKey(gate, ""), quota.PeriodStart(gate, chargeNow), quota.Counters{Requests: 99}, 0)
 	cands := []*core.Endpoint{epGated, epHealthy} // gated-first, so a no-op leaves it first
-	if changed := reorderByQuota(cands, nil, reg, chargeNow); changed {
+	if changed := reorderByQuota(cands, reg, chargeNow); changed {
 		t.Fatalf("reorderByQuota reordered on a live 99%%-used gate — no graded throttle exists; only a blown gate reorders")
 	}
 	if cands[0] != epGated {
@@ -131,7 +131,7 @@ func TestReorderByQuota_MultiLimit_BlownGateDeprioritizes(t *testing.T) {
 	// Blow the gate completely (100/100): now the provider must sink.
 	reg.Charge("gated", quota.LimitKey(gate, ""), quota.PeriodStart(gate, chargeNow), quota.Counters{Requests: 1}, 0)
 	cands = []*core.Endpoint{epGated, epHealthy}
-	reorderByQuota(cands, nil, reg, chargeNow)
+	reorderByQuota(cands, reg, chargeNow)
 	if cands[0] != epHealthy {
 		t.Fatalf("order = %v, want epHealthy first (epGated's gate is blown — the local bound tripped before the vendor's limit)", cands)
 	}

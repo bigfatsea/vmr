@@ -1,4 +1,4 @@
-// Ver 2026-09-20 11:58, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Provider-level concurrency gate and registry. Limits in-flight requests per
 // provider account, supporting fast non-blocking skip for new sessions and
@@ -61,23 +61,9 @@ func (l *ProviderLimiter) QueueWait() time.Duration {
 	return l.queueWait
 }
 
-// InFlight returns the current active in-flight requests.
-func (l *ProviderLimiter) InFlight() int64 {
-	if l == nil {
-		return 0
-	}
-	return l.inFlight.Load()
-}
-
-// Waiting returns the number of requests currently queued.
-func (l *ProviderLimiter) Waiting() int64 {
-	if l == nil {
-		return 0
-	}
-	return l.waiting.Load()
-}
-
-// Stats returns the instantaneous concurrency metrics for /stats.
+// Stats returns the instantaneous concurrency metrics for /stats. The raw
+// inFlight/waiting atomics double as the package tests' introspection point
+// (no production caller needs the single-value getters Stats doesn't cover).
 func (l *ProviderLimiter) Stats() ProviderConcurrencyStats {
 	if l == nil {
 		return ProviderConcurrencyStats{}

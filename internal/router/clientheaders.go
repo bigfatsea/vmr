@@ -1,4 +1,4 @@
-// Ver 2026-07-26, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 package router
 
 import (
@@ -55,7 +55,7 @@ var headerBlocklist = map[string]struct{}{
 // packages that already depend on this one. It sat in core only because
 // core was the first place both could reach without importing the HTTP
 // server — the same reasoning that put WriteJSON/WriteError there, and the
-// same reason both moved out once B5 wrote core's admission rule down (see
+// same reason both moved out once core's admission rule was written down (see
 // core's package comment: shared TYPES, not behavior with a real owner).
 func FilterClientHeaders(h http.Header) http.Header {
 	out := http.Header{}

@@ -1,16 +1,17 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
-// Unicode steganography online sanitizer (M4.6; design spec §4.4.2). The
-// classification decision (which code point falls in which tier) is M1.4's
-// ClassifyRune -- this file only adds the DELETION action on top of it: a
+// Unicode steganography online sanitizer. The
+// classification decision (which code point falls in which tier) is
+// ClassifyRune's (runes.go) -- this file only adds the DELETION action on
+// top of it: a
 // generic JSON string-value walk (parallel to walk.go's, but a rewrite
 // pass instead of a scan -- see below for why it's a separate walker
 // rather than a reuse of Engine's) that splices A-tier (and, depending on
 // config, B-tier) code points out of every string value in one SSE
-// event's JSON body, leaves C-tier untouched always (K-G7), and returns
+// event's JSON body, leaves C-tier untouched always, and returns
 // the original bytes unchanged (zero allocation) whenever nothing needed
 // touching -- the common case for the overwhelming majority of real
-// traffic per §2.3's corpus baseline.
+// traffic per the corpus baseline.
 //
 // A separate walker rather than reusing walk.go's Engine-coupled
 // walkValue/walkObject/walkArray: those exist to populate a Scratch's
@@ -19,17 +20,17 @@
 // different accumulation shape (an edit list reconstructed into a new
 // buffer) and no Engine/Rule/Tier concept at all. Forcing one traversal to
 // serve both would mean threading a "scan vs rewrite" mode through
-// walk.go's already-tested M1/M3 code for no benefit -- the traversal
+// walk.go's already-tested scanning code for no benefit -- the traversal
 // skeleton itself is genuinely small (SkipJSONString/SkipJSONWS/SkipJSONValue
 // composition), so duplicating just that skeleton here is cheaper and
 // safer than coupling two unrelated operations to one shared walker.
 //
-// Both wire forms are handled per string value, per §4.4.2's "转义感知"
-// requirement: literal UTF-8 bytes (JSON permits raw non-ASCII inside a
+// Both wire forms are handled per string value (escape-aware): literal
+// UTF-8 bytes (JSON permits raw non-ASCII inside a
 // string) and \uXXXX / surrogate-pair \uXXXX\uXXXX escapes -- an attacker
 // can equally well spell a zero-width character as six literal ASCII
 // bytes, which a byte-level scanner never looking for \u would miss
-// entirely (the exact evasion the design spec calls RT-03).
+// entirely.
 package guard
 
 import (
@@ -42,8 +43,8 @@ import (
 
 // shouldStrip decides one classified rune's fate. A-tier (Tags/Control) is
 // always stripped once sanitization is on at all -- there is no legitimate
-// use of either in API text (§4.4.2's table). C-tier (varsel) is NEVER
-// stripped (K-G7: required by real scripts and every ZWJ emoji sequence).
+// use of either in API text. C-tier (varsel) is NEVER
+// stripped (required by real scripts and every ZWJ emoji sequence).
 // Everything else classified is B-tier, always stripped too: the former
 // strip/flag_only middle rung was removed after the calibration corpus
 // showed B-tier's residual harm is visual only (a handful of occurrences
@@ -77,7 +78,7 @@ type sanitizeState struct {
 // shouldStrip) code points, counting each STRIPPED occurrence into dst --
 // dst is the "what this call actually removed" tally that becomes
 // Record.Guard.SanitizedRunes, so a C-tier code point (classified but
-// never stripped, K-G7) is never counted here even though ClassifyRune
+// never stripped) is never counted here even though ClassifyRune
 // recognizes it. ClassifyRunes (runes.go) is the separate offline function
 // that counts every classified occurrence regardless of tier, for the
 // different question "what survived in the final response" -- conflating

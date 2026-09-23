@@ -74,7 +74,7 @@ func TestAggregator_AttributionRules(t *testing.T) {
 	}
 	agg.Record(sValid)
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 
 	// Verify ProviderRow
 	if len(snap.ByProviderModel) != 1 {
@@ -161,7 +161,7 @@ func TestAggregator_HourlyLazyRollAndFileLifecycle(t *testing.T) {
 	}
 
 	// Snapshot should reflect both hour 10 and hour 11 in hourly[]
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.Hourly) != 2 {
 		t.Errorf("expected 2 hourly rows, got %d", len(snap.Hourly))
 	}
@@ -230,7 +230,7 @@ func TestAggregator_RestartRecovery(t *testing.T) {
 		t.Errorf("hour 10 slim should remain open for write")
 	}
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 
 	// Global ring must have recovered the 120 samples from hour 10
 	if len(snap.ByProviderModel) != 1 {
@@ -293,7 +293,7 @@ func TestAggregator_RollupRetentionOnLoad(t *testing.T) {
 	}
 
 	var total int64
-	for _, pr := range agg.Snapshot(HourlyTailDefault).ByProviderModel {
+	for _, pr := range agg.snapshot(HourlyTailDefault).ByProviderModel {
 		total += pr.OK
 	}
 	if total != 21 {
@@ -335,7 +335,7 @@ func TestAggregator_RetentionBoundaryIsCalendarDay(t *testing.T) {
 	defer agg.Close()
 
 	var total int64
-	for _, pr := range agg.Snapshot(HourlyTailDefault).ByProviderModel {
+	for _, pr := range agg.snapshot(HourlyTailDefault).ByProviderModel {
 		total += pr.OK
 	}
 	if total != 7 {
@@ -382,7 +382,7 @@ func TestAggregator_SecondInstanceDegradesToMemoryOnly(t *testing.T) {
 		Provider: "p1", Model: "m1", Forwarded: true, DurMS: 100, TTFTMS: 10,
 		Tokens: TokenCounts{In: 1, Out: 1},
 	})
-	snap := a2.Snapshot(HourlyTailDefault)
+	snap := a2.snapshot(HourlyTailDefault)
 	if len(snap.ByProviderModel) != 1 || snap.ByProviderModel[0].OK != 1 {
 		t.Errorf("memory-only instance must still count: %+v", snap.ByProviderModel)
 	}
@@ -441,7 +441,7 @@ func TestAggregator_CachedSnapshotStaleWindow(t *testing.T) {
 	if got := providerOK(agg.CachedSnapshot(HourlyTailDefault)); got != 1 {
 		t.Errorf("cached OK within TTL = %d, want stale 1", got)
 	}
-	if got := providerOK(agg.Snapshot(HourlyTailDefault)); got != 2 {
+	if got := providerOK(agg.snapshot(HourlyTailDefault)); got != 2 {
 		t.Errorf("fresh Snapshot OK = %d, want 2", got)
 	}
 
@@ -496,7 +496,7 @@ func TestAggregator_Concurrency(t *testing.T) {
 				}
 				agg.Record(s)
 				if i%10 == 0 {
-					_ = agg.Snapshot(HourlyTailDefault)
+					_ = agg.snapshot(HourlyTailDefault)
 					_ = agg.CachedSnapshot(HourlyTailDefault)
 				}
 			}
@@ -504,7 +504,7 @@ func TestAggregator_Concurrency(t *testing.T) {
 	}
 	wg.Wait()
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	expectedTotal := int64(workers * perWorker)
 	if len(snap.ByProviderModel) != 1 {
 		t.Fatalf("expected 1 provider model row, got %d", len(snap.ByProviderModel))

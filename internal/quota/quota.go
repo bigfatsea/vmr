@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package quota
 
@@ -80,7 +80,7 @@ func ModelSetsOverlap(a, b []string) bool {
 // LimitKey returns l's Registry storage key for a charge/read against
 // model. Two shapes, matching core.Limit.Models' two accounting modes:
 //   - shared (Models unset): "metric/every" — model is ignored; every
-//     matching endpoint's charges land in the same bucket, exactly P1/P2's
+//     matching endpoint's charges land in the same bucket, the
 //     original single-bucket-per-Limit shape.
 //   - per-model (Models set, wildcard or restricted list): "metric/every
 //     #model=<model>" — keyed by the ACTUAL model this charge/read is for,
@@ -91,7 +91,7 @@ func ModelSetsOverlap(a, b []string) bool {
 //     actual keys instead.
 //
 // Shared by router (charge/score) and any offline reader (vmr analyze's
-// §2.5 table) — one formula, every consumer, the same reason
+// quota-vs-consumption table) — one formula, every consumer, the same reason
 // BaseAmount/ApplyModelMultiplier live here instead of being reimplemented
 // at each call site.
 func LimitKey(l core.Limit, model string) string {
@@ -108,7 +108,7 @@ func LimitKey(l core.Limit, model string) string {
 // charged against a per-model Limit (its Scope alone doesn't say — "*"
 // covers an open-ended set, and even a restricted list only says which
 // models COULD have a bucket, not which ones actually do yet). Callers:
-// router.QuotaStatus (walks the live Registry) and vmr analyze's §2.5 table
+// router.QuotaStatus (walks the live Registry) and vmr analyze's quota table
 // (walks the offline quota.LoadFile snapshot) — both need the same prefix,
 // computed the same way, so this isn't reimplemented on either side.
 func PerModelPrefix(l core.Limit) string {
@@ -209,7 +209,7 @@ type Registry struct {
 	path     string
 	dirty    bool
 	logger   *log.Logger
-	// rollbackWarned dedups the clock-rollback WARN (R49): during a rollback
+	// rollbackWarned dedups the clock-rollback WARN: during a rollback
 	// every Charge/Used hits resetIfStaleLocked, and a persistent rollback
 	// must not spam the log — one line per process lifetime covers it.
 	rollbackWarned bool
@@ -231,7 +231,7 @@ func NewRegistry(path string) *Registry {
 	return &Registry{accounts: map[string]map[string]*bucket{}, path: path}
 }
 
-// SetLogger wires a logger for the clock-rollback WARN (R49). Nil (the
+// SetLogger wires a logger for the clock-rollback WARN. Nil (the
 // default) silences it. Takes r.mu because resetIfStaleLocked reads the
 // field under it.
 func (r *Registry) SetLogger(l *log.Logger) {
@@ -241,8 +241,8 @@ func (r *Registry) SetLogger(l *log.Logger) {
 }
 
 // Keys returns every limitKey currently on record for provider — including
-// ones from a since-changed config (§9.3's orphan-key caveat applies here
-// too: this never cleans up, it just reports what's there). Needed to
+// ones from a since-changed config (the design doc's orphan-key caveat
+// applies here too: this never cleans up, it just reports what's there). Needed to
 // enumerate a per-model Limit's actual live buckets (see PerModelPrefix/
 // ExtractModel): a "*" Scope's membership is open-ended, so which models
 // have a bucket is a live-Registry fact, not something derivable from
@@ -284,12 +284,12 @@ func (r *Registry) getLocked(provider, limitKey string) *bucket {
 // first Charge/Used after the gap runs, simply by comparing timestamps
 // instead of replaying missed ticks. Returns true when it actually reset, so
 // a read path (Used/Snapshot) can mark the Registry dirty — a period
-// roll observed only by a read still needs to reach vmr-quota.json (B8).
+// roll observed only by a read still needs to reach vmr-quota.json.
 //
 // A backward move (ps < b.PeriodStart) is a clock rollback — NTP
 // correction, VM snapshot restore, TZ change — NOT a new period: the bucket
 // is kept and the event warned about once per process (every Charge/Used
-// during a rollback would otherwise re-hit the same condition). (R49)
+// during a rollback would otherwise re-hit the same condition).
 func (r *Registry) resetIfStaleLocked(b *bucket, periodStart time.Time) bool {
 	ps := periodStart.Unix()
 	if ps > b.PeriodStart {

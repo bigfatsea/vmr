@@ -1,4 +1,4 @@
-// Ver 2026-09-02 12:00, by pi-agent
+// Ver 2026-09-23 02:40, by Claude Opus 5.5
 //
 // Health-reporting semantics of the streaming success path (forwardSuccess):
 // a 200 header followed by a mid-stream cut must reach the health state
@@ -122,7 +122,7 @@ models:
 
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"vm"}`)))
 	w := &failingWriter{}
-	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{"model":"vm"}`)}, "openai-completions", nil)
+	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{"model":"vm"}`)}, "openai-completions", rt.Snapshot(), nil)
 
 	st := rt.Health.Status(ep.HealthKey(), time.Now())
 	if st.Fails != 0 || st.Available == false || st.Probing {
@@ -163,7 +163,8 @@ models:
 	}
 	req := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader([]byte(`{}`)))
 	w := httptest.NewRecorder()
-	done, _, success := rt.tryOne(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+	ac := newAttemptCtx(rt, w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+	done, _, success := rt.tryOne(ac)
 	if !done || !success {
 		t.Fatalf("done=%v success=%v, want true true", done, success)
 	}
@@ -208,7 +209,8 @@ models:
 				t.Fatalf("recover() = %v, want http.ErrAbortHandler", r)
 			}
 		}()
-		rt.tryOne(w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+		ac := newAttemptCtx(rt, w, req, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{}`)}, ep, snap, 1, time.Now(), nil)
+		rt.tryOne(ac)
 	}()
 	st := rt.Health.Status(key, time.Now())
 	if st.Fails != 2 {

@@ -1,11 +1,11 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package quota implements Quota-Aware Routing's accounting half: counting
 // what a provider account has consumed against its configured Limit(s) and
 // computing the headroom score the router reorders candidates by. See
 // docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
 // "现状与后续计划" section for what's actually shipped (currently: one or
-// more tumbling Limits per provider, P3's bucket-vs-gate multi-window
+// more tumbling Limits per provider with the bucket-vs-gate multi-window
 // merge; rolling windows remain undelivered).
 //
 // Depends only on core, internal/fmtutil (DisplayZone — period boundaries

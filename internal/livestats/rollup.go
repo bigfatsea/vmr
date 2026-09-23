@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Persisted artifact names and modes (§3.2/§3.3). 0600 files / 0700 dirs —
+// Persisted artifact names and modes. 0600 files / 0700 dirs —
 // the ledger carries usage profiles, the same bar the audit log is held to.
 const (
 	rollupFileName = "vmr-stats-rollup.jsonl"
@@ -22,11 +22,11 @@ const (
 )
 
 // slimRow is one completed request, verbatim the design's slim example
-// (§3.2). Key names are the contract: tokens/client_key_tag/key_label quote
+// Key names are the contract: tokens/client_key_tag/key_label quote
 // audit's names, vmodel is the one deliberately renamed field (the flat row
 // carries both the virtual and the upstream name, so the virtual one needs
 // its own key). The zone offset in ts is write-time, preserved as-is.
-// Forwarded is the explicit service-quality gate (design §4.2) — Provider
+// Forwarded is the explicit service-quality gate (the design doc) — Provider
 // can be set from a failed request's terminal attempt too, so it alone no
 // longer implies forwarded; a pre-upgrade slim row without this field reads
 // back as false (bounded, self-healing: only the still-open current hour at
@@ -48,9 +48,9 @@ type slimRow struct {
 }
 
 // rollupRow is one (hour × dims) aggregate line, verbatim the design's
-// example (§3.3). Rows are append-only; a (hour, dims) key may legitimately
+// example. Rows are append-only; a (hour, dims) key may legitimately
 // appear more than once after a crash between rollup append and slim delete
-// — readers take the last row per key (§3.3/§6).
+// — readers take the last row per key.
 type rollupRow struct {
 	Hour string      `json:"hour"`
 	Dims Dims        `json:"dims"`
@@ -82,7 +82,7 @@ const hourFormat = "2006-01-02T15:04:05Z07:00"
 // appendJSONL appends one JSON line to path, creating it (0600) as needed.
 // The whole line goes in one Write call; short appends are atomic in
 // practice on local POSIX filesystems, and any torn line is dropped at read
-// time (§3.3).
+// time.
 func appendJSONL(path string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -101,7 +101,7 @@ func appendJSONL(path string, v any) error {
 }
 
 // readJSONL streams f line by line. A trailing line without a newline
-// (torn write) still parses; unparseable lines are skipped (§6).
+// (torn write) still parses; unparseable lines are skipped.
 func readJSONL(f io.Reader, decode func(line []byte) error) error {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -121,11 +121,11 @@ func readJSONL(f io.Reader, decode func(line []byte) error) error {
 var errSkipLine = errors.New("skip line")
 
 // loadRollup reads the rollup file into an in-memory map, last row per
-// (hour, dims) key winning (§3.3). A missing file starts from an empty map
-// — history loss is an accepted degradation, never a startup blocker (§7).
+// (hour, dims) key winning. A missing file starts from an empty map
+// — history loss is an accepted degradation, never a startup blocker.
 // Keys carry the stamp's own location. Rows older than minHour are read past
 // but not kept: the file is the full archive, the map is the retention
-// window (§8). A zero minHour keeps everything.
+// window. A zero minHour keeps everything.
 func loadRollup(path string, minHour time.Time) (map[time.Time]map[dimsKey]Counters, error) {
 	m := make(map[time.Time]map[dimsKey]Counters)
 	f, err := os.Open(path)
@@ -158,7 +158,7 @@ func loadRollup(path string, minHour time.Time) (map[time.Time]map[dimsKey]Count
 }
 
 // listSlimFiles returns the directory's slim file names for hours strictly
-// before `before`, oldest first (§6: catch-up rolls every un-rolled hour).
+// before `before`, oldest first (catch-up rolls every un-rolled hour).
 func listSlimFiles(dir string, before time.Time) ([]string, error) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -187,7 +187,7 @@ func listSlimFiles(dir string, before time.Time) ([]string, error) {
 
 // rollSlimFile aggregates one complete slim file by (hour × dims) — always
 // from the file, never from memory; that is what makes rolling idempotent
-// (§5) — and appends the result to the rollup file. A row whose own ts
+// and the result is appended to the rollup file. A row whose own ts
 // disagrees with the file's hour is bucketed by its own ts, the same rule
 // the live path uses.
 func rollSlimFile(dir, name string) error {

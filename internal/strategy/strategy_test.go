@@ -1,4 +1,4 @@
-// Ver 2026-07-07 02:25, by Fable 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 package strategy
 
 import (
@@ -15,11 +15,7 @@ func TestPrioritySortStableOnTies(t *testing.T) {
 		{Provider: "a", Priority: 1},
 		{Provider: "b", Priority: 1}, // same priority as "a", listed after
 	}
-	dims, err := Build([]string{"priority"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	Sort(eps, dims)
+	Sort(eps)
 	got := []string{eps[0].Provider, eps[1].Provider, eps[2].Provider}
 	want := []string{"a", "b", "c"}
 	for i := range want {
@@ -29,27 +25,16 @@ func TestPrioritySortStableOnTies(t *testing.T) {
 	}
 }
 
-func TestPriorityCompareNoOverflow(t *testing.T) {
+func TestPrioritySortNoOverflow(t *testing.T) {
 	t.Parallel()
-	// cmp.Compare avoids the subtraction overflow that a-b produces
-	// when the two values are at opposite extremes of int.
-	d := priority{}
-	a := &core.Endpoint{Priority: math.MaxInt32}
-	b := &core.Endpoint{Priority: math.MinInt32}
-	if got := d.Compare(a, b); got <= 0 {
-		t.Errorf("MaxInt32 vs MinInt32: got %d, want > 0", got)
+	// eps[i].Priority < eps[j].Priority avoids subtraction overflow
+	// when two values are at opposite extremes of int.
+	eps := []*core.Endpoint{
+		{Provider: "max", Priority: math.MaxInt32},
+		{Provider: "min", Priority: math.MinInt32},
 	}
-	if got := d.Compare(b, a); got >= 0 {
-		t.Errorf("MinInt32 vs MaxInt32: got %d, want < 0", got)
-	}
-	if got := d.Compare(a, a); got != 0 {
-		t.Errorf("equal priorities: got %d, want 0", got)
-	}
-}
-
-func TestBuildUnknownDimension(t *testing.T) {
-	t.Parallel()
-	if _, err := Build([]string{"priority", "nosuch"}); err == nil {
-		t.Error("want error for unknown dimension")
+	Sort(eps)
+	if eps[0].Provider != "min" || eps[1].Provider != "max" {
+		t.Errorf("order: got %v, %v; want min, max", eps[0].Provider, eps[1].Provider)
 	}
 }

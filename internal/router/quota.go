@@ -1,4 +1,4 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Quota-Aware Routing's router-side glue: metering a successful response
 // against its provider's configured Limit(s) (chargeQuota/tokenCharge) and
@@ -21,7 +21,6 @@ import (
 	"vmr/internal/core"
 	"vmr/internal/quota"
 	"vmr/internal/respnorm"
-	"vmr/internal/strategy"
 )
 
 // applicableLimits filters limits down to the ones whose Scope covers
@@ -52,7 +51,7 @@ func applicableLimits(limits []core.Limit, model string) []core.Limit {
 // the audit stamp (see forwardSuccess) — they are ignored outright for a
 // metric: requests Limit, which bills one unit regardless.
 //
-// nil-safe throughout, per the dev plan's §5.4 contract: rt.Quota==nil (no
+// nil-safe throughout: rt.Quota==nil (no
 // quota.Registry wired up — most tests, vmr diagnose), ep.Quota==nil (this
 // endpoint's provider has no quota: configured), and an empty Limits slice
 // are all silent no-ops, never a panic — a statistics helper must not be
@@ -113,7 +112,7 @@ func tokenCharge(rbody respnorm.NormalizerStream, creq *core.CanonicalRequest) (
 	// truncated after Anthropic's message_start has real INPUT usage but
 	// only the ~1 placeholder output — billing that as exact would write
 	// out≈1 into the ledger with estimated=0, poisoning estimated_pct, the
-	// operator's only trust signal. The per-side flags decide (R46).
+	// operator's only trust signal. The per-side flags decide.
 	u, _ := rbody.Usage()
 	inSniffed, outSniffed = rbody.UsageSides()
 	// Request-side degraded estimate reuses the cheap pre-routing number every
@@ -164,9 +163,8 @@ func TokenCountersSides(u chatmsg.Usage, inSniffed, outSniffed bool, inEst, outE
 }
 
 // QuotaProviderStatus is one (provider, Limit) pair's live state, for
-// /status's quota section and `vmr status` — P3: one row per Limit,
-// not per provider, now that a provider can carry more than one window
-// (see docs/VirtualModelRouter_Design_v4_Quota.md's §5.2). Fresh/CacheRead/
+// /status's quota section and `vmr status` — one row per Limit,
+// not per provider, now that a provider can carry more than one window.
 // CacheWrite/Out/Requests are the raw stored components (see
 // quota.Counters) — exposed alongside the already-weighted Used/Pct so a
 // user with a high-cache-hit-rate account can see, on day one, how far
@@ -186,12 +184,12 @@ type QuotaProviderStatus struct {
 	// Limit is a gate; a shared/wildcard row's competitors exclude any
 	// restricted-list Limit, which only ever competes for the models it
 	// names). Always "bucket" for a provider with exactly one Limit — the
-	// P1/P2 shape.
+	// zero-config shape.
 	Role         string    `json:"role"`
 	Amount       float64   `json:"amount"`
 	Used         float64   `json:"used"`     // base(metric) already applied — directly comparable to Amount
 	Pct          float64   `json:"pct"`      // Used/Amount*100, not clamped — can exceed 100 for an over-quota bucket
-	Headroom     float64   `json:"headroom"` // this Limit's own raw headroom (§5.1) — NOT the provider's merged routing score, see quota.ScoreForLimits
+	Headroom     float64   `json:"headroom"` // this Limit's own raw headroom — NOT the provider's merged routing score, see quota.ScoreForLimits
 	PeriodStart  time.Time `json:"period_start"`
 	PeriodEndsAt time.Time `json:"period_ends_at"`
 	// EstimatedPct is 0 for metric=requests (always exact) and for a
@@ -295,7 +293,7 @@ func (rt *Router) QuotaStatus() []QuotaProviderStatus {
 
 // quotaStatusRowsForProvider renders every QuotaProviderStatus row for one
 // provider's Limits. A shared Limit (quota.PerModel false) always produces
-// exactly one row, same as P1/P2. A per-model Limit's row count can't be
+// exactly one row. A per-model Limit's row count can't be
 // derived from its declared Scope — a wildcard's membership is open-ended,
 // and even a restricted list only says which models COULD have a bucket,
 // not which ones actually do — so this walks the Registry's actual live
@@ -377,22 +375,19 @@ func roundDisplay(v float64) float64 {
 	return math.Round(v*1e6) / 1e6
 }
 
-// reorderByQuota reorders cands in place: within each tier that dims'
-// Dimension chain considers equal (a full tie across every Dimension.
-// Compare — priority, or any future dimension), quota-bearing endpoints are
-// reordered in place across the slots they already occupy, by headroom-score
-// descending; non-quota endpoints (or endpoints whose provider's quota has
-// no Limit applicable to that endpoint's own model — see applicableLimits)
-// keep their exact position. Called from Serve right after strategy.Sort
-// and before the Sticky Model block — see router.go's Serve. Reports
-// whether the very first candidate actually changed, purely for
-// X-VMR-Route-Reason's pick=quota marker (routehdr.go).
+// reorderByQuota reorders cands in place: within each priority tier established
+// by strategy.Sort, quota-bearing endpoints are reordered in place across the
+// slots they already occupy, by headroom-score descending; non-quota endpoints
+// (or endpoints whose provider's quota has no Limit applicable to that
+// endpoint's own model — see applicableLimits) keep their exact position.
+// Called from buildCandidates right after strategy.Sort and before the Sticky
+// Model block. Reports whether the very first candidate actually changed,
+// purely for X-VMR-Route-Reason's pick=quota marker (routehdr.go).
 //
 // Two invariants this function exists to preserve (see the design doc's
 // Scheduling Flow section):
-// 1. it never reorders ACROSS tiers — priority's ordering intent, or any
-// other Dimension a future release adds, is never crossed by a quota
-// decision;
+// 1. it never reorders ACROSS priority tiers — priority's ordering intent
+// is never crossed by a quota decision;
 // 2. it never touches a candidate with no applicable quota Limit — so
 // configuring quota for one provider (or scoping a Limit to specific
 // models) can never move an unrelated candidate's position (the "占位
@@ -400,14 +395,14 @@ func roundDisplay(v float64) float64 {
 //
 // nil-safe: reg==nil (no quota.Registry wired up) or an empty cands slice
 // both return false without touching cands at all.
-func reorderByQuota(cands []*core.Endpoint, dims []strategy.Dimension, reg *quota.Registry, now time.Time) bool {
+func reorderByQuota(cands []*core.Endpoint, reg *quota.Registry, now time.Time) bool {
 	if reg == nil || len(cands) == 0 {
 		return false
 	}
 	front := cands[0]
 	for i := 0; i < len(cands); {
 		j := i + 1
-		for j < len(cands) && sameTier(cands[i], cands[j], dims) {
+		for j < len(cands) && sameTier(cands[i], cands[j]) {
 			j++
 		}
 		reorderTier(cands[i:j], reg, now)
@@ -416,18 +411,9 @@ func reorderByQuota(cands []*core.Endpoint, dims []strategy.Dimension, reg *quot
 	return cands[0] != front
 }
 
-// sameTier reports whether a and b are a full tie across every Dimension in
-// dims — dims==nil (only reachable via a hand-built ModelRoute in a test;
-// config.applyDefaults always fills an empty strategy with ["priority"])
-// ties everything into one tier, matching strategy.Sort's own behavior for
-// an empty dims chain.
-func sameTier(a, b *core.Endpoint, dims []strategy.Dimension) bool {
-	for _, d := range dims {
-		if d.Compare(a, b) != 0 {
-			return false
-		}
-	}
-	return true
+// sameTier reports whether a and b belong to the same priority tier.
+func sameTier(a, b *core.Endpoint) bool {
+	return a.Priority == b.Priority
 }
 
 // reorderTier reorders one tier in place: the subset of tier that has an

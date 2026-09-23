@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package pricing is Quota-Aware Routing's per-1M-token pricing resolution
 // engine (see docs/VirtualModelRouter_Design_v4_Quota.md's pricing sections
@@ -85,7 +85,7 @@ func (r Rate) MissingComponents() []string {
 }
 
 // Scale multiplies every SET component by f, leaving unset (nil) components
-// unset — the discount-form override's operation (design doc §4.2④): "the
+// unset — the discount-form override's operation: "the
 // discount multiplies the rate the lower layer resolved", and a lower layer
 // that never had a cache_write price to begin with doesn't gain one just
 // because a discount rule applied.
@@ -102,7 +102,7 @@ func (r Rate) Scale(f float64) Rate {
 
 // Cost prices fresh/cacheRead/cacheWrite/out (raw token counts) through r and
 // sums them — a thin delegate to core.Rate.Cost, where the base(cost)
-// formula from docs/VirtualModelRouter_Design_v4_Quota.md's §3 actually
+// formula from the Quota design doc actually
 // lives (one formula, both halves — see that method's doc comment for the
 // drift and parity reasoning). Kept as a method here so the analytics
 // half's call sites read naturally and no caller has to spell the
@@ -331,7 +331,7 @@ func Merge(base, overlay *Table) *Table {
 	out := NewTable()
 	if base != nil {
 		// GeneratedAt travels with base (the generated table, whose
-		// freshness is the signal callers like vmr analyze's §2 appendix
+		// freshness is the signal callers like vmr analyze's appendix
 		// render — see internal/report/pricing.go's Pricing.Disclaimer);
 		// overlay is the hand-maintained curated table, with no meaningful
 		// generation date of its own.

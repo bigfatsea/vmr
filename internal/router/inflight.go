@@ -1,16 +1,16 @@
-// Ver 2026-09-03, by pi-agent
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // In-flight registry: a per-request live view of what the router is doing
-// right now (the LiveStats design doc §5). The server layer registers a
+// right now (the LiveStats design doc). The server layer registers a
 // request before the concurrency gate and removes it from its defer chain
 // when the request leaves by any path; the router's own code only stamps:
 //
 //   - tryOne, per attempt sent: sent_at / attempt / the endpoint triple
 //     (provider/model/key_label), overwritten on every failover turn;
 //   - copyFlush, per body chunk: first_byte_at (first chunk) /
-//     last_byte_at (every chunk) / est_out, deliberately unthrottled (§5.3).
+//     last_byte_at (every chunk) / est_out, deliberately unthrottled.
 //
-// In-flight entries never settle into any completed-time ledger (§5.4): a
+// In-flight entries never settle into any completed-time ledger: a
 // request is counted there exactly once by the done() hook, here exactly
 // once by registration. The two counting planes do not touch.
 //
@@ -32,7 +32,7 @@ import (
 	"vmr/internal/respnorm"
 )
 
-// InflightInitials carries what is knowable at registration time (§5.2):
+// InflightInitials carries what is knowable at registration time:
 // arrival facts only. sent_at/attempt/triple and the byte/token stamps come
 // later through the handle.
 type InflightInitials struct {
@@ -50,7 +50,7 @@ type InflightInitials struct {
 }
 
 // InflightEntry is the JSON-ready snapshot row of one in-flight request.
-// Field names are the design doc §5.2 table's; timestamps are RFC3339 with
+// Field names are the design doc's table's; timestamps are RFC3339 with
 // the host's local offset, and an unstamped one renders as "".
 type InflightEntry struct {
 	Seq          uint64 `json:"seq"`
@@ -74,7 +74,7 @@ type InflightEntry struct {
 }
 
 // inflightRec is one registered request's mutable record. Stampable fields
-// are atomics (the per-chunk stamping path must stay lock-free, §5.3); the
+// are atomics (the per-chunk stamping path must stay lock-free); the
 // identity fields are set once by Register before the entry becomes visible,
 // so plain values suffice.
 type inflightRec struct {
@@ -158,8 +158,8 @@ func (reg *InflightRegistry) Register(in InflightInitials) (*InflightHandle, fun
 // failed, canceled, abandoned while queued) is gone whole from the live
 // map; its final snapshot is pushed to the bounded ended ring first — a
 // transient presentation buffer the console's Live Requests slots freeze
-// from (livereload design §3). The ring settles nothing into the
-// completed-time ledger (§5.4's two counting planes stay untouched) and is
+// from (the livereload design). The ring settles nothing into the
+// completed-time ledger (the two counting planes stay untouched) and is
 // wiped by process restart.
 func (reg *InflightRegistry) remove(seq uint64) {
 	reg.mu.Lock()
@@ -205,8 +205,9 @@ type InflightHandle struct {
 	rec *inflightRec
 }
 
-// Len reports the number of requests currently registered.
-func (reg *InflightRegistry) Len() int {
+// count reports the number of requests currently registered. Unexported:
+// test-only introspection — production reads go through Snapshot.
+func (reg *InflightRegistry) count() int {
 	if reg == nil {
 		return 0
 	}
@@ -225,7 +226,7 @@ func (h *InflightHandle) Seq() uint64 {
 
 // inflightCtxKey carries a request's handle from the server layer's
 // registration point down to tryOne/forwardSuccess. The handle travels in
-// the context rather than as a new ServeWithSnap parameter so the exported
+// the context rather than as a new Serve parameter so the exported
 // routing signature (which the server layer pins) stays untouched.
 type inflightCtxKey struct{}
 
@@ -246,7 +247,7 @@ func InflightHandleFrom(ctx context.Context) *InflightHandle {
 
 // stampSent marks one attempt as sent upstream: sent_at, the attempt number,
 // and the endpoint triple, all overwritten by the next attempt — a request
-// stuck in failover must show the endpoint it is currently waiting on (§5.2).
+// stuck in failover must show the endpoint it is currently waiting on.
 func (h *InflightHandle) stampSent(attempt int, provider, model, keyLabel string) {
 	if h == nil {
 		return
@@ -268,8 +269,8 @@ func (h *InflightHandle) SetEstIn(estIn int64) {
 // stampChunk records one response-body chunk arrival: first_byte_at on the
 // first chunk, last_byte_at on every chunk, and the running est_out.
 // copyFlush's read loop calls this per chunk with n > 0. estOut is the
-// respnorm meter's count so far — same source as quota charging (§5.2); a
-// compressed body estimates 0, which shows as unknown (§5.4), no
+// respnorm meter's count so far — same source as quota charging; a
+// compressed body estimates 0, which shows as unknown, no
 // special-casing here.
 func (h *InflightHandle) stampChunk(estOut int64) {
 	if h == nil {
@@ -308,7 +309,7 @@ func sortBySeq(live []*inflightRec) {
 	slices.SortFunc(live, func(a, b *inflightRec) int { return cmp.Compare(a.seq, b.seq) })
 }
 
-// snapshot renders one entry. state derives from sent_at (§5.2: never
+// snapshot renders one entry. state derives from sent_at (never
 // stored): sent_at == 0 means the request has not reached an upstream yet —
 // queued or mid-preprocessing — and the triple is empty then too, since it
 // is stamped at the same point as sent_at.
@@ -352,7 +353,7 @@ func inflightRFC3339(nanos int64) string {
 }
 
 // chunkStampReader observes every read the copy loop makes from the
-// normalized upstream body and stamps the in-flight entry (§5.3). It wraps
+// normalized upstream body and stamps the in-flight entry. It wraps
 // the stream in forwardSuccess — copyFlush only takes an io.Reader, and
 // changing its signature would touch every existing test call site, so the
 // wrap point carries the meter closure instead.

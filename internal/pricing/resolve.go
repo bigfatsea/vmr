@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package pricing
 
@@ -177,7 +177,7 @@ func resolveCanonicalKey(provider, model string, table *Table, aliases map[strin
 // all-nil Rate, which downstream consumers would read as a priced $0.00
 // rather than "unpriced" (see Resolver.RateFor's gate). A
 // partial/incomplete Base (some components nil) still resolves with
-// ok=true; whether that's fatal is the CALLER's decision — see Complete.
+// ok=true; whether that's fatal is the CALLER's decision (see Rate.Complete).
 func Resolve(provider, model string, opts ResolveOptions) (*core.PricingSpec, bool) {
 	base, tableHit := resolveCanonicalKey(provider, model, opts.Table, opts.Aliases)
 
@@ -236,25 +236,12 @@ func EffectiveRate(spec *core.PricingSpec) Rate {
 	return r
 }
 
-// Complete reports whether EffectiveRate(spec) is a Complete() rate. It is a
-// verification/test helper, not the aggregation-layer entry point:
-// production code (internal/report/cost.go) resolves the Rate once via
-// RateForEndpoint and calls Rate.Complete() directly, so it never needs the
-// badIndex diagnostic below.
 // Since EffectiveRate has exactly one resolution path (no time dimension to
-// range over), this is a single walk, not a reachability search: badIndex
-// is -1 when spec.Base itself supplied the (possibly incomplete) rate, else
-// the index of the Override whose Explicit rate did (a Discount form can
-// never itself introduce an incompleteness — Rate.Scale only narrows an
-// already-resolved rate, never widens it). nil-safe: a nil spec is never
-// complete.
-func Complete(spec *core.PricingSpec) (ok bool, bad Rate, badIndex int) {
-	if spec == nil {
-		return false, Rate{}, -1
-	}
-	r, idx := resolveChain(spec, 0)
-	return r.Complete(), r, idx
-}
+// range over), a caller needing the incompleteness diagnostic can walk the
+// chain once via resolveChain — see resolve_test.go's complete() helper, the
+// only consumer of that shape. Production code (internal/report/cost.go)
+// resolves the Rate once via RateForEndpoint and calls Rate.Complete()
+// directly.
 
 // resolveChain walks spec.Overrides starting at index from — the first
 // entry wins: an explicit-form one is returned directly (idx = its own

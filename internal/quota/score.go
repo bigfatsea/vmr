@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 package quota
 
@@ -12,7 +12,7 @@ const (
 	// HeadroomCap bounds Score's upper end: an account that has barely
 	// touched its quota very early in its period shouldn't get an unbounded
 	// multiplier just because the ratio is large — see the design doc's
-	// Core Algorithm section (§5.2's clamp).
+	// Core Algorithm section's clamp.
 	HeadroomCap = 5.0
 	// epsilon guards raw's denominator against an exact-zero time_left_frac
 	// (the window's closing instant) — a floor, not a tuning knob; Score's
@@ -65,9 +65,9 @@ func TimeLeftFrac(now, start, end time.Time) float64 {
 // is dimensionless (comparable across metrics) and self-correcting (no
 // tuning parameter beyond the clamp).
 //
-// P1 has exactly one Limit per provider, and that Limit is always the
+// A single Limit per provider is always the
 // account's bucket (see the design doc's Bucket vs Gate section) — the gate
-// role only exists from P3 once a provider can carry more than one Limit,
+// role only exists once a provider can carry more than one Limit,
 // so this function has no "is this a bucket or a gate" parameter at all.
 func Headroom(usedFrac, timeLeftFrac float64) float64 {
 	tl := timeLeftFrac
@@ -91,7 +91,7 @@ func Headroom(usedFrac, timeLeftFrac float64) float64 {
 // Metering section — before calling this; this function only knows ratios).
 // This is the raw per-Limit ratio ScoreForLimits below assigns a
 // bucket-or-gate role to — call it directly only when a provider has
-// exactly one Limit (P1/P2's shape) or when the role has already been
+// exactly one Limit or when the role has already been
 // decided elsewhere.
 func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 	start, end := PeriodBounds(l, now)
@@ -99,15 +99,15 @@ func ScoreForLimit(l core.Limit, used float64, now time.Time) float64 {
 }
 
 // BucketIndex returns the index of limits' bucket Limit — the longest
-// tumbling period among them (see the design doc's §5.2 bucket-vs-gate
+// tumbling period among them (see the design doc's bucket-vs-gate
 // rule: "周期最长的那条 tumbling Limit 是桶,其余全是闸"). Equal nominal periods
-// break deterministically, never by YAML written order (KNOWN_ISSUES §2.90):
+// break deterministically, never by YAML written order (see KNOWN_ISSUES):
 // a shared (non-per-model) pool beats a per-model one, and within the same
 // class the larger Amount wins — see preferBucket; a full tie keeps the
 // earlier-configured Limit as the documented final fallback. This package
 // carries no rolling windows yet (see core.Limit's doc comment), so every
 // Limit is tumbling and this always resolves to a real index for a
-// non-empty slice — the "all-rolling has no bucket" branch §5.2 also
+// non-empty slice — the "all-rolling has no bucket" branch the rule also
 // describes doesn't apply until rolling windows exist. len(limits)==0
 // returns -1; ScoreForLimits guards the empty slice (neutral 1.0) before
 // calling this, so its callers never see the -1.
@@ -128,7 +128,7 @@ func BucketIndex(limits []core.Limit) int {
 
 // preferBucket breaks the tie between two Limits whose nominal periods are
 // EQUAL — the case the longest-period rule alone leaves to YAML written
-// order (KNOWN_ISSUES §2.90). First principles, not convention: a shared
+// order (see KNOWN_ISSUES). First principles, not convention: a shared
 // pool beats a per-model one because the shared pool's headroom is the
 // scarcity EVERY model's traffic draws down — only as the bucket does its
 // drain produce the smooth declining-score signal quota-aware reordering
@@ -148,7 +148,7 @@ func preferBucket(a, b core.Limit) bool {
 }
 
 // ScoreForLimits composes a whole provider's score across every one of its
-// Limits (P3: multi-window) via the bucket-vs-gate rule: the longest-period
+// Limits (multi-window) via the bucket-vs-gate rule: the longest-period
 // Limit is the bucket — its raw headroom passes through unchanged (underuse
 // can push the score above 1.0, "use it or lose it"). Every other Limit is
 // a gate: a safety-margined local bound on the vendor's real rate limit, not
@@ -167,8 +167,8 @@ func preferBucket(a, b core.Limit) bool {
 // Limit's Scope-filtered Counters, this function only merges the results.
 //
 // Degenerates to plain ScoreForLimit when len(limits)==1: that one Limit is
-// trivially the bucket and there are no gates — byte-identical to P1/P2's
-// single-Limit behavior, which is the "zero regression for existing configs"
+// trivially the bucket and there are no gates — byte-identical to the
+// single-Limit behavior, the "zero regression for existing configs"
 // property.
 //
 // An empty limits slice returns 1.0 — neutral: no quota configured is

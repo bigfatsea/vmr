@@ -1,4 +1,4 @@
-// Ver 2026-09-12, by pi
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package router
 
@@ -360,11 +360,11 @@ models:
 		cancel()
 	}()
 
-	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: sessionBody}, "openai-completions", nil)
+	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: sessionBody}, "openai-completions", rt.Snapshot(), nil)
 
 	l := rt.ProviderLimiters.Get("p1")
-	if l.Waiting() != 0 {
-		t.Errorf("waiting count leaked: got %d, want 0", l.Waiting())
+	if l.waiting.Load() != 0 {
+		t.Errorf("waiting count leaked: got %d, want 0", l.waiting.Load())
 	}
 }
 
@@ -430,7 +430,7 @@ models:
 	reqPinned := httptest.NewRequest("POST", "/v1/chat/completions", bytes.NewReader([]byte(`{"model":"vm","messages":[{"role":"user","content":"test"}]}`)))
 	reqPinned.Header.Set("X-VMR-Provider", "p1")
 	wPinned := httptest.NewRecorder()
-	rt.Serve(wPinned, reqPinned, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{"model":"vm"}`)}, "openai-completions", nil)
+	rt.Serve(wPinned, reqPinned, &core.CanonicalRequest{Model: "vm", Raw: []byte(`{"model":"vm"}`)}, "openai-completions", rt.Snapshot(), nil)
 	if wPinned.Code != http.StatusServiceUnavailable {
 		t.Fatalf("pinned: expected 503, got %d", wPinned.Code)
 	}
@@ -522,7 +522,7 @@ models:
 		cancel()
 	}()
 
-	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: turn2Body}, "openai-completions", nil)
+	rt.Serve(w, req, &core.CanonicalRequest{Model: "vm", Raw: turn2Body}, "openai-completions", rt.Snapshot(), nil)
 
 	// Verify p2 was NEVER touched
 	if p2Hits.Load() != 0 {
@@ -544,7 +544,7 @@ models:
 
 	// Verify queue counter did not leak
 	l1 := rt.ProviderLimiters.Get("p1")
-	if l1.Waiting() != 0 {
-		t.Errorf("waiting count leaked: got %d, want 0", l1.Waiting())
+	if l1.waiting.Load() != 0 {
+		t.Errorf("waiting count leaked: got %d, want 0", l1.waiting.Load())
 	}
 }

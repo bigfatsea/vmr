@@ -1,4 +1,4 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 12:05, by pi
 
 // Fuzz coverage for the transport state machine (Wrap/stream): the one
 // hand-written byte-level state machine in the routing half, and the reason
@@ -120,8 +120,9 @@ func appliedChangesContent(applied []string) bool {
 // no panic/hang on any byte stream; fragmentation-invariance (the SAME
 // bytes delivered in one Read vs. many small Reads must produce
 // byte-identical output — this is what actually exercises the cross-chunk
-// state transitions, not just "fuzzing the whole-body parse"), with one
-// narrow, documented exception (modelFieldSpansEventSep below); opaque mode
+// state transitions, not just "fuzzing the whole-body parse"; unconditional
+// since the model rewrite became structural — emitted blocks are determined
+// by content, not delivery chunking); opaque mode
 // never transforms a single byte; the think-strip repair never leaves a
 // complete <think>...</think> pair behind once it has fired; and — checked
 // against Applied(), the authoritative transform record, not a guess from
@@ -176,33 +177,10 @@ func FuzzStream(f *testing.F) {
 		wantThinkOpens := bytes.Count(data, thinkOpenMarker)
 		chunkSize := int(chunkSizeByte) + 1 // clamp to [1,256]
 
-		// modelFieldSpansEventSep is the one known, accepted exception to
-		// fragmentation-invariance below: the byte-splice model rewrite can
-		// only fire when the WHOLE "model":\s*"..." match (modelFieldPattern
-		// itself allows whitespace — including a raw newline — between the
-		// colon and the opening quote, not just inside the value) lands
-		// inside a single emitted block. A raw, un-escaped eventSep
-		// ("\n\n") anywhere in that match — in the \s* gap or in the value
-		// — can fool the event-boundary scanner into emitting a block that
-		// ends mid-field, something a fragmented delivery can expose in a
-		// way a single whole-body Read never does (see respnorm.go's
-		// emitBlock). This requires a literal, unescaped newline byte
-		// somewhere a compliant JSON encoder would never put one raw
-		// (either inside a string value, or as insignificant whitespace a
-		// real upstream has no reason to emit mid-field) — invalid-shaped
-		// input no real upstream produces, so it's a real gap only against
-		// malformed input; the other invariants below still hold,
-		// whole-shot and chunked are just allowed to disagree on this one
-		// specific output.
-		modelFieldSpansEventSep := false
-		if m := modelFieldPattern.FindSubmatch(data); m != nil && bytes.Contains(m[0], eventSep) {
-			modelFieldSpansEventSep = true
-		}
-
-		// checkInvariants applies every invariant except fragmentation-
+		// checkInvariants applies every invariant including fragmentation-
 		// equality to one (out, s) pair — called once per delivery mode
-		// (whole-shot, chunked) so a divergence in the accepted exception
-		// above doesn't skip validating the rest.
+		// (whole-shot, chunked) so a divergence doesn't skip validating the
+		// rest.
 		checkInvariants := func(out []byte, s *stream, label string) {
 			if s.opaque {
 				// Opaque skips every transform unconditionally — the
@@ -262,7 +240,7 @@ func FuzzStream(f *testing.F) {
 					chunked := asStream(t, Wrap(&chunkedReader{data: data, size: chunkSize}, opts))
 					chunkedOut := readAllBounded(t, chunked)
 
-					if !bytes.Equal(wholeOut, chunkedOut) && !modelFieldSpansEventSep {
+					if !bytes.Equal(wholeOut, chunkedOut) {
 						t.Fatalf("output depends on fragmentation alone: isSSE=%v protocol=%s opaque=%v chunkSize=%d\nin=%q\nwhole-shot=%q\nchunked=%q",
 							isSSE, protocol, opaque, chunkSize, data, wholeOut, chunkedOut)
 					}

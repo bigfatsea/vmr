@@ -1,21 +1,20 @@
-// Ver 2026-09-13, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 package guard
 
 import "fmt"
 
-// RulesVersion is the built-in rule set's version (ADR-11's Record.Guard.Ver
-// — a version bump is a documented Prompt Cache invalidation event once
+// RulesVersion is the built-in rule set's version (stamped into
+// Record.Guard.Ver — a version bump is a documented Prompt Cache invalidation event once
 // online rewriting exists; for this offline-only build it just labels
 // which rule generation produced a given Finding). Bump alongside any
 // change to DefaultRules' patterns.
 const RulesVersion = 1
 
-// DefaultRules returns the built-in Tier1+Tier2 rule set: Appendix A of
-// the Agent Guard spec, calibrated against this
-// repo's own real audit corpus (tools/guard_corpus_scan; see the MVP
-// execution report linked from docs/KNOWN_ISSUES.md for the run that
-// confirmed Tier1 FP=0 and quantified the bare "sk-" prefix's noise).
+// DefaultRules returns the built-in Tier1+Tier2 rule set, calibrated
+// against this repo's own real audit corpus (tools/guard_corpus_scan) —
+// that run confirmed Tier1 FP=0 and quantified the bare "sk-" prefix's
+// noise.
 //
 // Every rule goes through NewRule, so every one carries the left-boundary
 // anchor (leftBoundary) by construction — the anchor is what makes "sk-"
@@ -23,12 +22,12 @@ const RulesVersion = 1
 // boundary check because the character before their embedded "sk-"/"ask-"
 // substring is itself alphanumeric.
 //
-// Deliberately NOT included here (scope decision, see the execution
-// report): generic-api-key, bearer-token, email, cn-mobile,
-// cn-resident-id. The spec names these as Tier2 candidates but gives no
-// concrete pattern for them, and they shift scope from credential
-// exfiltration into general PII detection — a different feature axis.
-// Backlogged in docs/ROADMAP.md.
+// Deliberately NOT included here (scope decision): generic-api-key,
+// bearer-token, email, cn-mobile,
+// cn-resident-id. These were Tier2 candidates but have no concrete
+// calibrated pattern, and they shift scope from credential exfiltration
+// into general PII detection — a different feature axis. Backlogged in
+// docs/ROADMAP.md.
 func DefaultRules() []Rule {
 	specs := []struct {
 		name       string
@@ -37,7 +36,7 @@ func DefaultRules() []Rule {
 		body       string
 		minEntropy float64
 	}{
-		// --- Tier 1: five-anchor admitted (ADR-5, Appendix A) ---
+		// --- Tier 1: five-anchor admitted ---
 		{"anthropic-api-key", Tier1, "sk-ant-api03-", `sk-ant-api03-[A-Za-z0-9_-]{93}`, 3.5},
 		{"openai-project-key", Tier1, "sk-proj-", `sk-proj-[A-Za-z0-9_-]{74,}`, 3.5},
 		{"openai-legacy-key", Tier1, "sk-", `sk-[A-Za-z0-9]{48}`, 3.8},
@@ -66,13 +65,14 @@ func DefaultRules() []Rule {
 		// real hit ever appears.
 		{"private-key-block", Tier1, "-----BEGIN", `-----BEGIN [A-Z ]*PRIVATE KEY-----`, 0},
 
-		// --- Tier 2: audit-only forever (K-G5) ---
-		// The bare "sk-" prefix (§2.3): real-corpus scan showed ~8,000 hits
+		// --- Tier 2: audit-only forever ---
+		// The bare "sk-" prefix: real-corpus scan showed ~8,000 hits
 		// on English words ending "sk" plus a hyphen (task-/risk-/disk-/
 		// ask-/desk-/mask-) before the boundary anchor was added, and even
 		// with the anchor its open-ended body (any 20+ alnum/hyphen/
 		// underscore run) is far weaker than openai-legacy-key's exact
-		// 48-char body. Never promotable to Tier1 — see K-G5.
+		// 48-char body. Never promotable to Tier1 — Tier2 rules are
+		// audit-only forever and never a basis for online intervention.
 		{"generic-sk-prefix", Tier2, "sk-", `sk-[A-Za-z0-9_-]{20,}`, 3.0},
 	}
 

@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Package replay implements `vmr replay`: rebuild and resend one request
 // from an audit JSONL record, using the exact same adapter.BuildRequest vmr
@@ -139,7 +139,7 @@ func buildReplayEndpoint(cfg *config.Config, opts Options, rv *recordView) (ad a
 		// replayed request rejected upstream for an unrewritten role.
 		RoleMap: providerCfg.RoleMap,
 		// chargeReplay needs this resolved directly, the same as above.
-		Quota: router.BuildQuotaSpecs(cfg.Providers)[opts.Provider],
+		Quota: router.BuildQuotaSpecs(cfg.Providers, nil)[opts.Provider],
 	}
 	ep.FullURL = ad.ResolveURL(baseURL)
 	return ad, protocol, providerCfg, ep, nil

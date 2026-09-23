@@ -1,7 +1,7 @@
-// Ver 2026-09-17, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package probe extensions for Agent Guard's active diagnostic probes
-// (the Agent Guard spec §4.10, M5), wired only
+// (see the Agent Guard spec), wired only
 // through `vmr diagnose -guard` (opt-in, sends real requests to configured
 // endpoints and consumes real upstream tokens -- same as any other `vmr
 // diagnose` connectivity check). Two of the five probes are credential/
@@ -95,7 +95,7 @@ func ToolCallProbeRequest(protocol, model, command string) (json.RawMessage, str
 		return b, command
 
 	case "openai-responses":
-		// R-8(e): tool_choice must be set here too, or the model may answer
+		// tool_choice must be set here too, or the model may answer
 		// in plain text instead of calling the tool and an honest relay
 		// fails the probe.
 		b, _ := json.Marshal(map[string]any{
@@ -156,7 +156,7 @@ func ToolCallProbeRequest(protocol, model, command string) (json.RawMessage, str
 func VerifyToolCallResponse(protocol string, body []byte, expectedCommand string) (bool, string) {
 	switch protocol {
 	case "openai-responses":
-		// R-8(a): responses' non-stream body is the output[] shape, not
+		// responses' non-stream body is the output[] shape, not
 		// choices[] — parsing it as chat-completions made every honest
 		// responses endpoint read as "empty choices" (a false TAMPER).
 		var m struct {
@@ -326,7 +326,7 @@ func ThinkingProbeRequest(protocol, model string) json.RawMessage {
 func VerifyThinkingResponse(protocol string, body []byte) (bool, string) {
 	switch protocol {
 	case "openai-responses":
-		// R-8(a): same output[]-shape fix as VerifyToolCallResponse — a
+		// Same output[]-shape fix as VerifyToolCallResponse — a
 		// reasoning item in the response proves thinking survived the relay.
 		var m struct {
 			Output []struct {
@@ -482,7 +482,7 @@ func InvisibleRuneProbeRequest(protocol, model string) json.RawMessage {
 
 // steganographicRuneCategories are the A/B-tier guard.ClassifyRune
 // categories the online sanitizer actually deletes (sanitize.go) -- C-tier
-// (ZWNJ/ZWJ/variant selectors) is deliberately excluded, matching K-G7:
+// (ZWNJ/ZWJ/variant selectors) is deliberately excluded:
 // those code points are required by real scripts and emoji sequences, never
 // a steganography signal on their own.
 var steganographicRuneCategories = map[string]bool{

@@ -1,7 +1,10 @@
-// Ver 2026-08-14, by Sonnet 5
+// Ver 2026-09-23 01:51, by Sonnet 5
 package jsonscan
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 // TestWalkArrayElements_DoesNotReadPastArrEnd locks in a boundary fix: the
 // entry check used to compare against len(raw) instead of arrEnd, so a
@@ -217,4 +220,140 @@ func TestSkipJSONWS_OutOfRangeSaturatesForward(t *testing.T) {
 	if got := SkipJSONWS(b, 3); got != 3 {
 		t.Errorf("SkipJSONWS(%q, 3) = %d, want 3", b, got)
 	}
+}
+
+func TestTopLevelValuesPrefix(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncated after model finds key", func(t *testing.T) {
+		raw := []byte(`{"id":"x","model":"upstream-model","choices":[{"message":{"content":"half`)
+		ranges, ok := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		if !ok || len(ranges) != 1 {
+			t.Fatalf("expected 1 range, got ok=%v, ranges=%v", ok, ranges)
+		}
+		got := string(raw[ranges[0][0]:ranges[0][1]])
+		if got != `"upstream-model"` {
+			t.Errorf("got %q, want %q", got, `"upstream-model"`)
+		}
+	})
+
+	t.Run("truncated before model returns false", func(t *testing.T) {
+		raw := []byte(`{"id":"x","mod`)
+		ranges, ok := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		if ok || len(ranges) != 0 {
+			t.Errorf("expected ok=false, got ok=%v, ranges=%v", ok, ranges)
+		}
+	})
+
+	t.Run("complete object finds key", func(t *testing.T) {
+		raw := []byte(`{"id":"x","model":"m"}`)
+		ranges, ok := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		if !ok || len(ranges) != 1 {
+			t.Fatalf("expected 1 range, got ok=%v, ranges=%v", ok, ranges)
+		}
+		if string(raw[ranges[0][0]:ranges[0][1]]) != `"m"` {
+			t.Errorf("got %q, want %q", string(raw[ranges[0][0]:ranges[0][1]]), `"m"`)
+		}
+	})
+
+	t.Run("nested model untouched", func(t *testing.T) {
+		raw := []byte(`{"id":"x","tools":[{"model":"nested"}],"choices":`)
+		ranges, ok := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		if ok || len(ranges) != 0 {
+			t.Errorf("nested model should not be returned, got ok=%v, ranges=%v", ok, ranges)
+		}
+	})
+
+	t.Run("not an object", func(t *testing.T) {
+		raw := []byte(`["model","m"]`)
+		ranges, ok := TopLevelValuesPrefix(raw, modelKeyLiteral)
+		if ok || len(ranges) != 0 {
+			t.Errorf("array should decline, got ok=%v, ranges=%v", ok, ranges)
+		}
+	})
+}
+
+func TestReplaceTopLevelValuePrefix(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncated after model rewrites value", func(t *testing.T) {
+		raw := []byte(`{"id":"x","model":"upstream-model","choices":[{"message":{"content":"half`)
+		newVal := []byte(`"agent"`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, newVal)
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		want := `{"id":"x","model":"agent","choices":[{"message":{"content":"half`
+		if string(out) != want {
+			t.Errorf("got %q, want %q", string(out), want)
+		}
+	})
+
+	t.Run("truncated before model returns false and unchanged raw", func(t *testing.T) {
+		raw := []byte(`{"id":"x","mod`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"agent"`))
+		if ok {
+			t.Errorf("expected ok=false, got ok=true")
+		}
+		if !bytes.Equal(out, raw) {
+			t.Errorf("got %q, want unchanged raw %q", string(out), string(raw))
+		}
+	})
+
+	t.Run("complete object rewrites model", func(t *testing.T) {
+		raw := []byte(`{"id":"x","model":"old","stream":false}`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"new"`))
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		want := `{"id":"x","model":"new","stream":false}`
+		if string(out) != want {
+			t.Errorf("got %q, want %q", string(out), want)
+		}
+	})
+
+	t.Run("same value returns zero-copy raw", func(t *testing.T) {
+		raw := []byte(`{"model":"same","tail":123`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"same"`))
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		if &out[0] != &raw[0] {
+			t.Errorf("expected zero-copy raw slice pointer, got different slice")
+		}
+	})
+
+	t.Run("multiple matching keys replaced", func(t *testing.T) {
+		raw := []byte(`{"model":"a","model":"b","partial":`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"c"`))
+		if !ok {
+			t.Fatalf("expected ok=true, got ok=false")
+		}
+		want := `{"model":"c","model":"c","partial":`
+		if string(out) != want {
+			t.Errorf("got %q, want %q", string(out), want)
+		}
+	})
+
+	t.Run("nested model key untouched", func(t *testing.T) {
+		raw := []byte(`{"id":"x","tools":[{"model":"nested"}],"choices":`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"agent"`))
+		if ok {
+			t.Errorf("expected ok=false for nested model, got ok=true")
+		}
+		if !bytes.Equal(out, raw) {
+			t.Errorf("got %q, want unchanged raw %q", string(out), string(raw))
+		}
+	})
+
+	t.Run("not an object declined", func(t *testing.T) {
+		raw := []byte(`["model","old"]`)
+		out, ok := ReplaceTopLevelValuePrefix(raw, modelKeyLiteral, []byte(`"agent"`))
+		if ok {
+			t.Errorf("expected ok=false for non-object, got ok=true")
+		}
+		if !bytes.Equal(out, raw) {
+			t.Errorf("got %q, want unchanged raw %q", string(out), string(raw))
+		}
+	})
 }

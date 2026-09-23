@@ -1,4 +1,4 @@
-// Ver 2026-07-24 10:00, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Package sticky implements the Sticky Model affinity registry: an
 // in-memory map from a session fingerprint to the endpoint that most
@@ -61,25 +61,20 @@ type Registry struct {
 	maxEntries int
 }
 
-func New() *Registry {
-	return &Registry{
-		entries:    make(map[string]entry),
-		maxEntries: MaxEntries,
-	}
-}
+func New() *Registry { return newBounded(MaxEntries) }
 
-// NewBounded creates a Registry with a custom maximum capacity — no config
+// newBounded creates a Registry with a custom maximum capacity — no config
 // reaches it; the eviction tests are its only callers.
-func NewBounded(maxEntries int) *Registry {
-	if maxEntries <= 0 {
-		maxEntries = MaxEntries
-	}
+func newBounded(maxEntries int) *Registry {
 	return &Registry{
 		entries:    make(map[string]entry),
 		maxEntries: maxEntries,
 	}
 }
 
+// limit is the one place the effective capacity default is resolved — a
+// Registry built by struct literal (or newBounded(0)) falls back to
+// MaxEntries here rather than at construction time.
 func (r *Registry) limit() int {
 	if r.maxEntries <= 0 {
 		return MaxEntries

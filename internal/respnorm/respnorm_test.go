@@ -1,4 +1,4 @@
-// Ver 2026-07-17 02:00, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 //
 // Unit tests for the response stream processor: model-field rewrite,
 // think-block stripping, [DONE] sentinel, and cross-chunk regex
@@ -443,27 +443,174 @@ func TestRespStream_EmptySource(t *testing.T) {
 
 func TestRespStream_NestedModelInDelta(t *testing.T) {
 	t.Parallel()
-	// modelFieldPattern is a plain regex with no JSON-depth tracking: it
-	// rewrites every unescaped `"model":"..."` occurrence in the block,
-	// nested or not — unlike the request-side RewriteModel, which is a
-	// structural scanner limited to the top-level key. In practice this is
-	// harmless (OpenAI/Anthropic-shaped responses only ever carry "model"
-	// at the top level), but a chunk with a genuinely nested "model" field
-	// — e.g. a vendor extension echoed inside a tool call — has that value
-	// rewritten too. This test documents the actual (not the hoped-for)
-	// behavior; it previously claimed "top level only" without ever
-	// constructing a nested field to check it.
+	// The SSE model rewrite is confined to each protocol's known model-field
+	// locations (see modelrewrite.go): a nested "model" key inside a delta
+	// or tool call is client-visible content, not protocol framing — it
+	// reaches the client untouched, even when it carries a different value.
 	src := strings.NewReader(
 		`data: {"id":"x","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant",` +
 			`"tool_calls":[{"function":{"name":"x","model":"nested-value"}}]}}]}` + "\n\n",
 	)
 	out := readAll(t, newStream(src, "agent", "", true, "openai-completions", false))
-	if got := strings.Count(out, `"model":"agent"`); got != 2 {
-		t.Errorf("expected both the top-level AND the nested model field rewritten to the client model (regex has no depth awareness), got %d rewrites in: %q", got, out)
+	if got := strings.Count(out, `"model":"agent"`); got != 1 {
+		t.Errorf("expected exactly the top-level model field rewritten to the client model, got %d rewrites in: %q", got, out)
 	}
-	if strings.Contains(out, `"model":"nested-value"`) {
-		t.Errorf("nested model field survived unrewritten — modelFieldPattern's depth-blindness changed, update this test's assumption: %q", out)
+	if !strings.Contains(out, `"model":"nested-value"`) {
+		t.Errorf("nested model field inside a tool call must not be rewritten — it is the tool argument's content: %q", out)
 	}
+}
+
+// Per-protocol tests: the legal model location is rewritten, a nested
+// same-named field is not.
+func TestRespStream_ModelRewriteKnownPathsPerProtocol(t *testing.T) {
+	t.Parallel()
+
+	t.Run("openai-completions: chunk top level only", func(t *testing.T) {
+		t.Parallel()
+		in := `data: {"id":"c1","model":"real-gpt","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"function":{"name":"f","arguments":"{\"model\":\"keep\"}"}}]}}]}` + "\n\n"
+		out := readAll(t, newStream(strings.NewReader(in), "agent", "real-gpt", true, "openai-completions", false))
+		if !strings.Contains(out, `"model":"agent"`) {
+			t.Errorf("chunk top-level model not rewritten: %q", out)
+		}
+		if !strings.Contains(out, `{\"model\":\"keep\"}`) {
+			t.Errorf("model key inside tool-call arguments content (a JSON string, escaped) must not be rewritten: %q", out)
+		}
+		if strings.Contains(out, "real-gpt") {
+			t.Errorf("upstream model leaked: %q", out)
+		}
+		if got := rs2(t, in, "openai-completions", "asked-model").ObservedModel(); got != "real-gpt" {
+			t.Errorf("ObservedModel() = %q, want real-gpt", got)
+		}
+	})
+
+	t.Run("anthropic-messages: message_start.message.model only", func(t *testing.T) {
+		t.Parallel()
+		in := "event: message_start\n" +
+			`data: {"type":"message_start","message":{"id":"m1","model":"real-claude","content":[{"type":"tool_use","name":"pick","input":{"model":"keep-me"}}]}}` + "\n\n" +
+			"event: content_block_delta\n" +
+			`data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Hello"}}` + "\n\n"
+		out := readAll(t, newStream(strings.NewReader(in), "claude", "real-claude", true, "anthropic-messages", false))
+		if !strings.Contains(out, `"model":"claude"`) {
+			t.Errorf("message_start's message.model not rewritten: %q", out)
+		}
+		if !strings.Contains(out, `"model":"keep-me"`) {
+			t.Errorf("nested model key inside tool_use.input must not be rewritten: %q", out)
+		}
+		if strings.Contains(out, "real-claude") {
+			t.Errorf("upstream model leaked: %q", out)
+		}
+		if got := rs2(t, in, "anthropic-messages", "asked-model").ObservedModel(); got != "real-claude" {
+			t.Errorf("ObservedModel() = %q, want real-claude", got)
+		}
+	})
+
+	t.Run("openai-responses: response.model only", func(t *testing.T) {
+		t.Parallel()
+		in := `event: response.created` + "\n" +
+			`data: {"type":"response.created","response":{"id":"r1","model":"real-gpt","metadata":{"model":"keep-me"},"output":[]}}` + "\n\n" +
+			`event: response.output_item.added` + "\n" +
+			`data: {"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi"}]}}` + "\n\n" +
+			`event: response.completed` + "\n" +
+			`data: {"type":"response.completed","response":{"id":"r1","model":"real-gpt","output":[{"type":"message","content":[{"type":"output_text","text":"hi"}]}]}}` + "\n\n"
+		out := readAll(t, newStream(strings.NewReader(in), "agent", "real-gpt", true, "openai-responses", false))
+		if got := strings.Count(out, `"model":"agent"`); got != 2 {
+			t.Errorf("expected both response.created and response.completed response.model rewritten, got %d: %q", got, out)
+		}
+		if !strings.Contains(out, `"model":"keep-me"`) {
+			t.Errorf("nested model key inside response.metadata must not be rewritten: %q", out)
+		}
+		if strings.Contains(out, "real-gpt") {
+			t.Errorf("upstream model leaked: %q", out)
+		}
+		if got := rs2(t, in, "openai-responses", "asked-model").ObservedModel(); got != "real-gpt" {
+			t.Errorf("ObservedModel() = %q, want real-gpt", got)
+		}
+	})
+}
+
+// A stream cut mid-event keeps its truncated tail byte-for-byte, even when
+// the cut lands right after a complete top-level model value.
+func TestRespStream_TruncatedTailAtValueBoundaryUnmodified(t *testing.T) {
+	t.Parallel()
+	tail := `data: {"id":"c2","model":"real-gpt",`
+	in := `data: {"id":"c1","model":"real-gpt","choices":[{"index":0,"delta":{"content":"hi"}}]}` + "\n\n" + tail
+	out := readAll(t, newStream(strings.NewReader(in), "agent", "real-gpt", true, "openai-completions", false))
+	if !strings.Contains(out, `"id":"c1","model":"agent"`) {
+		t.Errorf("complete event's model not rewritten: %q", out)
+	}
+	if !strings.Contains(out, tail) {
+		t.Errorf("truncated tail must pass through unmodified, want %q in %q", tail, out)
+	}
+}
+
+// rs2 runs one SSE stream through the normalizer and returns the stream
+// for post-completion inspection — the ObservedModel read must happen
+// after the response has been fully copied.
+func rs2(t *testing.T, body, protocol, upstreamModel string) *stream {
+	t.Helper()
+	client := "agent"
+	if protocol == "anthropic-messages" {
+		client = "claude"
+	}
+	rs := newStream(strings.NewReader(body), client, upstreamModel, true, protocol, false)
+	_ = readAll(t, rs)
+	return rs
+}
+
+func TestRespStream_NonStreamTopLevelModelRewrite(t *testing.T) {
+	t.Parallel()
+
+	t.Run("anthropic tool use nested model preserved", func(t *testing.T) {
+		t.Parallel()
+		in := `{"model":"up","content":[{"type":"tool_use","input":{"model":"keep-me"}}]}`
+		rs := newStream(strings.NewReader(in), "agent", "up", false, "anthropic-messages", false)
+		out := readAll(t, rs)
+		if !strings.Contains(out, `"model":"agent"`) {
+			t.Errorf("top-level model was not rewritten to agent: %s", out)
+		}
+		if !strings.Contains(out, `"model":"keep-me"`) {
+			t.Errorf("nested input.model was corrupted: %s", out)
+		}
+	})
+
+	t.Run("openai chat non-stream top-level rewrite", func(t *testing.T) {
+		t.Parallel()
+		in := `{"id":"chatcmpl-1","object":"chat.completion","model":"gpt-4o-2024-08-06","choices":[{"message":{"role":"assistant","content":"hello"}}]}`
+		rs := newStream(strings.NewReader(in), "coding", "gpt-4o-2024-08-06", false, "openai-completions", false)
+		out := readAll(t, rs)
+		if !strings.Contains(out, `"model":"coding"`) {
+			t.Errorf("top-level model was not rewritten to coding: %s", out)
+		}
+		if strings.Contains(out, "gpt-4o-2024-08-06") {
+			t.Errorf("upstream model leaked in output: %s", out)
+		}
+	})
+
+	t.Run("responses non-stream top-level rewrite", func(t *testing.T) {
+		t.Parallel()
+		in := `{"id":"resp-1","object":"response","model":"gpt-4o-real","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`
+		rs := newStream(strings.NewReader(in), "agent", "gpt-4o-real", false, "openai-responses", false)
+		out := readAll(t, rs)
+		if !strings.Contains(out, `"model":"agent"`) {
+			t.Errorf("top-level model was not rewritten to agent: %s", out)
+		}
+		if strings.Contains(out, "gpt-4o-real") {
+			t.Errorf("upstream model leaked in output: %s", out)
+		}
+	})
+
+	t.Run("non-stream missing model key not added", func(t *testing.T) {
+		t.Parallel()
+		in := `{"id":"resp-1","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}]}`
+		rs := newStream(strings.NewReader(in), "agent", "", false, "openai-responses", false)
+		out := readAll(t, rs)
+		if strings.Contains(out, `"model"`) {
+			t.Errorf("model key should not be added when absent from response body: %s", out)
+		}
+		if out != in {
+			t.Errorf("output was modified: got %s, want %s", out, in)
+		}
+	})
 }
 
 // TestRespStream_ModelNameWithDollar guards against regexp.ReplaceAll's
@@ -1326,9 +1473,15 @@ func TestRespStream_BufferedTruncationFlushesReceivedBytes(t *testing.T) {
 	if !strings.Contains(got.String(), `"model":"agent"`) {
 		t.Errorf("model field not rewritten on the flushed partial body: %q", got.String())
 	}
+	if strings.Contains(got.String(), "upstream-real-model") {
+		t.Errorf("upstream model name leaked on flushed partial body: %q", got.String())
+	}
 	applied := rs.Applied()
 	if !containsStr(applied, "truncated_flush") {
 		t.Errorf("Applied() = %v, want it to contain truncated_flush", applied)
+	}
+	if !containsStr(applied, "model_rewrite") {
+		t.Errorf("Applied() = %v, want it to contain model_rewrite", applied)
 	}
 }
 

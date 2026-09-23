@@ -1,4 +1,4 @@
-// Ver 2026-07-23 10:00, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package strategy
 
@@ -24,18 +24,22 @@ func (c capabilityCondition) Eligible(ep *core.Endpoint, facts core.RequestFacts
 	return ep.HasCapability(c.required)
 }
 
-func init() {
-	RegisterCondition(capabilityCondition{
+// conditions is the complete, static Condition set — a fixed compile-time
+// slice, not a registry: there was never a runtime registrant beyond these
+// two, so the atomic/mutex machinery only obscured what the set actually is.
+// Config may still accept capability words with no Condition behind them
+// ("audio"/"video"/"thinking" — see config's validCapabilities and Check()'s
+// warning): a "thinking" Condition in particular stays unregistered until
+// the request-side detection logic exists across the Anthropic/OpenAI/MiniMax
+// protocol shapes — registering it now would be a no-op that looks
+// implemented but never fires, which is worse than leaving it out.
+var conditions = []Condition{
+	capabilityCondition{
 		name: "image", required: "image",
 		needed: func(f core.RequestFacts) bool { return f.HasImage },
-	})
-	RegisterCondition(capabilityCondition{
+	},
+	capabilityCondition{
 		name: "tools", required: "tools",
 		needed: func(f core.RequestFacts) bool { return f.HasTools },
-	})
-	// "thinking" is deliberately not registered yet: the request-side
-	// signal (WantsThinking) has no detection logic behind it until the
-	// Anthropic/OpenAI/MiniMax protocol shapes are confirmed — registering
-	// the condition now would be a no-op that looks implemented but never
-	// fires, which is worse than leaving it out.
+	},
 }

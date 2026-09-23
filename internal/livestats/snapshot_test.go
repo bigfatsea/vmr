@@ -72,7 +72,7 @@ func TestSnapshot_HourlyDailyAndDimensions(t *testing.T) {
 	}
 	agg.Record(s3)
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 
 	// 1. Hourly rows: must have 3 distinct entries across the 3 hours
 	if len(snap.Hourly) != 3 {
@@ -149,7 +149,7 @@ func TestSnapshot_StreamAndNonStreamMergedProviderRow(t *testing.T) {
 		})
 	}
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.ByProviderModel) != 1 {
 		t.Fatalf("expected 1 merged provider row (stream + non-stream), got %d", len(snap.ByProviderModel))
 	}
@@ -208,7 +208,7 @@ func TestSnapshot_OverallFromGlobalRing(t *testing.T) {
 		})
 	}
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.ByProviderModel) != 1 {
 		t.Fatalf("expected 1 provider row, got %d", len(snap.ByProviderModel))
 	}
@@ -272,7 +272,7 @@ func TestSnapshot_DailyTailBoundsHistory(t *testing.T) {
 		t.Errorf("in-memory rollup holds %d hour-keys after %d days of operation, want <= %d", rollupHours, nDays, rollupRetentionDays+1)
 	}
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.Daily) != dailyTail {
 		t.Fatalf("daily rows = %d, want dailyTail=%d", len(snap.Daily), dailyTail)
 	}
@@ -309,7 +309,7 @@ func TestSnapshot_DailyBucketsUseLocalCalendarDay(t *testing.T) {
 		Provider: "p1", Model: "m1", Tokens: TokenCounts{In: 1, Out: 1},
 	})
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.Daily) != 1 {
 		t.Fatalf("expected 1 daily row, got %d", len(snap.Daily))
 	}
@@ -350,7 +350,7 @@ func TestSnapshot_RecentRequestsGlobalRing(t *testing.T) {
 		Provider: "p1", Model: "m1", TTFTMS: 0, DurMS: 200,
 	})
 
-	snap := agg.Snapshot(HourlyTailDefault)
+	snap := agg.snapshot(HourlyTailDefault)
 	if len(snap.RecentRequests) != 0 {
 		t.Fatalf("expected 0 recent requests, got %d", len(snap.RecentRequests))
 	}
@@ -364,7 +364,7 @@ func TestSnapshot_RecentRequestsGlobalRing(t *testing.T) {
 		})
 	}
 
-	snap = agg.Snapshot(HourlyTailDefault)
+	snap = agg.snapshot(HourlyTailDefault)
 	if len(snap.RecentRequests) != 300 {
 		t.Fatalf("expected 300 recent requests, got %d", len(snap.RecentRequests))
 	}

@@ -1,148 +1,47 @@
-// Ver 2026-09-20 23:38, by Sonnet 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
-// Package strategy implements scheduling as filter + stable multi-key sort.
-// Every scheduling behavior is just a Dimension; combining several would be
-// list concatenation, and the router's main loop would never change. Only
-// priority is registered today — traffic-splitting dimensions (weight,
-// round_robin) were evaluated and rejected on principle, not merely
-// unimplemented (see docs/VirtualModelRouter_Design_v4_Strategy.md's "为什么
-// 是配速而不是负载均衡" section: spreading traffic across otherwise-healthy
-// endpoints costs Prompt Cache locality, which this project optimizes for).
-// A deterministic, non-splitting dimension (e.g. cost- or latency-based
-// tie-breaking) isn't ruled out by that reasoning and would slot in the same
-// way. There is no config surface to select or combine dimensions — every
-// virtual model gets the same chain (see router.BuildSnapshot).
+// Package strategy implements candidate elimination and ordering as two
+// decoupled functions: elimination (Eligible, which inspects request facts)
+// and ordering (Sort, which inspects only static endpoint attributes).
+// This preserves the invariant that elimination and ordering stay separate,
+// structurally guaranteed by the function signatures themselves (Sort does
+// not receive a request).
 package strategy
 
 import (
-	"cmp"
-	"fmt"
 	"sort"
-	"sync"
-	"sync/atomic"
 
 	"vmr/internal/core"
 )
 
-// Dimension is one comparable sort key. Build (below) instantiates a
-// model's dimension chain exactly once, at snapshot-build time — the
-// resulting []Dimension is stored in router.ModelRoute.Dims and reused,
-// unchanged, by every concurrent request's strategy.Sort call for that
-// model's lifetime (until the next config reload rebuilds a fresh chain).
-// Compare must therefore be safe for concurrent use: a stateful dimension
-// (e.g. a future round_robin) cannot mutate unsynchronized state inside its
-// factory-returned instance the way a naive per-request read might suggest —
-// it needs its own locking/atomics, or a redesign to per-request
-// instantiation, not "manage state inside the instance" left unqualified.
-// The only dimension registered today (priority) is a stateless empty
-// struct, so this has no live consequence yet.
-type Dimension interface {
-	Name() string
-	Compare(a, b *core.Endpoint) int // <0: a first; 0: tie, defer to next dimension
-}
-
-var (
-	mu        sync.RWMutex
-	factories = map[string]func() Dimension{}
-)
-
-func Register(name string, f func() Dimension) {
-	mu.Lock()
-	defer mu.Unlock()
-	if _, dup := factories[name]; dup {
-		panic(fmt.Sprintf("strategy: Register called twice for %q", name))
-	}
-	factories[name] = f
-}
-
-// Build instantiates the dimension chain for one virtual model.
-func Build(names []string) ([]Dimension, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	dims := make([]Dimension, 0, len(names))
-	for _, n := range names {
-		f, ok := factories[n]
-		if !ok {
-			return nil, fmt.Errorf("unknown strategy dimension %q", n)
-		}
-		dims = append(dims, f())
-	}
-	return dims, nil
-}
-
-// Sort orders endpoints by the dimension chain. The sort is stable, so full
-// ties keep config-file order.
-func Sort(eps []*core.Endpoint, dims []Dimension) {
+// Sort orders endpoints by Priority ascending (lower number wins).
+// The sort is stable, so equal priorities keep config-file order.
+func Sort(eps []*core.Endpoint) {
 	sort.SliceStable(eps, func(i, j int) bool {
-		for _, d := range dims {
-			if c := d.Compare(eps[i], eps[j]); c != 0 {
-				return c < 0
-			}
-		}
-		return false
+		return eps[i].Priority < eps[j].Priority
 	})
-}
-
-func init() {
-	Register("priority", func() Dimension { return priority{} })
-}
-
-// priority: lower number wins; ties fall through to the next dimension.
-type priority struct{}
-
-func (priority) Name() string { return "priority" }
-func (priority) Compare(a, b *core.Endpoint) int {
-	return cmp.Compare(a.Priority, b.Priority)
 }
 
 // Condition tests whether one endpoint may serve a request at all, based on
 // facts derived from the request and static properties the endpoint
-// declares in config (core.Endpoint.Capabilities). Unlike Dimension
+// declares in config (core.Endpoint.Capabilities). Unlike Sort
 // (endpoint-vs-endpoint ordering, no request access), a Condition is
 // request-aware and elimination-only — it never reorders candidates, it
 // only says yes or no. See
 // docs/VirtualModelRouter_Design_v4_Core.md's Condition-based Routing
-// section for the architectural rationale (Dimension.Compare structurally can't see the
-// request; this is a parallel, differently-shaped interface, not an
-// extension of Dimension).
+// section for the architectural rationale (Sort structurally cannot see the
+// request; elimination and ordering are separate concerns).
 //
-// Registered Conditions all participate unconditionally — unlike Dimension,
-// there is no per-model opt-in list, because Condition composition is
-// always plain AND with no meaningful ordering between conditions, and an
-// endpoint that hasn't declared the relevant capability is unconstrained by
-// definition (see core.Endpoint.HasCapability).
+// conditions (conditions.go) is the fixed compile-time Condition set — read
+// once per endpoint per request by Eligible, the actual per-request hot path.
+// All of them participate unconditionally — there is no per-model opt-in list,
+// because Condition composition is always plain AND with no meaningful
+// ordering between conditions, and an endpoint that hasn't declared the
+// relevant capability is unconstrained by definition (see
+// core.Endpoint.HasCapability).
 type Condition interface {
 	Name() string
 	Eligible(ep *core.Endpoint, facts core.RequestFacts) bool
-}
-
-// conditions is read once per endpoint per request by Eligible — the
-// actual per-request hot path — via a lock-free atomic load instead of an
-// RWMutex.RLock/RUnlock pair per endpoint (conditions.go's init() calls
-// RegisterCondition twice, never dynamically). conditionsMu serializes the
-// copy-on-write writes themselves — see adapter.registerMu's
-// doc comment for why a plain copy-on-write without it would silently lose
-// an update under genuinely concurrent writers. factories (the Dimension
-// registry above) deliberately keeps its plain mutex on both paths: Build
-// is only called once per model at config-load/reload time, not per
-// request, so there's no read-side win to chase there.
-var (
-	conditionsMu sync.Mutex
-	conditions   atomic.Pointer[[]Condition]
-)
-
-// RegisterCondition adds c to the set consulted by Eligible/RejectedBy.
-// Called from init() in the file that defines each condition (see
-// conditions.go), the same compile-time registration pattern as Register.
-func RegisterCondition(c Condition) {
-	conditionsMu.Lock()
-	defer conditionsMu.Unlock()
-	var next []Condition
-	if cur := conditions.Load(); cur != nil {
-		next = append(next, *cur...)
-	}
-	next = append(next, c)
-	conditions.Store(&next)
 }
 
 // Eligible reports whether ep passes every registered hard Condition for
@@ -151,11 +50,7 @@ func RegisterCondition(c Condition) {
 // because it rests on an estimate rather than a certainty the way
 // capability conditions do.
 func Eligible(ep *core.Endpoint, facts core.RequestFacts) bool {
-	cur := conditions.Load()
-	if cur == nil {
-		return true
-	}
-	for _, c := range *cur {
+	for _, c := range conditions {
 		if !c.Eligible(ep, facts) {
 			return false
 		}
@@ -168,12 +63,8 @@ func Eligible(ep *core.Endpoint, facts core.RequestFacts) bool {
 // candidate set is eliminated. Not on the hot path — only called once
 // Serve() already knows candidates ended up empty.
 func RejectedBy(ep *core.Endpoint, facts core.RequestFacts) []string {
-	cur := conditions.Load()
-	if cur == nil {
-		return nil
-	}
 	var names []string
-	for _, c := range *cur {
+	for _, c := range conditions {
 		if !c.Eligible(ep, facts) {
 			names = append(names, c.Name())
 		}

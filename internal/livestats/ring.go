@@ -13,9 +13,9 @@ type provKey struct {
 // (the console's /stats contract): n is the window's actual
 // entry count, tokens are the
 // four-way sums, ttft/toks percentiles are nearest-rank. ttft_ms==0 is
-// "unmeasured" and stays out of the ttft pools (design §4.2); a sample
+// "unmeasured" and stays out of the ttft pools (the design doc); a sample
 // with zero output tokens or a non-positive generation span stays out of
-// the toks pool (design §8: one throughput caliber, tokens.out over the
+// the toks pool (one throughput caliber, tokens.out over the
 // generation-only span).
 func windowBlock(entries []RecentRequestEntry) *WindowBlock {
 	wb := &WindowBlock{N: int64(len(entries))}
@@ -57,7 +57,7 @@ func windowBlock(entries []RecentRequestEntry) *WindowBlock {
 // treatment as zero-output/non-positive-span).
 const minToksSpanMS = 50
 
-// toksOf applies the single toks rate (design §8): output-token generation
+// toksOf applies the single toks rate: output-token generation
 // throughput. For a streamed sample the span excludes the prefill/wait
 // phase (dur_ms - ttft_ms) — the client-visible TTFT already answers "was
 // the wait slow", so folding it into the rate too would just dilute the

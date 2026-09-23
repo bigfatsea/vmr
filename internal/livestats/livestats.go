@@ -17,7 +17,7 @@ const (
 // completed ok requests across all providers and models.
 const globalRingCap = 300
 
-// rollupRetentionDays is the in-memory rollup window (design §8): the last
+// rollupRetentionDays is the in-memory rollup window (the design doc): the last
 // this-many whole calendar days plus the current partial one. Startup only
 // loads rollup rows inside it; each day roll evicts anything older. The
 // rollup FILE still keeps every row — only the memory image, and therefore
@@ -28,7 +28,7 @@ const globalRingCap = 300
 const rollupRetentionDays = 7
 
 // HourlyTailDefault is the /stats hourly[] tail when no ?range= narrows it
-// (design §8): the last 48 distinct hours with data. dailyTail bounds
+// (the design doc): the last 48 distinct hours with data. dailyTail bounds
 // daily[] — the window spans rollupRetentionDays whole days plus today, and
 // nothing older is held anyway, so +1 keeps every day that is in memory.
 const (
@@ -36,7 +36,7 @@ const (
 	dailyTail         = rollupRetentionDays + 1
 )
 
-// recentErrCap bounds the in-memory recent_errors ring (design §8.1).
+// recentErrCap bounds the in-memory recent_errors ring (the design doc).
 // Keeps at most 100 errors within the last 24 hours.
 const recentErrCap = 100
 
@@ -54,7 +54,7 @@ const snapCacheTTL = 3 * time.Second
 
 // TokenCounts is the raw four-way per-request token tally. Same field names
 // as the audit record's token stamp, re-declared here: the slim/rollup key
-// space quotes audit's names verbatim (design §3.1) but the import stays
+// space quotes audit's names verbatim (the design doc) but the import stays
 // severed — the record's shape can change without touching this contract.
 type TokenCounts struct {
 	In         int64 `json:"in"`
@@ -83,7 +83,7 @@ type SumCount struct {
 // totals, and nearest-rank ttft/toks percentiles. The only rate is toks —
 // output-token generation throughput: tokens.out over (dur_ms - ttft_ms)
 // for streamed samples, tokens.out / dur_ms for non-streamed ones
-// (design §8).
+// (the design doc).
 //
 // TTFT and toks read their p90/p10 in opposite directions on purpose: TTFT
 // is a cost metric (bigger is worse), so its tail is the top decile —
@@ -115,15 +115,15 @@ type RecentRequestEntry struct {
 }
 
 // Sample is one completed request as the completion hook sees it. TS is the
-// arrival time and decides the hour bucket (design §3.2). Provider, Model
+// arrival time and decides the hour bucket (the design doc). Provider, Model
 // and KeyLabel identify which upstream endpoint the terminal attempt
 // targeted — populated whenever at least one attempt was made, forwarded or
-// not (design §4.2), so a failed request still groups under the endpoint
+// not (the design doc), so a failed request still groups under the endpoint
 // that actually failed instead of an anonymous bucket. Only empty when the
 // request never reached an attempt at all (client-side rejection or
 // no-candidate). Forwarded is the separate, authoritative gate for
 // service-quality aggregation: only a forwarded sample's tokens/dur/ttft
-// feed Counters' sums or the global performance ring (design §4.2) — Provider
+// feed Counters' sums or the global performance ring (the design doc) — Provider
 // being non-empty no longer implies Forwarded. TTFTMS 0 means unmeasured
 // and is excluded from ttft sums and the global ring. ErrorClass/Status/Attempt
 // feed only the recent_errors ring (the console's /stats
@@ -150,9 +150,9 @@ type Sample struct {
 }
 
 // Dims mirrors the rollup row's dims object — same key names, same order as
-// the design's example (§3.3). vmodel is the one deliberately renamed field:
+// the design's example. vmodel is the one deliberately renamed field:
 // the flat row carries both the virtual name and the upstream name, so the
-// virtual one gets a distinct key (design §3.2).
+// virtual one gets a distinct key (the design doc).
 type Dims struct {
 	VModel       string `json:"vmodel"`
 	Protocol     string `json:"protocol"`
@@ -163,7 +163,7 @@ type Dims struct {
 	Stream       bool   `json:"stream"`
 }
 
-// dimsKey is the memory-side grouping key (§3.3's dims tuple). Components
+// dimsKey is the memory-side grouping key (the design's dims tuple). Components
 // are config-sourced names or fixed enums, so "\x1f" joining in id() is
 // collision-proof in practice.
 type dimsKey struct {
@@ -212,7 +212,7 @@ func streamBit(b bool) string {
 // Counters is the counting payload of one (hour × dims) group — the same
 // shape a rollup row carries. Outcome counting is request-face (every
 // sample); tokens/dur/ttft are service-face and only move for forwarded
-// samples (design §4.2).
+// samples (the design doc).
 type Counters struct {
 	OK       int64       `json:"ok"`
 	Error    int64       `json:"error"`

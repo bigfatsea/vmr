@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:53, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package core defines shared domain entities (Endpoint, CanonicalRequest, RequestFacts,
 // PricingSpec, QuotaSpec) and zero-dependency domain helpers used across routing and analytics.
@@ -50,18 +50,14 @@ type CanonicalRequest struct {
 	// ClientKeyTag is the authenticated caller's identity tag (empty when
 	// no key matched or auth is disabled). Set by the server layer once,
 	// then read by the sticky model to scope the session fingerprint — so
-	// the sticky bucket is identical whether or not auditing is enabled
-	// (Q30).
+	// the sticky bucket is identical whether or not auditing is enabled.
 	ClientKeyTag string
 }
 
 // RequestFacts holds request-derived signals computed once per request for condition-based routing.
 type RequestFacts struct {
 	HasImage        bool  `json:"has_image,omitempty"`
-	HasAudio        bool  `json:"has_audio,omitempty"`
-	HasVideo        bool  `json:"has_video,omitempty"`
 	HasTools        bool  `json:"has_tools,omitempty"`
-	WantsThinking   bool  `json:"wants_thinking,omitempty"`
 	EstimatedTokens int64 `json:"estimated_tokens"`
 }
 
@@ -291,8 +287,8 @@ func (e *Endpoint) computeName() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model
 }
 
-// QuotaMetric is the counting unit a Limit is measured in — see
-// docs/VirtualModelRouter_Design_v4_Quota.md's §3 for the full model.
+// QuotaMetric is the counting unit a Limit is measured in — the Quota
+// design doc's charge model is the full story.
 type QuotaMetric string
 
 const (
@@ -307,12 +303,11 @@ const (
 // separate YAML-shape/runtime-shape types (the config.EndpointGroup ->
 // core.Endpoint precedent).
 //
-// P3: a provider's core.QuotaSpec carries one or more of these (tumbling
+// A provider's core.QuotaSpec carries one or more of these (tumbling
 // only — no Rolling field here at all, config.LimitConfig.Rolling exists
 // solely to produce a clear "not yet supported" load error, never reaches
 // this type). TokenWeights/ModelMultipliers live per-Limit, not on
-// QuotaSpec — see this field's own doc comment for why that's a P3 reversal
-// of the original P2 placement.
+// QuotaSpec — see this field's own doc comment for why.
 type Limit struct {
 	Metric QuotaMetric
 	EveryN int
@@ -335,8 +330,7 @@ type Limit struct {
 	// independent one (see quota.LimitKey's doc comment for the bucket-key
 	// consequence). Three shapes, one field:
 	//   - nil/empty: "shared" — every model on the provider draws down ONE
-	//     combined pool. The zero-config default, and the only shape P1/P2
-	//     ever had.
+	//     combined pool. The zero-config default.
 	//   - exactly []string{"*"}: "per-model, unrestricted" — the rule
 	//     applies to every model on the provider, but each one gets its OWN
 	//     independent pool. "*" is a reserved token, never a literal model
@@ -354,28 +348,24 @@ type Limit struct {
 	Models []string
 	// TokenWeights is this Limit's own per-component scaling factor,
 	// applied when Metric==MetricTokens (see TokenWeights' own doc comment
-	// for the formula and zero-value trap). Moved here from QuotaSpec in
-	// P3: once a provider can carry more than one window, "how much a
-	// component counts" turns out to differ by window in observed plans
-	// (e.g. a short RPM gate that counts every token type equally vs. a
-	// monthly Credits bucket that discounts cache reads) — see
-	// docs/VirtualModelRouter_Design_v4_Quota.md's §12.1 revision note on
-	// "折算规则的层级" for the full reversal record: the original P2
-	// reasoning (one ratio shared account-wide) held only as long as every
-	// observed plan's windows shared one ratio, which is no longer assumed
-	// true from P3 on.
+	// for the formula and zero-value trap). It lives per-Limit because once
+	// a provider can carry more than one window, "how much a component
+	// counts" differs by window in observed plans (e.g. a short RPM gate that
+	// counts every token type equally vs. a monthly Credits bucket that
+	// discounts cache reads) — a single account-wide ratio only held while
+	// every plan's windows were assumed to share one ratio.
 	TokenWeights TokenWeights
 	// ModelMultipliers is this Limit's own charge-time model scaling table
-	// — same P3 relocation and reasoning as TokenWeights above (see its doc
-	// comment); resolves via ApplyModelMultiplier the same way it always
-	// has, just read from the Limit instead of the account.
+	// — same per-Limit placement and reasoning as TokenWeights above (see
+	// its doc comment); resolves via ApplyModelMultiplier, read from the
+	// Limit.
 	ModelMultipliers map[string]float64
 }
 
 // TokenWeights is the account-level per-component scaling factor applied to
-// a tokens-metric Limit's base(tokens) formula — see
-// docs/VirtualModelRouter_Design_v4_Quota.md's §3 (charge = base(metric) ×
-// ModelMultipliers[model]) and its "Simplification" section ⑧ for why this
+// a tokens-metric Limit's base(tokens) formula — the Quota design doc's
+// charge formula (charge = base(metric) × ModelMultipliers[model]) and its
+// "Simplification" section explain why this
 // lives here rather than as a per-model price table: a Credits-style plan
 // whose account discounts cache reads (or prices output higher) uniformly
 // across all its models needs one shared ratio, not a per-model rate table
@@ -388,7 +378,7 @@ type Limit struct {
 // whichever resolves config.QuotaConfig into core.QuotaSpec) MUST explicitly
 // fill every unset component with DefaultTokenWeight; nothing in this
 // package does that for you. This is the same class of trap
-// HeadroomCap/epsilon hit during P1 — recorded here so it isn't rediscovered.
+// HeadroomCap/epsilon hit — recorded here so it isn't rediscovered.
 type TokenWeights struct {
 	InFresh    float64
 	CacheRead  float64
@@ -488,7 +478,7 @@ type PricingOverride struct {
 // chain below it resolves to).
 //
 // Not on the routing hot path — the routing half doesn't resolve or carry
-// pricing at all anymore (see KNOWN_ISSUES §1.0). This type exists purely
+// pricing at all anymore (see KNOWN_ISSUES). This type exists purely
 // for the analytics half's offline $ estimates: cmd/vmr/cmd_report.go
 // resolves it via internal/pricing.Resolve/Resolver, and vmr check's
 // display uses it to show what a provider's pricing.rates would resolve
@@ -506,11 +496,10 @@ type PricingSpec struct {
 }
 
 // QuotaSpec is a provider's full quota configuration: one or more Limits
-// (P3: multi-window). TokenWeights/ModelMultipliers are no longer carried
-// here — each now lives on the individual Limit it modifies (see Limit's
-// own doc comments) — because P3 observed real plans whose windows don't
-// all share one ratio, the premise P1/P2's account-level placement depended
-// on.
+// (multi-window). TokenWeights/ModelMultipliers are not carried
+// here — each lives on the individual Limit it modifies (see Limit's
+// own doc comments) — because real plans' windows don't
+// all share one ratio.
 type QuotaSpec struct {
 	Limits []Limit
 }

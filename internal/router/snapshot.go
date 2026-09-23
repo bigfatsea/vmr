@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:41, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Snapshot construction and installation: turning a validated config.Config
 // into the immutable, atomically-swappable routing table Serve reads. Split
@@ -23,11 +23,6 @@ import (
 // there is no "protocol" value here that could disagree with where the route
 // lives.
 type ModelRoute struct {
-	// Dims is the same chain for every route in a Snapshot (see
-	// BuildSnapshot) — carried per-route rather than package-level so
-	// quota.go's reorderByQuota/sameTier stay decoupled from where the
-	// chain comes from.
-	Dims      []strategy.Dimension
 	Endpoints []*core.Endpoint
 
 	// ImageDownscaleMaxPx mirrors config.ModelConfig.ImageDownscaleMaxPx: nil
@@ -42,8 +37,8 @@ type ModelRoute struct {
 	// docs/VirtualModelRouter_Design_v4_Core.md's Sticky Model section.
 	Sticky bool
 
-	// GuardAllTrusted is Agent Guard's outbound exemption precondition
-	// (M3.5, design spec §4.3): true only when EVERY endpoint this route
+	// GuardAllTrusted is Agent Guard's outbound exemption precondition:
+	// true only when EVERY endpoint this route
 	// could ever dispatch to (all try-order candidates, fallback included)
 	// names a provider in guard.trusted_providers. Computed once here,
 	// at Snapshot build time, because the request entry point doesn't yet
@@ -65,7 +60,7 @@ type ModelRoute struct {
 // this was factored out.
 func (r *ModelRoute) EffectiveOrder() []*core.Endpoint {
 	ordered := append([]*core.Endpoint(nil), r.Endpoints...)
-	strategy.Sort(ordered, r.Dims)
+	strategy.Sort(ordered)
 	return ordered
 }
 
@@ -115,34 +110,29 @@ func (s *Snapshot) clientFor(ep *core.Endpoint) *http.Client {
 // with at least one group becomes its own *ModelRoute — the same virtual
 // model name can be reachable from both ingress protocols at once (see
 // config.VirtualModel's doc comment), each independently, sharing the
-// model-level Dims/Sticky/ImageDownscaleMaxPx but never each other's
+// model-level Sticky/ImageDownscaleMaxPx but never each other's
 // endpoints. Each EndpointGroup's Models list expands into that many
 // independent *core.Endpoint values, in list order.
 func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	snap := &Snapshot{Cfg: cfg, Models: map[string]map[string]*ModelRoute{}}
 	// Single filtering point for Provider.Disabled — every downstream
 	// consumer (buildEndpoints' (provider,model) expansion, fallback
-	// injection, BuildQuotaSpecsDisabled) keys off this map. Don't scatter
-	// p.Disabled checks at each consumer: hot-reload sequences would then
-	// need every consumer updated in lockstep or routes would silently
+	// injection, BuildQuotaSpecs' enabled filter) keys off this map. Don't
+	// scatter p.Disabled checks at each consumer: hot-reload sequences would
+	// then need every consumer updated in lockstep or routes would silently
 	// drift (BuildQuotaSpecs would skip a disabled provider but
 	// buildEndpoints would still emit its endpoints, etc.). One map, one
 	// filter. Everything downstream follows for free: /status lists only
 	// endpoints a snapshot can actually route to; hot reload needs no new
 	// mechanism (snapshot swaps atomically; sticky re-checks candidates
 	// per request, so pinned sessions just fail over past a disabled
-	// provider); quota registry Prune drops the stranded bucket on install.
+	// provider). The quota registry's ledger for a disabled provider is
+	// deliberately KEPT across Prune (see ProviderLimits): disabling is a
+	// temporary removal from rotation, and dropping the ledger would zero
+	// the period's already-charged usage on re-enable — undercounting spend
+	// for the rest of the period.
 	enabled := enabledProviders(cfg.Providers)
-	quotaSpecs := BuildQuotaSpecsDisabled(cfg.Providers, enabled)
-	// Every virtual model orders candidates the same way — priority is the
-	// only registered Dimension (docs/VirtualModelRouter_Design_v4_Strategy.md's
-	// "为什么是配速而不是负载均衡" section is why a second, traffic-splitting
-	// one was evaluated and rejected, not merely unimplemented) — so the
-	// chain is built once here rather than per model.
-	dims, err := strategy.Build([]string{"priority"})
-	if err != nil {
-		return nil, fmt.Errorf("building default strategy dimensions: %w", err)
-	}
+	quotaSpecs := BuildQuotaSpecs(cfg.Providers, enabled)
 	for name, m := range cfg.Models {
 		sticky := m.Sticky == nil || *m.Sticky
 		fallbackOK := m.Fallback == nil || *m.Fallback
@@ -155,7 +145,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 				}
 				route, ok := routes[protocol]
 				if !ok {
-					route = &ModelRoute{Dims: dims, ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
+					route = &ModelRoute{ImageDownscaleMaxPx: m.ImageDownscaleMaxPx, Sticky: sticky}
 					routes[protocol] = route
 				}
 				route.Endpoints = append(route.Endpoints, eps...)
@@ -193,7 +183,7 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 	return snap, nil
 }
 
-// allEndpointsTrusted implements M3.5's precondition exactly: false
+// allEndpointsTrusted implements GuardAllTrusted's precondition exactly: false
 // whenever guard is unconfigured, no provider is listed as trusted, or
 // the route has no endpoints at all (nothing to be trusted about) —
 // true only when every single endpoint's provider name appears in
@@ -286,54 +276,45 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 // core.QuotaSpec once, keyed by provider name, so every core.Endpoint
 // expanded from that provider (however many virtual models/protocols
 // reference it) shares the SAME pointer — quota is an account property, not
-// a per-endpoint one (see core.Endpoint.Quota's doc comment). Providers
-// with no quota: configured are simply absent from the map, so a lookup
-// miss below naturally yields nil (unmetered). Exported: internal/replay
-// needs the same provider-name -> *core.QuotaSpec resolution BuildSnapshot
-// does, for a hand-built core.Endpoint that never goes through BuildSnapshot
-// itself (see replay.go's chargeReplay).
-func BuildQuotaSpecs(providers []config.Provider) map[string]*core.QuotaSpec {
+// a per-endpoint one (see core.Endpoint.Quota's doc comment). Providers with
+// no quota configured are simply absent from the map, so a lookup miss
+// naturally yields nil (unmetered).
+//
+// enabled scopes the result to the live routing half (BuildSnapshot's
+// expansion path): a provider named false, or absent, is skipped so a
+// disabled account carries no QuotaSpec. nil means no filtering — the
+// internal/replay path, which targets one explicit (provider, model) pair
+// and must resolve its quota spec regardless of the provider's live
+// routing state.
+func BuildQuotaSpecs(providers []config.Provider, enabled map[string]bool) map[string]*core.QuotaSpec {
 	out := map[string]*core.QuotaSpec{}
 	for _, p := range providers {
+		if enabled != nil && !enabled[p.Name] {
+			continue
+		}
 		if p.Quota == nil {
 			continue
 		}
-		limits := make([]core.Limit, len(p.Quota.Limits))
-		for i, lc := range p.Quota.Limits {
-			limits[i] = lc.Resolved
-		}
-		out[p.Name] = &core.QuotaSpec{Limits: limits}
+		out[p.Name] = &core.QuotaSpec{Limits: resolvedLimits(p.Quota.Limits)}
 	}
 	return out
 }
 
-// BuildQuotaSpecsDisabled is BuildQuotaSpecs plus the Provider.Disabled
-// filter — the BuildSnapshot-side companion, since BuildSnapshot must NOT
-// leave a stranded counter bucket for an account carrying no traffic.
-// Internal/replay is unchanged: it deliberately builds a core.Endpoint for
-// a specific (provider,model) pair and reuses BuildQuotaSpecs' shape.
-func BuildQuotaSpecsDisabled(providers []config.Provider, enabled map[string]bool) map[string]*core.QuotaSpec {
-	out := map[string]*core.QuotaSpec{}
-	for _, p := range providers {
-		if !enabled[p.Name] {
-			continue
-		}
-		if p.Quota == nil {
-			continue
-		}
-		limits := make([]core.Limit, len(p.Quota.Limits))
-		for i, lc := range p.Quota.Limits {
-			limits[i] = lc.Resolved
-		}
-		out[p.Name] = &core.QuotaSpec{Limits: limits}
+// resolvedLimits copies a provider's already-resolved config limits into
+// their runtime shape — the one copy loop shared by BuildQuotaSpecs and
+// Snapshot.ProviderLimits, so the two can't drift on how a Limit resolves.
+func resolvedLimits(lcs []config.LimitConfig) []core.Limit {
+	limits := make([]core.Limit, len(lcs))
+	for i, lc := range lcs {
+		limits[i] = lc.Resolved
 	}
-	return out
+	return limits
 }
 
 // enabledProviders returns the set of provider names that should be live
 // in the routing half — the inverse of Provider.Disabled. Single source
-// of truth used by BuildSnapshot (route expansion, fallback injection)
-// and BuildQuotaSpecsDisabled, so reload sequences can never drift (one
+// of truth used by BuildSnapshot (route expansion, fallback injection) and
+// its BuildQuotaSpecs filter, so reload sequences can never drift (one
 // consumer filtering and another not). All providers pass when none
 // declares it (the common case today).
 func enabledProviders(providers []config.Provider) map[string]bool {
@@ -426,7 +407,7 @@ func (rt *Router) Install(s *Snapshot) {
 	// the stale keys. Pruning first left a window where an in-flight request
 	// on the old snapshot could rebuild a bucket that was just pruned; a
 	// straggler that still does so after the swap is cleaned by the next
-	// reload's Prune (B7).
+	// reload's Prune.
 	if rt.Quota != nil {
 		rt.Quota.Prune(s.ProviderLimits())
 	}
@@ -462,7 +443,12 @@ func (s *Snapshot) HealthKeys() map[string]bool {
 	return keep
 }
 
-// ProviderLimits returns a map of provider name -> configured Limits from this snapshot.
+// ProviderLimits returns a map of provider name -> configured Limits from
+// this snapshot. Deliberately UNFILTERED by Provider.Disabled: the quota
+// registry keys its ledger on provider name across reloads, and a disabled
+// provider's period usage must survive — dropping it would zero the
+// period's charged amount on re-enable (see the quota-ledger note in
+// BuildSnapshot).
 func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
 	if s == nil || s.Cfg == nil {
 		return nil
@@ -470,11 +456,7 @@ func (s *Snapshot) ProviderLimits() map[string][]core.Limit {
 	out := make(map[string][]core.Limit, len(s.Cfg.Providers))
 	for _, p := range s.Cfg.Providers {
 		if p.Quota != nil && len(p.Quota.Limits) > 0 {
-			limits := make([]core.Limit, len(p.Quota.Limits))
-			for i, lc := range p.Quota.Limits {
-				limits[i] = lc.Resolved
-			}
-			out[p.Name] = limits
+			out[p.Name] = resolvedLimits(p.Quota.Limits)
 		}
 	}
 	return out

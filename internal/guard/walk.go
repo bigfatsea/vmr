@@ -1,7 +1,7 @@
-// Ver 2026-09-17, by Sonnet 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // JSON string-VALUE traversal at arbitrary depth. jsonscan (this package's
-// only whitelisted dependency, ADR-1) has structural byte-scanning
+// only whitelisted dependency) has structural byte-scanning
 // primitives (SkipJSONWS/SkipJSONString/SkipJSONValue) but no walker that
 // visits every string value regardless of nesting — TopLevelValues and
 // WalkArrayElements are both single-level (see that package's doc
@@ -10,7 +10,7 @@
 // walk that reuses jsonscan's byte-level primitives (quote/escape
 // handling, delimiter skipping) but adds the "descend into every
 // container" traversal jsonscan itself deliberately does not provide
-// (K1 in the design spec — this really is new capability, not a rename of
+// (this really is new capability, not a rename of
 // something already there).
 package guard
 
@@ -21,7 +21,7 @@ import (
 // maxWalkDepth guards against pathological/adversarial nesting (audit
 // records are vmr's own historical output, not attacker-controlled input,
 // but this package is also meant to be safe to point at arbitrary request
-// bodies once M3/M4 exist) — refuse to recurse past a depth no legitimate
+// bodies) — refuse to recurse past a depth no legitimate
 // LLM chat payload approaches, rather than risk unbounded stack growth.
 const maxWalkDepth = 10000
 
@@ -29,11 +29,11 @@ const maxWalkDepth = 10000
 // *Scratch (rather than a separate walker type holding a `visit
 // func(...)` closure) specifically so Scan never constructs a closure: a
 // closure capturing raw/dst afresh on every call is exactly the kind of
-// allocation the no-hit-path zero-allocation goal (§4.8) rules out, and
+// allocation the no-hit-path zero-allocation goal rules out, and
 // Go's escape analysis heap-allocates a closure stored through an
 // interface-shaped `visit func(...)` field, the exact shape this design
 // avoids. Threading sc explicitly (instead of a mutable Engine field) is what
-// makes the Engine itself safe to share across goroutines (M3.0) — see
+// makes the Engine itself safe to share across goroutines — see
 // engine.go's Engine/Scratch doc comments.
 
 // walkStrings visits every JSON string VALUE (never a key) found anywhere

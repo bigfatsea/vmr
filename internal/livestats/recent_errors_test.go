@@ -36,7 +36,7 @@ func TestRecentErrors_NewestFirstAndAdmission(t *testing.T) {
 	agg.Record(c1)
 	agg.Record(ok2)
 
-	rows := agg.Snapshot(HourlyTailDefault).RecentErrors
+	rows := agg.snapshot(HourlyTailDefault).RecentErrors
 	if len(rows) != 2 {
 		t.Fatalf("recent_errors = %d rows, want 2 (ok samples excluded)", len(rows))
 	}
@@ -78,7 +78,7 @@ func TestRecentErrors_CapHundred(t *testing.T) {
 		})
 	}
 
-	rows := agg.Snapshot(HourlyTailDefault).RecentErrors
+	rows := agg.snapshot(HourlyTailDefault).RecentErrors
 	if len(rows) != recentErrCap {
 		t.Fatalf("recent_errors = %d rows, want cap %d", len(rows), recentErrCap)
 	}
@@ -123,7 +123,7 @@ func TestRecentErrors_EvictOlderThan24Hours(t *testing.T) {
 		ErrorClass: "upstream_5xx",
 	})
 
-	rows := agg.Snapshot(HourlyTailDefault).RecentErrors
+	rows := agg.snapshot(HourlyTailDefault).RecentErrors
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2 (the 25h-old error must be evicted)", len(rows))
 	}
@@ -153,7 +153,7 @@ func TestRecentErrors_TransientRingNotPersisted(t *testing.T) {
 		t.Fatalf("NewAt after restart: %v", err)
 	}
 	defer agg2.Close()
-	if rows := agg2.Snapshot(HourlyTailDefault).RecentErrors; len(rows) != 0 {
+	if rows := agg2.snapshot(HourlyTailDefault).RecentErrors; len(rows) != 0 {
 		t.Errorf("recent_errors survived a restart: %d rows", len(rows))
 	}
 }
@@ -174,7 +174,7 @@ func TestRecentErrors_PastHourBookedToo(t *testing.T) {
 	clock = clock.Add(2 * time.Hour)
 	agg.Record(Sample{TS: clock.Add(-3 * time.Hour), VModel: "coding", Outcome: OutcomeError, ErrorClass: "upstream_5xx", Status: 503})
 
-	rows := agg.Snapshot(HourlyTailDefault).RecentErrors
+	rows := agg.snapshot(HourlyTailDefault).RecentErrors
 	if len(rows) != 2 {
 		t.Fatalf("recent_errors = %d rows, want 2 (past-hour failure included)", len(rows))
 	}

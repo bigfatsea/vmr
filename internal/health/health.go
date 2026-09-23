@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package health implements the failure-driven health state machine:
 // cooldown with exponential backoff and single-flight half-open recovery
@@ -31,7 +31,7 @@ const (
 	// conversation does NOT come back — the re-hits come from new traffic.)
 	// 5s slows the flap 2.5× without making a single transient failure
 	// expensive; the structural fix is registered in docs/KNOWN_ISSUES.md
-	// §2.99 (probe decays only to fails==1, real traffic confirms the last
+	// (probe decays only to fails==1, real traffic confirms the last
 	// step) pending observation.
 	transientBase = 5 * time.Second
 	transientCap  = 5 * time.Minute
@@ -162,7 +162,7 @@ func (r *Registry) ReportSuccess(key string) {
 // >0: Classify hands out no real requests on that state, so probe decay is
 // the only way out of it; ReportSuccess only runs once the endpoint is
 // already fully available again. The one exception is the candidate-building
-// last-resort path (KNOWN_ISSUES §2.85): when every candidate is
+// last-resort path (see KNOWN_ISSUES): when every candidate is
 // unavailable, the least-backed-off half-open endpoint is released to a
 // single real request as a genuine trial — that request can reach
 // ReportSuccess (clearing fails to 0 outright) while fails is still >0.
@@ -197,14 +197,12 @@ func (r *Registry) ReportFailure(key string, class core.ErrorClass, retryAfter t
 	s.lastClass = class
 
 	var d time.Duration
-	switch class {
-	case core.ErrAuth, core.ErrEndpoint:
+	if long {
 		d = backoff(longBase, longCap, s.fails)
-	case core.ErrClient, core.ErrRateLimit, core.ErrTransient, core.ErrContent, core.ErrContextLimit, core.ErrQuirk:
-		d = retryAfterCooldown(retryAfter, s.fails)
-	default:
-		// Out-of-enum value only — every declared ErrorClass has an explicit
-		// case above; a class added to core must be added here too.
+	} else {
+		// Every non-long declared ErrorClass lands here (as does an
+		// out-of-enum value, defensively): Retry-After if the upstream
+		// supplied one, else the transient curve.
 		d = retryAfterCooldown(retryAfter, s.fails)
 	}
 	s.cooldownUntil = now.Add(d)

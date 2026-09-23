@@ -1,8 +1,10 @@
-// Ver 2026-08-10, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 package pricing
 
 import (
 	"testing"
+
+	"vmr/internal/core"
 )
 
 func almostEqual(a, b float64) bool {
@@ -344,17 +346,33 @@ func TestResolve_StackedDiscounts_ComposeMultiplicatively(t *testing.T) {
 	}
 }
 
-// --- Complete: the incompleteness gate vmr analyze's $ estimate labeling uses ---
+// --- complete: the incompleteness diagnostic vmr analyze's $ estimate
+// labeling would use — the unexported, test-only walk of resolveChain that
+// reports WHERE a rate went incomplete. Production code
+// (internal/report/cost.go) needs only Rate.Complete() on the single
+// EffectiveRate result, so this shape never earns an exported entry point.
+// badIndex is -1 when spec.Base itself supplied the (possibly incomplete)
+// rate, else the index of the Override whose Explicit rate did (a Discount
+// form can never itself introduce an incompleteness — Rate.Scale only
+// narrows an already-resolved rate, never widens it). nil-safe: a nil spec
+// is never complete.
+func complete(spec *core.PricingSpec) (ok bool, bad Rate, badIndex int) {
+	if spec == nil {
+		return false, Rate{}, -1
+	}
+	r, idx := resolveChain(spec, 0)
+	return r.Complete(), r, idx
+}
 
 func TestComplete_NilSpec(t *testing.T) {
-	if ok, _, _ := Complete(nil); ok {
+	if ok, _, _ := complete(nil); ok {
 		t.Fatal("nil spec must not be considered complete")
 	}
 }
 
 func TestComplete_CompleteBaseNoOverrides(t *testing.T) {
 	spec, _ := Resolve("anthropic", "claude-3-5-sonnet", ResolveOptions{Table: testTable()})
-	ok, _, _ := Complete(spec)
+	ok, _, _ := complete(spec)
 	if !ok {
 		t.Fatal("a fully-priced table entry with no overrides should be complete")
 	}
@@ -362,7 +380,7 @@ func TestComplete_CompleteBaseNoOverrides(t *testing.T) {
 
 func TestComplete_IncompleteBaseNoOverrides_Fails(t *testing.T) {
 	spec, _ := Resolve("deepseek", "deepseek-chat", ResolveOptions{Table: testTable()})
-	ok, bad, idx := Complete(spec)
+	ok, bad, idx := complete(spec)
 	if ok {
 		t.Fatal("deepseek-chat's table entry is missing cache_write — must not be complete")
 	}
@@ -389,7 +407,7 @@ func TestComplete_OverrideFullyCoversModel_BaseIrrelevant(t *testing.T) {
 	if !ok {
 		t.Fatal("Resolve failed")
 	}
-	complete, bad, idx := Complete(spec)
+	complete, bad, idx := complete(spec)
 	if !complete {
 		t.Fatalf("want complete (the override fully covers the only reachable resolution), got bad=%+v idx=%d", bad, idx)
 	}
@@ -407,7 +425,7 @@ func TestComplete_DiscountOverIncompleteBase_Fails(t *testing.T) {
 	if !ok {
 		t.Fatal("Resolve failed")
 	}
-	complete, bad, idx := Complete(spec)
+	complete, bad, idx := complete(spec)
 	if complete {
 		t.Fatal("a discount scaling an incomplete Base must not be considered complete")
 	}
@@ -437,7 +455,7 @@ func TestComplete_RuleAfterFirstMatch_Unreachable_NotChecked(t *testing.T) {
 	if !ok {
 		t.Fatal("Resolve failed")
 	}
-	complete, bad, idx := Complete(spec)
+	complete, bad, idx := complete(spec)
 	if !complete {
 		t.Fatalf("want complete (the incomplete path is behind an earlier matching rule and can never be reached), got bad=%+v idx=%d", bad, idx)
 	}

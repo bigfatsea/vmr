@@ -1,4 +1,4 @@
-// Ver 2026-08-13 16:39, by Gemini 3.6 Flash
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 package quota
 
@@ -18,7 +18,7 @@ import (
 const DefaultFlushInterval = 10 * time.Second
 
 // fileVersion is bumped whenever the on-disk shape changes incompatibly —
-// left at 1 for the whole of P1 (see the design doc's Persistence section).
+// left at 1 so far (see the design doc's Persistence section).
 const fileVersion = 1
 
 // fileFormat is quota state's on-disk shape: <log_dir>/vmr-quota.json.
@@ -38,7 +38,7 @@ type fileFormat struct {
 // with an empty Registry either way; Load itself never mutates state on the
 // error path. Corruption here means syntactic OR structural: a version that
 // isn't the current one, a nil account map, or a null bucket is rejected
-// wholesale (R43/R66), so a structurally damaged file can't smuggle a nil
+// wholesale, so a structurally damaged file can't smuggle a nil
 // bucket past the loader into a later resetIfStaleLocked panic.
 func (r *Registry) Load() error {
 	if r.path == "" {
@@ -199,7 +199,7 @@ func (r *Registry) Flush() (err error) {
 	// seeing a half-written file, but only a sync orders the data ahead of
 	// the rename's metadata on the disk itself — without it a crash/power
 	// loss can surface the rename with a zero-length or stale-tail file and
-	// the whole period's counters read as lost (R52).
+	// the whole period's counters read as lost.
 	if err = tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
@@ -253,7 +253,7 @@ func (r *Registry) Close() error {
 }
 
 // Bucket represents a snapshot of quota state exported for offline consumers (vmr analyze's
-// §2.5 quota-vs-consumption table via LoadFile) — the JSON tags are shared
+// quota-vs-consumption table via LoadFile) — the JSON tags are shared
 // verbatim with the unexported bucket this package uses in memory and on
 // disk, per store.go's own "there is exactly one shape" rule (see
 // fileFormat's doc comment): a second, parallel type here would be exactly
@@ -284,7 +284,7 @@ func (b Bucket) PeriodStartTime() time.Time {
 // quota tracking — not an error a caller needs to branch on beyond checking
 // for a nil map. A structurally damaged file (bad version, nil account map,
 // null bucket) returns an error, wholesale rather than partially adopted —
-// same contract as Registry.Load (R43/R66): silently dropping one provider's
+// same contract as Registry.Load: silently dropping one provider's
 // ledger is more dangerous than failing the read.
 func LoadFile(path string) (map[string]map[string]Bucket, error) {
 	data, err := os.ReadFile(path)
@@ -320,8 +320,8 @@ func LoadFile(path string) (map[string]map[string]Bucket, error) {
 // validateLoadedShape rejects a structurally damaged quota ledger: a version
 // other than the current one, a nil account map, or a null bucket. Either
 // full adoption or full rejection — never a partial take, so an anomaly in
-// one provider's slice can't silently drop another provider's ledger
-// (R43/R66). Shared by Registry.Load and LoadFile so the two readers agree
+// one provider's slice can't silently drop another provider's ledger.
+// Shared by Registry.Load and LoadFile so the two readers agree
 // on what "damaged" means.
 func validateLoadedShape[T any](version int, accounts map[string]map[string]*T) error {
 	if version != fileVersion {
@@ -347,7 +347,7 @@ func validateLoadedShape[T any](version int, accounts map[string]map[string]*T) 
 // interval, and returns a stop function. Flush errors go to the logger
 // SetLogger wired (none if unset), deduplicated so a persistent failure
 // (full disk, permission change) logs once plus every 10th repeat instead
-// of one line per tick (R47). stop signals the goroutine to exit and BLOCKS until it has
+// of one line per tick. stop signals the goroutine to exit and BLOCKS until it has
 // actually done so — cmd_start.go's shutdown sequence calls stop() and then
 // one final Flush(); if stop() returned before the goroutine's own
 // possibly-in-flight Flush had finished, the two could race on the same
@@ -393,7 +393,7 @@ func (r *Registry) StartFlusher(interval time.Duration) (stop func()) {
 // flushLog throttles repeated identical Flush failures — a full disk or
 // permission change is persistent, so one line per 10s tick would bury the
 // log under the same message; first occurrence logs, then every 10th repeat
-// with a running consecutive-failure count (R47).
+// with a running consecutive-failure count.
 type flushLog struct {
 	logger   *log.Logger
 	lastMsg  string

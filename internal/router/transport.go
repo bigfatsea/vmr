@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Outbound HTTP transport: building the upstream http.Client and forwarding
 // a response body to the client. Split out of router.go — pure move, no
@@ -79,8 +79,7 @@ func NewUpstreamClient(cfg *config.Config, p config.Provider, protocol string) *
 // race-free reads even if a trailing read executes concurrently.
 //
 // Write errors from the client side are returned as *clientWriteError so the
-// caller can distinguish a client disconnect from an upstream read failure
-// (Q08).
+// caller can distinguish a client disconnect from an upstream read failure.
 
 // clientWriteError wraps a write-to-client failure so forwardSuccess can
 // distinguish it from an upstream read error — a client that disconnected
