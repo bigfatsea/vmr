@@ -616,7 +616,7 @@ func TestCmdAnalyze_ShowUngrouped(t *testing.T) {
 	}
 }
 
-// TestCmdAnalyze_NoInputFiles mirrors TestCmdReport_NoInputFiles: `vmr analyze`
+// TestCmdAnalyze_NoInputFiles: `vmr analyze`
 // with no positional args is a usage error, not a silent no-op.
 func TestCmdAnalyze_NoInputFiles(t *testing.T) {
 	if err := cmdAnalyze([]string{}); err == nil {
@@ -947,7 +947,7 @@ func TestCmdAnalyze_NoLLMCacheDirConfiguredMeansNoCaching(t *testing.T) {
 // TestCmdAnalyze_ReportYamlProvidesLLMDefaults covers report.yaml's
 // llm_addr/llm_model/llm_cache_dir feeding -journey's LLM interpretation
 // layer when the corresponding -llm-* flags aren't passed at all — the same
-// merge order TestCmdReport_ReportYamlDefaultsOutputAndDetails covers for
+// merge order TestCmdAnalyze_MacroOnly_ReportYamlDefaultsOutputAndDetails covers for
 // -o/-details.
 func TestCmdAnalyze_ReportYamlProvidesLLMDefaults(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

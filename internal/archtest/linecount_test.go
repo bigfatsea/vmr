@@ -9,6 +9,7 @@ import (
 	"go/scanner"
 	"go/token"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -233,50 +234,12 @@ func targetFunc(a int) int {
 	}
 
 	// Now add 30 pure comment lines inside the function body:
-	srcWith30Comments := `package main
-
-func targetFunc(a int) int {
-	// Comment 01
-	// Comment 02
-	// Comment 03
-	// Comment 04
-	// Comment 05
-	// Comment 06
-	// Comment 07
-	// Comment 08
-	// Comment 09
-	// Comment 10
-	// Comment 11
-	// Comment 12
-	// Comment 13
-	// Comment 14
-	// Comment 15
-	// Comment 16
-	// Comment 17
-	// Comment 18
-	// Comment 19
-	// Comment 20
-	// Comment 21
-	// Comment 22
-	// Comment 23
-	// Comment 24
-	// Comment 25
-	// Comment 26
-	// Comment 27
-	// Comment 28
-	// Comment 29
-	// Comment 30
-	// Step 1: initialize
-	x := a + 1
-
-	// Step 2: calculate
-	/* block comment
-	   line 2 */
-	y := x * 2 // line comment
-
-	return y
-}
-`
+	srcWith30Comments := strings.Replace(
+		baseSrc,
+		"\t// Step 1: initialize",
+		strings.Repeat("\t// Added comment\n", 30)+"\t// Step 1: initialize",
+		1,
+	)
 	setTestSource(virtualFile, []byte(srcWith30Comments))
 	fset2 := token.NewFileSet()
 	f2, err := parser.ParseFile(fset2, virtualFile, []byte(srcWith30Comments), parser.ParseComments)

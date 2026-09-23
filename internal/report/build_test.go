@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -134,40 +135,40 @@ func TestBuild_WarmMatchesColdFullFeature(t *testing.T) {
 		}
 	}
 
-	// Per-record feature comparison (tool shapes, role distribution,
-	// compaction links).
+	if len(coldSess.Recs) != len(warmSess.Recs) {
+		t.Fatalf("rec count differs: cold %d, warm %d", len(coldSess.Recs), len(warmSess.Recs))
+	}
+
+	// Per-record feature comparison (tool shapes, role distribution, compaction links).
+	type recSnap struct {
+		Model, Outcome, Protocol string
+		SessionID, TaskID        string
+		TaskSeq                  int
+		Compaction               bool
+		Summarizes, ContinuesTo  string
+		ToolsSig                 string
+		ToolsDeclared, Tags      string
+		UsageIn, UsageOut        int64
+		UsageInOK, UsageOutOK    bool
+		RoleChars, RoleTokens    map[string]int64
+		NoReply                  bool
+		TraceID, ChatID          string
+	}
+	snap := func(r *ReqInfo) recSnap {
+		return recSnap{
+			Model: r.Model, Outcome: r.Outcome, Protocol: r.Protocol,
+			SessionID: r.SessionID, TaskID: r.TaskID, TaskSeq: r.TaskSeq,
+			Compaction: r.Compaction, Summarizes: r.Summarizes, ContinuesTo: r.ContinuesTo,
+			ToolsSig: r.ToolsSig, ToolsDeclared: strings.Join(r.ToolsDeclared, ","), Tags: strings.Join(r.Tags, ","),
+			UsageIn: r.Usage.In, UsageOut: r.Usage.Out,
+			UsageInOK: r.UsageInOK, UsageOutOK: r.UsageOutOK,
+			RoleChars: r.RoleChars, RoleTokens: r.RoleTokens,
+			NoReply: r.NoReply, TraceID: r.TraceID, ChatID: r.ChatID,
+		}
+	}
 	for i, cr := range coldSess.Recs {
-		wr := warmSess.Recs[i]
-		if cr.Model != wr.Model || cr.Outcome != wr.Outcome || cr.Protocol != wr.Protocol {
-			t.Errorf("rec[%d] identity differs: cold (%s/%s/%s), warm (%s/%s/%s)", i, cr.Model, cr.Protocol, cr.Outcome, wr.Model, wr.Protocol, wr.Outcome)
-		}
-		if cr.SessionID != wr.SessionID || cr.TaskID != wr.TaskID || cr.TaskSeq != wr.TaskSeq {
-			t.Errorf("rec[%d] grouping differs: cold (s=%s t=%s n=%d), warm (s=%s t=%s n=%d)", i, cr.SessionID, cr.TaskID, cr.TaskSeq, wr.SessionID, wr.TaskID, wr.TaskSeq)
-		}
-		if cr.Compaction != wr.Compaction || cr.Summarizes != wr.Summarizes || cr.ContinuesTo != wr.ContinuesTo {
-			t.Errorf("rec[%d] compaction link differs: cold (c=%v s=%q c2=%q), warm (c=%v s=%q c2=%q)", i, cr.Compaction, cr.Summarizes, cr.ContinuesTo, wr.Compaction, wr.Summarizes, wr.ContinuesTo)
-		}
-		if cr.ToolsSig != wr.ToolsSig || strings.Join(cr.ToolsDeclared, ",") != strings.Join(wr.ToolsDeclared, ",") {
-			t.Errorf("rec[%d] tool shape differs: cold sig=%q declared=%v, warm sig=%q declared=%v", i, cr.ToolsSig, cr.ToolsDeclared, wr.ToolsSig, wr.ToolsDeclared)
-		}
-		if strings.Join(cr.Tags, ",") != strings.Join(wr.Tags, ",") {
-			t.Errorf("rec[%d] tags differ: cold %v, warm %v", i, cr.Tags, wr.Tags)
-		}
-		if cr.Usage.In != wr.Usage.In || cr.Usage.Out != wr.Usage.Out || cr.UsageInOK != wr.UsageInOK || cr.UsageOutOK != wr.UsageOutOK {
-			t.Errorf("rec[%d] usage differs: cold %+v (in=%v out=%v), warm %+v (in=%v out=%v)", i, cr.Usage, cr.UsageInOK, cr.UsageOutOK, wr.Usage, wr.UsageInOK, wr.UsageOutOK)
-		}
-		for role, c := range cr.RoleChars {
-			if wr.RoleChars[role] != c {
-				t.Errorf("rec[%d] role_chars[%s] differs: cold %d, warm %d", i, role, c, wr.RoleChars[role])
-			}
-		}
-		for role, tk := range cr.RoleTokens {
-			if wr.RoleTokens[role] != tk {
-				t.Errorf("rec[%d] role_tokens[%s] differs: cold %d, warm %d", i, role, tk, wr.RoleTokens[role])
-			}
-		}
-		if cr.NoReply != wr.NoReply || cr.TraceID != wr.TraceID || cr.ChatID != wr.ChatID {
-			t.Errorf("rec[%d] flags differ: cold (nr=%v trace=%q chat=%q), warm (nr=%v trace=%q chat=%q)", i, cr.NoReply, cr.TraceID, cr.ChatID, wr.NoReply, wr.TraceID, wr.ChatID)
+		if !reflect.DeepEqual(snap(cr), snap(warmSess.Recs[i])) {
+			t.Errorf("rec[%d] differs between cold and warm:\ncold: %+v\nwarm: %+v", i, snap(cr), snap(warmSess.Recs[i]))
 		}
 	}
 }

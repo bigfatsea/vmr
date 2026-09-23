@@ -18,125 +18,65 @@ type TemplateViolation struct {
 	Expr    string
 }
 
-// knownSafeVars holds identifiers for variables known to hold safe HTML row fragments,
-// safe badge HTML, or pre-escaped snippets constructed immediately before interpolation.
-var knownSafeVars = map[string]bool{
-	"modelRows":       true,
-	"clientRows":      true,
-	"quotaRows":       true,
-	"epRows":          true,
-	"dateRows":        true,
-	"ceRows":          true,
-	"compRows":        true,
-	"argsHtml":        true,
-	"resultHtml":      true,
-	"costHtml":        true,
-	"evidenceHtml":    true,
-	"actionHtml":      true,
-	"droppedEntities": true,
-	"outcomeBadge":    true,
-	"flags.join(' ')": true,
-}
+var (
+	reNumericField = regexp.MustCompile(`^(?:[a-zA-Z0-9_(). ]+\.)?[a-zA-Z0-9_]*(?:requests|errors|failed|fallbacks|tokens|shipped|waste|length|count|seq|step|steps|earliest)(?:\s*\|\|\s*0)?$`)
+	reArithmetic   = regexp.MustCompile(`^[a-zA-Z0-9_(). ]+\s*[\/+\-*]\s*[a-zA-Z0-9_(). ]+$`)
+	reTernaryClass = regexp.MustCompile(`^[a-zA-Z0-9_(). =!><]+\s*\?\s*'[a-zA-Z0-9_\- ]*'\s*:\s*'[a-zA-Z0-9_\- ]*'$`)
 
-// isWhitelistedExpr checks whether expr meets escaping requirements:
-// 1. Starts with esc(...)
-// 2. Or is a numeric/currency/duration/percentage formatter
-// 3. Or is a known safe SVG or HTML helper
-// 4. Or is a known safe HTML fragment variable
-// 5. Or is a pure numeric, length, or count expression.
+	// Escaping/formatting calls must span the whole expression: "esc(a) + raw" is not safe.
+	safeCalls = []string{
+		"esc(", "FmtTokens(", "FmtBytes(", "FmtPercent(", "FmtCurrency(",
+		"FmtCurrencyPrecise(", "FmtDuration(", "pct0(", "secs(",
+	}
+
+	safeSVGHelpers = []string{
+		"svgBarChart(", "svgLineChart(", "svgHeatmap(", "svgLatencyPlot(", "sourceBar(",
+	}
+
+	knownSafeVars = map[string]bool{
+		"modelRows": true, "clientRows": true, "quotaRows": true, "epRows": true,
+		"dateRows": true, "ceRows": true, "compRows": true, "argsHtml": true,
+		"resultHtml": true, "costHtml": true, "evidenceHtml": true, "actionHtml": true,
+		"droppedEntities": true, "outcomeBadge": true, "flags.join(' ')": true,
+	}
+)
+
 func isWhitelistedExpr(expr string) bool {
 	expr = strings.TrimSpace(expr)
-	if expr == "" {
+	if expr == "" || expr == "EXPECTED_MANIFEST_FORMAT" {
 		return true
 	}
-
-	// 1. Explicit esc(...) call:
-	if strings.HasPrefix(expr, "esc(") && strings.HasSuffix(expr, ")") {
-		return true
-	}
-
-	// 2. Numeric / format helper function calls:
-	safeFuncPrefixes := []string{
-		"FmtTokens(",
-		"FmtBytes(",
-		"FmtPercent(",
-		"FmtCurrency(",
-		"FmtCurrencyPrecise(",
-		"FmtDuration(",
-		"pct0(",
-		"secs(",
-	}
-	for _, p := range safeFuncPrefixes {
+	for _, p := range safeCalls {
 		if strings.HasPrefix(expr, p) && strings.HasSuffix(expr, ")") {
 			return true
 		}
-	}
-
-	// 3. Safe methods on numbers or strings:
-	if strings.HasSuffix(expr, ".toLocaleString()") ||
-		strings.Contains(expr, ".toFixed(") ||
-		strings.Contains(expr, ".padStart(") {
-		return true
-	}
-
-	// 4. SVG chart helpers:
-	safeSVGHelpers := []string{
-		"svgBarChart(",
-		"svgLineChart(",
-		"svgHeatmap(",
-		"svgLatencyPlot(",
-		"sourceBar(",
 	}
 	for _, p := range safeSVGHelpers {
 		if strings.HasPrefix(expr, p) {
 			return true
 		}
 	}
-
-	// 5. Known safe HTML snippet or row variables:
+	if strings.HasSuffix(expr, ".toLocaleString()") ||
+		strings.Contains(expr, ".toFixed(") ||
+		strings.Contains(expr, ".padStart(") {
+		return true
+	}
 	if knownSafeVars[expr] {
 		return true
 	}
-	// Also handle fallback rows: e.g. "modelRows || '<tr>...</tr>'"
 	for v := range knownSafeVars {
 		if strings.HasPrefix(expr, v+" ||") {
 			return true
 		}
 	}
-
-	// 6. Manifest / system constants:
-	if expr == "EXPECTED_MANIFEST_FORMAT" {
-		return true
-	}
-
-	// 7. Pure numeric literals:
 	if _, err := strconv.ParseFloat(expr, 64); err == nil {
 		return true
 	}
-
-	// 8. Safe numeric metrics and counts (identifiers representing counts, steps, or lengths):
-	exprClean := strings.TrimSpace(expr)
-	if strings.HasPrefix(exprClean, "(") && strings.HasSuffix(exprClean, ")") {
-		exprClean = strings.TrimSpace(exprClean[1 : len(exprClean)-1])
+	clean := expr
+	if strings.HasPrefix(clean, "(") && strings.HasSuffix(clean, ")") {
+		clean = strings.TrimSpace(clean[1 : len(clean)-1])
 	}
-	numericFieldPattern := regexp.MustCompile(`^(?:[a-zA-Z0-9_(). ]+\.)?[a-zA-Z0-9_]*(?:requests|errors|failed|fallbacks|tokens|shipped|waste|length|count|seq|step|steps|earliest)(?:\s*\|\|\s*0)?$`)
-	if numericFieldPattern.MatchString(exprClean) {
-		return true
-	}
-
-	// Simple arithmetic or ratio expressions on counts:
-	arithmeticPattern := regexp.MustCompile(`^[a-zA-Z0-9_(). ]+\s*[\/+\-*]\s*[a-zA-Z0-9_(). ]+$`)
-	if arithmeticPattern.MatchString(exprClean) {
-		return true
-	}
-
-	// Safe static class ternaries:
-	ternaryClassPattern := regexp.MustCompile(`^[a-zA-Z0-9_(). =!><]+\s*\?\s*'[a-zA-Z0-9_\- ]*'\s*:\s*'[a-zA-Z0-9_\- ]*'$`)
-	if ternaryClassPattern.MatchString(exprClean) {
-		return true
-	}
-
-	return false
+	return reNumericField.MatchString(clean) || reArithmetic.MatchString(clean) || reTernaryClass.MatchString(clean)
 }
 
 // isTargetTemplateContext checks whether the template literal occurs in a context

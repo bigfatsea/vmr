@@ -369,13 +369,13 @@ func captureStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
+// TestCmdAnalyze_MacroOnly_ProducesOutputFiles exercises the CLI wiring around
 // report.Build: glob expansion, output directory creation, and
 // writing both the JSON and Markdown artifacts. -details is off by
-// default (see TestCmdReport_DetailsOffByDefault for that), so it's passed
+// default (see TestCmdAnalyze_MacroOnly_DetailsOffByDefault for that), so it's passed
 // explicitly here to also cover the session-analysis-driven details/
 // output in the same pass.
-func TestCmdReport_ProducesOutputFiles(t *testing.T) {
+func TestCmdAnalyze_MacroOnly_ProducesOutputFiles(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
 	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
@@ -397,12 +397,12 @@ func TestCmdReport_ProducesOutputFiles(t *testing.T) {
 	}
 }
 
-// TestCmdReport_DetailsOffByDefault locks in P3.3's default flip: a plain
+// TestCmdAnalyze_MacroOnly_DetailsOffByDefault locks in the default flip: a plain
 // `vmr analyze -macro-only` run (no -details, no report.yaml) must not materialize
 // details/ at all, while requests/index.json still carries a non-empty "req"
-// (and, once P4/P5 wire a consumer, a computable detail filename) for
+// (and, once wired to a consumer, a computable detail filename) for
 // every row — the index never needs the file to exist to link to it.
-func TestCmdReport_DetailsOffByDefault(t *testing.T) {
+func TestCmdAnalyze_MacroOnly_DetailsOffByDefault(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
 	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
@@ -426,11 +426,11 @@ func TestCmdReport_DetailsOffByDefault(t *testing.T) {
 	}
 }
 
-// TestCmdReport_ReportYamlDefaultsOutputAndDetails covers report.yaml's
+// TestCmdAnalyze_MacroOnly_ReportYamlDefaultsOutputAndDetails covers report.yaml's
 // output/details fields feeding cmdAnalyze's -o/-details when the flags
 // themselves aren't passed — the same "-flag > report.yaml > built-in
 // default" merge order resolveLanguage already established for -lang.
-func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
+func TestCmdAnalyze_MacroOnly_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 	dir := t.TempDir()
 	auditPath := filepath.Join(dir, "vmr-audit-2026-07-08.jsonl")
 	line := `{"ts":"2026-07-08T10:00:00Z","dur_ms":5,"model":"m1","protocol":"openai-completions","outcome":"ok","client":{"request":{}}}` + "\n"
@@ -468,18 +468,12 @@ func TestCmdReport_ReportYamlDefaultsOutputAndDetails(t *testing.T) {
 	}
 }
 
-// TestCmdReport_NoMatches ensures a glob matching nothing is a clear error,
+// TestCmdAnalyze_MacroOnly_NoMatches ensures a glob matching nothing is a clear error,
 // not an empty-but-successful report.
-func TestCmdReport_NoMatches(t *testing.T) {
+func TestCmdAnalyze_MacroOnly_NoMatches(t *testing.T) {
 	dir := t.TempDir()
 	if err := cmdAnalyze([]string{"-macro-only", filepath.Join(dir, "no-such-*.jsonl")}); err == nil {
 		t.Error("cmdAnalyze with a non-matching glob should return an error")
-	}
-}
-
-func TestCmdReport_NoInputFiles(t *testing.T) {
-	if err := cmdAnalyze([]string{"-macro-only"}); err == nil {
-		t.Error("cmdAnalyze with no input files should return an error")
 	}
 }
 
