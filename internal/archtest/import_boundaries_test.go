@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-09-23 02:50, by pi
 
 // Package archtest holds executable checks for architectural invariants
 // this project has stated but never enforced with code: a documented
@@ -28,6 +28,14 @@ import (
 // production code (one-directional), and ctxgraph depending back on report
 // would be a real import cycle risk, not just a layering preference.
 var forbiddenImports = map[string][]string{
+	// analyze orchestrates the analytics half (report and journey pipelines)
+	// and belongs to the analysis half: it must never import the routing runtime
+	// or server or configuration layer.
+	"vmr/internal/analyze": {
+		"vmr/internal/router",
+		"vmr/internal/server",
+		"vmr/internal/config",
+	},
 	"vmr/internal/report": {
 		"vmr/internal/router",
 		"vmr/internal/server",
@@ -64,7 +72,7 @@ var forbiddenImports = map[string][]string{
 	//
 	// journey→pricing is deliberately NOT forbidden: cost.go takes a
 	// *pricing.Resolver for its per-journey $ estimate exactly the way
-	// report.BuildCached already does, and pricing is a near-leaf (its only
+	// report.Build already does, and pricing is a near-leaf (its only
 	// internal dependency is core). config stays out — the resolver is built
 	// in cmd/vmr and threaded in, same as the report half.
 	"vmr/internal/journey": {
@@ -201,6 +209,7 @@ var forbiddenImports = map[string][]string{
 		"vmr/internal/ctxgraph",
 		"vmr/internal/taskseg",
 		"vmr/internal/reqdetail",
+		"vmr/internal/analyze",
 	},
 }
 

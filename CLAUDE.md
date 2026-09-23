@@ -1,4 +1,4 @@
-<!-- Ver 2026-08-15 14:30, by gemini-3.7-flash -->
+<!-- Ver 2026-09-23 04:17, by Claude Opus 5.5 -->
 
 # vmr — Claude Code project brief
 
@@ -77,7 +77,7 @@ Routing half:
 | --- | --- |
 | `config` | YAML load, `${ENV}` expansion, strict validation, hot-reload watch. Also resolves each provider's `pricing` (account overrides) and the top-level `exchange_rate` through `internal/pricing` at load time — purely for `vmr analyze`'s $ estimates; a rate row missing a component is a config error (all four or none), but an unresolvable model is not — it just leaves that row unpriced |
 | `adapter`, `adapter/{openai,anthropic,openairesponses}` | `Adapter` interface (compile-time blank-import registry) + shared error classification (`DefaultClassify`) + protocol-domain field/role semantics (`SessionFingerprint`, `TopLevelProbe`) |
-| `strategy` | `Dimension` (ordering) + `Condition` (elimination) — two separate interfaces |
+| `strategy` | `Eligible` (elimination by request facts) + `Sort` (ordering by endpoint `Priority`) — two separate functions |
 | `health` | Passive state machine: cooldown, backoff, half-open single-flight |
 | `sticky` | Session-affinity registry for prompt-cache stickiness |
 | `probe` | Minimal echo-nonce request shared by background recovery probes and `vmr diagnose` |
@@ -97,10 +97,11 @@ Analytics half:
 | --- | --- |
 | `chatmsg` | Message/SSE/usage parsing and tool-call pairing — the one parser `ctxgraph`/`report`/`journey` all share |
 | `ctxgraph` | Content-addressed manifests, edit classification, conversation lineage and cross-lineage stitching |
-| `taskseg` | Agent-dialect `Profile` (`OpenClawAware`, `Generic`) **and** the session/task segmentation algorithm itself, shared by `report` and `journey` rather than duplicated in each |
+| `taskseg` | Agent-dialect `Profile` (`OpenClawAware`, `Generic`) **and** the session/task segmentation algorithm itself: `Segmenter` is the one place a record's delta start, task boundary and instruction are assembled (a compaction record is never a predecessor); `report` and `journey` only consume it |
 | `reqdetail` | Two layers, with different inputs — do not collapse them. Per-record fact extraction (role token/char shares, tool signature, error class, image counts — `report/session.go`'s own aggregation calls these too, not just detail rendering) is a pure function of one `audit.Record` and nothing else. The detail page renderer built on top of it (`requests/details/*.md`, plus its deterministic coordinate-hash filename with the `r-` prefix — `FileName`/`FileNameForRecord`/`FileNameForManifest`) is a pure function of `(record, manifest, prev manifest)`: `prev` is cross-record context the caller injects, so byte-identical output between `report` and `journey` requires both to pass the *same* triple — which is why the render fingerprint carries `m`/`prev` identity, not just lang |
 | `report` | `vmr analyze`'s macro half: aggregation into the five domain slices under `macro/*.json` plus `requests/index.json`, stamped by `manifest.json` (written last, admission token); rendering goes through the ViewModel layer (`viewmodel_*.go` builders + fixed serializer) reading the slices from disk. A new report section arrives as a new `internal/report/viewmodel_*.go` builder, not as more lines in an existing one — the `archtest` line budget is what enforces that |
 | `journey` | `vmr analyze`'s journey half: Journey/Task/Step narrative, behavior indicators, findings, journey comparison, benchmark statistics, optional LLM interpretation layer; products under `journeys/`, self-contained `j-<id>.json` (tree + `bodies` blob table) |
+| `analyze` | `vmr analyze`'s orchestration: the `Run` context (already-resolved pricing, quota refs, self-traffic tags, language, output dir) and the journey/report/compare/benchmark/render-only pipelines plus the L2/L3 product cache. Analytics half — never imports `router`/`server`/`config`; `cmd/vmr` resolves everything config-derived and hands it over as values |
 | `auditdiff` | `vmr diff`'s comparison algorithm: two `audit.Record`/`ctxgraph.Manifest` pairs in, a structured header/system/tools/messages `Report` plus one of five narrow verdicts out — a pure function, no file I/O, no CLI concerns. `cmd/vmr/cmd_diff.go` is the only production caller |
 
 Shared guards:
@@ -110,13 +111,14 @@ Shared guards:
 | `archtest` | Executable architecture invariants: import boundaries, per-file line budgets, per-function line budgets, and documentation-reference integrity |
 | `buildinfo`, `rundir`, `sysinfo` | Build identity from Go's VCS stamp; default runtime dir resolution (`~/.vmr` → temp → cwd); OS/runtime metrics |
 
-`cmd/vmr/` is the CLI (stdlib `flag`), one file per subcommand, and the only composition
-root allowed to see both halves at once.
+`cmd/vmr/` is the CLI (stdlib `flag`): flag parsing, config reading, and assembly only — one
+file per subcommand — and the only composition root allowed to see both halves at once.
 
 ## Invariants to not accidentally break
 
 - **Byte-faithful passthrough.** No canonical IR, no cross-protocol translation. Exactly
-  six sanctioned deviations: model-name rewrite, role-map remapping, `imgprep`'s
+  six sanctioned deviations: model-name rewrite (only at each protocol's known model-field position —
+  never a nested `model` key inside content or tool arguments), role-map remapping, `imgprep`'s
   image downscale (the largest — a real unmarshal/rewrite/re-marshal), `respnorm`'s
   evidence-based quirk repairs (each behind a content guard, fail-open to "unmodified" on
   any doubt), `respnorm`'s `[DONE]` delimiter completion, and `guard`'s inbound Unicode
@@ -139,10 +141,10 @@ root allowed to see both halves at once.
 - **No provider SDKs**, and **compile-time plugin registration only** (blank import) — never
   a runtime plugin system.
 - **Config is strict YAML** (`KnownFields`): unknown keys are load errors, not warnings.
-- **`Condition` (elimination) and `Dimension` (ordering) stay separate** — do not add a
-  request parameter to `Dimension.Compare`.
-- **Registries populated from `init()`** use a lock-free atomic read path with a
-  mutex-guarded copy-on-write *write* path. A bare copy-on-write without the mutex silently
+- **Elimination and ordering stay separate** — `strategy.Sort` orders by endpoint attributes
+  only; never give it a request parameter.
+- **Registries populated from `init()`** (today only `adapter`'s) use a lock-free atomic read
+  path with a mutex-guarded copy-on-write *write* path. A bare copy-on-write without the mutex silently
   loses updates under concurrent writers — guard the write too, not just the atomic swap.
 - **Audit files are 0600, `reports/` output is 0600/0700.** Derived artifacts carry full
   conversation bodies and must not loosen that.
@@ -156,8 +158,10 @@ root allowed to see both halves at once.
 - **`internal/report` is coupled to `audit.Record`'s shape at compile time** — changing the
   record structure means updating `report` and its tests in the same change.
 - **Run `go test ./internal/archtest/...`** after any package-boundary change, any `router`
-  change, or any edit that grows a function. Line budgets are soft caps: in ordinary tasks,
-  don't contort a change to fit them — raise the number in the table as needed. Refactoring
+  change, or any edit that grows a function. Budgets count net code lines (blank and
+  comment-only lines excluded). They are soft caps: in ordinary tasks, don't contort a change
+  to fit them — raise the number in the table when the logic is cohesive; a split must
+  introduce a named abstraction, not just spread parameters across helpers. Refactoring
   oversized files (splitting, reorganizing) gets scheduled as its own dedicated task.
 
 ## Conventions
@@ -196,7 +200,8 @@ root allowed to see both halves at once.
   sentence already makes the point — a pointer pays only for itself if the reader needs the other
   document's full reasoning.
 - **Comments: only non-obvious "why"** (hidden constraint, workaround, invariant). Match the
-  existing terse style; don't add narration.
+  existing terse style; don't add narration. `archtest` rejects pinned section numbers and
+  review/milestone IDs (`§7.2`, `Q14`, `R-12`, `ADR-15`, …) in production comments.
 - **Commit messages**: short, imperative, **no trailers at all** — including `Co-Authored-By`,
   which tooling defaults tend to add back; strip it. Body only when the change needs a why
   (`git log --oneline`).

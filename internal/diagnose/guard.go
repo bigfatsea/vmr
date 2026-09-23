@@ -1,7 +1,7 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package diagnose guard probe execution
-// (the Agent Guard spec §4.10, M5).
+// (see the Agent Guard spec).
 // Implements active security diagnostic probes:
 // 1. Tool Call rewrite / tampering detection
 // 2. Long-context needle-in-a-haystack silent truncation detection

@@ -1,7 +1,8 @@
-// Ver 2026-09-12 12:00, by Gemini 4.5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // gentargets writes loadtest/targets.json — one Vegeta attack target per
-// scenario (see docs/VirtualModelRouter_Design_v4_Core.md §12) — plus three
+// scenario (see docs/VirtualModelRouter_Design_v4_Core.md's load-testing
+// chapter) — plus three
 // cost-regime subsets: targets-plain.json, targets-stream.json, and
 // targets-image.json. Percentiles are only comparable within a regime: a 5s
 // drip stream or a 100ms image decode/scale/encode mixed into cheap routing

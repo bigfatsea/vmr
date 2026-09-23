@@ -1,4 +1,4 @@
-// Ver 2026-08-14, by Opus 5
+// Ver 2026-09-23 04:17, by Claude Opus 5.5
 
 package archtest
 
@@ -15,96 +15,68 @@ import (
 	"testing"
 )
 
-// defaultFuncLineLimit bounds a single function body, in lines, for every
-// production function under internal/ and cmd/ that isn't listed in
-// funcLineExemptions below.
+// defaultFuncLineLimit bounds a single function body, in net code lines, for
+// every production function under internal/ and cmd/ that isn't listed in
+// funcLineExemptions below (empty lines, pure // comments, and /* ... */ block
+// comments excluded).
 //
-// Why this test exists at all: a file can sit comfortably inside
-// file_sizes_test.go's budget while containing one function nobody can hold in
-// their head. internal/report/aggregate.go was exactly that — 975 lines
-// against a 1000-line budget, with a single 639-line buildInternal inside it,
-// and the file budget green the whole time.
-//
-// Why a global default with exemptions, rather than a whitelist: a whitelist
-// only ever constrains what someone remembered to register, so a brand-new
-// 400-line function lands green. This inverts that — growing past the bound is
-// a deliberate, reviewed act of adding a line below. file_sizes_test.go has
-// since been inverted the same way, for the same reason.
-//
-// 120 was picked from the actual distribution (976 production functions;
-// p95 ≈ 50 lines, 20 over 120) so it lands above ordinary code and below the
-// handful of genuinely oversized ones, all of which are named below. Tighten
-// it once that list is shorter, not before — a limit that forces a dozen
-// unrelated refactors on the day it lands gets reverted, not respected.
-const defaultFuncLineLimit = 120
+// 95 was chosen from the actual distribution of net code lines across 1711
+// production functions (p50 12, p90 38, p95 51, p99 85, max 127). Only six
+// functions exceed 95, all of which are linear compositions registered below.
+const defaultFuncLineLimit = 95
 
-// funcLineExemptions is every production function currently over the limit,
-// with the bound it is held to. Recorded at ~current size, NOT rounded up:
-// the point is that these cannot grow further without a deliberate edit here.
-//
-// Adding an entry is legitimate — some functions really are long (a protocol
-// state machine, a validation pass with 30 independent checks). Raising an
-// existing entry's number to make room for new code is what this table is
-// designed to make visible.
+// funcLineExemptions is every production function currently over the default
+// limit, with ~15% headroom over its current net code line size.
 var funcLineExemptions = map[string]int{
-	// Top-level command/entry-point bodies: flag parsing, wiring, and a
-	// linear happy path. Long because they are compositions, not algorithms —
-	// splitting them tends to produce helpers with one caller and no
-	// independent meaning.
-	"internal/diagnose/diagnose.go:Run":      190,
-	"internal/replay/replay.go:Run":          160,
-	"cmd/vmr/cmd_start.go:cmdStart":          170,
-	"cmd/vmr/cmd_journey.go:compareJourneys": 125,
-	// cmdAnalyze itself stays below the default limit
-	// once P9.1 (CLI convergence) pulled its linear pipelines out into
-	// runReport/setupJourneyRun/dispatchAnalyze below — those three inherit
-	// the "composition, not an algorithm" reasoning above; the top-level
-	// entry points no longer need an entry here at all (removing an entry
-	// a function has outgrown, rather than leaving a now-meaningless
-	// higher ceiling, is the same hygiene this table asks of growth in the
-	// other direction).
-	"cmd/vmr/cmd_report.go:runReport": 121,
+	// Top-level command composition: flag parsing, configuration loading,
+	// component wiring, and process signal lifecycle.
+	"cmd/vmr/cmd_start.go:cmdStart": 150,
 
-	// internal/router's failover loop was split (Q37): Serve is now a thin
-	// wrapper that loads the snapshot and delegates to ServeWithSnap, and
-	// the candidate-selection pipeline moved to buildCandidates
-	// (candidates.go). Neither needs an entry here — they sit under the
-	// 120-line default. chatHandler kept a modest exemption because it
-	// remains a linear request-lifecycle composition (auth → body → probe →
-	// gate → downscale → facts → route) even after its audit/recorder and
-	// image-conversion blocks were extracted into beginAudit/toAuditImages/
-	// downscaleImages.
-	"internal/server/server.go:chatHandler": 150,
+	// Diagnostic suite entry point: sequential probe dispatch and terminal
+	// report composition.
+	"internal/diagnose/diagnose.go:Run": 150,
 
-	// runProbe's readErr check moved ahead of the status-code branch
-	// (KNOWN_ISSUES §2.134: a 200 OK that dies mid-read must not read as a
-	// successful probe) — a few lines of guard plus the comment explaining
-	// why it comes first, pushing a linear probe-outcome-classification
-	// composition just over the default.
-	"internal/router/probe.go:runProbe": 122,
+	// Report reliability section builder: multi-table reliability viewmodel
+	// assembly across error classes and fallback cascades.
+	"internal/report/viewmodel_reliability.go:vmReliabilitySection": 125,
+
+	// The analytics half's canonical per-record fact extraction: one pass
+	// over an audit.Record producing the whole report-side recordFacts
+	// projection (aggregation + session features + guard forensics). Linear
+	// field collection, no branching depth.
+	"internal/report/factscache.go:extractRecordFacts": 140,
+
+	// Core HTTP ingress handler: linear request lifecycle composition (auth,
+	// body buffering, probe check, guard gate, image downscale, facts
+	// extraction, and router dispatch).
+	"internal/server/server.go:chatHandler": 115,
+
+	// Audit record replay runner: coordinates record resolution, upstream client
+	// construction, and response comparison.
+	"internal/replay/replay.go:Run": 115,
+
+	// Unified report loader: reads and validates all JSON artifact slices from
+	// disk into an in-memory Report document.
+	"internal/report/viewmodel_doc.go:LoadReport": 115,
+
+	// Journey assembly loop: walks one stitched lineage chain step by step,
+	// resolving segmentation, body parsing and event de-duplication in the
+	// order they depend on each other.
+	"internal/journey/journey.go:buildFrom": 115,
 }
 
 // funcBudgetRoots are the trees this test governs: the shipped binary's own
-// code. loadtest/ and tools/ are developer utilities that never run in a
-// user's process, and holding a throwaway generator's main() to the same bar
-// as the routing core buys nothing.
+// code.
 var funcBudgetRoots = []string{"internal", "cmd"}
 
 // funcBudgetExemptPkgs are packages whose "functions" are string tables, not
-// control flow. internal/i18n's per-section constructors are a
-// `return XxxText{...}` literal reading a package-level Lang-indexed row
-// table (internal/i18n/table.go), plus for files with no interpolated
-// field, the older `if lang == ZH {...}` shape — either way there's no
-// control flow beyond picking a row/branch. A line budget there measures
-// how much text a report section renders, which is not a complexity
-// signal and not something anyone should refactor to satisfy.
+// control flow.
 var funcBudgetExemptPkgs = map[string]bool{
 	"internal/i18n": true,
 }
 
-// TestArchitecture_FuncSizes bounds single-function length. Counts body lines
-// the same way `wc -l` counts a file (closing brace line minus opening brace
-// line), so a failure is reproducible by eye without reading this file first.
+// TestArchitecture_FuncSizes bounds single-function length in net code lines
+// (empty lines and comments excluded).
 func TestArchitecture_FuncSizes(t *testing.T) {
 	repoRoot := repoRootDir(t)
 	seen := map[string]bool{}
@@ -134,7 +106,7 @@ func TestArchitecture_FuncSizes(t *testing.T) {
 					continue
 				}
 				key := rel + ":" + fd.Name.Name
-				n := fset.Position(fd.Body.End()).Line - fset.Position(fd.Body.Pos()).Line
+				n := codeLinesInRange(fset, f, fd.Body.Pos(), fd.Body.End())
 				limit, exempt := funcLineExemptions[key]
 				if !exempt {
 					limit = defaultFuncLineLimit
@@ -142,14 +114,7 @@ func TestArchitecture_FuncSizes(t *testing.T) {
 					seen[key] = true
 				}
 				if n > limit {
-					if exempt {
-						t.Errorf("%s is %d lines, over its %d-line exemption: shorten it, "+
-							"don't raise the number in archtest's funcLineExemptions", key, n, limit)
-					} else {
-						t.Errorf("%s is %d lines, over the %d-line default: split it into "+
-							"named helpers. Adding it to archtest's funcLineExemptions is for "+
-							"functions that genuinely can't be split, not for making room", key, n, defaultFuncLineLimit)
-					}
+					t.Errorf("%s is %d lines, over the %d-line budget (net code lines, comments excluded). Either raise the number in the table when the logic is cohesive, or split it — a split must introduce a named abstraction (a type or struct), not just spread parameters across helpers.", key, n, limit)
 				}
 			}
 			return nil
@@ -159,9 +124,8 @@ func TestArchitecture_FuncSizes(t *testing.T) {
 		}
 	}
 
-	// A stale exemption is worse than none: it reads as "this function is
-	// still oversized" long after someone fixed it, and quietly grants 150
-	// lines of headroom to whatever gets written there next.
+	// Staleness check: an entry naming a function that no longer exists reads
+	// as "this function is still oversized" long after someone refactored it.
 	var stale []string
 	for key := range funcLineExemptions {
 		if !seen[key] {
@@ -174,8 +138,8 @@ func TestArchitecture_FuncSizes(t *testing.T) {
 	}
 }
 
-// repoRootDir locates the module root the same way file_sizes_test.go does,
-// via the go tool rather than by walking up looking for go.mod.
+// repoRootDir locates the module root via the go tool rather than by walking
+// up looking for go.mod.
 func repoRootDir(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("go", "env", "GOMOD").Output()

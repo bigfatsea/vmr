@@ -1,4 +1,4 @@
-// Ver 2026-08-15 14:30, by gemini-3.7-flash
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package archtest
 
@@ -428,5 +428,106 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		if got := checkDocRefs(w, tc.docRel, tc.content); len(got) != 0 {
 			t.Errorf("checkDocRefs(%q) = %v, want no problems", tc.content, got)
 		}
+	}
+}
+
+// rePinnedRef matches pinned reference tokens in Go comments: pinned
+// section numbers (§N, §N.M) and review/milestone/decision numbers (Q14,
+// R46, R6a-2, R-12, P3, P6.4, M3.4, ADR-15, K-G19, D8, B7, NEW-D, 问题 18).
+// These mostly point
+// at documents no longer in the repository (archived design specs, past
+// review reports, execution plans), so the number resolves to nothing and
+// only misleads. Case-sensitive on purpose: a lowercase p95 and
+// hardware/model names ("Apple M4", "MiniMax M3") are not references. B0 is
+// left out: stitch notation uses it for a successor's opening block.
+var rePinnedRef = regexp.MustCompile(`§[0-9]|问题 ?[0-9]+|\b(Q[0-9]{2}|R[0-9]{1,2}[a-z]?(-[0-9]+)?|R-[0-9]+|P[0-9]+(\.[0-9]+)?[a-z]?|M[0-9]\.[0-9]+|ADR-[0-9]+|K-G[0-9]+|D[0-9]{1,2}|B[1-9][0-9]?|NEW-[A-Z])\b`)
+
+// pinnedRefWhitelist holds regex-shaped tokens that look like pinned
+// references but are not: percentile labels.
+var pinnedRefWhitelist = map[string]bool{"P50": true, "P90": true, "P95": true, "P99": true}
+
+// findPinnedRefs returns the pinned reference tokens in content (comment
+// text or otherwise), minus the whitelist.
+func findPinnedRefs(content string) []string {
+	var hits []string
+	for _, loc := range rePinnedRef.FindAllStringIndex(content, -1) {
+		m := content[loc[0]:loc[1]]
+		// A token glued to a hyphen is part of a name ("DeepSeek-R1"), not a reference.
+		if pinnedRefWhitelist[m] || (loc[0] > 0 && content[loc[0]-1] == '-') {
+			continue
+		}
+		hits = append(hits, m)
+	}
+	return hits
+}
+
+func TestArchitecture_NoPinnedReferencesInComments(t *testing.T) {
+	root := repoRootDir(t)
+	for _, top := range []string{"internal", "cmd", "tools"} {
+		err := filepath.WalkDir(filepath.Join(root, top), func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
+			}
+			docRel, rerr := filepath.Rel(root, path)
+			if rerr != nil {
+				return rerr
+			}
+			comments, rerr := goFileComments(path)
+			if rerr != nil {
+				return rerr
+			}
+			for _, ref := range findPinnedRefs(comments) {
+				t.Errorf("%s: pinned reference %q in a comment — cite the target by name or delete the reference (the numbered document is archived)", docRel, ref)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s for pinned comment references: %v", top, err)
+		}
+	}
+}
+
+// TestArchitecture_NoPinnedReferencesInComments_Negative drives the guard
+// over synthetic violating source to prove it actually trips, and over the
+// same-shaped non-references (percentile labels, hardware/model names) to
+// prove it stays silent for them.
+func TestArchitecture_NoPinnedReferencesInComments_Negative(t *testing.T) {
+	src := `// Ver 2026-09-23 03:30, by test
+package example
+
+// See the archived spec §4.2 and ADR-15 for why (Q14, R46, R-12, M3.4, K-G19, D8, NEW-D).
+// Also B7, R6a-2 and 问题 18a.
+const A = 1
+
+// Percentile labels (P50/P90/P95/P99), hardware/model names (Apple M4,
+// MiniMax M3), a lowercase p95, CWE-506 and stitch block B0 are not references.
+const B = 2
+`
+	path := filepath.Join(t.TempDir(), "example.go")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	comments, err := goFileComments(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := findPinnedRefs(comments)
+	want := []string{"§4", "ADR-15", "Q14", "R46", "R-12", "M3.4", "K-G19", "D8", "NEW-D", "B7", "R6a-2", "问题 18"}
+	if len(got) != len(want) {
+		t.Fatalf("findPinnedRefs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("findPinnedRefs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestArchitecture_NoPinnedReferencesInComments_NamesAreNotRefs(t *testing.T) {
+	if hits := findPinnedRefs("served by DeepSeek-R1 at P95 latency"); len(hits) != 0 {
+		t.Errorf("model names and percentiles must not count as pinned references, got %v", hits)
+	}
+	if hits := findPinnedRefs("see the plan's §7.2 and R46"); len(hits) != 2 {
+		t.Errorf("want 2 pinned references, got %v", hits)
 	}
 }

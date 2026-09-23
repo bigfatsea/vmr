@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-20 23:20, by Sonnet 5 -->
+<!-- Ver 2026-09-23 02:43, by Claude Opus 5.5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -103,7 +103,7 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 | `internal/server` | HTTP 服务入口、鉴权、请求特征提取、基础监控与控制台端点。 |
 | `internal/health` | 被动失败驱动的健康状态机：指数退避、Retry-After 遵循与后台单飞探测名额控制。 |
 | `internal/sticky` | 会话亲和注册表：维护基于 Prompt Cache 的会话连续性与内存淘汰。 |
-| `internal/respnorm` | 响应流归一化：流式状态机、顶层模型名改写、厂商特定思考块剥离与用量嗅探。 |
+| `internal/respnorm` | 响应流归一化：流式状态机、按协议已知位置的模型名改写、厂商特定思考块剥离与用量嗅探。 |
 | `internal/audit` | 双层原始字节审计记录落盘（JSONL）与按日归档压缩（zstd）。 |
 | `internal/imgprep` | 内联图片特征识别、解码缩放与本地磁盘缓存。 |
 | `internal/guard` | Agent Guard 双向安全护栏：锚定规则检测核心、出向干预与入向隐写净化挂载点（详见 Agent Guard 一节）。 |
@@ -126,6 +126,7 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 * **刷新纪律**：Overview 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests/Recent Failures/并发区附加自适应轮询（活跃 ~1s、空闲 15s）；Log 页由流状态驱动；Help 静态。
 * **`/status` `alerts[]` 纪律**：只放**可操作状态**，滚动统计量绝不进——config 校验问题各一条（`kind: config`）；端点仅在 cooldown 期间在列（`consecutive_failures > 0` 但未冷却的降级态由拓扑表 Health 列承载，否则无流量时残留失败计数不消零，会把徽章永久钉在非零，违反告警收敛纪律）；quota `used_frac ≥ 1` 为 error、`≥ 0.9` 为 warning，阈值刻意写死不作配置项。排序：error 优先，再按 `kind`+`ref` 稳定排序；同一账号多限额触发合并为一条。
 * **`/status` 端点行契约**：`provider`/`key_label`/`model` 取自 `core.Endpoint`；`from_fallback` 恒出现（含 `false` 零值，供前端切分）；`headroom` 从路由半区既有的配额导出读取（禁止第二套公式重推，与配额差分测试纪律一致），未配额端点省略该字段。
+* **流量计数只有一个来源**：`/status` 的 `traffic` 块只保留 sticky 注册表规模；请求数、结果分布与 token 用量一律由 livestats 账本（`/stats`）提供，重启后可恢复。进程内不再维护第二本计数器。
 
 ---
 
@@ -162,7 +163,7 @@ type Adapter interface {
 
 ### 5.3 响应流归一化（`internal/respnorm`）
 遵循**直连等价**原则：客户端经 vmr 收发的数据与直连上游保持字节级一致。仅有的法定偏离：
-1. **模型名称重写**：将响应体中的上游物理模型名改写回客户端请求的虚拟模型名（防止客户端 SDK 丢弃消息）；
+1. **模型名称重写**：将响应体中的上游物理模型名改写回客户端请求的虚拟模型名（防止客户端 SDK 丢弃消息）。只改写各协议的已知模型字段位置：非流式响应的顶层 `model`；流式响应中 Chat Completions chunk 的顶层 `model`、Anthropic `message_start` 的 `message.model`、Responses 事件的 `response.model`。嵌套在内容、工具参数或厂商扩展里的同名字段是客户端可见内容，不改写；
 2. **MiniMax 思考块剥离**：识别并剔除混杂在内容中的 `<think>...</think>` 标签或特定思考引导文本，防止多轮会话产生自我指涉循环；
 3. **SSE 哨兵补齐**：对 Chat Completions 协议缺失 `data: [DONE]` 终止哨兵的上游，在流结束时补齐。
 
@@ -356,8 +357,8 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 | **协议私有约束分类** | 归入独立枚举 `ErrQuirk`（切换且零冷却） | 区分于 `ErrContextLimit`；若归入 `ErrEndpoint` 会触发 10min 长冷却误伤健康端点。 |
 | **内容合规与窗口超限** | `ErrContent` / `ErrContextLimit` 零冷却切换 | 该类错误属于请求内容或模型静态参数属性，非端点故障，切换下一端点不处罚健康度。 |
 | **代理路由模型** | Provider 级显式布尔开关，无全局/环境变量隐式回退 | 流量走向必须在 config.yaml 静态可查，隐式环境变量是排障最难发现的陷阱；直连 DNS/TLS 检查对代理端点自动跳过。 |
-| **准入与排序接口** | 准入 `Condition` 与排序 `Dimension` 接口物理解耦 | `Dimension.Compare` 看不到请求；准入是二元淘汰，排序是多键决胜，合并会强迫排序维度感知请求。 |
-| **窗口超限降级** | `WithinContext` 单独实现，不注册进 Condition 接口 | 唯一需要“全体超限时不真拒绝、留给上游 400 兜底”的条件，硬编码两行避免破坏接口纯洁性。 |
+| **准入与排序分离** | 淘汰（`strategy.Eligible`，看请求事实）与排序（`strategy.Sort`，只看端点 `Priority`）是两个独立函数 | `Sort` 的签名不接收请求，排序不可能感知请求。只有一个排序键且无配置入口，所以不设接口与注册表；出现第二个排序维度时再引入。 |
+| **窗口超限降级** | `WithinContext` 单独实现，不放进硬条件表 | 唯一需要“全体超限时不真拒绝、留给上游 400 兜底”的条件，硬编码两行避免破坏接口纯洁性。 |
 | **会话亲和（Sticky）** | 默认开启，基于 System Prompt + 首条消息联合哈希 | 保护 Prompt Cache 降低延迟与成本；TTL 挂在 Provider 账号级（基础设施属性），免跨模型重复配置；设 24h 校验上限防内存淘汰失效。 |
 | **Model 字段重写** | 免分配字节 Splice（`jsonscan.RewriteModel`） | 全量 unmarshal+marshal 消耗热路径 CPU 并重排键序；Splice 单趟扫描除 model 值外逐字节保留。 |
 | **思考块剥离守卫** | 首个非空 content 必须以 `<think>` 开头才认定思考形态 | 避免正文中合法引用 `<think>` 标签的代码或文本被静默删除；Thinking Process 剥离同样仅限 thinking=medium 且匹配前缀。 |

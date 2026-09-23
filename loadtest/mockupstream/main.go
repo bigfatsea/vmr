@@ -1,7 +1,7 @@
-// Ver 2026-09-12 12:00, by Gemini 4.5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // mockupstream stands in for a real LLM provider during vmr load testing
-// (see docs/VirtualModelRouter_Design_v4_Core.md §12). It never talks to a real
+// (see docs/VirtualModelRouter_Design_v4_Core.md's load-testing chapter). It never talks to a real
 // provider — the whole point is to measure vmr's own overhead, not a
 // provider's response time. Response shape is chosen by the incoming
 // request's "model" field (vmr has already rewritten it to whatever real

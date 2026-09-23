@@ -1,4 +1,4 @@
-// Ver 2026-09-22 18:40, by coding
+// Ver 2026-09-23 03:25, by Claude Opus 5.5
 
 package archtest
 
@@ -191,7 +191,7 @@ func TestArchitecture_ReportI18nPairing_Negative(t *testing.T) {
 // i18n/reqdetail_detail.go next to internal/reqdetail" — but journey's
 // renderers don't share one filename prefix (render_*, viewmodel_* and plain
 // *.go files all carry user copy, one i18n file can serve several, and
-// journey_compares_index.go renders a cmd/vmr page), so unlike the report
+// journey_compares_index.go renders a page built in internal/analyze), so unlike the report
 // half the counterpart is stated explicitly per file rather than derived
 // from a glob. The test makes "each stated counterpart exists" an enforced
 // fact: a renderer renamed, moved or split without updating its i18n anchor
@@ -199,7 +199,7 @@ func TestArchitecture_ReportI18nPairing_Negative(t *testing.T) {
 var sideI18nCounterparts = map[string][]string{
 	"journey_benchmarks.go":     {"internal/journey/render_benchmarks.go"},
 	"journey_compare.go":        {"internal/journey/compare.go", "internal/journey/render_compare.go"},
-	"journey_compares_index.go": {"cmd/vmr/compares_index.go"},
+	"journey_compares_index.go": {"internal/analyze/compares_index.go"},
 	"journey_findings.go":       {"internal/journey/findings.go"},
 	"journey_index.go":          {"internal/journey/journeyindex.go"},
 	"journey_indicators.go":     {"internal/journey/viewmodel_build.go"},

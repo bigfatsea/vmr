@@ -1,10 +1,10 @@
-// Ver 2026-09-23 01:50, by GLM-4.7
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
-// guard_corpus_scan is Agent Guard's M0.1 calibration and corpus analysis tool
-// (the Agent Guard spec): it reproduces the spec's
-// §2.3 real-corpus scan against this repo's historical audit logs
+// guard_corpus_scan is Agent Guard's calibration and corpus analysis tool:
+// it performs a real-corpus scan against this repo's historical audit logs
 // (logs/vmr-audit-*.jsonl[.zst]), and performs multi-dimensional security
-// analysis to prepare data for M3 (outbound protection) and M4 (inbound guard).
+// analysis to prepare data for the outbound (guard.Outbound) and inbound
+// (guard.Inbound) online layers.
 // Not part of the vmr binary — a calibration & analysis tool run by hand:
 //
 //	go run ./tools/guard_corpus_scan
@@ -276,12 +276,11 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "scanning %d file(s) under %s with %d workers\n", len(files), *dir, *workers)
 
-	// One Engine shared by every worker goroutine (M3.0's concurrency
-	// model, the Agent Guard spec §4.2): the
+	// One Engine shared by every worker goroutine: the
 	// rule table and its Aho-Corasick prefilter are immutable after
 	// construction, so building it once here instead of once per worker
 	// both amortizes the regexp compiles and exercises the exact
-	// concurrent-Scan-sharing contract the online M3/M4 wiring will
+	// concurrent-Scan-sharing contract the online wiring will
 	// depend on. Each worker still gets its own *guard.Scratch.
 	sharedEngine, err := guard.NewEngine(guard.DefaultRules(), guard.RulesVersion)
 	if err != nil {
@@ -424,7 +423,7 @@ func processAuditFile(filePath string, st *workerState, doDeep bool) {
 	_ = audit.ForEachLine(f, audit.MaxLogLine, func(line []byte) {
 		st.recordsTotal++
 
-		// 1. Baseline: Full-line scan (matches M0.1 corpus_scan.json specification)
+		// 1. Baseline: full-line scan
 		findingsBuf := st.engine.Scan(line, st.scratch)
 		if len(findingsBuf) > 0 {
 			perRuleCount := map[string]int{}
@@ -688,7 +687,7 @@ func scanToolCalls(respBytes []byte, provider, model string, ts time.Time, reqSe
 }
 
 // handleSingleToolCall judges one tool call via guard.InspectToolCall --
-// the same M1.5 tool-classification, high-risk-command, protected-path,
+// the same tool-classification, high-risk-command, protected-path,
 // and credential-echo logic internal/report's Fallback Path (guardscan.go)
 // uses -- rather than a private regex library, so this calibration tool
 // and `vmr analyze` can never quietly disagree about what counts as a hit.

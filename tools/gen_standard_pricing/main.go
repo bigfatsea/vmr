@@ -1,17 +1,17 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // gen_standard_pricing generates
 // internal/pricing/standard_price_generated.yaml from
 // docs/data/model_prices_and_context_window.json (a LiteLLM-format
 // price-list snapshot, MIT licensed — see that file's own license note and
-// docs/VirtualModelRouter_Design_v4_Quota.md's §4.2③ for the attribution
+// the Quota design doc's pricing-source section for the attribution
 // requirement this comment satisfies). Not part of the vmr binary — a
 // one-off/periodic maintenance tool, run by hand:
 //
 //	go run ./tools/gen_standard_pricing   # -url/-input/-output/-generated-at all default; fetches upstream, rewrites the snapshot and the generated yaml
 //
-// Two rules that are NOT optional (see the design doc's §4.2① "缺失比过期更
-// 危险" and its §9.1 validation checklist):
+// Two rules that are NOT optional (see the Quota design doc's pricing
+// section, "缺失比过期更危险", and its validation checklist):
 // - A component absent from the source JSON is OMITTED from the output
 // row entirely — never written as 0.0. internal/pricing.Rate depends on
 // this distinction (nil = unknown, *float64(0) = explicitly free) to keep
@@ -309,8 +309,8 @@ func generateRows(raw map[string]json.RawMessage) (sortedRows []generatedRow, ke
 
 // fileHeader is standard_price_generated.yaml's top-level shape — the exact
 // shape internal/pricing.ParseTable reads back (see that file's fileTable
-// type), plus the license/attribution note §4.2③ requires travel with the
-// data, not just live in this generator's source comment.
+// type), plus the license/attribution note the Quota design doc requires
+// travel with the data, not just live in this generator's source comment.
 type fileHeader struct {
 	Currency    string         `yaml:"currency"`
 	GeneratedAt string         `yaml:"generated_at"`

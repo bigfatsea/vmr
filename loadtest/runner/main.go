@@ -1,4 +1,4 @@
-// Ver 2026-09-12 12:00, by Gemini 4.5
+// Ver 2026-09-23 03:33, by Doubao Seed 2.0
 
 // runner is the one-command version of the manual steps in loadtest/README.md:
 // starts loadtest/mockupstream and vmr, generates targets.json (and its two
@@ -413,7 +413,7 @@ func attack(targetsPath string, rate int, duration time.Duration) (vegetaReport,
 }
 
 // auditRecord is the minimal subset of one audit JSONL line's fields this
-// tool needs (see docs/VirtualModelRouter_Design_v4_Core.md §9.2 for the
+// tool needs (see docs/VirtualModelRouter_Design_v4_Core.md for the
 // full schema). Deliberately hand-rolled here instead of importing
 // vmr/internal/audit.Record to remain completely self-contained.
 type auditRecord struct {
