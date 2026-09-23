@@ -1,6 +1,6 @@
-// Ver 2026-08-12 23:40, by Opus 5
+// Ver 2026-09-23 04:00, by Claude Opus 5.5
 
-// §2.5 账户（Provider）消耗与额度: rolls EndpointsAll up by upstream
+// 账户（Provider）消耗与额度: rolls EndpointsAll up by upstream
 // account, post-hoc — see rows.go's ProviderRow doc comment for why no new
 // streaming accumulation is needed. Mirrors recextract.go's buildTools/
 // buildCompactions: a pure function over already-finished buckets, called
@@ -15,9 +15,10 @@ import (
 
 // buildProviders rolls rep.EndpointsAll up by provider name. quotas (nil
 // when config.yaml wasn't readable, or an account declares no quota) is
-// looked up by provider name — one entry per Limit (P3) — and copied as-is
+// looked up by provider name — one entry per Limit (a provider can carry
+// more than one window) — and copied as-is
 // into ProviderRow.Quota.
-func buildProviders(rep *Report2, quotas map[string][]ProviderQuotaRef) []ProviderRow {
+func buildProviders(rep *Report, quotas map[string][]ProviderQuotaRef) []ProviderRow {
 	byProvider := map[string]*ProviderRow{}
 	models := map[string]map[string]bool{}
 	durSum := map[string]int64{}

@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
-// §6 会话 view model: per-session rollups and the compaction chains that
+// 会话 view model: per-session rollups and the compaction chains that
 // link a summarized session to the one continuing from it. Only
 // interactive-class sessions are listed here (scheduled single-shots live
 // in the requests side's own rollups). Pairs with
@@ -17,7 +17,7 @@ import (
 	"vmr/internal/reqdetail"
 )
 
-func vmSessionsSection(rep *Report2, journeyLink map[string]string, lang i18n.Lang) SectionVM {
+func vmSessionsSection(rep *Report, journeyLink map[string]string, lang i18n.Lang) SectionVM {
 	t := i18n.Sessions(lang)
 	sec := SectionVM{ID: "sessions", Title: t.Title}
 	var interactive []SessionRow
@@ -91,11 +91,11 @@ func vmSessionsSection(rep *Report2, journeyLink map[string]string, lang i18n.La
 
 const (
 	// sessionsHeadRows is how many sessions per client render un-collapsed
-	// in §6 before the tail folds into a <details>.
+	// in the sessions section before the tail folds into a <details>.
 	// sessionsLongTailTurnCap is the turn count at or below which a tail
 	// session is "short" enough to fold. Real corpora put a few hundred
 	// near-identical low-turn cron sessions behind every client's handful
-	// of real conversations; without a fold §6 is ~45% of the whole macro
+	// of real conversations; without a fold this section is ~45% of the whole macro
 	// report and its signal drowns.
 	sessionsHeadRows        = 20
 	sessionsLongTailTurnCap = 12
@@ -123,7 +123,7 @@ func splitSessionLongTail(rows []SessionRow) (head, tail []SessionRow) {
 }
 
 // formatSessionTimeRange produces a compact "08-16 02:39 → 02:42" or
-// "08-16 02:39 → 08-17 11:47" display in fmtutil.DisplayZone (问题 23).
+// "08-16 02:39 → 08-17 11:47" display in fmtutil.DisplayZone.
 func formatSessionTimeRange(fromStr, toStr string) string {
 	if fromStr == "" && toStr == "" {
 		return "-"
@@ -165,14 +165,14 @@ func vmSessionRow(tbl *TableVM, s SessionRow, journeyLink map[string]string, t i
 		id = s.Alias + " (" + s.ID + ")"
 	}
 	// Link the row to its journey narrative when one was rendered for this
-	// lineage in the same output root (问题 5 / P6.2c).
+	// lineage in the same output root.
 	if journey := journeyLink[s.ID]; journey != "" {
 		id = "[" + id + "](journeys/" + journey + ")"
 	}
 	timeRange := formatSessionTimeRange(s.From, s.To)
 	// EscapeHTML on top of row()'s own EscapeCell: the title is free-form
 	// user/model text, so an unclosed "<!--" would otherwise swallow the
-	// rest of the file in an HTML-aware renderer (B4).
+	// rest of the file in an HTML-aware renderer.
 	tbl.row(id, timeRange, reqdetail.EscapeHTML(truncateTitle(s.Title, 28)), strconv.Itoa(s.Requests), strconv.Itoa(s.Tasks),
 		fmt.Sprintf("%s / %s / %s", fmtutil.FmtTokens(s.TokensInFresh), fmtutil.FmtTokens(s.TokensInCached), fmtutil.FmtTokens(s.TokensOut)),
 		outcome)
@@ -193,7 +193,7 @@ func truncateTitle(s string, maxRunes int) string {
 // SessionRow.ContinuedFrom and renders a mermaid flowchart for any chain
 // with ≥3 nodes (≥2 compaction hops). Shorter chains are noted inline as
 // text. (V2 A3 / M5)
-func vmCompactionChainBlocks(rep *Report2, lang i18n.Lang) []BlockVM {
+func vmCompactionChainBlocks(rep *Report, lang i18n.Lang) []BlockVM {
 	t := i18n.Sessions(lang)
 	byID := map[string]*SessionRow{}
 	for i := range rep.Sessions {

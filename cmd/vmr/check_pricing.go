@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Sonnet 5
+// Ver 2026-09-23 04:16, by Claude Opus 5.5
 
 // Pricing display for `vmr check` — split out of cmd_check.go when the file
 // crossed its archtest line budget: the pricing block (standard-table
@@ -67,7 +67,7 @@ func pricingTableLine(cfg *config.Config) (string, bool) {
 // config — the top-level exchange_rate: block's own keys, plus every
 // provider's pricing.currency — and for each, whether its rate came from
 // the user's own exchange_rate: block or the built-in default table (see
-// pricing.EffectiveExchangeRate and the plan doc's §2.3: an operator must
+// pricing.EffectiveExchangeRate: an operator must
 // be able to tell the two apart, not just see a number). ok=false when
 // nothing in this config names a non-USD currency at all — the common
 // case, and the line would say nothing useful.

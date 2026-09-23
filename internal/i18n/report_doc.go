@@ -1,7 +1,7 @@
 // Ver 2026-09-22 02:35, by Sonnet 5
 
 // Pairs with internal/report/viewmodel_doc.go: the document title, the meta
-// line, §0 summary + auto highlights, §8's link line, and the appendix.
+// line, the summary + auto highlights, the request-index link line, and the appendix.
 package i18n
 
 import "fmt"
@@ -23,7 +23,7 @@ type DocText struct {
 	MetaReportConfig func(path string) string
 	DetailLinkLine   string
 	// JourneyIndexLinkLine is the "vmr-report.md → journeys/index.md" edge
-	// (P6.2a) — path is relative to vmr-report.md itself.
+	// — path is relative to vmr-report.md itself.
 	JourneyIndexLinkLine func(path string, journeyCount int, from, to string) string
 	SummaryTitle         string
 	SummaryRequests      func(requests, fallbacks, truncated int) string
@@ -31,11 +31,11 @@ type DocText struct {
 	// SummaryCostUnknown fills the cost cell when nothing priced at all —
 	// never "0", which reads as "this was free".
 	SummaryCostUnknown string
-	// SummaryInteractiveNote is a line below the §0 summary table noting
+	// SummaryInteractiveNote is a line below the summary table noting
 	// what fraction of total requests belong to the "interactive" workload
 	// class (as opposed to heartbeat/dream_diary/compaction). The total
 	// requests figure includes everything; this note gives the reader a
-	// quick sense of how much of the traffic is user-facing. (review P-07)
+	// quick sense of how much of the traffic is user-facing.
 	SummaryInteractiveNote func(total, interactive int, pct string) string
 	SummaryStarNote        string
 	HighlightsAuto         string
@@ -49,7 +49,7 @@ type DocText struct {
 	DetailsCaptureBody     string
 	// DetailsOnDemandBody is DetailsCaptureBody's counterpart for the
 	// default (-details=false) run, where details/*.md was never
-	// materialized (P6.2b) — example is a real "basename:line" coordinate
+	// materialized — example is a real "basename:line" coordinate
 	// from this run's own data, "" when this run had no requests at all.
 	DetailsOnDemandBody func(example string) string
 	AppendixTitle       string
@@ -62,7 +62,7 @@ type DocText struct {
 	AppendixBillingLine func(suffix string) string
 	AppendixNoPricing   string
 	AppendixSlowThresh  func(sec int) string
-	// AppendixSelfTrafficExcluded (P6.4) is shown whenever exclusion was
+	// AppendixSelfTrafficExcluded is shown whenever exclusion was
 	// configured and applied — n is how many records it skipped, and n == 0
 	// ("configured, nothing in this window matched") still takes this line,
 	// not AppendixSelfTrafficNotExcluded.

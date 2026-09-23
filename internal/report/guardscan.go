@@ -1,6 +1,6 @@
-// Ver 2026-09-17, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
-// Agent Guard's M2.2/M2.3 offline Fallback Path (ADR-12): extractRecordFacts
+// Agent Guard's offline Fallback Path: extractRecordFacts
 // picks between this file's two entry points on guardOutboundStamped(rec.Guard)
 // (factscache.go). Not stamped -- guard: absent entirely, outbound mode: off,
 // a trusted-provider exemption, any record predating the online wiring, or a
@@ -10,7 +10,7 @@
 // Client.Request.Body plus the inbound forensics pass over
 // Client.Response.Body) since no authoritative Hits exist yet to reuse.
 // Already outbound-stamped -- audit_only/block ran online, or a historical
-// replace-era/M2-era stamp -- calls scanInboundFacts, which skips the
+// replace-era stamp -- calls scanInboundFacts, which skips the
 // outbound scan (arec.Guard.Hits is already authoritative; re-running it
 // would only reproduce the same Hits) and runs just the inbound half,
 // re-deriving known secrets from Client.Request.Body only to feed its own
@@ -22,14 +22,14 @@
 //
 // guardEngine/guardScratch are process-lifetime singletons: one
 // *guard.Engine (immutable rule table + prefilter automaton, cheap to
-// build once) and one *guard.Scratch (the mutable per-scan workspace M3.0
+// build once) and one *guard.Scratch (the mutable per-scan workspace
 // split out of Engine — a single shared instance is correct here
 // specifically because this call path is one sequential goroutine, not
 // because Engine itself is unsafe to share), both created lazily on first
 // use and reused for every record scanFiles' single sequential goroutine
 // ingests during this run (see internal/guard's package doc comment for
 // why that single-goroutine fact means no concurrency work is needed
-// here). guard.Fingerprint is deterministic (KNOWN_ISSUES K-G19) — no
+// here). guard.Fingerprint is deterministic — no
 // salt to manage here at all, which also means this path and the online
 // path always agree on the same credential's FP.
 package report
@@ -48,8 +48,11 @@ var (
 	guardEngineOnce sync.Once
 	guardEngineVal  *guard.Engine
 
-	guardScratchOnce sync.Once
-	guardScratchVal  *guard.Scratch
+	guardScratchPool = sync.Pool{
+		New: func() any {
+			return guard.NewScratch(len(guardEngine().Rules()))
+		},
+	}
 )
 
 // guardEngine returns the process-lifetime fallback-scan Engine, built from
@@ -69,14 +72,14 @@ func guardEngine() *guard.Engine {
 	return guardEngineVal
 }
 
-// guardScratch returns the process-lifetime fallback-scan Scratch. One
-// shared instance is correct only because scanRecordForGuard's caller
-// (aggregate.go's scanFiles) is a single sequential goroutine — a second
-// concurrent caller would need its own Scratch (see guard.Scratch's doc
-// comment).
+// guardScratch acquires a Scratch from guardScratchPool for thread-safe concurrent
+// fallback scanning. Callers must putGuardScratch when finished.
 func guardScratch() *guard.Scratch {
-	guardScratchOnce.Do(func() { guardScratchVal = guard.NewScratch(len(guardEngine().Rules())) })
-	return guardScratchVal
+	return guardScratchPool.Get().(*guard.Scratch)
+}
+
+func putGuardScratch(sc *guard.Scratch) {
+	guardScratchPool.Put(sc)
 }
 
 // GuardScanFacts is one record's Fallback Path result — computed only when
@@ -87,15 +90,15 @@ type GuardScanFacts struct {
 	InboundRunes       map[string]int          `json:"inbound_runes,omitempty"`
 	ToolCallsInspected int                     `json:"tool_calls_inspected,omitempty"`
 	ToolFindings       []GuardToolFindingFacts `json:"tool_findings,omitempty"`
-	// ToolEchoCount/TextEchoCount split ADR-6's decryption-oracle signal by
-	// WHERE the echo landed (design spec Section 4.7(2)'s explicit split):
+	// ToolEchoCount/TextEchoCount split the decryption-oracle signal by
+	// WHERE the echo landed:
 	// ToolEchoCount is the high-risk half (a credential reappearing inside
 	// a tool call's own arguments -- already counted per-finding in
 	// ToolFindings' Echoed flag); TextEchoCount is the low-risk half (the
 	// same credential reappearing in the assistant's plain text, which
-	// K-G8-style reasoning says is normal conversation, not an attack
-	// signal, but is worth a background count for the text-vs-tool-arg
-	// contrast the design spec's own real-corpus finding rests on).
+	// is normal conversation, not an attack
+	// signal, but is worth a background count as the baseline the
+	// tool-arg half is read against).
 	ToolEchoCount int `json:"tool_echo_count,omitempty"`
 	TextEchoCount int `json:"text_echo_count,omitempty"`
 }
@@ -151,14 +154,14 @@ func scanBodyTree(v any, eng *guard.Engine, sc *guard.Scratch, visit func(secret
 // guardOutboundStamped reports whether g carries an authoritative OUTBOUND
 // verdict — i.e. the online outbound scan actually ran and stamped a real
 // result: server.applyOutboundGuard under audit_only/block (OutMode set),
-// a historical replace-era record (OutMode "replace"), or an M2-era stamp
+// a historical replace-era record (OutMode "replace"), or a stamp
 // predating the OutMode field (Ver set). An inbound-only stamp —
 // server.go's completion hook filling SanitizedRunes on a record
 // whose outbound scan never ran (outbound mode: off, trusted-provider
 // exemption) — has OutMode == "", Ver == 0 and no Hits, and does NOT count
 // as one: its outbound side remains the offline fallback's job, and the
 // inbound artifacts must not suppress it the way a full stamp legitimately
-// does (the §2 blind-spot shape this direction-aware condition exists to
+// does (the blind-spot shape this direction-aware condition exists to
 // close).
 //
 // OutMode == "error" (applyOutboundGuard's panic-recover stamp,
@@ -191,7 +194,9 @@ func scanOutbound(arec *audit.Record, eng *guard.Engine) (hits []audit.Hit, know
 	byKey := map[hitKey]*audit.Hit{}
 	var order []hitKey
 	seenSecret := map[string]bool{}
-	scanBodyTree(arec.Client.Request.Body, eng, guardScratch(), func(secret []byte, f guard.Finding) {
+	sc := guardScratch()
+	defer putGuardScratch(sc)
+	scanBodyTree(arec.Client.Request.Body, eng, sc, func(secret []byte, f guard.Finding) {
 		// known is deduped by secret content alone (seenSecret), independent
 		// of byKey's per-(rule, fp) dedup below: the same credential text can
 		// satisfy more than one rule (e.g. a 48-char legacy OpenAI key also
@@ -269,7 +274,9 @@ func scanInboundFacts(arec *audit.Record) *GuardScanFacts {
 	}
 	var known [][]byte
 	seen := map[string]bool{}
-	scanBodyTree(arec.Client.Request.Body, guardEngine(), guardScratch(), func(secret []byte, f guard.Finding) {
+	sc := guardScratch()
+	defer putGuardScratch(sc)
+	scanBodyTree(arec.Client.Request.Body, guardEngine(), sc, func(secret []byte, f guard.Finding) {
 		if seen[string(secret)] {
 			return
 		}
@@ -292,7 +299,7 @@ func scanInboundFacts(arec *audit.Record) *GuardScanFacts {
 // isolated per-HTTP-request by net/http's own recover) — one malformed
 // record's scan crashing would otherwise abort the entire `vmr analyze`
 // run. A recovered record's GuardScan stays nil, but failed is returned as
-// true so the failure count is visible on the report (spec §4.9).
+// true so the failure count is visible on the report.
 func guardScanSafe(fn func() *GuardScanFacts) (out *GuardScanFacts, failed bool) {
 	defer func() {
 		if recover() != nil {
@@ -304,8 +311,8 @@ func guardScanSafe(fn func() *GuardScanFacts) (out *GuardScanFacts, failed bool)
 }
 
 // scanRecordForGuard runs the Fallback Path over one record: outbound scan
-// of Client.Request.Body (M2.2), inbound rune/tool-call forensics over
-// Client.Response.Body (M2.3). Returns nil when there is nothing to scan
+// of Client.Request.Body, inbound rune/tool-call forensics over
+// Client.Response.Body. Returns nil when there is nothing to scan
 // or nothing was found — recordFacts.GuardScan stays nil in that case,
 // matching Record.Guard's own "nil means nothing to report" convention.
 func scanRecordForGuard(arec *audit.Record) *GuardScanFacts {
@@ -323,7 +330,7 @@ func scanRecordForGuard(arec *audit.Record) *GuardScanFacts {
 }
 
 // countEchoes counts how many of known's secret values appear as a
-// substring of text -- the plain-text half of ADR-6's decryption-oracle
+// substring of text -- the plain-text half of the decryption-oracle
 // signal (the tool-arg half is guard.InspectToolCall's Echoed field,
 // already counted per tool call above). A single secret is counted once
 // per occurrence in text, matching Hit.Count's own "context amplification,

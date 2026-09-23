@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:08, by Claude Opus 5.5
 
-// §2.5 账户（Provider）消耗与额度 view model: cross-model roll-up per
+// 账户（Provider）消耗与额度 view model: cross-model roll-up per
 // upstream account, plus the "额度与消耗对照" sub-table. Pairs with
 // internal/i18n/report_provider.go. The main table carries no quota
 // column — a declared quota only ever appears in the sub-table (see
@@ -18,7 +18,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmProvidersSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmProvidersSection(rep *Report, lang i18n.Lang) SectionVM {
 	// The sub-table is gated independently: an account can declare quota:
 	// and have Live data worth showing even with zero traffic in THIS
 	// report's window. Only skip the whole section when BOTH the main
@@ -69,11 +69,11 @@ func vmProvidersSection(rep *Report2, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// vmProviderQuotaTable is §2.5's "额度与消耗对照" sub-table. WindowConsumed
+// vmProviderQuotaTable is the "额度与消耗对照" sub-table. WindowConsumed
 // and Live are two independently-windowed numbers that must stay visually
 // separate, never combined into one. Absent entirely when no config.yaml
 // account both declares quota: and resolved successfully.
-func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
+func vmProviderQuotaTable(sec *SectionVM, rep *Report, lang i18n.Lang) {
 	if len(rep.ProviderQuotas) == 0 {
 		return
 	}
@@ -163,10 +163,10 @@ func vmProviderQuotaTable(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 	sec.Blocks = append(sec.Blocks, tbl)
 }
 
-// skippedAttemptsNote renders the P-5-2 line under §2.5 when some
+// skippedAttemptsNote renders the disclosure line under the quota sub-table when some
 // EndpointsAll rows carried a provider name not found in the quotas map.
 // Directly calls providerquota.go's renderSkippedAttemptsNote.
-func skippedAttemptsNote(rep *Report2, lang i18n.Lang) string {
+func skippedAttemptsNote(rep *Report, lang i18n.Lang) string {
 	var buf strings.Builder
 	renderSkippedAttemptsNote(func(format string, args ...any) { fmt.Fprintf(&buf, format, args...) }, rep, lang)
 	return buf.String()

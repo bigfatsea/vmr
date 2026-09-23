@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_sessions.go (§6 Sessions & Tasks).
+// Pairs with internal/report/viewmodel_sessions.go (Sessions & Tasks).
 package i18n
 
 import "fmt"

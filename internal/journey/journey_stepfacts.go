@@ -1,4 +1,4 @@
-// Ver 2026-08-30 21:45, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package journey
 
@@ -246,21 +246,11 @@ func manifestSysChanged(cur, prev *ctxgraph.Manifest) bool {
 		(cur.HasSys != prev.HasSys || (cur.HasSys && prev.HasSys && cur.SysHash != prev.SysHash))
 }
 
-// stepBoundaryFlags defaults the per-step task-boundary flags: only the
-// Journey's very first step starts a Task and counts as human-initiated
-// (every Journey opens on a real instruction, by construction). Both
-// branches of buildFrom's switch override these for their own cases; a
-// plain tool-loop continuation (neither branch fires) correctly stays
-// false.
-func stepBoundaryFlags(ci, i int) (newTask, humanInitiated bool) {
-	return ci == 0 && i == 0, ci == 0 && i == 0
-}
-
 // applyStitchBoundary fills the step facts that only exist at a stitch
 // boundary: the stitch edge, the compaction info measured against the
 // predecessor lineage's last record, and whether a genuinely new
 // instruction bridged the stitch — which is what makes a boundary a Task
-// boundary (B9), not the stitch itself.
+// boundary, not the stitch itself.
 func applyStitchBoundary(l *ctxgraph.Lineage, recs map[ctxgraph.Loc]*audit.Record, prevManifest, m *ctxgraph.Manifest, msgs []chatmsg.Message, rawMsgs []any, off int, ru taskseg.RealUsers, seen map[ctxgraph.Hash]*Event) (*ctxgraph.StitchEdge, *CompactionInfo, bool) {
 	stitchEdge := l.Stitch.Edge
 	var compaction *CompactionInfo

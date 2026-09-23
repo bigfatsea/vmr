@@ -1,4 +1,4 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package ctxgraph
 
@@ -75,7 +75,7 @@ type Manifest struct {
 	//
 	// They exist so a journey's $ line and the macro report's $ column price
 	// the same records: internal/report has always priced these estimated
-	// records (and says so in its §2 footnote), internal/journey silently
+	// records (and says so in its pricing footnote), internal/journey silently
 	// skipped them, and nothing said the two totals were on different bases.
 	// 0 on a manifest from a pre-v4 parse cache.
 	EstIn  int64 `json:"est_in,omitempty"`
@@ -268,29 +268,10 @@ func lastEndpoint(rec *audit.Record) string {
 	return rec.Attempts[len(rec.Attempts)-1].Endpoint
 }
 
-// servedEndpoint applies the same attribution rule as internal/report's
-// endpointInfo — prefer the strictly successful attempt (no error, < 400),
-// fall back to the last attempt that got a < 400 response header at all —
-// duplicated rather than shared for the same reason lastEndpoint is: the
-// import boundary forbids ctxgraph -> report. The duplication is pinned by
-// cmd/vmr's cost_basis_parity_test, which prices the same canceled/error
-// fixtures through both halves and fails if the two rules ever disagree.
-// "" (not "-") when nothing served: consumers treat that as "no endpoint
-// to attribute to", exactly like report's empty-string endpoint.
+// servedEndpoint returns the endpoint that served the client, delegating to
+// audit.Record.ServedEndpoint.
 func servedEndpoint(rec *audit.Record) string {
-	var successEp, servedEp string
-	for _, a := range rec.Attempts {
-		if a.Response != nil && a.Response.Status < 400 {
-			servedEp = a.Endpoint
-			if a.Error == "" {
-				successEp = a.Endpoint
-			}
-		}
-	}
-	if successEp != "" {
-		return successEp
-	}
-	return servedEp
+	return rec.ServedEndpoint()
 }
 
 // --- Message hash cache ---

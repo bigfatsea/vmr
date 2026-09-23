@@ -1,15 +1,15 @@
-// Ver 2026-08-20, by Sonnet 5
+// Ver 2026-09-23 03:38, by Claude Opus 5.5
 
 // The Task/Step/Event/ToolCall structural skeleton j-<id>.json
-// publishes as its "structure" field (architecture doc §7.4b). This is assembly,
+// publishes as its "structure" field. This is assembly,
 // not new computation: everything here already sits on Journey/Step/Event
 // (see journey.go); the judgment call this file makes is the inline-vs-reference
 // boundary: a Step's OWN decision content (RespText/Reasoning/tool-call args,
 // plus rule-derived classifications ABOUT content — edit kind, stitch evidence,
 // compaction token/entity counts) is inlined (resp/reasoning/args unlimited or
 // capped at maxBodyExcerptChars — see the per-field comments), a tool call's
-// paired RESULT lives in the same file's deduplicated bodies blob table (D18 /
-// §3.6) referenced by ToolCallRef.Result, and an ordinary conversation-history
+// paired RESULT lives in the same file's deduplicated bodies blob table
+// referenced by ToolCallRef.Result, and an ordinary conversation-history
 // MESSAGE (NewEvents) is a hash reference only — the message text itself still
 // lives only in the audit log (nothing renders it; the error-marker signal the
 // renderer needs is stamped per Step as HasErrorMarker).
@@ -33,7 +33,7 @@ import (
 )
 
 // maxBodyExcerptChars is the uniform 3000-character data-layer truncation cap
-// for tool-call arguments, tool-call results, and compaction predecessor excerpts (D18 / §3.6).
+// for tool-call arguments, tool-call results, and compaction predecessor excerpts.
 // RespText/Reasoning stored under RespRef has no character limit.
 const maxBodyExcerptChars = 3000
 
@@ -52,8 +52,7 @@ func (b blobStore) put(text string) string {
 
 // EventRef is one message's structural identity within the Journey's
 // globally de-duped event stream — a REFERENCE, never its text: an ordinary
-// conversation message is history, not this turn's decision (architecture
-// doc §7.4b). Hash is the same digest ctxgraph.Manifest.Keys already
+// conversation message is history, not this turn's decision. Hash is the same digest ctxgraph.Manifest.Keys already
 // carries for every non-leading-system message in the owning Step's own
 // record (md5 of the message's raw decoded JSON value, or its flattened
 // text when no raw form is available — ctxgraph.BuildManifest computes this
@@ -83,7 +82,7 @@ type EventRef struct {
 }
 
 // ToolResultRef is one tool call's paired result reference, confidence level,
-// and error status (D18 / §3.6).
+// and error status.
 type ToolResultRef struct {
 	Ref     string `json:"ref"`
 	Match   string `json:"match"` // "exact" | "normalized" | "positional"
@@ -91,7 +90,7 @@ type ToolResultRef struct {
 }
 
 // ToolCallRef is one Step's tool call — referencing its arguments in the bodies
-// blob table (args_ref), plus its paired result reference (result) if found (D18 / §3.6).
+// blob table (args_ref), plus its paired result reference (result) if found.
 type ToolCallRef struct {
 	ID      string         `json:"id"`
 	Name    string         `json:"name"`
@@ -114,7 +113,7 @@ type ToolCallRef struct {
 // compares TWO manifests — so, unlike NewEvents' text, it cannot be
 // recomputed from this Step's own Req record alone; if this file didn't
 // carry it, fact-layer's per-step edit-kind line would become
-// unrecoverable the moment P5.1 deletes that rendering.
+// unrecoverable the moment that rendering is removed.
 type EditRef struct {
 	Kind     string  `json:"kind"`
 	LCP      int     `json:"lcp"`
@@ -126,7 +125,7 @@ type EditRef struct {
 // comment). Same "graph-level, not single-record" reasoning as EditRef:
 // StitchGraph's bucket/coverage search spans the whole corpus, not this one
 // record, so Req cannot recover it — this is the only place it survives
-// past P5.1's fact-layer deletion.
+// past the fact layer's per-step rendering.
 type StitchRef struct {
 	Kind       string  `json:"kind"`
 	Score      float64 `json:"score"`
@@ -134,7 +133,7 @@ type StitchRef struct {
 }
 
 // CompactionRef mirrors CompactionInfo, referencing the predecessor excerpt in
-// the bodies blob store (D18 / §3.6).
+// the bodies blob store.
 type CompactionRef struct {
 	TokensBefore          int64    `json:"tokens_before"`
 	TokensAfter           int64    `json:"tokens_after,omitempty"`
@@ -155,7 +154,7 @@ type StepStructure struct {
 	Seq int       `json:"seq"`
 	Req string    `json:"req,omitempty"`
 	TS  time.Time `json:"ts"`
-	// TSDisplay is TS rendered in fmtutil.DisplayZone (§5.6: the frontend
+	// TSDisplay is TS rendered in fmtutil.DisplayZone (the frontend
 	// shows this verbatim and never converts a timezone). journey-viewer.html
 	// reads it; TS stays the machine form.
 	TSDisplay string `json:"ts_display,omitempty"`
@@ -254,14 +253,14 @@ type TaskStructure struct {
 }
 
 // JourneyStructure is j-<id>.json's "structure" field — the complete
-// Task/Step/Event/ToolCall skeleton plus self-contained bodies blob store (D18 / §3.6).
+// Task/Step/Event/ToolCall skeleton plus self-contained bodies blob store.
 type JourneyStructure struct {
 	Tasks  []TaskStructure   `json:"tasks"`
 	Bodies map[string]string `json:"-"`
 }
 
 // BuildStructure assembles j's already-computed Task/Step/Event data into
-// its published JSON shape, populating the deduplicated bodies table (D18 / §3.6)
+// its published JSON shape, populating the deduplicated bodies table
 // and stamping the journey-wide exact-repeat flag per tool call (see
 // ToolCallRef.Repeat).
 func BuildStructure(j *Journey) JourneyStructure {
@@ -367,7 +366,7 @@ func buildStepStructure(steps []*Step, i int, s *Step, bodies blobStore, repeats
 		}
 	}
 
-	// RespText / Reasoning into bodies without character limit (D18 / §3.6),
+	// RespText / Reasoning into bodies without character limit,
 	// keeping the two distinguishable: RespRef holds the reply when there is
 	// one (RespIsReasoning unset), the reasoning otherwise (set); when BOTH
 	// carry content the reasoning also goes under ReasoningRef.

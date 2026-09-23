@@ -21,7 +21,7 @@
 //
 // This file holds the per-record fact extraction shared with
 // internal/report's own aggregation pass (session.go's collect(),
-// recextract.go's buildRec2, ingest.go's per-endpoint tallies) — logic that
+// recextract.go's buildRow, ingest.go's per-endpoint tallies) — logic that
 // used to be implemented once for aggregation and a second, separately
 // hand-rolled time for detail rendering. Exported here so report calls the
 // one implementation instead of carrying its own copy that could drift.

@@ -1,4 +1,4 @@
-// Ver 2026-09-07, by Claude
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -76,7 +76,7 @@ func TestSliceTimePoints_CarryBothForms(t *testing.T) {
 
 	// buildRequestRow must never regress RequestRow.ts back to a string.
 	t.Run("buildRequestRow emits epoch ms", func(t *testing.T) {
-		rc := &rec2{ts: sample, outcome: "ok"}
+		rc := &recRow{ts: sample, outcome: "ok"}
 		rr := buildRequestRow(rc)
 		if rr.TS != sample.UnixMilli() {
 			t.Errorf("RequestRow.TS = %d, want %d (epoch ms)", rr.TS, sample.UnixMilli())

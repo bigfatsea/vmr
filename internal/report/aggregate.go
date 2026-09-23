@@ -1,18 +1,18 @@
-// Ver 2026-07-29 23:55, by Sonnet 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
 // This file is the aggregation pass behind `vmr analyze`'s report half: it
-// reads audit JSONL and fills in the Report2 buckets declared in rows.go.
+// reads audit JSONL and fills in the Report buckets declared in rows.go.
 // Rendering lives in the internal/report/viewmodel_*.go builders + the
-// fixed Markdown serializer (no template engine, D3/§5.3); the
-// five-domain macro slices in slices.go are derived from this Report2 by
+// fixed Markdown serializer (no template engine); the
+// five-domain macro slices in slices.go are derived from this Report by
 // BuildSummarySlice/BuildFinanceSlice/... — slices are the only persisted
-// macro data (D2), and LoadReport (viewmodel_doc.go) rebuilds an
-// in-memory Report2 from them on -render-only. The per-request detail
+// macro data, and LoadReport (viewmodel_doc.go) rebuilds an
+// in-memory Report from them on -render-only. The per-request detail
 // files in detail.go/render.go; session and task grouping in session.go;
 // token extraction in chatmsg.ExtractUsageSides; the optional pricing sidecar
 // in pricing.go. Per-bucket accumulation (TrafficStats.Ingest and friends)
-// lives in ingest.go; per-record extraction (buildRec2 and friends) lives
-// in recextract.go — this file is buildInternal's own orchestration:
+// lives in ingest.go; per-record extraction (buildRow and friends) lives
+// in recextract.go — this file is Build's own orchestration:
 // aggState plus its three phases (scanFiles/finishBuckets/sortBuckets).
 //
 // See docs/VirtualModelRouter_Design_v4_Analytics.md for the
@@ -43,10 +43,10 @@ import (
 	"vmr/internal/taskseg"
 )
 
-// rec2 is Build's per-record working struct: raw fields from audit.Record
+// recRow is Build's per-record working struct: raw fields from audit.Record
 // joined to ReqInfo's grouping/features. Built once per record, shared
 // read-only by every bucket.
-type rec2 struct {
+type recRow struct {
 	ts                       time.Time
 	date                     string
 	hour                     int
@@ -83,11 +83,10 @@ type rec2 struct {
 	newInstruction    string
 	path              string
 	line              int
-	// guard is audit.Record.Guard carried through verbatim — the
-	// Authoritative Fast Path (ADR-12), nil on every real record today.
-	// guardScan is the Fallback Path's result (guardscan.go), computed
-	// only when guard is nil. guardCollector reads both; nothing else
-	// does.
+	// guard is audit.Record.Guard carried through verbatim — authoritative
+	// when stamped online by Agent Guard. When guard is nil (un-stamped
+	// records), guardScan falls back to offline corpus scanning.
+	// guardCollector reads both; nothing else does.
 	guard           *audit.GuardRecord
 	guardScan       *GuardScanFacts
 	guardScanFailed bool
@@ -112,12 +111,12 @@ var diagnosticNormMarker = map[string]bool{
 	"thinking_process_pattern_detected": true,
 }
 
-// aggState is buildInternal's per-run working state: every bucket map plus
+// aggState is Build's per-run working state: every bucket map plus
 // the collectors/inputs its three phases (scanFiles/finishBuckets/
-// sortBuckets, below) need. Split out so buildInternal itself is just the
-// three-call orchestration — see that function's own doc comment.
+// sortBuckets, below) need. Split out so Build itself is just the
+// three-call orchestration — see build.go.
 type aggState struct {
-	rep         *Report2
+	rep         *Report
 	sess        *SessionAnalysis
 	sessionInfo map[string]*SessionInfo
 
@@ -136,7 +135,12 @@ type aggState struct {
 	guardCol          *guardCollector
 	pricingSrc        *pricing.Resolver
 
-	// excludeClientTags is P6.4's self-traffic exclusion set — a record
+	// prof is the taskseg.Profile used to re-extract record facts on a
+	// fresh decode (scanAndCacheFile) so cache entries stamped outside
+	// AnalyzeSessionsCached carry the same profile semantics.
+	prof taskseg.Profile
+
+	// excludeClientTags is the self-traffic exclusion set — a record
 	// whose ClientKeyTag is a member never reaches any bucket. Computed
 	// once by cmd/vmr (the identification rule's one definition, see
 	// audit.KeyTag's use in cmd/vmr's selfTrafficExcludeTags) and threaded straight
@@ -147,7 +151,11 @@ type aggState struct {
 	from, to time.Time
 }
 
-func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolver, excludeClientTags map[string]bool) *aggState {
+func newAggState(rep *Report, sess *SessionAnalysis, pricingSrc *pricing.Resolver, excludeClientTags map[string]bool) *aggState {
+	return newAggStateWithProfile(rep, sess, pricingSrc, excludeClientTags, nil)
+}
+
+func newAggStateWithProfile(rep *Report, sess *SessionAnalysis, pricingSrc *pricing.Resolver, excludeClientTags map[string]bool, prof taskseg.Profile) *aggState {
 	sessionInfo := map[string]*SessionInfo{}
 	for _, s := range sess.Sessions {
 		sessionInfo[s.ID] = s
@@ -169,65 +177,12 @@ func newAggState(rep *Report2, sess *SessionAnalysis, pricingSrc *pricing.Resolv
 		clientEndpointCol: newClientEndpointCollector(),
 		guardCol:          newGuardCollector(),
 		pricingSrc:        pricingSrc,
+		prof:              prof,
 		excludeClientTags: excludeClientTags,
 	}
 }
 
-// buildInternal is Build/BuildCached's shared body — see build_cached.go
-// for both entry points' doc comments and the full rationale (two-read
-// design, onRecord's independence from Build's own success/failure, the
-// session-analysis-failure error message below). Kept to session analysis
-// plus wiring aggState's three phases (scanFiles/finishBuckets/sortBuckets)
-// in sequence — no behavior split from the pre-B4 single function, only a
-// declaration/accumulation split (see rows.go's TrafficStats and
-// ingest.go's per-type Ingest methods) and a phase split.
-// Not a MetricAggregator interface: a single-threaded batch loop over one
-// record type has no caller that needs to swap the aggregator at runtime,
-// so an interface would buy polymorphism nobody uses.
-func buildInternal(paths []string, now time.Time, progress io.Writer, pricingInfo *Pricing, pricingSrc *pricing.Resolver, onRecord func(*audit.Record, *ReqInfo), prof taskseg.Profile, prior *ctxgraph.FileCache, quotas map[string][]ProviderQuotaRef, excludeClientTags map[string]bool) (*Report2, *SessionAnalysis, *ctxgraph.FileCache, error) {
-	sess, cache, err := AnalyzeSessionsCached(paths, prior, prof)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("session analysis failed (%w) — no report was written. "+
-			"This step reads every input file a second time; the most common real-world cause "+
-			"is one of them being rotated/compressed by the audit housekeeping sweep (a running "+
-			"`vmr start` instance) while this scan was in progress. Rerun; if it persists, check "+
-			"whether any input path still exists under its original name (housekeeping renames "+
-			"rotated files to .zst) and that it isn't corrupt", err)
-	}
-	// Self-traffic exclusion (P6.4) must also reach sess.Recs/Compactions
-	// here, not just ingestRecord's own per-record skip below: buildTools/
-	// buildCompactions (§5/§6.7) read straight from sess, a completely
-	// separate pass from the scanFiles loop ingestRecord runs in — an
-	// excluded record's tool calls/compaction entry would otherwise still
-	// surface in those two sections even though it never gets a
-	// RequestRow or contributes to Overall. sess.Sessions is deliberately
-	// left untouched: rep.Sessions (§6) is already correctly filtered
-	// because a self-traffic session never gets a SessionRow in the first
-	// place (every one of its records is skipped in ingestRecord below),
-	// so there is nothing reading sess.Sessions directly that this would
-	// need to protect. Meta.SelfTrafficExcluded is NOT incremented here —
-	// ingestRecord's own per-record check below counts every excluded
-	// record exactly once, from the scanFiles pass every record goes
-	// through regardless of whether it also appears in sess.
-	excludeSelfTrafficFromSessionAnalysis(sess, excludeClientTags)
-
-	rep := &Report2{Meta: Meta{
-		Format: Format, GeneratedAt: now.Format(time.RFC3339), Inputs: paths,
-		SlowThreshold:              SlowThresholdMS,
-		SelfTrafficExclusionActive: len(excludeClientTags) > 0,
-		PercentileMethod:           "true per-bucket from raw dur_ms/ttft_ms/stream_ms; cross-day merges use pre-aggregated *_all/hours_of_day siblings",
-	}}
-
-	st := newAggState(rep, sess, pricingSrc, excludeClientTags)
-	if err := st.scanFiles(paths, progress, onRecord, cache); err != nil {
-		return nil, nil, nil, err
-	}
-	st.finishBuckets(pricingInfo, quotas, now, progress)
-	st.sortBuckets()
-	return rep, sess, cache, nil
-}
-
-// scanFiles is buildInternal's single pass over the input files, joined to
+// scanFiles is Build's single pass over the input files, joined to
 // ReqInfo via st.sess.Lookup. cache is the same *ctxgraph.FileCache
 // AnalyzeSessionsCached already returned (hash-fresh for every path in
 // paths — see ScanCached's postcondition) — a file whose cached Facts are
@@ -254,7 +209,7 @@ func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(
 		var err error
 		if hashErr != nil {
 			fileRecords, err = st.scanAndCacheFile(path, "", cache, onRecord)
-		} else if ff, ok := loadCachedFacts(cache, key); onRecord == nil && ok {
+		} else if ff, ok := loadCachedFacts(cache, key, nil); onRecord == nil && ok {
 			fileRecords = st.ingestCachedFile(path, ff)
 		} else {
 			fileRecords, err = st.scanAndCacheFile(path, key, cache, onRecord)
@@ -272,14 +227,14 @@ func (st *aggState) scanFiles(paths []string, progress io.Writer, onRecord func(
 
 // ingestCachedFile replays one file's cached recordFacts — no file I/O, no
 // JSON decode of the record bodies — through the exact same
-// buildRec2/ingestRecord path a fresh decode would use. Returns the record
+// buildRow/ingestRecord path a fresh decode would use. Returns the record
 // count for the progress line.
 func (st *aggState) ingestCachedFile(path string, ff fileFacts) int {
 	st.rep.Meta.Records += len(ff.Records)
 	st.rep.Meta.ParseErrors += ff.ParseErrors
 	for _, rf := range ff.Records {
 		ri := st.sess.Lookup(path, rf.Line)
-		st.ingestRecord(buildRec2(rf, ri, path), rf.Attempts)
+		st.ingestRecord(buildRow(rf, ri, path), rf.Attempts)
 	}
 	return len(ff.Records)
 }
@@ -290,8 +245,7 @@ func (st *aggState) ingestCachedFile(path string, ff fileFacts) int {
 // (a genuine cache miss, or onRecord forcing a decode a Facts hit would
 // otherwise have skipped) — so a later -details=false run over the same
 // file benefits even if this run needed the raw records for detail
-// rendering. cache may be nil (no prior/output cache at all, e.g. a caller
-// using Build instead of BuildCached); storeCachedFacts/loadCachedFacts
+// rendering. cache may be nil (no prior/output cache at all); storeCachedFacts/loadCachedFacts
 // both treat that as a no-op rather than a special case here.
 func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache, onRecord func(*audit.Record, *ReqInfo)) (int, error) {
 	f, err := audit.OpenLogFile(path)
@@ -301,6 +255,10 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 	defer f.Close()
 
 	var ff fileFacts
+	ff.Profile = ""
+	if st.prof != nil {
+		ff.Profile = st.prof.Name()
+	}
 	line := 0
 	scanErr := audit.ForEachLine(f, audit.MaxLogLine, func(lineBytes []byte) {
 		line++
@@ -311,10 +269,10 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 			return
 		}
 		st.rep.Meta.Records++
-		rf := extractRecordFacts(&arec, line)
+		rf := extractRecordFacts(&arec, line, st.prof)
 		ff.Records = append(ff.Records, rf)
 		ri := st.sess.Lookup(path, line)
-		// Self-traffic exclusion (P6.4) must gate onRecord too, not just
+		// Self-traffic exclusion must gate onRecord too, not just
 		// ingestRecord below: onRecord is the -details detail-page writer
 		// (setupDetailWriter's callback) — without this check it would
 		// still materialize a details/*.md page for an excluded record,
@@ -323,7 +281,7 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 		if onRecord != nil && !st.excludeClientTags[arec.ClientKeyTag] {
 			onRecord(&arec, ri)
 		}
-		st.ingestRecord(buildRec2(rf, ri, path), rf.Attempts)
+		st.ingestRecord(buildRow(rf, ri, path), rf.Attempts)
 	}, func() {
 		st.rep.Meta.ParseErrors++
 		ff.ParseErrors++
@@ -335,12 +293,12 @@ func (st *aggState) scanAndCacheFile(path, key string, cache *ctxgraph.FileCache
 	return len(ff.Records), nil
 }
 
-// ingestRecord fans rc (already joined to its ReqInfo — see buildRec2) out
+// ingestRecord fans rc (already joined to its ReqInfo — see buildRow) out
 // to every bucket it touches, given the same record's attempt-level facts
-// (needed only by ingestEndpoints, so not part of rec2 itself).
-func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
+// (needed only by ingestEndpoints, so not part of recRow itself).
+func (st *aggState) ingestRecord(rc *recRow, attempts []attemptFacts) {
 	if st.excludeClientTags[rc.clientKey] {
-		// Self-analysis traffic (P6.4): `vmr analyze`'s own -llm-addr calls
+		// Self-analysis traffic: `vmr analyze`'s own -llm-addr calls
 		// route back through this same instance and land in the audit
 		// log like any other request — but their cost/tokens are the
 		// analysis tool's own overhead, not the workload being analyzed,
@@ -374,7 +332,7 @@ func (st *aggState) ingestRecord(rc *rec2, attempts []attemptFacts) {
 // ingestRowBuckets updates Overall/ByModel/ByDate/Hours/HoursOfDay,
 // returning the ByModel/ByDate rows so ingestRecord can price them without
 // a second map lookup.
-func (st *aggState) ingestRowBuckets(rc *rec2) (mr, dr *Row) {
+func (st *aggState) ingestRowBuckets(rc *recRow) (mr, dr *Row) {
 	model := rc.model
 	if model == "" {
 		model = "(rejected)"
@@ -414,7 +372,7 @@ func (st *aggState) ingestRowBuckets(rc *rec2) (mr, dr *Row) {
 }
 
 // ingestEndpoints updates Endpoints/EndpointsAll from one record's attempts.
-func (st *aggState) ingestEndpoints(attempts []attemptFacts, rc *rec2) {
+func (st *aggState) ingestEndpoints(attempts []attemptFacts, rc *recRow) {
 	// reqAttributed: the `a.Endpoint == rc.endpoint` guard alone does NOT
 	// make the request-level half fire once. attempts[] may repeat one
 	// protocol:provider:model label (no per-attempt component; BuildSnapshot
@@ -445,7 +403,7 @@ func (st *aggState) ingestEndpoints(attempts []attemptFacts, rc *rec2) {
 }
 
 // ingestSecondaryBuckets updates ByClient/Workloads/Sessions.
-func (st *aggState) ingestSecondaryBuckets(rc *rec2) {
+func (st *aggState) ingestSecondaryBuckets(rc *recRow) {
 	// ByClient (skip empty tag - auth disabled / no match)
 	if rc.clientKey != "" {
 		c := st.byClient[rc.clientKey]

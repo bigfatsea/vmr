@@ -1,7 +1,7 @@
-// Ver 2026-09-01, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Dedicated failed requests index rendering: WriteFailedIndex, FailedRequestRows,
-// and temporal error clustering (问题 28). Split from requests.go to respect
+// and temporal error clustering. Split from requests.go to respect
 // archtest line budgets.
 package report
 
@@ -107,8 +107,8 @@ func clusterFailedRequests(failed []RequestRow) (clusters int, maxCount int, max
 // WriteFailedIndex writes requests/failed.md: a flat, time-ordered index of
 // every failed request (FailedRequestRows), each row's "文件" column a
 // detailCell (a details/*.md link when the target actually exists on disk,
-// else the req coordinate — see detailCell's own doc comment, P13.4). This
-// is the one human-readable request document D7 kept: triage is the case
+// else the req coordinate — see detailCell's own doc comment). This
+// is the one human-readable request document kept: triage is the case
 // where you should not have to open a browser first.
 func WriteFailedIndex(rows []RequestRow, dir string, lang i18n.Lang, detailDir string) error {
 	detailSet := buildDetailFileSet(detailDir)

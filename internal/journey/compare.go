@@ -45,7 +45,7 @@ type JourneyRef struct {
 	Steps      int    `json:"steps"`
 	ToolCalls  int    `json:"tool_calls"`
 	ReportFile string `json:"report_file,omitempty"`
-	// Partial is D19's data-carried replacement for the retired "-partial"
+	// Partial is the data-carried replacement for the retired "-partial"
 	// filename suffix: this side's head was truncated by the loaded file
 	// range. It rides on the ref so compares/index and the .md banner can
 	// mark partiality without re-reading the side's own journey JSON.
@@ -74,7 +74,7 @@ type Comparison struct {
 	Rows  []MetricDiff    `json:"rows"`
 	Tools []ToolShareDiff `json:"tools"` // union of both sides' tool names, A's Count-desc order first then B-only names
 
-	// Partial is true when either side is head-truncated (D19: partiality is
+	// Partial is true when either side is head-truncated (partiality is
 	// a property of the loaded range, carried as data instead of a filename
 	// suffix); which side is told by A.Partial / B.Partial.
 	Partial bool `json:"partial,omitempty"`
@@ -94,19 +94,19 @@ type Comparison struct {
 	// possible persisted calls — the overall comparison, and (only when a
 	// divergence point was found) the divergence-point reading. Both render
 	// from these fields (RenderComparisonMarkdown's trailing LLM sections),
-	// so compare-*.md is a pure function of compare-*.json — §3.6's
-	// "彻底杜绝旁路拼接", the compare-side counterpart of JourneySummary's
-	// llm_interpretation. nil when -llm-addr wasn't given or the call
+	// so compare-*.md is a pure function of compare-*.json — the
+	// "no second assembly path" contract, the compare-side counterpart of
+	// JourneySummary's llm_interpretation. nil when -llm-addr wasn't given or the call
 	// wasn't attempted; a failed call is recorded (Status "failed") and
 	// renders nothing.
 	LLMInterpretation *LLMInterpretation `json:"llm_interpretation,omitempty"`
 	LLMDivergence     *LLMInterpretation `json:"llm_divergence,omitempty"`
 }
 
-// Compare diffs a and b's Metrics — the whole of Phase 4d ("两份剖面做差就是对比报告的骨架"). Order is fixed:
+// Compare diffs a and b's Metrics — the whole of the comparison phase ("两份剖面做差就是对比报告的骨架"). Order is fixed:
 // caller decides which Journey is "A" and which is "B" (e.g. baseline vs
 // candidate); Compare doesn't sort or normalize that choice away. No lang
-// parameter (R1): each row's Label is the English baseline
+// parameter: each row's Label is the English baseline
 // (i18n.MetricLabel(i18n.EN, ...)) — Metric is already the stable,
 // non-localized id, so a consumer that wants another language's label
 // looks it up from Metric via i18n.MetricLabel rather than reading a
@@ -164,9 +164,9 @@ func toolShareDiff(a, b []ToolCallStat) []ToolShareDiff {
 const (
 	sysPromptExcerptChars   = 20000
 	deliverableExcerptChars = 6000
-	// initialInstructionExcerptChars is architecture doc §4.7's decided
-	// bound — a real language-model corpus example pastes several thousand
-	// characters of JSON as the opening instruction; unbounded display
+	// initialInstructionExcerptChars is the decided bound on the opening
+	// instruction excerpt — a real language-model corpus example pastes thousands
+	// of characters of JSON as the opening instruction; unbounded display
 	// would defeat the point of a "3-second overview" up top.
 	initialInstructionExcerptChars = 2000
 )

@@ -1,6 +1,6 @@
-// Ver 2026-09-22 00:10, by Sonnet 5
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-package main
+package analyze
 
 import (
 	"encoding/json"
@@ -15,47 +15,51 @@ import (
 	"vmr/internal/report"
 )
 
-// runRenderOnly implements `vmr analyze -render-only` (§5.4).
+// RenderOnlyOptions holds parameters for RunRenderOnly.
+type RenderOnlyOptions struct {
+	OutDir        string
+	RequestedLang string
+	LangPassed    bool
+	NoCache       bool
+}
+
+// RunRenderOnly implements `vmr analyze -render-only`.
 // Validates manifest.json, then re-renders in the requested language — or,
-// with no -lang, inherits the snapshot's last-rendered language (D10).
-// Changing language here is now a normal, cheap path (R1): the JSON data
-// product is language-invariant, so redrawing it in a different language
-// is pure re-render, never re-aggregation. This used to hard-error on any language
-// other than the snapshot's own — that guard predated R1, when the JSON
-// itself still carried narrative text baked in at the original language.
-func runRenderOnly(outDir string, requestedLang string, langPassed bool) error {
-	m, err := report.ValidateManifest(outDir)
+// with no -lang, inherits the snapshot's last-rendered language.
+func RunRenderOnly(opts RenderOnlyOptions) error {
+	m, err := report.ValidateManifest(opts.OutDir)
 	if err != nil {
 		return fmt.Errorf("-render-only requires a valid manifest: %w", err)
+	}
+
+	if !opts.NoCache && tryRenderOnlyL3Cache(opts.OutDir, opts.RequestedLang, opts.LangPassed) {
+		return nil
 	}
 
 	lang, err := i18n.Parse(m.Lang)
 	if err != nil {
 		lang = i18n.EN
 	}
-	if langPassed {
-		reqLang, err := i18n.Parse(requestedLang)
+	if opts.LangPassed {
+		reqLang, err := i18n.Parse(opts.RequestedLang)
 		if err != nil {
-			return fmt.Errorf("-render-only: invalid -lang %q: %w", requestedLang, err)
+			return fmt.Errorf("-render-only: invalid -lang %q: %w", opts.RequestedLang, err)
 		}
 		lang = reqLang
 	}
 
-	if err := renderAllFromDisk(outDir, lang); err != nil {
+	if err := renderAllFromDisk(opts.OutDir, lang); err != nil {
 		return err
 	}
-	// Stamp the language actually just rendered (R1: manifest.json's Lang
-	// means "last Markdown render," not "this snapshot's language" — see
-	// the Manifest.Lang field's own doc comment). rep=nil: BuildManifest's
-	// nil-rep path re-hashes whatever slices are already on disk (untouched
-	// by a render-only pass) and preserves TimeRange/Inputs/Footnotes/
-	// Disclaimers from the existing manifest — only Lang and GeneratedAt
-	// actually change.
-	return writeReportManifest(outDir, nil, lang)
+	if err := writeReportManifest(opts.OutDir, nil, lang); err != nil {
+		return err
+	}
+	recordRenderOnlyL3Cache(opts.OutDir)
+	return nil
 }
 
-// renderAllFromDisk renders all resident human-readable Markdown products from on-disk JSON (§5.4).
-// Shared by -render-only and full analyze runs (D11).
+// renderAllFromDisk renders all resident human-readable Markdown products from on-disk JSON.
+// Shared by -render-only and full analyze runs.
 func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 	// 1. vmr-report.md (if the macro slice set exists)
 	if _, err := os.Stat(filepath.Join(outDir, report.SliceMacroSummary)); err == nil {
@@ -87,7 +91,6 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 			return fmt.Errorf("write journeys index md: %w", err)
 		}
 
-		// D20: Job list comes from journeys/index.json, never directory scan!
 		linkDetails := detailDirHasFiles(detailDir)
 		_, reportMDErr := os.Stat(filepath.Join(outDir, "vmr-report.md"))
 		reportMDExists := reportMDErr == nil
@@ -104,10 +107,6 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 				continue
 			}
 			outPath := filepath.Join(journeysDir, "details", base+".md")
-			// The .md is a pure function of the .json (§3.6) — the old
-			// "scrape the appended LLM section from the previous .md"
-			// bypass-splice is gone: the interpretation renders from the
-			// record the JSON itself carries.
 			journeyMD := journey.RenderMarkdownFromSummary(&s, lang, reportMDExists, linkDetails)
 			if err := os.WriteFile(outPath, []byte(journeyMD), 0o600); err != nil {
 				return fmt.Errorf("write journey md %s: %w", base, err)
@@ -146,8 +145,6 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 					continue
 				}
 				cmpMDPath := filepath.Join(comparesDir, strings.TrimSuffix(entry.Name(), ".json")+".md")
-				// Same §3.6 rule as the journey .md above: the LLM sections
-				// render from compare-*.json's own records — no scraping.
 				if err := os.WriteFile(cmpMDPath, []byte(journey.RenderComparisonMarkdown(cmp, lang)), 0o600); err != nil {
 					return fmt.Errorf("write compare md %s: %w", entry.Name(), err)
 				}
@@ -156,7 +153,7 @@ func renderAllFromDisk(outDir string, lang i18n.Lang) error {
 		_ = RebuildComparesIndex(comparesDir, lang)
 	}
 
-	// 6. Idempotently refresh skeletons (§5.4)
+	// 6. Idempotently refresh skeletons
 	if err := dashboard.WriteSkeletons(outDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed: %v\n", err)
 	}

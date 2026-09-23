@@ -1,6 +1,6 @@
-// Ver 2026-08-20 17:25, by Sonnet 5
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-package main
+package analyze
 
 import (
 	"testing"
@@ -11,20 +11,20 @@ import (
 
 func TestSelfTrafficExcludeTags(t *testing.T) {
 	t.Run("empty llmKey and no extra tags excludes nothing", func(t *testing.T) {
-		if got := selfTrafficExcludeTags("", nil); got != nil {
+		if got := SelfTrafficExcludeTags("", nil); got != nil {
 			t.Errorf("got %v, want nil", got)
 		}
 	})
 	t.Run("llmKey derives its audit.KeyTag", func(t *testing.T) {
 		key := "sk-analysis-vmrstory"
-		got := selfTrafficExcludeTags(key, nil)
+		got := SelfTrafficExcludeTags(key, nil)
 		want := audit.KeyTag(key)
 		if !got[want] {
-			t.Errorf("selfTrafficExcludeTags(%q, nil) = %v, want a set containing %q (same transform internal/server's authenticate() applies)", key, got, want)
+			t.Errorf("SelfTrafficExcludeTags(%q, nil) = %v, want a set containing %q (same transform internal/server's authenticate() applies)", key, got, want)
 		}
 	})
 	t.Run("extra tags are unioned in, empty strings ignored", func(t *testing.T) {
-		got := selfTrafficExcludeTags("", []string{"manual-tag", ""})
+		got := SelfTrafficExcludeTags("", []string{"manual-tag", ""})
 		if !got["manual-tag"] || len(got) != 1 {
 			t.Errorf("got %v, want exactly {manual-tag: true}", got)
 		}

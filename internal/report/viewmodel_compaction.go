@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:08, by Claude Opus 5.5
 
-// §6.7 Compaction 还原 (CCR N-4) view model: every standalone compaction
+// Compaction 还原 view model: every standalone compaction
 // LLM call this period, with which sessions it links, how much it
 // compressed, and a rule-based sample of what got swallowed. "不修复，只
 // 揭示" — no LLM, no attempt to judge whether the loss mattered, just the
@@ -16,7 +16,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmCompactionsSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmCompactionsSection(rep *Report, lang i18n.Lang) SectionVM {
 	t := i18n.Compaction(lang)
 	sec := SectionVM{ID: "compactions", Title: t.Title}
 	if len(rep.Compactions) == 0 {

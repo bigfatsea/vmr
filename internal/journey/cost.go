@@ -49,7 +49,8 @@ type CostFact struct {
 	TotalSteps  int      `json:"total_steps"`
 	// EstimatedSteps is how many of PricedSteps were priced from a degraded
 	// token estimate (the upstream reported no usage) rather than real
-	// reported usage — the per-journey counterpart of the macro report's §2
+	// reported usage — the per-journey counterpart of the macro cost
+	// section's
 	// degraded-share note. Those steps are IN Total, as they always have
 	// been on the report side.
 	EstimatedSteps int `json:"estimated_steps,omitempty"`

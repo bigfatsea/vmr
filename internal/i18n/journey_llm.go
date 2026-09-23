@@ -1,4 +1,4 @@
-// Ver 2026-09-22 02:45, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Pairs with internal/journey/llm.go (the -compare LLM interpretation layer).
 // The system prompt instructs the model which language to answer in, so the
@@ -327,8 +327,7 @@ Follow these rules strictly:
 // llmDivergenceSystemPromptZH is the divergence-point LLM layer's system prompt — llm_divergence.go's
 // DivergenceEvidencePack pairs a structural DivergencePoint fact (which
 // Step, light/heavy severity, which tools) with a bounded window of Step
-// briefs on both sides around it. The prompt's central constraint mirrors
-// the journey design specification's
+// briefs on both sides around it. The prompt's central constraint is the
 // divergence-interpretation boundary: divergence location is a fact, "why" is always a labeled guess,
 // and the two sides are never ranked as better/worse (VMR has no outcome
 // signal to base that on).

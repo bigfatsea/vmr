@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// CleanOrphanJourneys scans detailsDir (strictly limited to journeys/details/ per D20 / §3.4)
+// CleanOrphanJourneys scans detailsDir (strictly limited to journeys/details/)
 // and removes any expired j-<id>.* detail files whose ID is not present in activeIDs.
 //
 // Boundary invariants:

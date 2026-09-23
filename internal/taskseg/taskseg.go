@@ -1,7 +1,10 @@
-// Ver 2026-08-14, by Sonnet 5
+// Ver 2026-09-24 14:35, by dev
 
-// Package taskseg isolates agent-specific offline analytics heuristics: identifying
-// genuine user instructions, transport scaffolding, no-reply conventions, and framework session IDs.
+// Package taskseg isolates agent-specific offline analytics heuristics and owns
+// the session/task segmentation algorithm itself, shared canonically by report
+// and journey rather than duplicated in each. It provides agent-dialect profiles
+// (identifying genuine user instructions, transport scaffolding, no-reply conventions,
+// and framework session IDs) and the canonical Step/Task segmentation assembly (Segment).
 package taskseg
 
 import "vmr/internal/chatmsg"

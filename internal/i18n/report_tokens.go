@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_tokens.go (§1 Cost & Token Economy).
+// Pairs with internal/report/viewmodel_tokens.go (Cost & Token Economy).
 package i18n
 
 import "fmt"

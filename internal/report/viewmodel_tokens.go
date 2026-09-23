@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:06, by Claude Opus 5.5
 
-// §1 成本与 Token 经济 view model: the token-class breakdown, per-model
+// 成本与 Token 经济 view model: the token-class breakdown, per-model
 // cache efficiency, and the role-level character and estimated-token
 // split. Pairs with internal/i18n/report_tokens.go.
 package report
@@ -12,7 +12,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmTokensSection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
+func vmTokensSection(rep *Report, o Row, lang i18n.Lang) SectionVM {
 	t := i18n.Tokens(lang)
 	sec := SectionVM{ID: "tokens", Title: t.Title}
 

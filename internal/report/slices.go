@@ -1,14 +1,15 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-23 03:35, by Claude Opus 5.5
 //
-// Domain-sliced macro report schemas and writers (§3.2, §0.3 D2).
-// Deconstructs the monolithic Report2 into five independent domain slices:
+// Domain-sliced macro report schemas and writers.
+// Deconstructs the monolithic Report into five independent domain slices:
 //   - macro/summary.json: overall traffic, efficiency findings, opening highlights
 //   - macro/finance.json: cost attribution by model/client/endpoint, provider accounts, quota compliance
 //   - macro/reliability.json: endpoint availability, error classification, failover, latency, sticky effectiveness
 //   - macro/workloads.json: temporal distributions, workload classes, client-endpoint routing
 //   - macro/context-efficiency.json: session growth, compaction loss proxy, tool schema waste
 //
-// Slices do not cross-reference values directly (D1). All outputs are written atomically (0600).
+// Slices do not cross-reference values directly — each carries its own copy
+// of any value it needs. All outputs are written atomically (0600).
 package report
 
 import (
@@ -22,7 +23,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-// CostCoverage captures structured disclosures on pricing completeness (§3.3):
+// CostCoverage captures structured disclosures on pricing completeness:
 // unpriced endpoints that served traffic, incomplete rates missing components,
 // and the share of estimated spend from degraded usage.
 type CostCoverage struct {
@@ -32,7 +33,7 @@ type CostCoverage struct {
 }
 
 // BuildCostCoverage derives the cost coverage disclosure facts from rep's endpoints.
-func BuildCostCoverage(rep *Report2) CostCoverage {
+func BuildCostCoverage(rep *Report) CostCoverage {
 	if rep == nil {
 		return CostCoverage{}
 	}
@@ -67,9 +68,9 @@ func BuildCostCoverage(rep *Report2) CostCoverage {
 	}
 }
 
-// SummarySlice is the macro/summary.json schema (§3.2): headline traffic,
+// SummarySlice is the macro/summary.json schema: headline traffic,
 // success rate, spend, findings, opening highlights, and the provenance
-// facts the macro Markdown rebuild needs (D2: with the monolithic
+// facts the macro Markdown rebuild needs (with the monolithic
 // vmr-report.json gone, the slices are the only persisted macro data).
 type SummarySlice struct {
 	Overall    Row          `json:"overall"`
@@ -79,10 +80,10 @@ type SummarySlice struct {
 }
 
 // SummaryMeta carries the report provenance facts that manifest.json
-// deliberately does not hold (§8.2: the manifest carries no metric
+// deliberately does not hold (the manifest carries no metric
 // values — not even record counts). Inputs, window, format version,
 // footnotes and disclaimers live on the manifest; everything else the
-// §0–§8 renderer reads off Report2.Meta lives here.
+// macro renderer reads off Report.Meta lives here.
 type SummaryMeta struct {
 	Records                    int    `json:"records"`
 	ParseErrors                int    `json:"parse_errors"`
@@ -96,7 +97,7 @@ type SummaryMeta struct {
 	QuotaInputOutsideLogDir    bool   `json:"quota_input_outside_log_dir,omitempty"`
 }
 
-// FinanceSlice is the macro/finance.json schema (§3.2): cost attribution by
+// FinanceSlice is the macro/finance.json schema: cost attribution by
 // model/client/endpoint, provider accounts, and quota compliance.
 type FinanceSlice struct {
 	ByModel                       []Row              `json:"by_model,omitempty"`
@@ -112,7 +113,7 @@ type FinanceSlice struct {
 	Pricing *Pricing `json:"pricing,omitempty"`
 }
 
-// ReliabilitySlice is the macro/reliability.json schema (§3.2): endpoint
+// ReliabilitySlice is the macro/reliability.json schema: endpoint
 // availability, error classification, failover performance, latency
 // percentiles, and sticky model effectiveness.
 type ReliabilitySlice struct {
@@ -121,7 +122,7 @@ type ReliabilitySlice struct {
 	Sticky       *StickyEffect `json:"sticky,omitempty"`
 }
 
-// WorkloadsSlice is the macro/workloads.json schema (§3.2): temporal
+// WorkloadsSlice is the macro/workloads.json schema: temporal
 // distributions, workload class attribution, and client-endpoint routing.
 type WorkloadsSlice struct {
 	ByDate          []Row               `json:"by_date,omitempty"`
@@ -131,7 +132,7 @@ type WorkloadsSlice struct {
 	ClientEndpoints []ClientEndpointRow `json:"client_endpoints,omitempty"`
 }
 
-// ContextEfficiencySlice is the macro/context-efficiency.json schema (§3.2):
+// ContextEfficiencySlice is the macro/context-efficiency.json schema:
 // session growth, compaction loss proxy, and declared-tool schema waste.
 type ContextEfficiencySlice struct {
 	Sessions    []SessionRow    `json:"sessions,omitempty"`
@@ -140,11 +141,11 @@ type ContextEfficiencySlice struct {
 }
 
 // BuildSummarySlice projects rep into SummarySlice. Efficiency/Highlights
-// are the English baseline regardless of the report's display language (R1:
-// the persisted JSON stays language-invariant) — Markdown rendering computes
+// are the English baseline regardless of the report's display language (the
+// persisted JSON stays language-invariant) — Markdown rendering computes
 // its own independent, actually-localized copies of both (viewmodel_efficiency.go,
 // viewmodel_doc.go's vmSummarySection) and never reads this slice back.
-func BuildSummarySlice(r *Report2) SummarySlice {
+func BuildSummarySlice(r *Report) SummarySlice {
 	if r == nil {
 		return SummarySlice{}
 	}
@@ -173,7 +174,7 @@ func BuildSummarySlice(r *Report2) SummarySlice {
 }
 
 // BuildFinanceSlice projects rep into FinanceSlice including CostCoverage.
-func BuildFinanceSlice(r *Report2) FinanceSlice {
+func BuildFinanceSlice(r *Report) FinanceSlice {
 	if r == nil {
 		return FinanceSlice{}
 	}
@@ -190,7 +191,7 @@ func BuildFinanceSlice(r *Report2) FinanceSlice {
 }
 
 // BuildReliabilitySlice projects rep into ReliabilitySlice.
-func BuildReliabilitySlice(r *Report2) ReliabilitySlice {
+func BuildReliabilitySlice(r *Report) ReliabilitySlice {
 	if r == nil {
 		return ReliabilitySlice{}
 	}
@@ -202,7 +203,7 @@ func BuildReliabilitySlice(r *Report2) ReliabilitySlice {
 }
 
 // BuildWorkloadsSlice projects rep into WorkloadsSlice.
-func BuildWorkloadsSlice(r *Report2) WorkloadsSlice {
+func BuildWorkloadsSlice(r *Report) WorkloadsSlice {
 	if r == nil {
 		return WorkloadsSlice{}
 	}
@@ -215,7 +216,7 @@ func BuildWorkloadsSlice(r *Report2) WorkloadsSlice {
 	}
 }
 
-// GuardSlice is the macro/guard.json schema (Agent Guard's M2
+// GuardSlice is the macro/guard.json schema (Agent Guard's
 // offline consumption): Agent Guard's own dimension, not a re-cut of
 // an existing one, and not one of the five core domain slices above — it
 // is written whenever BuildGuardSlice has something to report (i.e.
@@ -228,7 +229,7 @@ type GuardSlice struct {
 // nil. Kept separate from the other Build*Slice functions' "always returns
 // a value, even a zero one" convention so WriteMacroSlices can skip
 // writing the file when there is no guard summary.
-func BuildGuardSlice(r *Report2) *GuardSlice {
+func BuildGuardSlice(r *Report) *GuardSlice {
 	if r == nil || r.Guard == nil {
 		return nil
 	}
@@ -236,7 +237,7 @@ func BuildGuardSlice(r *Report2) *GuardSlice {
 }
 
 // BuildContextEfficiencySlice projects rep into ContextEfficiencySlice.
-func BuildContextEfficiencySlice(r *Report2) ContextEfficiencySlice {
+func BuildContextEfficiencySlice(r *Report) ContextEfficiencySlice {
 	if r == nil {
 		return ContextEfficiencySlice{}
 	}
@@ -251,11 +252,11 @@ func BuildContextEfficiencySlice(r *Report2) ContextEfficiencySlice {
 }
 
 // WriteMacroSlices writes the 5 domain slices into <dir>/macro/*.json atomically (0600).
-// Slices are built, marshaled, and released sequentially (K-01 / §11.3) to minimize peak RSS.
-// Language-neutral (R1): no slice builder here takes a lang parameter — every
+// Slices are built, marshaled, and released sequentially to minimize peak RSS.
+// Language-neutral: no slice builder here takes a lang parameter — every
 // narrative field they write is the English baseline, and Markdown rendering
 // always recomputes its own localized copy rather than reading these back.
-func WriteMacroSlices(dir string, r *Report2) error {
+func WriteMacroSlices(dir string, r *Report) error {
 	if r == nil {
 		return fmt.Errorf("cannot write nil report slices")
 	}
@@ -289,7 +290,7 @@ func WriteMacroSlices(dir string, r *Report2) error {
 	return nil
 }
 
-// EnsureTimeFields ensures TSMS and TSDisplay are populated for CompactionRow (§3.3).
+// EnsureTimeFields ensures TSMS and TSDisplay are populated for CompactionRow.
 func (c *CompactionRow) EnsureTimeFields() {
 	if c.TSMS == 0 && c.TS != "" {
 		if t, err := time.Parse(time.RFC3339, c.TS); err == nil {

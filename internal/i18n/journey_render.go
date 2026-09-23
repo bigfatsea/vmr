@@ -1,4 +1,4 @@
-// Ver 2026-09-22 04:20, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Pairs with internal/journey/viewmodel_build.go + viewmodel_spine.go
 // (j-<id>.md via the ViewModel path, the only render path since the legacy
@@ -8,7 +8,7 @@
 // boundary). The handful of *fallback* placeholders used when there's no
 // real instruction to quote used to localize too, until a real-corpus
 // -lang diff caught them leaking into journeys/index.json — a JSON data
-// product R1 requires to stay language-neutral (KNOWN_ISSUES's R1 carrier
+// product that must stay language-neutral (KNOWN_ISSUES' "language never enters data products" carrier
 // table). Frozen to English (JourneyNoTitle etc., below) instead of moved
 // to the Code+Params pattern ComputeFindings uses: unlike findings text,
 // nothing ever re-localizes these at render time — the same string sits in
@@ -45,7 +45,7 @@ type JourneyText struct {
 	// retired StoryHTMLText (the self-contained dashboard's chrome) — the
 	// Markdown banner and the dashboard banner were the same sentence.
 	PartialBanner string
-	// BackLinkLine is the "journey report → return" edge (P6.2d):
+	// BackLinkLine is the "journey report → return" edge:
 	// journeys/index.md (always, as ../index.md from journeys/details/) and,
 	// when reportLink != "", vmr-report.md.
 	BackLinkLine        func(reportLink string) string
@@ -63,13 +63,13 @@ type JourneyText struct {
 	SysPromptHeaderChanged func(eras int) string
 	// SysPromptEraLink is one era's line when it has a system prompt: the
 	// effective Step range, a char-count summary, and a link to the shared
-	// evidence blob (P5.3 — full text no longer inlines here).
+	// evidence blob (full text no longer inlines here).
 	SysPromptEraLink func(fromSeq, toSeq, chars int, relPath string) string
 	// SysPromptEraCoord is the coordinate form of the same line, used by the
 	// default batch suite where the evidence blob is not materialized
-	// (P13.1) — names the blob and points at `vmr analyze -journey <id>`
-	// rather than emitting a link that would 404 (guarded by B10, the
-	// dead-link check in cmd/vmr/cmd_analyze_test.go).
+	// — names the blob and points at `vmr analyze -journey <id>`
+	// rather than emitting a link that would 404 (guarded by the dead-link
+	// check in cmd/vmr/cmd_analyze_test.go).
 	SysPromptEraCoord func(fromSeq, toSeq, chars int, blobName string) string
 	// SysPromptEraNoSys is the line for an era with no leading system
 	// block at all (HasSys == false) — rendered as-is, not silently

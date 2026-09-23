@@ -1,7 +1,7 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-09-23 04:04, by Claude Opus 5.5
 
 // ToolShapeStats/ToolShapes: per declared-tool-set usage aggregation,
-// consumed by the report §7 tool-waste section (recextract.go's buildTools
+// consumed by the report's tool-waste section (recextract.go's buildTools
 // converts every field into the report's own richer ToolShapeRow, rows.go).
 package report
 

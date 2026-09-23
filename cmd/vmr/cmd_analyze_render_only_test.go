@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/analyze"
 	"vmr/internal/audit"
 	"vmr/internal/report"
 )
@@ -23,6 +24,10 @@ func hashFile(t *testing.T, path string) string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func detailDirHasFiles(dir string) bool {
+	return analyze.DetailDirHasFiles(dir)
 }
 
 func fixtureAuditLogs(t *testing.T) string {

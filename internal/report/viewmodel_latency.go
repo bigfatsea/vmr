@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:08, by Claude Opus 5.5
 
-// §4 延迟 view model: TTFT / total duration / stream duration
+// 延迟 view model: TTFT / total duration / stream duration
 // percentiles, each carrying the n it was computed from. Pairs with
 // internal/i18n/report_latency.go.
 package report
@@ -12,7 +12,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmLatencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
+func vmLatencySection(rep *Report, o Row, lang i18n.Lang) SectionVM {
 	t := i18n.Latency(lang)
 	sec := SectionVM{ID: "latency", Title: t.Title}
 	h := t.Headers(SlowThresholdMS / 1000)
@@ -29,7 +29,7 @@ func vmLatencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	sec.Blocks = append(sec.Blocks, tbl)
 	tbl.Notes = vmNotes(t.SummaryNote(fmtDurMS(o.DurMSP95), fmtDurMS(o.DurMSMax)) + t.StreamNote)
 
-	// by endpoint, split by protocol (跨日合并, same basis as §3 端点健康),
+	// by endpoint, split by protocol (跨日合并, same basis as the endpoint-health rows),
 	// each group sorted by tok/s descending
 	if len(rep.EndpointsAll) > 0 {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.ByEndpointTitle + "\n\n"})

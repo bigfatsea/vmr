@@ -18,7 +18,7 @@ import (
 // plus its Metrics profile and rule-derived Findings, so Phase 4d's
 // comparison module can diff two Journeys without re-parsing Markdown.
 //
-// It is also the SINGLE rendering input for j-<id>.md (D11/§5.0 via
+// It is also the SINGLE rendering input for j-<id>.md (via
 // viewmodel.go): every fact the Markdown renders must be reachable from
 // here — Structure+Bodies carry the per-Step content, Metrics the aggregates,
 // Findings the detector output, and the stamped Break/Deliverable facts the
@@ -30,7 +30,7 @@ type JourneySummary struct {
 	Title string    `json:"title"`
 	From  time.Time `json:"from"`
 	To    time.Time `json:"to"`
-	// FromDisplay/ToDisplay are From/To in fmtutil.DisplayZone (§5.6: the
+	// FromDisplay/ToDisplay are From/To in fmtutil.DisplayZone (the
 	// frontend shows these verbatim, no timezone math). From/To stay the
 	// machine form.
 	FromDisplay string    `json:"from_display,omitempty"`
@@ -40,13 +40,13 @@ type JourneySummary struct {
 	Findings    []Finding `json:"findings,omitempty"`
 	LLMFindings []Finding `json:"llm_findings,omitempty"`
 	// LLMInterpretation is the single-journey interpretation layer's persisted
-	// outcome (§3.6: 模型/耗时/状态/正文 — see LLMInterpretation). The .md's LLM
+	// outcome (模型/耗时/状态/正文 — see LLMInterpretation). The .md's LLM
 	// section renders from this field, so -render-only reproduces it from the
 	// JSON alone; nil when -llm-addr wasn't given or the call wasn't attempted.
 	LLMInterpretation *LLMInterpretation `json:"llm_interpretation,omitempty"`
 	// Structure is the complete Task/Step/Event/ToolCall skeleton — the
 	// machine-readable counterpart to the human-readable fact-layer
-	// (render_md.go's renderStep), P4 (see structure.go's doc comment).
+	// (render_md.go's renderStep).
 	Structure JourneyStructure  `json:"structure"`
 	Bodies    map[string]string `json:"bodies,omitempty"`
 	// Cost is the estimated $ spend for this Journey (cost.go), nil when no
@@ -72,7 +72,7 @@ type JourneySummary struct {
 }
 
 // Summarize builds j's JourneySummary — Metrics and rule-derived Findings
-// are both language-neutral now (R1), so unlike its earlier form this takes
+// are both language-neutral now, so unlike its earlier form this takes
 // no lang parameter at all: Findings carries the English baseline plus
 // Params, and Markdown rendering reconstructs the actual display language
 // from those at render time (localizeFinding, called from
@@ -82,7 +82,7 @@ type JourneySummary struct {
 // The -compare path (cmd/vmr/cmd_journey.go's compareJourneys) calls this on both
 // sides purely to get Metrics for Compare(sA, sB) — Compare/journeyRef
 // only ever project ID/Title/From/To/Metrics out of the result, so the
-// Structure this also computes (P4) is built and discarded on that path.
+// Structure this also computes is built and discarded on that path.
 // Millisecond-scale waste, not worth a second entry point for; noted here
 // so it reads as a known, accepted cost rather than an oversight.
 func Summarize(j *Journey) JourneySummary {
@@ -98,11 +98,10 @@ func Summarize(j *Journey) JourneySummary {
 // Summarize's own signature has no room for).
 // Before this existed, writeJourneyFile built its own separate
 // JourneySummary{} literal — the exact "same construction, two hand-written
-// copies" pattern this project has already been bitten by once (P2's
-// detailFileNameFromInfo mirroring detailFileName): P4 added Structure to
-// Summarize's literal and, for one build, silently left writeJourneyFile's
-// copy without it. One constructor is what keeps that from recurring the
-// next time JourneySummary gains a field.
+// copies" pattern this project has already been bitten by once: Structure
+// was added to Summarize's literal and, for one build, silently left
+// writeJourneyFile's copy without it. One constructor is what keeps that
+// from recurring the next time JourneySummary gains a field.
 func NewJourneySummary(j *Journey, m Metrics, findings, llmFindings []Finding, cost *CostFact, llmInterp *LLMInterpretation) JourneySummary {
 	s := BuildStructure(j)
 	sum := JourneySummary{

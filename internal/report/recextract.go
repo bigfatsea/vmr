@@ -1,9 +1,9 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
 // Per-record extraction and the small standalone builders that read
 // SessionAnalysis after the fact (buildCompactions/buildTools) — split out
-// of aggregate.go to keep that file focused on orchestration. buildRec2 is
-// the single place that joins an audit.Record to its ReqInfo into a rec2.
+// of aggregate.go to keep that file focused on orchestration. buildRow is
+// the single place that joins an audit.Record to its ReqInfo into a recRow.
 package report
 
 import (
@@ -18,8 +18,8 @@ import (
 	"vmr/internal/reqdetail"
 )
 
-// buildRequestRow maps a rec2 to its per-request export row.
-func buildRequestRow(rc *rec2) RequestRow {
+// buildRequestRow maps a recRow to its per-request export row.
+func buildRequestRow(rc *recRow) RequestRow {
 	rr := RequestRow{
 		TS:         rc.ts.UnixMilli(),
 		TSDisplay:  rc.ts.In(fmtutil.DisplayZone).Format("2006-01-02 15:04:05"),
@@ -75,36 +75,45 @@ func sortRows(rows []Row, key string) {
 	})
 }
 
-// buildRec2 joins rf — one record's arec-derived facts, either freshly
-// extracted (extractRecordFacts) or replayed from the parse cache
-// (factscache.go) — with ri (its ReqInfo, nil for a record the session
-// analyzer didn't correlate) into the aggregator's working struct. This is
-// the ONLY place that performs this join: both scanFiles' fresh-decode
-// path and its cache-hit path call it, so a cache hit and a cache miss can
-// never disagree about how ReqInfo overrides rf.
-func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
+// buildRow joins rf — one record's canonical extracted facts — with ri
+// (its ReqInfo, containing session grouping information) into the
+// aggregator's working struct recRow. Because rf is the single source of
+// truth for all per-record facts, this is a direct assembly with no
+// conflict arbitration or fallback overriding.
+func buildRow(rf recordFacts, ri *ReqInfo, path string) *recRow {
 	// date/hour bucket keys use fmtutil.DisplayZone, not rf.TS's own offset.
-	r := &rec2{
-		ts:              rf.TS,
-		date:            rf.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
-		hour:            rf.TS.In(fmtutil.DisplayZone).Hour(),
-		model:           rf.Model,
-		protocol:        rf.Protocol,
-		outcome:         rf.Outcome,
-		stream:          rf.Stream,
-		durMS:           rf.DurMS,
-		ttftMS:          rf.TTFTMS,
-		path:            path,
-		line:            rf.Line,
-		bytesIn:         rf.BytesIn,
-		bytesOut:        rf.BytesOut,
-		endpoint:        rf.Endpoint,
-		errClass:        rf.ErrorClass,
-		clientKey:       rf.ClientKey,
-		truncated:       rf.TruncatedRaw, // may be OR'd with ri.Truncated below
-		guard:           rf.Guard,
-		guardScan:       rf.GuardScan,
-		guardScanFailed: rf.GuardScanFailed,
+	r := &recRow{
+		ts:               rf.TS,
+		date:             rf.TS.In(fmtutil.DisplayZone).Format("2006-01-02"),
+		hour:             rf.TS.In(fmtutil.DisplayZone).Hour(),
+		model:            rf.Model,
+		protocol:         rf.Protocol,
+		outcome:          rf.Outcome,
+		stream:           rf.Stream,
+		durMS:            rf.DurMS,
+		ttftMS:           rf.TTFTMS,
+		path:             path,
+		line:             rf.Line,
+		bytesIn:          rf.BytesIn,
+		bytesOut:         rf.BytesOut,
+		endpoint:         rf.Endpoint,
+		errClass:         rf.ErrorClass,
+		clientKey:        rf.ClientKey,
+		truncated:        rf.Truncated,
+		images:           rf.Images,
+		imagesCompressed: rf.ImagesCompressed,
+		fallbacks:        rf.Fallbacks,
+		usage:            rf.Usage,
+		usageInOK:        rf.UsageInOK,
+		usageOutOK:       rf.UsageOutOK,
+		finish:           rf.Finish,
+		toolCalls:        rf.ToolCalls,
+		roleChars:        rf.RoleChars,
+		roleTokens:       rf.RoleTokens,
+		msgs:             rf.Msgs,
+		guard:            rf.Guard,
+		guardScan:        rf.GuardScan,
+		guardScanFailed:  rf.GuardScanFailed,
 	}
 	if rf.DurMS > 0 && rf.TTFTMS > 0 {
 		r.streamMS = rf.DurMS - rf.TTFTMS
@@ -114,26 +123,7 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 			r.streamOK = true
 		}
 	}
-	// images + fallbacks: the rf-derived half only matters when there is no
-	// ReqInfo to join — the ri != nil block below overwrites both
-	// unconditionally.
-	if ri == nil {
-		r.images, r.imagesCompressed, r.fallbacks = rf.ImagesRaw, rf.ImagesCompressedRaw, rf.FallbacksRaw
-	}
-	// join ReqInfo (grouping + expensive features it already computed)
 	if ri != nil {
-		r.usage = ri.Usage
-		r.usageInOK = ri.UsageInOK
-		r.usageOutOK = ri.UsageOutOK
-		r.finish = ri.Finish
-		r.truncated = r.truncated || ri.Truncated
-		r.fallbacks = ri.Fallbacks
-		r.images = ri.Images
-		r.imagesCompressed = ri.ImagesCompressed
-		r.toolCalls = ri.ToolCalls
-		r.roleChars = ri.RoleChars
-		r.roleTokens = ri.RoleTokens
-		r.msgs = ri.Msgs
 		r.sessionID = ri.SessionID
 		r.taskID = ri.TaskID
 		r.taskSeq = ri.TaskSeq
@@ -142,6 +132,8 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 		r.detailFile = ri.DetailFile
 		r.newInstruction = ri.NewInstruction
 		r.workloadClass = workloadClassOf(ri)
+	} else {
+		r.workloadClass = workloadClassOfFacts(rf.Compaction, rf.Tags)
 	}
 	// Per-side degraded estimate: fill only the side whose usage is missing,
 	// and only when an endpoint actually served the request (nothing served
@@ -162,36 +154,14 @@ func buildRec2(rf recordFacts, ri *ReqInfo, path string) *rec2 {
 	return r
 }
 
-// endpointInfo returns the endpoint that served the client and the last
-// attempt's error class (for index display). "Served" prefers a strictly
-// successful attempt (no error, 2xx) but falls back to the last attempt that
-// got a 2xx response header at all: a stream truncated mid-transfer already
-// committed its status to the client via that endpoint before dying, so the
-// bytes/tokens/cost the client received are genuinely this endpoint's, not
-// unattributable — only SetSuccessResponse's status matters here, not
-// whether SetTruncated ran afterward.
+// endpointInfo returns the endpoint that served the client (via
+// audit.Record.ServedEndpoint) and the last attempt's error class (for
+// index display).
 func endpointInfo(arec *audit.Record) (endpoint, errClass string) {
-	var successEp, servedEp string
-	for _, a := range arec.Attempts {
-		// Same predicate as EndpointRow.Forwarded / report's
-		// providerquota.go basis — see audit.Attempt.IsForwarded's doc
-		// comment for the historical-format compat rule. softblock paths
-		// (ErrorClass="content" on a < 400 response) are excluded.
-		if !a.IsForwarded() {
-			continue
-		}
-		servedEp = a.Endpoint
-		if a.Error == "" {
-			successEp = a.Endpoint
-		}
-	}
-	if successEp == "" {
-		successEp = servedEp
-	}
 	if len(arec.Attempts) > 0 {
 		errClass = reqdetail.AttemptErrorClass(arec.Attempts[len(arec.Attempts)-1])
 	}
-	return successEp, errClass
+	return arec.ServedEndpoint(), errClass
 }
 
 // workloadClassOf derives the workload class from a ReqInfo's Compaction +
@@ -200,10 +170,14 @@ func workloadClassOf(ri *ReqInfo) string {
 	if ri == nil {
 		return "interactive"
 	}
-	if ri.Compaction {
+	return workloadClassOfFacts(ri.Compaction, ri.Tags)
+}
+
+func workloadClassOfFacts(compaction bool, tags []string) string {
+	if compaction {
 		return "compaction"
 	}
-	for _, t := range ri.Tags {
+	for _, t := range tags {
 		if t == "heartbeat" {
 			return "heartbeat"
 		}
@@ -214,7 +188,7 @@ func workloadClassOf(ri *ReqInfo) string {
 	return "interactive"
 }
 
-// buildCompactions derives §6.7/CCR N-4's compaction rows from the
+// buildCompactions derives the compaction rows from the
 // analysis's standalone compaction calls.
 // "Before/after" tokens are the compaction call's OWN input/output - how
 // much history it was asked to compress vs how big the resulting summary

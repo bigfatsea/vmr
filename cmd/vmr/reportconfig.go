@@ -1,4 +1,4 @@
-// Ver 2026-08-01, by Sonnet 5
+// Ver 2026-09-23 04:16, by Claude Opus 5.5
 
 // vmr analyze's own tiny sidecar config — report.yaml. Entirely
 // separate from internal/config.Config: config.yaml is the router's
@@ -42,7 +42,7 @@ type reportConfig struct {
 	LLMModel       string `yaml:"llm_model"`       // vmr analyze's -llm-model default
 	LLMKey         string `yaml:"llm_key"`         // vmr analyze's -llm-key default; plaintext or "${SOME_ENV_VAR}"
 	LLMCacheDir    string `yaml:"llm_cache_dir"`   // vmr analyze's -llm-cache-dir default; "" everywhere = no caching, never an implicit path
-	// SelfTrafficClientTags (P6.4) extends the self-traffic exclusion set
+	// SelfTrafficClientTags extends the self-traffic exclusion set
 	// beyond the one tag auto-derived from LLMKey — needed only when
 	// -llm-addr traffic was generated under a DIFFERENT, e.g. rotated,
 	// credential than the one currently configured. Most deployments

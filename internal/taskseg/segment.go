@@ -1,4 +1,4 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package taskseg
 
@@ -16,7 +16,7 @@ import (
 // no matter how many boundary/title decisions afterward read from it.
 //
 // The stored value is already Preview'd, and that placement is the whole
-// point rather than an implementation detail (it reverses B3's original
+// point rather than an implementation detail (it reverses an earlier
 // "store raw, truncate on read" decision — see IndexRealUsers). Preview is
 // idempotent, so every consumer still calls it on the way out and nothing
 // downstream depends on which side of the map the truncation happened on;
@@ -32,8 +32,8 @@ type RealUsers map[int]string
 // of re-scanning for each — journey used to rerun the same regex up to 2-3
 // times per request this way.
 //
-// Why Preview here and not in the consumers (B3 stored the raw text and
-// truncated on read; that is deliberately reversed): report keeps one of
+// Why Preview here and not in the consumers (an earlier version stored the
+// raw text and truncated on read; that is deliberately reversed): report keeps one of
 // these indexes alive per RECORD for the whole corpus (SessionAnalysis
 // holds every ReqInfo), and every record carries the session's entire
 // history — so the same instruction's full text would be retained once per

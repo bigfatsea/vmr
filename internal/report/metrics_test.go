@@ -1,4 +1,4 @@
-// Ver 2026-09-03, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -10,14 +10,14 @@ import (
 func TestEndpointRow_TokOutPerSec_UsageOutOKBasis(t *testing.T) {
 	var e EndpointRow
 	// rec1: sniffed usage with 100 output tokens and 1000ms duration.
-	rec1 := &rec2{
+	rec1 := &recRow{
 		outcome:    "ok",
 		usageOutOK: true,
 		durMS:      1000,
 		usage:      chatmsg.Usage{Out: 100},
 	}
-	// rec2: degraded estimation with 50 estimated output tokens and 1000ms duration (no sniffed usage).
-	rec2Est := &rec2{
+	// recRow: degraded estimation with 50 estimated output tokens and 1000ms duration (no sniffed usage).
+	rec2Est := &recRow{
 		outcome:    "ok",
 		usageOutOK: false,
 		durMS:      1000,

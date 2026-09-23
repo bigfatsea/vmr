@@ -20,7 +20,7 @@ var errEmptyLineage = errors.New("journey: lineage has no manifests")
 var errNilProfile = errors.New("journey: prof is nil")
 
 // classifyJourney tags a candidate Journey by structural signals in its
-// already-derived title alone (P6.3) — it does not re-scan message
+// already-derived title alone — it does not re-scan message
 // content or consult turn count. Turn count was in this task's original
 // plan as a second signal, but real-corpus verification (run against the full
 // local logs/ corpus, 477 candidate Journeys) found title markers alone fully

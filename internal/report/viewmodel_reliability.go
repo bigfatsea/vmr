@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
-// §3 可靠性 view model: outcome mix, per-endpoint health (attempt-level
+// 可靠性 view model: outcome mix, per-endpoint health (attempt-level
 // availability vs request-level success rate — deliberately distinct), the
 // error class distribution, and the quirk-repair marker distribution,
 // bucketed by protocol. Pairs with internal/i18n/report_reliability.go.
@@ -17,7 +17,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
+func vmReliabilitySection(rep *Report, o Row, lang i18n.Lang) SectionVM {
 	t := i18n.Reliability(lang)
 	sec := SectionVM{ID: "reliability", Title: t.Title}
 
@@ -138,7 +138,7 @@ func vmReliabilitySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-func vmEndpointHealth(sec *SectionVM, rep *Report2, t i18n.ReliabilityText) {
+func vmEndpointHealth(sec *SectionVM, rep *Report, t i18n.ReliabilityText) {
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.EndpointHealthTitle + "\n\n"})
 	protocols, byProto := protocolBuckets(rep.EndpointsAll)
 	for _, p := range protocols {
@@ -187,7 +187,7 @@ func endpointProtocol(endpoint string) string {
 // protocolBuckets splits endpoint rows by protocol, preserving each
 // row's relative order within its bucket. "openai-completions" sorts
 // first, "anthropic-messages" second, any other protocol follows
-// alphabetically — the fixed group order every §3/§4 by-protocol table
+// alphabetically — the fixed group order every by-protocol table
 // renders in.
 func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	byProto := map[string][]EndpointRow{}
@@ -219,8 +219,8 @@ func protocolBuckets(eps []EndpointRow) ([]string, map[string][]EndpointRow) {
 	return order, byProto
 }
 
-// errorRateMarker is the §3 endpoint-health error-rate cell suffix.
-// Low-n rows (same n<20 cutoff as render_cells.go's ppCell) get §4's
+// errorRateMarker is the endpoint-health error-rate cell suffix.
+// Low-n rows (same n<20 cutoff as render_cells.go's ppCell) get the
 // ⚠️low-n instead of the error-rate ⚠️: 50% off 2 attempts is not 50% off
 // 300.
 func errorRateMarker(e EndpointRow) string {

@@ -1,4 +1,4 @@
-// Ver 2026-07-28 20:05, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // Sticky Model effectiveness: does sending a conversation back to the same
 // endpoint actually keep its prompt cache warm? See StickyEffect (rows.go)
@@ -14,7 +14,7 @@ package report
 import "sort"
 
 // stickyEntry is the per-record slice of state this metric needs. Kept to
-// plain scalars rather than a *rec2: every record in the input has to be
+// plain scalars rather than a *recRow: every record in the input has to be
 // buffered until the pass ends, and holding the full working struct alive
 // would pin the whole log in memory on a large report.
 type stickyEntry struct {
@@ -36,7 +36,7 @@ func newStickyCollector() *stickyCollector {
 	return &stickyCollector{bySession: map[string][]stickyEntry{}}
 }
 
-func (sc *stickyCollector) add(rc *rec2) {
+func (sc *stickyCollector) add(rc *recRow) {
 	// No endpoint means nothing ever served this request (every attempt
 	// failed before a response) — there is no continuity to judge.
 	if rc.endpoint == "" {

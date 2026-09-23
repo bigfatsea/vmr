@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package main
 
 import (
@@ -370,7 +370,7 @@ func captureStdout(t *testing.T, fn func()) string {
 }
 
 // TestCmdReport_ProducesOutputFiles exercises the CLI wiring around
-// report.BuildCached: glob expansion, output directory creation, and
+// report.Build: glob expansion, output directory creation, and
 // writing both the JSON and Markdown artifacts. -details is off by
 // default (see TestCmdReport_DetailsOffByDefault for that), so it's passed
 // explicitly here to also cover the session-analysis-driven details/

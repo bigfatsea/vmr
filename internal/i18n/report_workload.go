@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_workload.go (§5 Workload Distribution).
+// Pairs with internal/report/viewmodel_workload.go (Workload Distribution).
 package i18n
 
 // WorkloadText is viewmodel_workload.go's text, in one language.

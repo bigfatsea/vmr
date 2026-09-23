@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 package main
 
 import (
@@ -159,7 +159,7 @@ func setupLiveStats(cfg *config.Config, logger *log.Logger) (*livestats.Aggregat
 	return agg, func() { agg.Close() }
 }
 
-// setupGuard builds Agent Guard's online engine (M3.4), only when cfg
+// setupGuard builds Agent Guard's online engine, only when cfg
 // declares guard: at all — a hot reload that adds one later needs a
 // restart to take effect (same precedent as log_dir). Toggling mode/off
 // on an already-guard-enabled instance IS hot-reload-safe (chatHandler
@@ -256,7 +256,7 @@ func cmdStart(args []string) error {
 	if err != nil {
 		return fmt.Errorf("guard: %w", err)
 	}
-	rt.Guard = vmrGuard // inbound mount (M4, narrowed by ADR-15); WithGuard(vmrGuard) below is the outbound one (M3.4)
+	rt.Guard = vmrGuard // inbound mount (Unicode sanitization only); WithGuard(vmrGuard) below is the outbound one
 	snap, err := router.BuildSnapshot(cfg)
 	if err != nil {
 		return fmt.Errorf("build routes: %w", err)
@@ -266,7 +266,7 @@ func cmdStart(args []string) error {
 	logConfigSummary(logger, cfg, snap, issues)
 
 	// Hot reload: fsnotify + SIGHUP. A bad config never replaces a good one.
-	var reloadMu sync.Mutex // serialize fsnotify vs SIGHUP reloads: concurrent rt.Install races installLimiter (B5)
+	var reloadMu sync.Mutex // serialize fsnotify vs SIGHUP reloads: concurrent rt.Install races installLimiter
 	reload := func(trigger string) {
 		reloadMu.Lock()
 		defer reloadMu.Unlock()

@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // journeys/index.json/.md: a file-hash-keyed parse cache (see
 // ctxgraph.FileCache/ScanCached) that doubles as the candidate-Journey
@@ -30,7 +30,7 @@ import (
 // value, not the zero value — a real task (the common case) is the one
 // consumers most need to be able to filter on, so it serializes into
 // journeys/index.json like the other three rather than relying on field
-// absence to mean "task" (P7.4: JSON readers no longer need to know that
+// absence to mean "task" (JSON readers no longer need to know that
 // convention).
 type JourneyCategory string
 
@@ -85,7 +85,7 @@ type JourneyIndexRow struct {
 	NetWorkingMS int64    `json:"net_working_ms,omitempty"`
 	Model        string   `json:"model,omitempty"`
 	// Lineages is every ctxgraph.Lineage.LineageID() this Journey's chain
-	// is built from (P6.1) — report's SessionRow.ID uses the same
+	// is built from — report's SessionRow.ID uses the same
 	// identity for the single Lineage it represents, so "does report
 	// session X belong to journey Y" becomes a set-membership check
 	// against this slice instead of a cross-command hash-and-compare.
@@ -93,8 +93,8 @@ type JourneyIndexRow struct {
 	// Category classifies this candidate by title content markers alone
 	// (see classifyJourney) so a noisy scheduled/heartbeat/subagent
 	// candidate can be told apart from a real task-shaped one without
-	// introducing new guessing (P6.3). Always present — including the
-	// common CategoryTask case (P7.4) — so a JSON consumer never has to
+	// introducing new guessing. Always present — including the
+	// common CategoryTask case — so a JSON consumer never has to
 	// treat field absence as a fourth, implicit category value.
 	Category JourneyCategory `json:"category"`
 }
@@ -122,10 +122,10 @@ type JourneyIndex struct {
 	SelfTraffic *SelfTrafficStatus `json:"-"`
 }
 
-// SelfTrafficStatus is the "was self-traffic excluded" disclosure (P6.4).
+// SelfTrafficStatus is the "was self-traffic excluded" disclosure.
 // Two runs with different report.yaml (one carrying llm_key, one not) list
 // different candidate populations; without this line a reader diffing two
-// journeys/index.md files reads that as the data changing (问题 4 / R6a-2).
+// journeys/index.md files reads that as the data changing.
 type SelfTrafficStatus struct {
 	Active   bool // an exclusion tag set was configured and applied
 	Excluded int  // candidates dropped by it
@@ -181,7 +181,7 @@ func BuildJourneyIndexRow(chain []*ctxgraph.Lineage, title string, partial bool)
 		requests += len(l.Manifests)
 		for _, m := range l.Manifests {
 			// CanonicalPath, not the raw m.Path, so Files uses the same
-			// coordinate spelling as req (P7.4) — both derive from the
+			// coordinate spelling as req — both derive from the
 			// same underlying file, and a consumer joining the two
 			// shouldn't have to re-normalize one of them first.
 			fileSet[ctxgraph.CanonicalPath(m.Path)] = true

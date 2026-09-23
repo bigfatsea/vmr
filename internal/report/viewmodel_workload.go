@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:08, by Claude Opus 5.5
 
-// §5 负载分布 view model: request shape by workload class, hourly and
+// 负载分布 view model: request shape by workload class, hourly and
 // daily series (mermaid charts, with the daily table folded), and the
 // per-client / per-endpoint breakdowns. Pairs with
 // internal/i18n/report_workload.go.
@@ -15,7 +15,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmWorkloadSection(rep *Report2, _ Row, lang i18n.Lang) SectionVM {
+func vmWorkloadSection(rep *Report, _ Row, lang i18n.Lang) SectionVM {
 	t := i18n.Workload(lang)
 	sec := SectionVM{ID: "workload", Title: t.Title}
 
@@ -91,7 +91,7 @@ func vmWorkloadSection(rep *Report2, _ Row, lang i18n.Lang) SectionVM {
 		}
 		sec.Blocks = append(sec.Blocks, clientTbl)
 	}
-	// by endpoint (8), format mirrors 按客户端 - cross-day merged like §3/§4
+	// by endpoint (8), format mirrors 按客户端 - cross-day merged like the reliability rows
 	if len(rep.EndpointsAll) > 0 {
 		epTbl := &TableVM{Title: t.ByEndpointTitle, Headers: t.ByEndpointHeaders[:]}
 		byRequests := append([]EndpointRow(nil), rep.EndpointsAll...)

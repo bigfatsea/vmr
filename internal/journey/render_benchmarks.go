@@ -1,4 +1,4 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package journey
 
@@ -69,7 +69,7 @@ func RenderBenchmarksMarkdown(stats BenchmarkStats, lang i18n.Lang) string {
 		w("%s", t.NoCorrelations)
 	} else {
 		w("%s", t.CorrelationHeader)
-		// Top-N by |rho| — filter out known mechanical identities (问题 18a)
+		// Top-N by |rho| — filter out known mechanical identities
 		// so empirical patterns surface; full list lands in the JSON.
 		var empirical []CorrelationRow
 		for _, c := range stats.Correlations {

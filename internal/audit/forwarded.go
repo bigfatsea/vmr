@@ -1,4 +1,4 @@
-// Ver 2026-09-02, by pi-agent
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package audit
 
@@ -38,4 +38,40 @@ func (a *Attempt) IsForwarded() bool {
 		return true
 	}
 	return a.Response != nil && a.Response.Status < 400 && a.ErrorClass == ""
+}
+
+// ServedEndpoint returns the endpoint that served the client. It prefers the
+// last served and error-free attempt, falls back to the last served attempt,
+// and returns "" if no attempt served the client. "Served" is the served()
+// predicate below — wider than IsForwarded on pre-field records.
+func (r *Record) ServedEndpoint() string {
+	if r == nil {
+		return ""
+	}
+	var successEp, servedEp string
+	for _, a := range r.Attempts {
+		if !a.served() {
+			continue
+		}
+		servedEp = a.Endpoint
+		if a.Error == "" {
+			successEp = a.Endpoint
+		}
+	}
+	if successEp != "" {
+		return successEp
+	}
+	return servedEp
+}
+
+// served reports whether this attempt's response bytes reached the client.
+// Wider than IsForwarded on pre-field records: a committed 2xx that was later
+// truncated or canceled still served the client (its ErrorClass is set by
+// the cut, not by a softblock), so endpoint attribution counts it; only a
+// softblock (ErrorClass "content" on a < 400 response) never served.
+func (a *Attempt) served() bool {
+	if a.IsForwarded() {
+		return true
+	}
+	return a.Response != nil && a.Response.Status < 400 && a.ErrorClass != "content"
 }

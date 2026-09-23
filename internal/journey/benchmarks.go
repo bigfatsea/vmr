@@ -1,13 +1,10 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
-// Benchmark statistics — "一批 Journey 里找出反复出现的行为
-// 倾向" (the journey design specification's
-// corpus-level statistics section), built directly on data this package
-// already computes per-Journey (Metrics, Finding) — no new collection, no
-// LLM, pure descriptive statistics. Three deliberate limits, all straight
-// from the design doc's own discipline (its relevance/no-labels
-// disciplines, restated here because this is the one file that could
-// otherwise drift into overclaiming):
+// Benchmark statistics — recurring behavior tendencies across a batch of
+// Journeys, built directly on data this package already computes
+// per-Journey (Metrics, Finding) — no new collection, no LLM, pure
+// descriptive statistics. Three deliberate limits, stated here because this
+// is the one file that could otherwise drift into overclaiming:
 //
 // 1. Correlations are Spearman rank correlation (not Pearson) reported as
 // an effect size (rho) only — no p-values, no significance claims. The
@@ -93,7 +90,7 @@ type CorrelationRow struct {
 }
 
 // mechanicalCorrelationPairs marks metric pairs whose correlation is
-// mathematically or definitionally guaranteed by their formulas (问题 18a).
+// mathematically or definitionally guaranteed by their formulas.
 // They remain present in machine-readable JSON stats but are filtered from
 // the human Markdown Top-15 ranking so genuine empirical patterns surface.
 var mechanicalCorrelationPairs = map[[2]MetricCode]bool{

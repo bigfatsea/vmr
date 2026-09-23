@@ -1,6 +1,6 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-09-23 04:08, by Claude Opus 5.5
 
-// §2.5's "额度与消耗对照" sub-table: for every config.yaml account that
+// "额度与消耗对照" sub-table: for every config.yaml account that
 // declares a quota:, places this report run's own recomputed window
 // consumption next to the router's real-time counter — see
 // the quota design specification for
@@ -52,7 +52,7 @@ func refMatchesModel(ref ProviderQuotaRef, model string) bool {
 // window to compare a billing period against). Returns nil when quotas is
 // empty — the common "no account declares quota:" case, so the caller (and
 // the renderer) can treat "no sub-table" and "nil" the same way.
-func buildProviderQuotaRows(rep *Report2, quotas map[string][]ProviderQuotaRef, now, windowFrom, windowTo time.Time) []ProviderQuotaRow {
+func buildProviderQuotaRows(rep *Report, quotas map[string][]ProviderQuotaRef, now, windowFrom, windowTo time.Time) []ProviderQuotaRow {
 	if len(quotas) == 0 {
 		return nil
 	}
@@ -183,13 +183,13 @@ type quotaWindow struct {
 	unknownProviders map[string]int
 }
 
-// renderSkippedAttemptsNote writes a single line under the §2.5 quota table
+// renderSkippedAttemptsNote writes a single line under the quota table
 // when some EndpointsAll rows carried a provider name not found in the
-// quotas map — traffic that contributed nothing to the window recomputation
-// (P-5-2). Reads the stats buildProviderQuotaRows wrote onto rep. The format
+// quotas map — traffic that contributed nothing to the window recomputation.
+// Reads the stats buildProviderQuotaRows wrote onto rep. The format
 // lists the first 3 unknown provider names plus a remaining count when there
 // are more.
-func renderSkippedAttemptsNote(w func(string, ...any), rep *Report2, lang i18n.Lang) {
+func renderSkippedAttemptsNote(w func(string, ...any), rep *Report, lang i18n.Lang) {
 	if rep == nil || rep.ProviderQuotaSkippedAttempts == 0 {
 		return
 	}
@@ -213,7 +213,7 @@ func renderSkippedAttemptsNote(w func(string, ...any), rep *Report2, lang i18n.L
 // every model, same as the router actually charged.
 // Separate from the row construction because the two share no control
 // flow, only this result.
-func accumulateQuotaWindow(rep *Report2, quotas map[string][]ProviderQuotaRef) quotaWindow {
+func accumulateQuotaWindow(rep *Report, quotas map[string][]ProviderQuotaRef) quotaWindow {
 	acc := quotaWindow{
 		windowSums:       map[string]quota.Counters{},
 		windowEstimated:  map[string]float64{},

@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_reliability.go (§3 Reliability).
+// Pairs with internal/report/viewmodel_reliability.go (Reliability).
 package i18n
 
 import "fmt"

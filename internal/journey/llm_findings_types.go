@@ -13,7 +13,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-// --- P1b.1: Tool Result Misinterpretation (E3) Types ------------------------
+// --- Tool Result Misinterpretation (E3) Types ------------------------
 
 type ToolMisinterpretationEvidencePack struct {
 	SuspiciousPairs []SuspiciousToolPair `json:"suspicious_pairs"`
@@ -38,7 +38,7 @@ type toolMisinterpretationItem struct {
 	SuggestedAction  string `json:"suggested_action"`
 }
 
-// --- P1b.2: Semantic Oscillation (E4) Types ---------------------------------
+// --- Semantic Oscillation (E4) Types ---------------------------------
 
 type ToolCallSnippet struct {
 	StepSeq   int    `json:"step_seq"`
@@ -74,7 +74,7 @@ type semanticOscillationItem struct {
 	SuggestedBreakout string `json:"suggested_breakout"`
 }
 
-// --- P1b.3: Long-term Goal Drift (E5) Types ---------------------------------
+// --- Long-term Goal Drift (E5) Types ---------------------------------
 
 type StepCheckpoint struct {
 	StepSeq   int      `json:"step_seq"`
@@ -106,7 +106,7 @@ type goalDriftResult struct {
 	SuggestedAction  string `json:"suggested_action"`
 }
 
-// --- P1b.4: Compaction Constraint Dropped (E7) Types ------------------------
+// --- Compaction Constraint Dropped (E7) Types ------------------------
 
 type CompactionExcerpt struct {
 	StepSeq            int    `json:"step_seq"`
@@ -136,7 +136,7 @@ type compactionConstraintItem struct {
 	SuggestedAction string `json:"suggested_action"`
 }
 
-// --- P1b.5: Plan Execution Misalignment (PCPC) Types ------------------------
+// --- Plan Execution Misalignment Types ------------------------
 
 type PlanItemAudit struct {
 	Seq  int    `json:"seq"`
@@ -171,7 +171,7 @@ type planAuditResult struct {
 	SuggestedAction string `json:"suggested_action"`
 }
 
-// --- P1b.6: Unverified Completion Claim (E2) Types --------------------------
+// --- Unverified Completion Claim (E2) Types --------------------------
 
 type CompletionClaimEvidencePack struct {
 	FinalOutcome          string   `json:"final_outcome"`

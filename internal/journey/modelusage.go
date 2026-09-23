@@ -1,4 +1,4 @@
-// Ver 2026-08-12 23:40, by Opus 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Model usage & switches within a single Journey — which upstream
 // models/endpoints this task actually hit, and where it moved between them.
@@ -7,9 +7,8 @@
 // Manifest.Model — that field is audit.Record.Model, the VIRTUAL model name
 // (e.g. "coding"/"agent"), which a client requests once and never changes
 // within a Journey. Reading it here would produce a table that always
-// claims "no model switch ever happened" — see
-// the cost analysis design's
-// §5.5 ① for the full account of this pitfall.
+// claims "no model switch ever happened" — the cost analysis design's
+// by-client attribution section gives the full account of this pitfall.
 package journey
 
 import (
@@ -48,13 +47,14 @@ type ModelSwitch struct {
 	From    string `json:"from"` // "provider:model"
 	To      string `json:"to"`
 	// OnFailoverStep is an observational marker, not a causal claim (see
-	// this file's package doc comment and the design doc's §5.3): whether
+	// this file's package doc comment and the design doc's latency
+	// section): whether
 	// the Step where the switch was observed itself needed more than one
 	// upstream attempt. failover/TTL-expiry/routing-policy/sticky-off are
 	// indistinguishable after the fact — this only says the two co-occurred.
 	OnFailoverStep bool `json:"on_failover_step"`
 
-	// Cache telemetry around the switch point (问题 43 ②).
+	// Cache telemetry around the switch point.
 	HasCacheData   bool    `json:"has_cache_data,omitempty"`
 	PrevCacheRatio float64 `json:"prev_cache_ratio,omitempty"`
 	CurCacheRatio  float64 `json:"cur_cache_ratio,omitempty"`
@@ -175,9 +175,8 @@ func computeModelUsage(steps []*Step) ([]ModelUsageStat, []ModelSwitch) {
 // than shared: internal/journey can't import internal/report
 // (internal/archtest's import-boundary rule), and the dev plan's take is
 // that a 12-line duplicate here is cheaper than sinking this into
-// internal/audit before a second real consumer needs it (see
-// the cost analysis design's
-// §5.5 ②).
+// internal/audit before a second real consumer needs it (the cost analysis
+// design's per-client attribution section makes the same tradeoff).
 func stepUpstream(s *Step) (provider, model string) {
 	if len(s.Attempts) > 0 {
 		a := s.Attempts[len(s.Attempts)-1]

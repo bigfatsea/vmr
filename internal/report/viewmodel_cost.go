@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
-// §2 成本估算 view model: per-model / per-endpoint / per-client $
+// 成本估算 view model: per-model / per-endpoint / per-client $
 // estimates, rendered only when pricing resolved, plus the closing note
 // naming the pricing sources. Pairs with internal/i18n/report_cost.go.
 package report
@@ -10,7 +10,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmCostSection(rep *Report, lang i18n.Lang) SectionVM {
 	t := i18n.Cost(lang)
 	sec := SectionVM{ID: "cost", Title: t.Title}
 	if rep.Pricing == nil {
@@ -43,8 +43,8 @@ func vmCostSection(rep *Report2, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// vmCostByDate renders §2's per-day table and returns its totals.
-func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+// vmCostByDate renders the cost section's per-day table and returns its totals.
+func vmCostByDate(sec *SectionVM, rep *Report, t i18n.CostText, cur string) costTotal {
 	dateTot := costTotalOf(len(rep.ByDate), func(i int) *float64 { return rep.ByDate[i].CostEstimate })
 	if dateTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByDateTitle(cur), Headers: t.ByDateHeaders[:]}
@@ -67,8 +67,8 @@ func vmCostByDate(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) cos
 	return dateTot
 }
 
-// vmCostByModel renders §2's per-model table and returns its totals.
-func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+// vmCostByModel renders the cost section's per-model table and returns its totals.
+func vmCostByModel(sec *SectionVM, rep *Report, t i18n.CostText, cur string) costTotal {
 	modelTot := costTotalOf(len(rep.ByModel), func(i int) *float64 { return rep.ByModel[i].CostEstimate })
 	if modelTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByModelTitle(cur), Headers: t.ByModelHeaders[:]}
@@ -87,10 +87,10 @@ func vmCostByModel(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) co
 	return modelTot
 }
 
-// vmCostByEndpoint renders §2's per-endpoint table, plus the two caveats
+// vmCostByEndpoint renders the cost section's per-endpoint table, plus the two caveats
 // only EndpointRow carries the data for (degraded-estimate share,
 // incomplete-rate endpoints) — both stated once, after this table.
-func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+func vmCostByEndpoint(sec *SectionVM, rep *Report, t i18n.CostText, cur string) costTotal {
 	// Forwarded == 0: this endpoint never served a request (every attempt
 	// failed), so it has no cost to attribute and its absence from the
 	// total is not a pricing gap.
@@ -134,8 +134,8 @@ func vmCostByEndpoint(sec *SectionVM, rep *Report2, t i18n.CostText, cur string)
 	return epTot
 }
 
-// vmCostByClient renders §2's per-client table and returns its totals.
-func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) costTotal {
+// vmCostByClient renders the cost section's per-client table and returns its totals.
+func vmCostByClient(sec *SectionVM, rep *Report, t i18n.CostText, cur string) costTotal {
 	clientTot := costTotalOf(len(rep.ByClient), func(i int) *float64 { return rep.ByClient[i].CostEstimate })
 	if clientTot.priced > 0 {
 		tbl := &TableVM{Title: t.ByClientTitle(cur), Headers: t.ByClientHeaders[:]}
@@ -154,7 +154,7 @@ func vmCostByClient(sec *SectionVM, rep *Report2, t i18n.CostText, cur string) c
 	return clientTot
 }
 
-// costTotal is one §2 table's totals-row inputs: the sum over rows that
+// costTotal is one cost table's totals-row inputs: the sum over rows that
 // actually resolved a rate, and how many rows did and didn't.
 type costTotal struct {
 	sum              float64

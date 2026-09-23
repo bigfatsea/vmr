@@ -1,4 +1,4 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 // End-to-end tests for the multi-language report/journey design (see
 // docs/VirtualModelRouter_Design_v4_Analytics.md's output-language section):
@@ -24,7 +24,7 @@ import (
 // e2eReportFixture writes a one-record audit log guaranteed to trigger the
 // §7 "tool schema waste" finding (a tool declared but never called, well
 // under the 20% utilization threshold) — the cheapest reliable way to
-// exercise Report2.Efficiency (and therefore Finding.Code/Finding) via the
+// exercise Report.Efficiency (and therefore Finding.Code/Finding) via the
 // real cmdReport path, without depending on internal/report's own
 // unexported test fixtures.
 func e2eReportFixture(t *testing.T) string {
@@ -62,7 +62,7 @@ func e2eReportFixture(t *testing.T) string {
 }
 
 // reportEfficiencyJSON is the slice of macro/summary.json this test needs —
-// deliberately narrow (not report.Report2) so this test breaks only when
+// deliberately narrow (not report.Report) so this test breaks only when
 // the actual fields it checks change shape, not on every unrelated schema
 // addition.
 type reportEfficiencyJSON struct {

@@ -1,6 +1,6 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-23 03:42, by Claude Opus 5.5
 //
-// Manifest modeling and atomic writing sequence (§3.4, §8.2, D20).
+// Manifest modeling and atomic writing sequence.
 // Manifest is the sole authoritative token for snapshot admission.
 // Readers treat manifest.json as the admission gate: if manifest is missing
 // or any slice SHA-256 fingerprint does not match, the snapshot is rejected.
@@ -19,9 +19,9 @@ import (
 	"vmr/internal/i18n"
 )
 
-// ManifestFormat is the current version of the report snapshot manifest
-// (§3.4, D2). 11 -> 12: R1 changed three field shapes on the data product
-// — macro/summary.json's efficiency[] gained Params (additive, wouldn't
+// ManifestFormat is the current version of the report snapshot manifest.
+// 11 -> 12: language-neutralization changed three field shapes on the data
+// product — macro/summary.json's efficiency[] gained Params (additive, wouldn't
 // alone need a bump) but highlights[] changed from []string to
 // []Highlight{code,text,params} (breaking), and manifest.json's
 // footnotes/disclaimers changed from bare localized strings to
@@ -38,7 +38,7 @@ const (
 	SliceRequestsIndex          = "requests/index.json"
 	SliceJourneysIndex          = "journeys/index.json"
 	SliceJourneysBenchmarks     = "journeys/benchmarks.json"
-	// SliceMacroGuard is Agent Guard's optional M2 slice (slices.go's
+	// SliceMacroGuard is Agent Guard's optional slice (slices.go's
 	// GuardSlice) — deliberately NOT in MacroSlicePaths: it is not one of
 	// the five core domain slices written as an atomic unit, and a run
 	// with Agent Guard unconfigured (every run today) never writes it at
@@ -69,7 +69,7 @@ var AllSlicePaths = []string{
 }
 
 // TimePoint represents a timestamp as both raw epoch milliseconds (for
-// sorting/filtering) and a DisplayZone-formatted string (for display) (§3.3, §5.6).
+// sorting/filtering) and a DisplayZone-formatted string (for display).
 type TimePoint struct {
 	TS        int64  `json:"ts"`
 	TSDisplay string `json:"ts_display"`
@@ -83,20 +83,20 @@ func NewTimePoint(t time.Time) TimePoint {
 	}
 }
 
-// InputFile pairs an input audit log path with its SHA-256 digest (§3.4).
+// InputFile pairs an input audit log path with its SHA-256 digest.
 type InputFile struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
 
-// SliceRef identifies an output slice by relative path and content SHA-256 digest (§3.4).
+// SliceRef identifies an output slice by relative path and content SHA-256 digest.
 type SliceRef struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
 }
 
 // Manifest is the authoritative admission token and consistency record
-// for a report snapshot (§3.4, §8.2).
+// for a report snapshot.
 type Manifest struct {
 	Format      int       `json:"format"`
 	GeneratedAt TimePoint `json:"generated_at"`
@@ -104,7 +104,7 @@ type Manifest struct {
 	// Lang is the language of the LAST MARKDOWN RENDER this snapshot's
 	// manifest was stamped after — not "this product's language". The five
 	// macro/*.json slices, requests/index.json, and this manifest's own
-	// Footnotes/Disclaimers are language-invariant (R1); only vmr-report.md
+	// Footnotes/Disclaimers are language-invariant; only vmr-report.md
 	// and the other rendered .md files vary by language. Re-rendering in a
 	// different language (-render-only -lang) updates this field without
 	// touching any JSON slice.
@@ -118,7 +118,7 @@ type Manifest struct {
 
 // FootnoteRef is one manifest.json footnote definition: a stable code
 // instead of pre-localized text, plus any parameters needed to reconstruct
-// it (R1 — same Code+Params split as Finding/Highlight). Every current
+// it (same Code+Params split as Finding/Highlight). Every current
 // footnote is static (no params), but the shape stays uniform with
 // DisclaimerRef's rather than special-casing the no-params case.
 type FootnoteRef struct {
@@ -133,11 +133,11 @@ type DisclaimerRef struct {
 }
 
 // BuildFootnotesAndDisclaimers extracts structured footnote definitions and
-// disclaimers for downstream consumers (§3.3). Language-neutral (R1): no
+// disclaimers for downstream consumers. Language-neutral: no
 // lang parameter, because a footnote's glyph key and a disclaimer's code
 // are exactly the "reproduce it in either language without re-aggregating"
-// contract R1 asks for — nothing here should ever need to vary by lang.
-func BuildFootnotesAndDisclaimers(rep *Report2) (map[string]FootnoteRef, []DisclaimerRef) {
+// contract — nothing here should ever need to vary by lang.
+func BuildFootnotesAndDisclaimers(rep *Report) (map[string]FootnoteRef, []DisclaimerRef) {
 	footnotes := map[string]FootnoteRef{
 		"¹":       {Code: "low_confidence_ratio"},
 		"⚠️low-n": {Code: "low_sample_size"},
@@ -173,8 +173,8 @@ func BuildFootnotesAndDisclaimers(rep *Report2) (map[string]FootnoteRef, []Discl
 }
 
 // BuildManifest constructs a Manifest for the snapshot in dir, computing
-// sha256 digests for all generated slices and inputs (§3.4, §8.2).
-func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) {
+// sha256 digests for all generated slices and inputs.
+func BuildManifest(dir string, rep *Report, lang i18n.Lang) (*Manifest, error) {
 	now := time.Now()
 	var timeRange [2]string
 	var inputs []InputFile
@@ -221,7 +221,7 @@ func BuildManifest(dir string, rep *Report2, lang i18n.Lang) (*Manifest, error) 
 	// succeeded this run, so all five macro slices must be on disk now. A
 	// missing one at stamp time means something removed or truncated it
 	// between the write and here — refuse to stamp a partial snapshot as
-	// valid rather than silently omitting the slice from the manifest (N8).
+	// valid rather than silently omitting the slice from the manifest.
 	if rep != nil {
 		if err := requireMacroSlices(slices); err != nil {
 			return nil, err
@@ -265,7 +265,7 @@ func WriteManifest(dir string, m *Manifest) error {
 }
 
 // ValidateManifest verifies that manifest.json exists in dir, has the expected Format,
-// and that every slice recorded in manifest.json exists and its sha256 matches (§3.4).
+// and that every slice recorded in manifest.json exists and its sha256 matches.
 func ValidateManifest(dir string) (*Manifest, error) {
 	manifestPath := filepath.Join(dir, "manifest.json")
 	data, err := os.ReadFile(manifestPath)
@@ -289,7 +289,7 @@ func ValidateManifest(dir string) (*Manifest, error) {
 	// A manifest that lists any macro slice must list all five: the macro
 	// set is written as a unit (WriteMacroSlices is all-or-error), so a
 	// partial set on record is a corrupt manifest, not a valid macro-free
-	// snapshot (N8). Zoom/journey-only snapshots legitimately record none.
+	// snapshot. Zoom/journey-only snapshots legitimately record none.
 	if macroSlicePresent(m.Slices) {
 		if err := requireMacroSlices(m.Slices); err != nil {
 			return nil, err
@@ -326,7 +326,7 @@ func macroSlicePresent(slices map[string]SliceRef) bool {
 }
 
 // requireMacroSlices returns an error naming the first macro slice absent
-// from slices — the five are a unit (§8.2), so a partial set is invalid.
+// from slices — the five are a unit, so a partial set is invalid.
 func requireMacroSlices(slices map[string]SliceRef) error {
 	for _, p := range MacroSlicePaths {
 		if _, ok := slices[p]; !ok {

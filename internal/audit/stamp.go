@@ -1,7 +1,7 @@
-// Ver 2026-09-09, by pi
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Attempt.Tokens / Attempt.KeyLabel stamping: the LiveStats design doc's
-// §3.1 前置改动 lives in its own file so the main audit.go stays inside its
+// prelude-change lives in its own file so the main audit.go stays inside its
 // archtest line budget. The token shape is deliberately the exact key space
 // the LiveStats design pins for its slim/rollup files: downstream readers
 // parse one shape everywhere. Pure data — the quota.Counters → TokenCount

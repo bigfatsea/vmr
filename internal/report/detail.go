@@ -1,4 +1,4 @@
-// Ver 2026-08-20 00:00, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 // Per-request detail export: every audit record becomes one Markdown file
 // under {out}/details/, named by its coordinate hash (see
@@ -12,15 +12,11 @@
 package report
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
@@ -30,7 +26,7 @@ import (
 )
 
 // detailWorkerCount bounds how many records get rendered+written
-// concurrently in WriteDetails. Capped well below NumCPU on large machines:
+// concurrently. Capped well below NumCPU on large machines:
 // each job is two small-file writes, and past a point more goroutines just
 // contend on the filesystem/GC instead of finishing faster.
 func detailWorkerCount() int {
@@ -44,15 +40,12 @@ func detailWorkerCount() int {
 	return n
 }
 
-// detailJob is one record's render-and-write work, queued for a worker. wg
-// (optional) is Done() by the worker that processes this job — see
-// detailWriter.submit.
+// detailJob is one record's render-and-write work, queued for a worker.
 type detailJob struct {
 	rec  *audit.Record
 	info *ReqInfo
 	path string
 	line int
-	wg   *sync.WaitGroup
 }
 
 // manifestsFor resolves j's own and lineage-predecessor Manifest from its
@@ -79,7 +72,7 @@ func (j detailJob) manifestsFor() (m, prev *ctxgraph.Manifest) {
 
 // writeOneDetail renders one record's detail page if it isn't already on
 // disk, via reqdetail.EnsureRendered — idempotent (a rerun over the same
-// records skips every file it already wrote) and, since P3.1, without a
+// records skips every file it already wrote) and without a
 // same-named .json copy of the raw record: that used to be a byte-for-byte
 // duplicate of data that already exists, addressably, in the source audit
 // log (see internal/audit.LineAt and `vmr replay -req COORD -print`, its
@@ -95,20 +88,16 @@ func writeOneDetail(dir, evidenceDir string, lang i18n.Lang, prof taskseg.Profil
 }
 
 // DetailWriter is a bounded worker pool that renders and writes one .md per
-// submitted record (the same-named .json copy is gone since P3.1 — see
-// writeOneDetail) — the reusable half of what used to be
-// WriteDetails' own, self-contained implementation. It has two callers now:
-// WriteDetails itself (drives it from its own file-scanning loop, one
-// submit per record, batched per file via a *sync.WaitGroup so its progress
-// line still reports real per-file elapsed time), and Build's onRecord hook
-// (cmd/vmr constructs one and passes its Submit method — driven directly
-// during Build's existing aggregation pass, no file scan of its own at all;
-// see Build's doc comment for why). Every record's detail page depends only
-// on that record's own (audit.Record, path, line, Manifest, prev Manifest)
-// tuple, so there's no cross-record ordering constraint either caller needs
-// to preserve — and, unlike before P2, no shared naming state either: the
-// coordinate hash makes every name unique on its own, so submit/Submit no
-// longer need a mutex-guarded `used` fallback-naming map.
+// submitted record (the same-named .json copy is gone — see
+// writeOneDetail). Driven by Build's onRecord hook (cmd/vmr constructs one
+// and passes its Submit method — driven directly during Build's existing
+// aggregation pass, no file scan of its own at all; see Build's doc comment
+// for why). Every record's detail page depends only on that record's own
+// (audit.Record, path, line, Manifest, prev Manifest) tuple, so there's no
+// cross-record ordering constraint either caller needs to preserve — and,
+// no shared naming state either: the coordinate hash makes
+// every name unique on its own, so Submit no longer needs a mutex-guarded
+// `used` fallback-naming map.
 type DetailWriter struct {
 	dir         string
 	evidenceDir string
@@ -131,8 +120,8 @@ type DetailWriter struct {
 // internal/reqdetail's evidence.go) go into "evidence" next to dir's own
 // parent, i.e. dir's sibling — dir is always {outDir}/details (every
 // caller follows this convention), so this resolves to {outDir}/evidence,
-// matching internal/journey's own future use of the same directory (P3.4's
-// scope is the macro report half only; the convention itself is package-agnostic).
+// matching internal/journey's own future use of the same directory (a
+// convention shared by convention, not by shared code).
 func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailWriter, error) {
 	// 0o700/0o600 throughout: detail files carry the same full conversation
 	// bodies as the audit JSONL they were derived from, which is
@@ -154,9 +143,6 @@ func NewDetailWriter(dir string, lang i18n.Lang, prof taskseg.Profile) (*DetailW
 			defer dw.poolWG.Done()
 			for j := range dw.jobs {
 				writeOneDetail(dw.dir, dw.evidenceDir, dw.lang, dw.prof, j, &dw.n, dw.recordErr)
-				if j.wg != nil {
-					j.wg.Done()
-				}
 			}
 		}()
 	}
@@ -177,26 +163,10 @@ func (dw *DetailWriter) hasErr() bool {
 	return dw.firstErr != nil
 }
 
-// submit queues one record's render+write. wg is optional: pass one to wait
-// for a batch to finish (WriteDetails waits per file); pass nil for
-// fire-and-forget, relying on a later Close to drain everything (Build's
-// hook, via Submit below — it has no natural "batch" boundary of its own).
-// path/line default to info's own coordinate when info is non-nil (the
-// common case, and the one WriteDetails' fallback below needs when info IS
-// nil); WriteDetails passes its own scan-loop path/line explicitly since it
-// has them regardless of whether Lookup found a ReqInfo.
-func (dw *DetailWriter) submit(rec *audit.Record, info *ReqInfo, path string, line int, wg *sync.WaitGroup) {
-	if wg != nil {
-		wg.Add(1)
-	}
-	dw.jobs <- detailJob{rec: rec, info: info, path: path, line: line, wg: wg}
-}
-
 // Submit queues one record's render+write, fire-and-forget — the exported
-// entry point for a caller (e.g. Build's onRecord hook) with no per-batch
-// wait of its own. A no-op once a prior job has already failed, matching
-// WriteDetails' own short-circuit, so a broken output directory (e.g. disk
-// full) doesn't queue thousands more doomed jobs once it's known bad.
+// entry point for a caller (e.g. Build's onRecord hook). A no-op once a prior
+// job has already failed, so a broken output directory (e.g. disk full)
+// doesn't queue thousands more doomed jobs once it's known bad.
 func (dw *DetailWriter) Submit(rec *audit.Record, info *ReqInfo) {
 	if dw.hasErr() {
 		return
@@ -205,7 +175,7 @@ func (dw *DetailWriter) Submit(rec *audit.Record, info *ReqInfo) {
 	if info != nil {
 		path, line = info.Path, info.Line
 	}
-	dw.submit(rec, info, path, line, nil)
+	dw.jobs <- detailJob{rec: rec, info: info, path: path, line: line}
 }
 
 // Close drains the pool and returns the total records written and the
@@ -214,76 +184,4 @@ func (dw *DetailWriter) Close() (int, error) {
 	close(dw.jobs)
 	dw.poolWG.Wait()
 	return int(atomic.LoadInt64(&dw.n)), dw.firstErr
-}
-
-// WriteDetails renders every record in the given audit files into dir (one
-// .md per record, in lang — no same-named .json since P3.1). Returns the
-// number of record files written. Reruns overwrite deterministically —
-// every name is the record's own coordinate hash
-// (internal/reqdetail.FileName), so unlike before P2 there is no
-// batch-order or cross-run dependency to keep paths aligned for: any
-// subset of files, scanned via any path spelling, names each record the
-// same way.
-//
-// sess (optional, nil = plain mode) supplies the session grouping: detail
-// pages gain a previous-turn link and delta highlight when sess correlates
-// this record to a lineage predecessor.
-//
-// progress (optional, nil = silent) gets one line per input file.
-//
-// Deprecated: WriteDetails is retained only as the two-pass differential
-// baseline TestBuildOnRecordMatchesWriteDetails (detail_test.go) diffs
-// Build's single-pass onRecord hook against, byte-for-byte. `vmr analyze`
-// itself no longer calls this — Build's onRecord hook covers detail export
-// in the same pass session analysis already runs. Production callers use
-// BuildCached with an onRecord hook (see DetailWriter.Submit), not this.
-func WriteDetails(paths []string, dir string, sess *SessionAnalysis, progress io.Writer, lang i18n.Lang, prof taskseg.Profile) (int, error) {
-	dw, err := NewDetailWriter(dir, lang, prof)
-	if err != nil {
-		return 0, err
-	}
-
-	var outerErr error
-	for fileIdx, path := range paths {
-		fileStart := time.Now()
-		before := atomic.LoadInt64(&dw.n)
-		rc, err := audit.OpenLogFile(path)
-		if err != nil {
-			outerErr = err
-			break
-		}
-		line := 0
-		var fileWG sync.WaitGroup
-		scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
-			line++
-			if dw.hasErr() {
-				return
-			}
-			var rec audit.Record
-			if err := json.Unmarshal(lineBytes, &rec); err != nil {
-				return // Build already counts parse errors
-			}
-			info := sess.Lookup(path, line)
-			dw.submit(&rec, info, path, line, &fileWG)
-		}, func() { line++ }) // skipped lines still advance the counter so sess.Lookup keys stay aligned with AnalyzeSessions
-		rc.Close()
-		fileWG.Wait() // drain this file's jobs so the progress line below reflects real elapsed time
-		if progress != nil {
-			fmt.Fprintf(progress, "[%d/%d] %s  done: %d detail file pairs (%s)\n",
-				fileIdx+1, len(paths), path, atomic.LoadInt64(&dw.n)-before, time.Since(fileStart).Round(time.Millisecond))
-		}
-		if scanErr != nil {
-			outerErr = fmt.Errorf("%s: %w", path, scanErr)
-			break
-		}
-		if dw.hasErr() {
-			break
-		}
-	}
-
-	n, err := dw.Close()
-	if outerErr != nil {
-		return n, outerErr
-	}
-	return n, err
 }

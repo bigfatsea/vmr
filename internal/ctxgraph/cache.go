@@ -1,8 +1,9 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-23 04:15, by Claude Opus 5.5
 
 package ctxgraph
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,81 +13,13 @@ import (
 	"sync"
 )
 
-// CacheSchemaVersion gates every CachedFile's freshness alongside its
-// content hash: a hash match alone only proves the *input bytes* haven't
-// changed, not that the *extraction logic* that produced Manifests/Facts
-// from those bytes hasn't. Bump this whenever that logic changes (either
-// BuildManifest's own fields, or internal/report's per-record Facts
-// payload — see that package's cache.go) — a version mismatch is treated
-// exactly like a hash mismatch (scanCachedFile falls back to a fresh
-// parse), so bumping it is always safe: the cache is a fully re-derivable
-// artifact, and silently reusing output from retired logic is the failure
-// mode this constant exists to prevent, not the rebuild cost.
-// v2 (2026-08): protocol-name rename — cached Facts carry normalized
-// "openai-completions"/"anthropic-messages" protocol/endpoint values.
-// v3 (2026-08): Manifest gains Bytes (decompressed JSON line length), used
-// by cmd/vmr's byte-budget batching.
-// v4 (2026-08): Manifest gains EstIn/EstOut (degraded token estimate for
-// records whose upstream reported no usage), so internal/journey prices the
-// same records internal/report has always priced.
-// v5 (2026-09): Manifest gains ServedEndpoint (the endpoint that actually
-// committed a < 400 response, per report's endpointInfo rule) — cost
-// attribution keys off it, so an early-canceled request is unpriced on
-// both halves and a mid-stream-canceled one stays priced. Cached v4
-// manifests would carry an empty ServedEndpoint and silently unprice
-// served traffic, hence the bump.
-// v6 (2026-09): Keys hashing strips Anthropic cache_control breakpoint
-// markers (see hashMsgJSON) — a client moving its breakpoint between
-// turns used to re-hash those messages and fracture lineages with
-// phantom edits. Cached v5 manifests carry marker-influenced Keys and
-// must not be reused, hence the bump.
-// v7 (2026-09): Manifest's single UsageOK splits into UsageInOK/UsageOutOK
-// (per-side usage-ledger tracking; see chatmsg.ExtractUsageSides) and
-// EstIn/EstOut become per-side fills. A cached v6 manifest decodes with
-// both OK flags false and would silently degrade every side to the
-// estimate, so cached v6 entries must not be reused — hence the bump.
-// v8 (2026-09): Manifest's SessKey prefix changed to anchor:<hash>.
-// v9 (2026-09): Manifest gains ToolsHash / HasTools (digest of top-level
-// tools array) for cache-break attribution. Cached v8 manifests lack
-// tool hashes and must not be reused, hence the bump.
-// v10 (2026-09): internal/report's recordFacts drops ToolDeclCount/
-// ToolDeclBytes — write-only fields with no reader anywhere in report.
-// A cached v9 fileFacts blob still carries them; decoding it into the slimmer
-// struct is harmless (unknown JSON keys are ignored), but a version bump keeps
-// this cache's "same schema version = safe to reuse" invariant honest
-// rather than silently mixing pre/post-removal shapes.
-// v11 (2026-09): internal/report's recordFacts gains Guard (audit.Record.Guard
-// carried through verbatim, Agent Guard's M2 offline consumption — see
-// the Agent Guard spec). A cached v10 fileFacts
-// blob decodes with Guard == nil regardless of the source record, which
-// would silently under-count guard aggregation on a warm cache; the bump
-// forces one fresh decode per file so guardcol.go sees real data everywhere.
-// v12 (2026-09): internal/report's recordFacts gains GuardScan (the M2.2/
-// M2.3 Fallback Path's result — see guardscan.go's scanRecordForGuard):
-// computed only when Guard is nil, i.e. on every real record today. A
-// cached v11 fileFacts blob decodes with GuardScan == nil unconditionally,
-// which would silently make every warm-cache `vmr analyze` run report zero
-// credential exposure regardless of what a fresh scan would find — exactly
-// the "wrong answer here would silently corrupt aggregated numbers"
-// failure loadCachedFacts' own doc comment warns about, hence the bump.
-//
-// v12 → v13: guard fact semantics changed again — outbound mode: off
-// records no longer stamp Record.Guard (and inbound-only stamps no longer
-// suppress the direction-aware outbound fallback, report.guardscan's
-// guardOutboundStamped), and InspectToolCall's file_write protected-path
-// check became directed (path-named argument values only), so a warm v12
-// cache's Guard/GuardScan facts reproduce the old blind-spot semantics and
-// stale ToolFindings. Hence the bump.
-//
-// v13 → v14: guard.Fingerprint dropped its salt parameter and became a
-// deterministic hash (KNOWN_ISSUES K-G19, fixing the offline fallback
-// scan's per-run random salt causing the same credential's Hit.FP to
-// drift across runs). A warm v13 cache's GuardScan.Hits carry FP values
-// computed under the old per-run random salt — fine in isolation, but
-// they would never match a fresh v14-computed FP for the same credential,
-// silently reintroducing the exact drift this cache-schema mechanism
-// exists to prevent. Hence the bump.
-const CacheSchemaVersion = 14
+// CacheSchemaVersion gates every CachedFile's Manifest freshness: a shard
+// stamped with any other version is ignored and re-parsed. Bump it whenever
+// BuildManifest's output changes meaning or shape for the same input bytes
+// (a new field, a changed hashing or attribution rule) — a stale shard would
+// otherwise keep serving the old answer for as long as the audit file is
+// unchanged. report's own payload is versioned separately (FactsVersion).
+const CacheSchemaVersion = 15
 
 // CachedFile is one audit file's already-parsed scan result, keyed by its
 // own content hash — see FileCache and ScanCached. Manifest carries no
@@ -97,6 +30,12 @@ const CacheSchemaVersion = 14
 type CachedFile struct {
 	Hash          string `json:"hash"`
 	SchemaVersion int    `json:"schema_version,omitempty"`
+	// FactsVersion is internal/report's own payload version for the Facts
+	// blob — stamped by report's FactsSchemaVersion, validated by report on
+	// load. Kept separate from SchemaVersion (which gates the whole entry
+	// including Manifests) so a report-side extraction change can invalidate
+	// only the facts payload without forcing a manifest reparse.
+	FactsVersion int `json:"facts_version,omitempty"`
 	// CanonicalPath is diagnostic only: this run's CanonicalPath spelling
 	// of the source file (see reqcoord.go). It is no longer the map key —
 	// FileCache.Files keys by Hash — and is kept only so a sharded on-disk
@@ -330,10 +269,13 @@ func LoadCacheDir(dir string) *FileCache {
 
 // SaveCacheDir writes cache's entries into dir, one compact-encoded
 // <hash>.json shard per entry — content-addressed by CachedFile.Hash, so a
-// rerun over an unchanged file always names the same shard and (since
-// shard content is a pure function of that hash) skip-if-exists is a
-// correct, not approximate, dedup: two entries can never share a Hash
-// with different content short of a SHA-256 collision. Stale shards from a
+// rerun over an unchanged file always names the same shard. A shard that is
+// already on disk with the same SchemaVersion/FactsVersion/Facts is skipped
+// (the common unchanged-file repeat run); a shard whose Facts half is
+// missing or stale (e.g. written by the journey half before report ran, or
+// written under an older FactsSchemaVersion) is refreshed in place —
+// report's facts are a per-half cache slot, not a pure function of the
+// audit file bytes alone. Stale shards from a
 // since-rotated/renamed input are deliberately never deleted here — see
 // this package's doc comment on FileCache: the directory is a fully
 // re-derivable, unreferenced-counted cache, and a few orphaned KB-scale
@@ -350,8 +292,14 @@ func SaveCacheDir(dir string, cache *FileCache) error {
 			continue // nothing to name the shard after; shouldn't happen for a real entry
 		}
 		target := filepath.Join(dir, cf.Hash+".json")
-		if _, err := os.Stat(target); err == nil {
-			continue
+		if data, err := os.ReadFile(target); err == nil {
+			var diskCF CachedFile
+			if json.Unmarshal(data, &diskCF) == nil &&
+				diskCF.SchemaVersion == cf.SchemaVersion &&
+				diskCF.FactsVersion == cf.FactsVersion &&
+				bytes.Equal(diskCF.Facts, cf.Facts) {
+				continue
+			}
 		} else if !os.IsNotExist(err) {
 			return err
 		}

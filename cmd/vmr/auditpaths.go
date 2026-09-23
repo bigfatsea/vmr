@@ -1,6 +1,7 @@
-// Ver 2026-07-29 14:00, by Sonnet 5
+// Ver 2026-09-23 02:50, by pi
 
-// Input-path resolution shared by cmd_report.go and cmd_journey.go: both take
+// Input-path resolution shared by vmr analyze and other audit-consuming
+// subcommands: both take
 // the same "<audit.jsonl|glob>..." positional argument convention and the
 // same default when it's omitted.
 package main

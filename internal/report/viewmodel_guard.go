@@ -1,11 +1,11 @@
-// Ver 2026-09-14, by Sonnet 5
+// Ver 2026-09-23 03:56, by Claude Opus 5.5
 
-// Agent Guard's M2 offline bidirectional forensic audit section view model
-// (the Agent Guard spec §4.7). Reads rep.Guard —
+// Agent Guard's offline bidirectional forensic audit section view model.
+// Reads rep.Guard —
 // nil only when the Fallback Path never had a single record to cover (see
 // that field's own doc comment) — rendering, in order: coverage/source,
-// the Tier1/Tier2 outbound-credential ranking (M2.2), the M2.4 provider
-// exposure table, and the M2.3 inbound forensics block. Pairs with
+// the Tier1/Tier2 outbound-credential ranking, the provider
+// exposure table, and the inbound forensics block. Pairs with
 // internal/i18n/report_guard.go.
 package report
 
@@ -16,7 +16,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmGuardSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmGuardSection(rep *Report, lang i18n.Lang) SectionVM {
 	g := rep.Guard
 	if g == nil {
 		return SectionVM{}
@@ -82,15 +82,15 @@ func guardProviderTable(rows []GuardProviderRow, t i18n.GuardText) *TableVM {
 	return tbl
 }
 
-// vmGuardInboundBlocks renders M2.3's inbound forensics: rune counts (only
+// vmGuardInboundBlocks renders the inbound forensics: rune counts (only
 // the categories actually seen — a run with zero A/B-tier hits, the real-
 // corpus baseline, renders nothing here at all), the online sanitizer's
 // own SanitizedRuneCounts stamp as a SEPARATE table (what existed before
 // the strip, not a subset of what's left — see rows.go's own doc comment
 // on why the two never merge), tool-call risk findings, and the
-// credential-echo line. K-G14 governs every string here: this describes
+// credential-echo line. Every string here describes
 // what the client already received (or, for the sanitized table, would
-// have received without ADR-15's one remaining online intervention),
+// have received without the one remaining online intervention),
 // never anything blocked — there is no block path left to describe.
 func vmGuardInboundBlocks(in *GuardInboundSummary, t i18n.GuardText) []BlockVM {
 	var out []BlockVM

@@ -1,4 +1,4 @@
-// Ver 2026-08-13, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -8,7 +8,7 @@ import (
 )
 
 func TestQuotaExhaustionFinding_FiresAtThreshold(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Metric: "requests", Every: "1mo", Live: &LiveQuota{Pct: 90.0}},
 	}}
 	f := quotaExhaustionFinding(rep, i18n.EN)
@@ -24,7 +24,7 @@ func TestQuotaExhaustionFinding_FiresAtThreshold(t *testing.T) {
 }
 
 func TestQuotaExhaustionFinding_BelowThresholdDoesNotFire(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Live: &LiveQuota{Pct: 89.9}},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f != nil {
@@ -36,7 +36,7 @@ func TestQuotaExhaustionFinding_BelowThresholdDoesNotFire(t *testing.T) {
 // guard: a missing real-time counter must never be treated as "0% used" or
 // otherwise fabricate an alert — an estimate must never be the basis of one.
 func TestQuotaExhaustionFinding_NoLiveDataDoesNotFire(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", WindowConsumed: 999999, Live: nil},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f != nil {
@@ -49,7 +49,7 @@ func TestQuotaExhaustionFinding_NoLiveDataDoesNotFire(t *testing.T) {
 // the way through its cycle is burning SLOWER than the period elapses, not
 // faster — it must not alert every single run near cycle end.
 func TestQuotaExhaustionFinding_HighButNotOutpacingPeriodDoesNotFire(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 98.0},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f != nil {
@@ -61,7 +61,7 @@ func TestQuotaExhaustionFinding_HighButNotOutpacingPeriodDoesNotFire(t *testing.
 // strict-inequality boundary: Pct == PeriodElapsedPct is Headroom == 1
 // exactly, not < 1, so it must not fire.
 func TestQuotaExhaustionFinding_EqualUsedAndElapsedDoesNotFire(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 95.0},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f != nil {
@@ -73,7 +73,7 @@ func TestQuotaExhaustionFinding_EqualUsedAndElapsedDoesNotFire(t *testing.T) {
 // the above: same absolute 95% but now genuinely outpacing period elapse
 // (80%) — this is the "actually alarming" case and must still fire.
 func TestQuotaExhaustionFinding_HighAndOutpacingPeriodFires(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 80.0},
 	}}
 	if f := quotaExhaustionFinding(rep, i18n.EN); f == nil {
@@ -82,7 +82,7 @@ func TestQuotaExhaustionFinding_HighAndOutpacingPeriodFires(t *testing.T) {
 }
 
 func TestQuotaExhaustionFinding_PicksWorstTieBreaksByName(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "b-acct", Live: &LiveQuota{Pct: 95.0}},
 		{Provider: "a-acct", Live: &LiveQuota{Pct: 99.0}},
 		{Provider: "c-acct", Live: &LiveQuota{Pct: 99.0}}, // tie with a-acct at the max
@@ -94,7 +94,7 @@ func TestQuotaExhaustionFinding_PicksWorstTieBreaksByName(t *testing.T) {
 }
 
 func TestQuotaExhaustionFinding_EmptyProviderQuotas(t *testing.T) {
-	if f := quotaExhaustionFinding(&Report2{}, i18n.EN); f != nil {
+	if f := quotaExhaustionFinding(&Report{}, i18n.EN); f != nil {
 		t.Fatalf("expected no finding with no ProviderQuotas at all, got %+v", f)
 	}
 }
@@ -104,7 +104,7 @@ func TestQuotaExhaustionFinding_EmptyProviderQuotas(t *testing.T) {
 // — so an operator can tell a single model's exhaustion from a whole-account
 // one.
 func TestQuotaExhaustionFinding_ModelScopeInImplicated(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Models: []string{"gpt-4o"}, Metric: "cost", Every: "1d",
 			Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 50.0},
 	}}
@@ -117,7 +117,7 @@ func TestQuotaExhaustionFinding_ModelScopeInImplicated(t *testing.T) {
 // TestQuotaExhaustionFinding_SharedLimitNoModelScope: a shared Limit (Models
 // empty) must keep the bare provider name — no empty parentheses.
 func TestQuotaExhaustionFinding_SharedLimitNoModelScope(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Metric: "requests", Every: "1mo",
 			Live: &LiveQuota{Pct: 95.0}, PeriodElapsedPct: 50.0},
 	}}
@@ -132,7 +132,7 @@ func TestQuotaExhaustionFinding_SharedLimitNoModelScope(t *testing.T) {
 // order across runs must be deterministic — buildProviderQuotaRows' own sort
 // uses the same rule).
 func TestQuotaExhaustionFinding_SameProviderTieBreaksByModel(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Models: []string{"o1"}, Live: &LiveQuota{Pct: 95.0}},
 		{Provider: "acct1", Models: []string{"gpt-4o"}, Live: &LiveQuota{Pct: 95.0}},
 	}}
@@ -143,7 +143,7 @@ func TestQuotaExhaustionFinding_SameProviderTieBreaksByModel(t *testing.T) {
 }
 
 func TestQuotaExhaustionFinding_ZH(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Metric: "tokens", Every: "1mo", Live: &LiveQuota{Pct: 95.0}},
 	}}
 	f := quotaExhaustionFinding(rep, i18n.ZH)
@@ -155,7 +155,7 @@ func TestQuotaExhaustionFinding_ZH(t *testing.T) {
 // TestBuildFindings_IncludesQuotaExhaustion locks in the wiring from
 // buildFindings itself, not just the detector in isolation.
 func TestBuildFindings_IncludesQuotaExhaustion(t *testing.T) {
-	rep := &Report2{ProviderQuotas: []ProviderQuotaRow{
+	rep := &Report{ProviderQuotas: []ProviderQuotaRow{
 		{Provider: "acct1", Live: &LiveQuota{Pct: 95.0}},
 	}}
 	findings := buildFindings(rep, i18n.EN)

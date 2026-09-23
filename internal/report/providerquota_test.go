@@ -1,4 +1,4 @@
-// Ver 2026-09-06, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -13,7 +13,7 @@ import (
 )
 
 func TestBuildProviderQuotaRows_Empty(t *testing.T) {
-	rep := &Report2{}
+	rep := &Report{}
 	if got := buildProviderQuotaRows(rep, nil, time.Now(), time.Time{}, time.Time{}); got != nil {
 		t.Fatalf("empty quotas must return nil, got %+v", got)
 	}
@@ -49,7 +49,7 @@ func oneRef(provider string, l *core.Limit) map[string][]ProviderQuotaRef {
 func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T) {
 	lim := requestsLimit(1000)
 	lim.ModelMultipliers = map[string]float64{"heavy": 5}
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:heavy", Requests: 3, Forwarded: 3},
 		{Endpoint: "openai-completions:acct1:light", Requests: 2, Forwarded: 2},
 	}}
@@ -74,7 +74,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_RollsUpAndMultiplies(t *testing.T
 func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatchesRouter(t *testing.T) {
 	lim := requestsLimit(100000)
 	lim.ModelMultipliers = map[string]float64{"deepseek-v4-pro": 5.5}
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:volcengine:deepseek-v4-pro", Requests: 19, Forwarded: 19},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("volcengine", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -94,7 +94,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_NonIntegerMultiplierExactlyMatche
 func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testing.T) {
 	lim := requestsLimit(100000)
 	lim.ModelMultipliers = map[string]float64{"m": 5.5}
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 20, Forwarded: 12},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -116,7 +116,7 @@ func TestBuildProviderQuotaRows_RequestsMetric_UsesForwardedNotRequests(t *testi
 // WindowEstimatedPct instead of being papered over with a "-".
 func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *testing.T) {
 	lim := tokensLimit(1_000_000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 7, Forwarded: 7, TokensKnown: 0,
 			TokensInFreshEst: 400, TokensOutEst: 100, TokensEstimated: 7},
 	}}
@@ -136,7 +136,7 @@ func TestBuildProviderQuotaRows_TokensMetric_UnsniffedUsageCountsItsEstimate(t *
 // The total must include both, and the row must say how much of it is a guess.
 func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
 	lim := tokensLimit(1_000_000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 10, Forwarded: 10, TokensKnown: 6,
 			TokensInFresh: 600, TokensOut: 150,
 			TokensInFreshEst: 200, TokensOutEst: 50, TokensEstimated: 4},
@@ -157,7 +157,7 @@ func TestBuildProviderQuotaRows_TokensMetric_MixedUsageIsFlagged(t *testing.T) {
 // authoritative number.
 func TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged(t *testing.T) {
 	lim := tokensLimit(1_000_000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 800, TokensOut: 200},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -171,7 +171,7 @@ func TestBuildProviderQuotaRows_TokensMetric_FullySniffedIsNotFlagged(t *testing
 // really did consume zero, and must render that zero.
 func TestBuildProviderQuotaRows_TokensMetric_NoTrafficRendersRealZero(t *testing.T) {
 	lim := tokensLimit(1_000_000)
-	rep := &Report2{} // no endpoints at all
+	rep := &Report{} // no endpoints at all
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
 	if rows[0].WindowConsumed != 0 {
 		t.Fatalf("WindowConsumed = %v, want 0 (zero traffic)", rows[0].WindowConsumed)
@@ -183,7 +183,7 @@ func TestBuildProviderQuotaRows_TokensMetric_NoTrafficRendersRealZero(t *testing
 // column sums what it has (this is the routine partial case).
 func TestBuildProviderQuotaRows_TokensMetric_PartialUsageStillSums(t *testing.T) {
 	lim := tokensLimit(1_000_000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m1", Requests: 5, Forwarded: 5, TokensKnown: 0},
 		{Endpoint: "openai-completions:acct1:m2", Requests: 5, Forwarded: 5, TokensKnown: 5, TokensInFresh: 100, TokensOut: 20},
 	}}
@@ -197,7 +197,7 @@ func TestBuildProviderQuotaRows_TokensMetric_AppliesWeightsAndMultiplier(t *test
 	lim := tokensLimit(1_000_000)
 	lim.TokenWeights = core.TokenWeights{InFresh: 1, CacheRead: 0.1, CacheWrite: 1, Out: 4}
 	lim.ModelMultipliers = map[string]float64{"*": 2}
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m1", TokensInFresh: 100, TokensInCached: 100, TokensOut: 10},
 	}}
 	rows := buildProviderQuotaRows(rep, oneRef("acct1", &lim), time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), time.Time{}, time.Time{})
@@ -216,7 +216,7 @@ func TestBuildProviderQuotaRows_WindowNoOverlap_DisjointIntervalsFlagged(t *test
 	now := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC)
 	windowFrom := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	windowTo := time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)
-	rows := buildProviderQuotaRows(&Report2{}, oneRef("acct1", &lim), now, windowFrom, windowTo)
+	rows := buildProviderQuotaRows(&Report{}, oneRef("acct1", &lim), now, windowFrom, windowTo)
 	if !rows[0].WindowNoOverlap {
 		t.Error("a May audit-log window against an August billing period must be flagged as non-overlapping")
 	}
@@ -230,7 +230,7 @@ func TestBuildProviderQuotaRows_WindowOverlap_PartialOverlapNotFlagged(t *testin
 	now := time.Date(2026, 8, 15, 0, 0, 0, 0, time.UTC) // period: 08-01 ~ 09-01 (1mo since 2026-01-01)
 	windowFrom := time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)
 	windowTo := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
-	rows := buildProviderQuotaRows(&Report2{}, oneRef("acct1", &lim), now, windowFrom, windowTo)
+	rows := buildProviderQuotaRows(&Report{}, oneRef("acct1", &lim), now, windowFrom, windowTo)
 	if rows[0].WindowNoOverlap {
 		t.Error("a window that partially overlaps the billing period must not be flagged")
 	}
@@ -241,7 +241,7 @@ func TestBuildProviderQuotaRows_WindowOverlap_PartialOverlapNotFlagged(t *testin
 // never flag, since there's no meaningful window to compare.
 func TestBuildProviderQuotaRows_WindowNoOverlap_ZeroFromSkipsCheck(t *testing.T) {
 	lim := requestsLimit(1000)
-	rows := buildProviderQuotaRows(&Report2{}, oneRef("acct1", &lim), time.Now(), time.Time{}, time.Time{})
+	rows := buildProviderQuotaRows(&Report{}, oneRef("acct1", &lim), time.Now(), time.Time{}, time.Time{})
 	if rows[0].WindowNoOverlap {
 		t.Error("a zero windowFrom (no records) must never flag WindowNoOverlap")
 	}
@@ -256,7 +256,7 @@ func TestBuildProviderQuotaRows_WindowNoOverlap_ZeroFromSkipsCheck(t *testing.T)
 // silently dropping the provider or fabricating a Live value.
 func TestBuildProviderQuotaRows_LiveNil_StillRendersRow(t *testing.T) {
 	lim := requestsLimit(1000)
-	rep := &Report2{}
+	rep := &Report{}
 	quotas := map[string][]ProviderQuotaRef{"acct1": {{Limit: &lim, Live: nil}}}
 	rows := buildProviderQuotaRows(rep, quotas, time.Now(), time.Time{}, time.Time{})
 	if len(rows) != 1 || rows[0].Live != nil {
@@ -268,7 +268,7 @@ func TestBuildProviderQuotaRows_NilLimit_RowOmitted(t *testing.T) {
 	quotas := map[string][]ProviderQuotaRef{
 		"no-limit": {{}},
 	}
-	rows := buildProviderQuotaRows(&Report2{}, quotas, time.Now(), time.Time{}, time.Time{})
+	rows := buildProviderQuotaRows(&Report{}, quotas, time.Now(), time.Time{}, time.Time{})
 	if len(rows) != 0 {
 		t.Fatalf("rows with nil Limit must be omitted, got %+v", rows)
 	}
@@ -281,7 +281,7 @@ func TestBuildProviderQuotaRows_SortsLiveFirstByPctDesc_ThenNameTieBreak(t *test
 		"low-pct":  {{Limit: &limB, Live: &LiveQuota{Used: 10, Pct: 10}}},
 		"high-pct": {{Limit: &limC, Live: &LiveQuota{Used: 90, Pct: 90}}},
 	}
-	rows := buildProviderQuotaRows(&Report2{}, quotas, time.Now(), time.Time{}, time.Time{})
+	rows := buildProviderQuotaRows(&Report{}, quotas, time.Now(), time.Time{}, time.Time{})
 	if len(rows) != 3 {
 		t.Fatalf("got %d rows, want 3", len(rows))
 	}
@@ -310,7 +310,7 @@ func TestBuildProviderQuotaRows_MultiLimit_OneRowPerLimit(t *testing.T) {
 		{Limit: &dailyScoped, Model: "premium-model", Models: []string{"premium-model"}},
 		{Limit: &monthlyUnscoped},
 	}}
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:premium-model", Requests: 3, Forwarded: 3},
 		{Endpoint: "openai-completions:acct1:other-model", Requests: 5, Forwarded: 5},
 	}}
@@ -341,7 +341,7 @@ func TestBuildProviderQuotaRows_MultiLimit_OneRowPerLimit(t *testing.T) {
 // recomputation. Rows that DO resolve are never counted.
 func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing.T) {
 	lim := requestsLimit(1000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 3, Forwarded: 3},
 		{Endpoint: "openai-completions:ghost-account:m2", Requests: 5, Forwarded: 5},
 		{Endpoint: "anthropic-messages:ghost-account:m3", Requests: 2, Forwarded: 2},
@@ -362,7 +362,7 @@ func TestBuildProviderQuotaRows_SkippedAttempts_TracksUnknownProvider(t *testing
 // renderSkippedAttemptsNote takes its first three from.
 func TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders(t *testing.T) {
 	lim := requestsLimit(1000)
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:acct1:m", Requests: 1, Forwarded: 1},
 		{Endpoint: "openai-completions:z-rare:m2", Requests: 1, Forwarded: 1},
 		{Endpoint: "openai-completions:a-common:m3", Requests: 5, Forwarded: 5},
@@ -386,7 +386,7 @@ func TestBuildProviderQuotaRows_SkippedAttempts_DistinctProviders(t *testing.T) 
 func TestRenderSkippedAttemptsNote(t *testing.T) {
 	var b strings.Builder
 	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) },
-		&Report2{ProviderQuotaSkippedAttempts: 2, ProviderQuotaSkippedProviders: []string{"ghost-a", "ghost-b"}}, i18n.EN)
+		&Report{ProviderQuotaSkippedAttempts: 2, ProviderQuotaSkippedProviders: []string{"ghost-a", "ghost-b"}}, i18n.EN)
 	want := "> 2 attempts skipped (unknown provider: ghost-a, ghost-b)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -398,7 +398,7 @@ func TestRenderSkippedAttemptsNote(t *testing.T) {
 func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
 	var b strings.Builder
 	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) },
-		&Report2{ProviderQuotaSkippedAttempts: 9, ProviderQuotaSkippedProviders: []string{"p1", "p2", "p3", "p4", "p5"}}, i18n.EN)
+		&Report{ProviderQuotaSkippedAttempts: 9, ProviderQuotaSkippedProviders: []string{"p1", "p2", "p3", "p4", "p5"}}, i18n.EN)
 	want := "> 9 attempts skipped (unknown provider: p1, p2, p3, … +2 more)\n"
 	if b.String() != want {
 		t.Fatalf("note = %q, want %q", b.String(), want)
@@ -409,7 +409,7 @@ func TestRenderSkippedAttemptsNote_MoreThanThreeNames(t *testing.T) {
 // unknown providers) must not add a note line under the §2.5 table.
 func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
 	var b strings.Builder
-	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, &Report2{}, i18n.EN)
+	renderSkippedAttemptsNote(func(f string, a ...any) { fmt.Fprintf(&b, f, a...) }, &Report{}, i18n.EN)
 	if b.Len() != 0 {
 		t.Fatalf("no-skips note = %q, want empty", b.String())
 	}
@@ -419,7 +419,7 @@ func TestRenderSkippedAttemptsNote_NoSkipsRendersNothing(t *testing.T) {
 // on the finance slice (macro/finance.json) as omitempty fields — present
 // when there is something to disclose, absent (not zero) when there is not.
 func TestProviderQuotaSkippedJSON(t *testing.T) {
-	withSkip, err := json.Marshal(&Report2{ProviderQuotaSkippedAttempts: 3, ProviderQuotaSkippedProviders: []string{"ghost"}})
+	withSkip, err := json.Marshal(&Report{ProviderQuotaSkippedAttempts: 3, ProviderQuotaSkippedProviders: []string{"ghost"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestProviderQuotaSkippedJSON(t *testing.T) {
 		!strings.Contains(string(withSkip), `"provider_quota_skipped_providers":["ghost"]`) {
 		t.Fatalf("serialized report must carry the skip fields, got: %s", withSkip)
 	}
-	noSkip, err := json.Marshal(&Report2{})
+	noSkip, err := json.Marshal(&Report{})
 	if err != nil {
 		t.Fatal(err)
 	}

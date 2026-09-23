@@ -1,18 +1,18 @@
-// Ver 2026-09-22 19:10, by coding
+// Ver 2026-09-23 03:46, by Claude Opus 5.5
 
-// The journey-side ViewModel layer (design decisions D3/D4/D11/D12):
-// the single rendering path for j-<id>.md. BuildJourneyVM consumes ONLY the
-// self-contained JourneySummary — the shape j-<id>.json publishes — and absorbs
+// The journey-side ViewModel layer: the single rendering path for
+// j-<id>.md. BuildJourneyVM consumes ONLY the self-contained JourneySummary —
+// the shape j-<id>.json publishes — and absorbs
 // every business formatting decision (argument shape-picking, multi-level step
 // role tags, badge determination), every escaping/truncation call, and every
 // i18n lookup, producing a flat, print-ready, in-memory-only block sequence.
 // SerializeJourneyVM is the fixed serializer: a deterministic walk over that
-// structure with no copy, no formatting and no i18n of its own (D3 — no
-// template engine; the VM is Markdown's deterministic source).
+// structure with no copy, no formatting and no i18n of its own (no template
+// engine; the VM is Markdown's deterministic source).
 //
 // Single entry point: RenderMarkdownFromSummary(s, lang, reportMDExists, linkDetails)
 // builds the VM and serializes it — the single path for j-<id>.md, consuming
-// the self-contained JourneySummary (D11).
+// the self-contained JourneySummary.
 package journey
 
 import (
@@ -29,7 +29,7 @@ const (
 )
 
 // VMTable is one print-ready Markdown table. The two halves' table semantics
-// deliberately differ (§11.1), so this is journey-side's own shape, not a
+// deliberately differ, so this is journey-side's own shape, not a
 // shared report type: Header is the complete localized header+separator
 // block, each row one complete print-ready line.
 type VMTable struct {
@@ -60,7 +60,7 @@ type VMBlock struct {
 }
 
 // JourneyVM groups the print-ready blocks by document section — the structure
-// golden tests compare (§9: golden sunk to VM structure), and the fixed order
+// golden tests compare (golden tests sunk to VM structure), and the fixed order
 // SerializeJourneyVM walks. All text is final; the serializer only concatenates.
 type JourneyVM struct {
 	Header     []VMBlock `json:"header,omitempty"`     // id, title, meta, back links, partial/break banners
@@ -71,7 +71,7 @@ type JourneyVM struct {
 	Spine      []VMBlock `json:"spine,omitempty"`      // the decision spine incl. final deliverable
 	Timeline   []VMBlock `json:"timeline,omitempty"`   // tool-call timeline
 	Findings   []VMBlock `json:"findings,omitempty"`   // findings section
-	LLM        []VMBlock `json:"llm,omitempty"`        // -llm-addr interpretation section, last (§3.6: rendered from s.LLMInterpretation)
+	LLM        []VMBlock `json:"llm,omitempty"`        // -llm-addr interpretation section, last (rendered from s.LLMInterpretation)
 }
 
 func vmTextBlock(text string) VMBlock { return VMBlock{Kind: vmText, Text: text} }
@@ -87,7 +87,7 @@ func serializeDetails(d *VMDetails) string {
 	return d.Prefix + "<details><summary>" + d.Summary + "</summary>\n\n" + d.Body + "</details>\n\n"
 }
 
-// SerializeJourneyVM is the fixed serializer (D3): walk the sections in
+// SerializeJourneyVM is the fixed serializer: walk the sections in
 // document order; text blocks are written as-is, tables as header+rows+blank
 // line, details blocks through serializeDetails' single fixed shape. No copy,
 // no formatting, no i18n — everything here is already print-ready.
@@ -123,8 +123,9 @@ func SerializeJourneyVM(vm *JourneyVM) string {
 
 // RenderMarkdownFromSummary renders s — the self-contained JourneySummary that
 // j-<id>.json publishes — as a complete Markdown document in lang. This is the
-// one rendering path for j-<id>.md (D11): everything it shows comes from s
-// alone, so the audit log is never an input (D18's structural guarantee).
+// one rendering path for j-<id>.md: everything it shows comes from s
+// alone, so the audit log is never an input (the self-contained-summary
+// structural guarantee).
 // linkDetails/reportMDExists carry the caller's materialization decisions the
 // same way RenderMarkdown's do; cost rides on s.Cost.
 func RenderMarkdownFromSummary(s *JourneySummary, lang i18n.Lang, reportMDExists, linkDetails bool) string {
@@ -148,12 +149,12 @@ func BuildJourneyVM(s *JourneySummary, lang i18n.Lang, reportMDExists, linkDetai
 	}
 }
 
-// buildVMLLM renders the persisted -llm-addr interpretation record (§3.6) as
+// buildVMLLM renders the persisted -llm-addr interpretation record as
 // the document's last section — the same "\n" + RenderLLMSection block the
 // old writeJourneyFile/compareJourneys append produced, now a pure function
 // of the JSON so -render-only reproduces it without scraping the old .md.
 // A nil or failed record contributes no block (the full run also left the
-// section out), keeping D11 byte-equivalence exact.
+// section out), keeping byte-equivalence with the full-run path exact.
 func buildVMLLM(s *JourneySummary, lang i18n.Lang) []VMBlock {
 	sec := RenderLLMSection(s.LLMInterpretation, lang)
 	if sec == "" {

@@ -1,9 +1,11 @@
-// Ver 2026-09-07, by pi
+// Ver 2026-09-22 19:15, by Sonnet 5
+
+// Package analyze carries analysis orchestration moved out of cmd/vmr.
 //
-// Dynamic derived comparison index (§3.8, D21).
+// Dynamic derived comparison index.
 // Scans compares/compare-*.json on every analyze run to build compares/index.{json,md}.
 // The entire compares/ tree is deliberately excluded from manifest.json fingerprints.
-package main
+package analyze
 
 import (
 	"bytes"
@@ -19,18 +21,18 @@ import (
 	"vmr/internal/journey"
 )
 
-// CompareItem describes one pairwise comparison entry in compares/index.json (§3.8, D21).
+// CompareItem describes one pairwise comparison entry in compares/index.json.
 type CompareItem struct {
 	Filename string `json:"filename"`
 	Markdown string `json:"markdown"`
 	HTML     string `json:"html,omitempty"`
-	// Partial marks a head-truncated side (D19: data, not filename suffix).
+	// Partial marks a head-truncated side (data, not filename suffix).
 	Partial bool               `json:"partial,omitempty"`
 	A       journey.JourneyRef `json:"a_journey"`
 	B       journey.JourneyRef `json:"b_journey"`
 }
 
-// ComparesIndex is the root schema of compares/index.json (§3.8, D21).
+// ComparesIndex is the root schema of compares/index.json.
 type ComparesIndex struct {
 	Count    int           `json:"count"`
 	Compares []CompareItem `json:"compares"`

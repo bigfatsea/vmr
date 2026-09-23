@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_latency.go (§4 Latency & Throughput).
+// Pairs with internal/report/viewmodel_latency.go (Latency & Throughput).
 package i18n
 
 import "fmt"

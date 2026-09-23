@@ -1,14 +1,14 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 03:48, by Claude Opus 5.5
 
-// The report side's ViewModel layer (D3/D4 of the analyze architecture
-// redesign): every section's business formatting, confidence marking, i18n
+// The report side's ViewModel layer of the analyze architecture redesign:
+// every section's business formatting, confidence marking, i18n
 // lookup and typesetting decision happens in the viewmodel_*.go builders,
 // which produce this flat, fully localized, memory-only structure; the
 // fixed serializer below turns it into Markdown. No template engine — the
 // VM's shape is fixed, so serialization is a deterministic function of it.
 //
-// Field set vs the design doc's §5.2 sketch, and why the deviations:
-//   - Highlights live in §0's blocks, not on MacroReportVM: the old
+// Field set vs the design doc's VM sketch, and why the deviations:
+//   - Highlights live in the summary section's blocks, not on MacroReportVM: the old
 //     document renders them after the summary table, and byte equivalence
 //     with the legacy path is the transition test's assertion.
 //   - SectionVM carries an ordered Blocks list rather than separate
@@ -17,9 +17,9 @@
 //     must reproduce that order exactly.
 //   - TableVM drops Aligns: every current table renders as plain
 //     left-aligned pipes, so an alignment field would be passthrough with
-//     no formatting decision behind it (the §10 benefit criterion).
+//     no formatting decision behind it.
 //
-// The VM is memory-only (D12) — it is never persisted; the JSON slices are
+// The VM is memory-only — it is never persisted; the JSON slices are
 // the machine-readable contract, this is the Markdown-only projection.
 package report
 
@@ -40,7 +40,7 @@ type MacroReportVM struct {
 	// line, the collapsible input list, the details link and any cross-
 	// product links. All composed by the builder.
 	Meta []BlockVM
-	// Sections are §0..appendix in render order. The last one (appendix)
+	// Sections are the report's sections in render order. The last one (appendix)
 	// normally has no blocks of its own — its body is Disclaimers and
 	// Footnotes below, which the serializer emits after every section.
 	Sections []SectionVM
@@ -71,15 +71,15 @@ type SectionVM struct {
 // BlockVM is one element of a section body. The set is deliberately small:
 // paragraph, table, collapsible block. Everything else (mermaid charts,
 // blockquote notes, group headings) is a Para whose text the builder
-// composed — typesetting decisions live in the builder (D4).
+// composed — typesetting decisions live in the builder.
 type BlockVM interface{ isBlock() }
 
 // ParaVM is a verbatim Markdown fragment — the explicit escape hatch for
 // prose that doesn't fit HeadingVM/NoteVM/ChartVM/FlowVM/TableVM/DetailsVM
-// (R2-c: internal/archtest's TestParaVMBudget caps new uses, see that
+// (internal/archtest's TestParaVMBudget caps new uses, see that
 // test's doc comment). Text is written as-is — leading/trailing blank
-// lines included — so the builder owns all whitespace. R2-b tried moving
-// this to the serializer (auto-detecting a missing blank line) and found
+// lines included — so the builder owns all whitespace. An earlier design
+// tried moving this to the serializer (auto-detecting a missing blank line) and found
 // a real counter-example: some ParaVM blocks are deliberately followed by
 // the next block with a single "\n", no blank line (e.g. the interactive-
 // share note directly above the "†" footnote marker) — an auto-detector
@@ -146,7 +146,7 @@ type DetailsVM struct {
 
 func (DetailsVM) isBlock() {}
 
-// TableVM is one Markdown table plus its attached notes (§5.2). Headers,
+// TableVM is one Markdown table plus its attached notes. Headers,
 // Rows and Notes are already localized, formatted and escaped; Title is
 // the sub-heading line rendered above the table (empty for none); Fold is
 // the <details> summary line that collapses the table (empty for inline).

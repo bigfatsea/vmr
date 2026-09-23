@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -429,7 +429,7 @@ func TestUngroupedFoldedIntoUnresolved(t *testing.T) {
 		t.Fatalf("ungrouped = %d, want 1", len(a.Ungrouped))
 	}
 	out := filepath.Join(dir, "details")
-	if n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
+	if n, err := writeDetailsBaseline([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
 		t.Fatal(err)
 	} else if n != 1 {
 		t.Fatalf("n = %d, want 1", n)
@@ -443,7 +443,7 @@ func TestWriteDetailsGroupedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(t.TempDir(), "details")
-	n, err := WriteDetails([]string{path}, dir, a, nil, i18n.EN, taskseg.OpenClawAware)
+	n, err := writeDetailsBaseline([]string{path}, dir, a, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,8 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-23 03:54, by Claude Opus 5.5
 
-// Agent Guard's M2 offline aggregation: rolls every ingested record's
+// Agent Guard's offline aggregation: rolls every ingested record's
 // verdict -- audit.Record.Guard when non-nil (the Authoritative Fast
-// Path), else guardscan.go's Fallback Path result (rc.guardScan, ADR-12) --
+// Path), else guardscan.go's Fallback Path result (rc.guardScan) --
 // into a GuardSummary. Unlike stickyCollector (sticky.go), this needs no
 // session ordering — it is a flat per-record accumulation — so it stays a
 // single pass with no buffering, fed inline from ingestRecord like
@@ -18,8 +18,8 @@ import (
 
 // guardCollector accumulates Agent Guard verdicts across the whole ingest
 // pass. byRule/uniqueFP mirror the outbound-hit ranking table; providers/
-// providerFP the M2.4 attribution; the rune/tool/echo fields the M2.3
-// inbound forensics block.
+// providerFP the provider exposure attribution; the rune/tool/echo fields
+// the inbound forensics block.
 type guardCollector struct {
 	stamped         int
 	scanned         int
@@ -66,7 +66,7 @@ func newGuardCollector() *guardCollector {
 // record exactly once, so RecordsScanned/RecordsStamped/
 // RecordsFallbackScanned are true coverage counts, not just a count of
 // records that happened to produce a Finding.
-func (gc *guardCollector) add(rc *rec2) {
+func (gc *guardCollector) add(rc *recRow) {
 	var hits []audit.Hit
 	var ver int
 	if guardOutboundStamped(rc.guard) {
@@ -112,10 +112,10 @@ func (gc *guardCollector) add(rc *rec2) {
 // what survived sanitization (mostly C-tier). SanitizedRunes is the only
 // record of what existed before the strip. Merging the two into one
 // counter would silently understate "what the upstream actually sent" and
-// contradict K-G14's own distinction between "already happened" and
-// "was intercepted" -- this keeps them two clearly labeled numbers instead
-// (independent review finding: this stamp previously had no consumer at
-// all; see KNOWN_ISSUES K-G25).
+// contradict the "already happened" vs.
+// "was intercepted" distinction -- this keeps them two clearly labeled
+// numbers instead (independent review finding: this stamp previously had
+// no consumer at all).
 func (gc *guardCollector) addSanitizedRunes(counts map[string]int) {
 	if gc.sanitizedRuneCounts == nil {
 		gc.sanitizedRuneCounts = map[string]int{}
@@ -126,7 +126,7 @@ func (gc *guardCollector) addSanitizedRunes(counts map[string]int) {
 }
 
 // addHits folds one record's outbound Hits into the rule ranking table and
-// (M2.4) the provider exposure table. Each Hit already carries the caller's
+// the provider exposure table. Each Hit already carries the caller's
 // per-(rule,FP) dedup key (aggregateHits/scanOutbound both key that way), so
 // Hit.Count IS the "same credential resent N times" amplification factor
 // its own doc comment describes -- MaxPerRecord takes the max of Count
@@ -180,7 +180,7 @@ func (gc *guardCollector) addHits(hits []audit.Hit, provider string) {
 	}
 }
 
-// addInbound folds one record's Fallback Path inbound forensics (M2.3)
+// addInbound folds one record's Fallback Path inbound forensics
 // into the running rune/tool/echo tallies.
 func (gc *guardCollector) addInbound(gs *GuardScanFacts) {
 	for cat, n := range gs.InboundRunes {
@@ -212,7 +212,7 @@ func (gc *guardCollector) addInbound(gs *GuardScanFacts) {
 
 // providerOf extracts the actually-served provider name from an
 // EndpointLabel-shaped endpoint string (core.EndpointLabel's
-// "protocol:provider:model" format) — the M2.4 attribution basis: the
+// "protocol:provider:model" format) — the provider exposure attribution basis: the
 // record's real served attempt, never the virtual model's whole candidate
 // set (Failover can land on any one of them). "" when the record has no
 // served endpoint (e.g. every attempt failed).
@@ -228,7 +228,7 @@ func providerOf(endpoint string) string {
 }
 
 // result finalizes the aggregate — nil when Agent Guard produced no
-// verdict for any record (total == 0), matching Report2.Guard's "nil,
+// verdict for any record (total == 0), matching Report.Guard's "nil,
 // not an empty struct" contract so macro/guard.json is only written when
 // there is actual data.
 func (gc *guardCollector) result() *GuardSummary {

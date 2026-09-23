@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_sticky.go (§6.5 Sticky Effectiveness).
+// Pairs with internal/report/viewmodel_sticky.go (Sticky Effectiveness).
 package i18n
 
 import "fmt"

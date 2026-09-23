@@ -1,4 +1,4 @@
-// Ver 2026-08-20 00:00, by Sonnet 5
+// Ver 2026-09-23 03:00, by Claude Opus 5.5
 
 package report
 
@@ -12,6 +12,7 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/ctxgraph"
+	"vmr/internal/taskseg"
 )
 
 // cacheWithFacts builds a *ctxgraph.FileCache holding one entry (keyed by
@@ -25,6 +26,7 @@ func cacheWithFacts(t *testing.T, path string, n int) *ctxgraph.FileCache {
 		t.Fatal(err)
 	}
 	var ff fileFacts
+	ff.Version = FactsSchemaVersion
 	for i := 1; i <= n; i++ {
 		ff.Records = append(ff.Records, recordFacts{Line: i, TS: time.Now(), Model: "m1", Outcome: "ok"})
 	}
@@ -33,7 +35,7 @@ func cacheWithFacts(t *testing.T, path string, n int) *ctxgraph.FileCache {
 		t.Fatal(err)
 	}
 	return &ctxgraph.FileCache{Files: map[string]ctxgraph.CachedFile{
-		hash: {Hash: hash, SchemaVersion: ctxgraph.CacheSchemaVersion, Facts: data},
+		hash: {Hash: hash, SchemaVersion: ctxgraph.CacheSchemaVersion, FactsVersion: FactsSchemaVersion, Facts: data},
 	}}
 }
 
@@ -61,7 +63,7 @@ func TestScanFiles_CacheHitNeverDecodesFile(t *testing.T) {
 	writeGarbageFile(t, path)
 	cache := cacheWithFacts(t, path, 3)
 
-	rep := &Report2{}
+	rep := &Report{}
 	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	if err := st.scanFiles([]string{path}, nil, nil, cache); err != nil {
 		t.Fatalf("scanFiles with a valid Facts cache hit should not need to decode the file, got: %v", err)
@@ -89,7 +91,7 @@ func TestScanFiles_DetailsPathIgnoresFactsCache(t *testing.T) {
 	writeGarbageFile(t, path)
 	cache := cacheWithFacts(t, path, 3)
 
-	rep := &Report2{}
+	rep := &Report{}
 	st := newAggState(rep, &SessionAnalysis{}, nil, nil)
 	onRecord := func(*audit.Record, *ReqInfo) {}
 	if err := st.scanFiles([]string{path}, nil, onRecord, cache); err != nil {
@@ -145,13 +147,13 @@ func TestRecordFactsJSONGolden(t *testing.T) {
 				Response: &audit.Message{Status: 200, Headers: http.Header{}}, DurMS: 900},
 		},
 	}
-	rf := extractRecordFacts(&arec, 7)
-	ff := fileFacts{Records: []recordFacts{rf}}
+	rf := extractRecordFacts(&arec, 7, taskseg.OpenClawAware)
+	ff := fileFacts{Version: FactsSchemaVersion, Profile: "openclaw", Records: []recordFacts{rf}}
 	got, err := json.Marshal(ff)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"records":[{"line":7,"ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","stream":true,"dur_ms":1234,"ttft_ms":210,"bytes_in":340,"bytes_out":49,"endpoint":"anthropic-messages:prov-a:model-a","client_key":"k1","fallbacks_raw":1,"est_in_fresh":101,"attempts":[{"endpoint":"anthropic-messages:prov-b:model-b","error":"network: dial timeout","error_class":"network","dur_ms":300},{"endpoint":"anthropic-messages:prov-a:model-a","has_response":true,"status":200,"dur_ms":900}]}]}`
+	want := `{"version":2,"profile":"openclaw","records":[{"line":7,"ts":"2026-09-02T08:30:00Z","model":"claude","protocol":"anthropic-messages","outcome":"ok","stream":true,"dur_ms":1234,"ttft_ms":210,"bytes_in":340,"bytes_out":49,"endpoint":"anthropic-messages:prov-a:model-a","client_key":"k1","fallbacks":1,"est_in_fresh":101,"attempts":[{"endpoint":"anthropic-messages:prov-b:model-b","error":"network: dial timeout","error_class":"network","dur_ms":300},{"endpoint":"anthropic-messages:prov-a:model-a","has_response":true,"status":200,"dur_ms":900}],"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","tools_sig":"tools:1/cdf093ad","tools_declared":["read_file"],"decl_bytes":152,"usage":{"in":100,"out":42,"cache_read":0,"cache_write":0,"reasoning":0},"usage_in_ok":true,"usage_out_ok":true,"role_chars":{"system":37,"user":11},"role_tokens":{"system":7,"user":2},"real_users":{"1":"hello there"},"first_text":"hello there","real_model":"model-a","msgs":2}]}`
 	if string(got) != want {
 		t.Fatalf(`serialized fileFacts shape changed:
 
@@ -159,7 +161,7 @@ func TestRecordFactsJSONGolden(t *testing.T) {
 want: %s
 
 If this change is INTENTIONAL (extraction logic legitimately changed), bump
-CacheSchemaVersion in internal/ctxgraph/cache.go AND update this golden —
+FactsSchemaVersion in internal/report/factscache.go AND update this golden —
 a version bump without this golden (or this golden without a bump) leaves
 stale .cache/parse entries silently serving old-logic output.
 If it is NOT intentional, fix the extraction regression instead.`,
@@ -167,12 +169,9 @@ If it is NOT intentional, fix the extraction regression instead.`,
 	}
 }
 
-// TestLoadCachedFacts_RejectsStaleSchemaVersion covers the defensive
-// SchemaVersion re-check loadCachedFacts does on top of
-// ctxgraph.ScanCached's own — see that function's doc comment for why a
-// wrong answer here would silently corrupt aggregated numbers rather than
-// just cost a slower rerun.
-func TestLoadCachedFacts_RejectsStaleSchemaVersion(t *testing.T) {
+// TestLoadCachedFacts_RejectsStaleFactsVersion covers the defensive
+// FactsVersion re-check loadCachedFacts does on cached facts.
+func TestLoadCachedFacts_RejectsStaleFactsVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "audit.jsonl")
 	writeGarbageFile(t, path) // content is irrelevant; only its hash keys the entry
 	cache := cacheWithFacts(t, path, 1)
@@ -181,16 +180,16 @@ func TestLoadCachedFacts_RejectsStaleSchemaVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale := cache.Files[key]
-	stale.SchemaVersion = ctxgraph.CacheSchemaVersion - 1
+	stale.FactsVersion = FactsSchemaVersion - 1
 	cache.Files[key] = stale
 
-	if _, ok := loadCachedFacts(cache, key); ok {
-		t.Error("loadCachedFacts should reject an entry with a stale SchemaVersion")
+	if _, ok := loadCachedFacts(cache, key, nil); ok {
+		t.Error("loadCachedFacts should reject an entry with a stale FactsVersion")
 	}
 }
 
 func TestLoadCachedFacts_NilCache(t *testing.T) {
-	if _, ok := loadCachedFacts(nil, "x"); ok {
+	if _, ok := loadCachedFacts(nil, "x", nil); ok {
 		t.Error("loadCachedFacts(nil, ...) should report ok=false")
 	}
 }

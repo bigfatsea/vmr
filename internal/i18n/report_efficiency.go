@@ -1,14 +1,14 @@
 // Ver 2026-09-22 02:20, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_efficiency.go (§7 Efficiency & Waste)
+// Pairs with internal/report/viewmodel_efficiency.go (Efficiency & Waste)
 // and internal/report/metrics.go's buildFindings. The six Finding* closures
 // here are called twice, both times through buildFindings(rep, lang): once
-// with EN by buildFindingsForJSON (populating Report2.Efficiency and
-// macro/summary.json's language-invariant baseline, R1), and again with the
+// with EN by buildFindingsForJSON (populating Report.Efficiency and
+// macro/summary.json's language-invariant baseline), and again with the
 // report's actual render language by viewmodel_efficiency.go's
 // vmEfficiencySection for the Markdown output — it deliberately never reads
 // the already-computed rep.Efficiency, precisely so Markdown keeps
-// following -lang after R1 froze the JSON path to English. Code
+// following -lang after language-neutralization froze the JSON path to English. Code
 // (report.FindingCode) never appears here — it's the caller's stable
 // identifier and never varies by language; neither does Params, which
 // carries the raw values a script needs to rebuild the sentence in another

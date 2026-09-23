@@ -1,4 +1,4 @@
-// Ver 2026-08-31, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // The report-half / journey-half cost-basis differential test. CLAUDE.md's
 // rule is that an analytics number reproducing another must be pinned by a
@@ -117,9 +117,13 @@ func TestCostBasis_ReportAndJourneyAgreeCanceledAndError(t *testing.T) {
 	path := writeJourneyJSONL(t, recs)
 
 	res := costParityResolver(t)
-	rep, _, _, err := report.BuildCached([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := report.Build(report.BuildOptions{
+		Paths:       []string{path},
+		PricingInfo: &report.Pricing{Currency: "USD"},
+		PricingSrc:  res,
+	})
 	if err != nil {
-		t.Fatalf("report.BuildCached: %v", err)
+		t.Fatalf("report.Build: %v", err)
 	}
 	if rep.Overall.CostEstimate == nil {
 		t.Fatal("report side priced nothing — fixture no longer exercises the pricing path")
@@ -183,9 +187,13 @@ func TestCostBasis_ReportAndJourneyAgree(t *testing.T) {
 	}
 	path := writeJourneyJSONL(t, recs)
 	res := costParityResolver(t)
-	rep, _, _, err := report.BuildCached([]string{path}, time.Now(), nil, &report.Pricing{Currency: "USD"}, res, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := report.Build(report.BuildOptions{
+		Paths:       []string{path},
+		PricingInfo: &report.Pricing{Currency: "USD"},
+		PricingSrc:  res,
+	})
 	if err != nil {
-		t.Fatalf("report.BuildCached: %v", err)
+		t.Fatalf("report.Build: %v", err)
 	}
 	if rep.Overall.CostEstimate == nil {
 		t.Fatal("report side priced nothing — fixture no longer exercises the pricing path")

@@ -1,6 +1,6 @@
-// Ver 2026-09-22 02:10, by Sonnet 5
+// Ver 2026-09-23 03:25, by Claude Opus 5.5
 
-// Pairs with cmd/vmr/compares_index.go (compares/index.{json,md}, D21).
+// Pairs with internal/analyze/compares_index.go (compares/index.{json,md}).
 package i18n
 
 import "fmt"

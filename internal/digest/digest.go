@@ -1,6 +1,6 @@
-// Ver 2026-09-07, by Claude (pi)
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
-// Package digest owns the system's single cache-digest construction (D8):
+// Package digest owns the system's single cache-digest construction:
 // a length-prefixed, ordered sha256
 // chain. Every cache-admission judgment in the analytics half is a call site
 // of Digest — the properties below are what make the chain safe, and none of

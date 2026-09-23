@@ -1,4 +1,4 @@
-// Ver 2026-07-30 21:00, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Scoped to the -compare report: an optional, always-degradable LLM
 // interpretation layer appended to a Comparison's rendered Markdown. Every
@@ -85,17 +85,17 @@ const llmHTTPTimeout = 120 * time.Second
 
 // ToolIndexEntry is one Step's compact, rule-generated summary — seq, which
 // tools it called, and a one-line brief — fed to the LLM so it can narrate
-// "what phases did this Journey go through" itself (design doc plan review:
-// phase classification needs semantic judgment, which the LLM is better and
+// "what phases did this Journey go through" itself (phase classification
+// needs semantic judgment, which the LLM is better and
 // more honest at than a maintained if/else threshold ladder). Nothing here
 // is a judgment call; it's the same data j-<id>.md already renders,
 // just condensed to one line per Step instead of the full body.
 type ToolIndexEntry struct {
 	Seq int `json:"seq"`
-	// Req is the Step's request-level coordinate (P2's basename:line,
-	// Manifest.Req) — added in P4.3 so an LLM interpretation that cites a
+	// Req is the Step's request-level coordinate (basename:line,
+	// Manifest.Req) — carried so an LLM interpretation that cites a
 	// specific Step ("at step 7 it looked up...") gives a reader or a
-	// future navigation feature (P6.2) something to jump to, without the
+	// future navigation feature something to jump to, without the
 	// evidence pack growing by more than a few bytes per entry.
 	Req   string   `json:"req,omitempty"`
 	Tools []string `json:"tools,omitempty"`
@@ -411,7 +411,7 @@ func truncateForError(b []byte) string {
 // is the whole call's wall-clock elapsed (cache hit included — a hit is
 // near-zero by construction, a live call carries retries' backoff too);
 // it rides on the result, not only in an error path, because the persisted
-// llm_interpretation record (§3.6's 模型/耗时/状态/正文) wants it on both
+// llm_interpretation record (模型/耗时/状态/正文) wants it on both
 // outcomes.
 type InterpretResult struct {
 	Text     string
@@ -423,7 +423,7 @@ type InterpretResult struct {
 // disk cache, call the LLM on a miss, write the cache on success. Any
 // failure (cache I/O aside — a cache miss is not a failure) is returned as
 // an error and the caller is expected to treat it as "no LLM section this
-// run", per design doc C.7 — this function itself never panics or retries.
+// run" — this function itself never panics or retries.
 func Interpret[T evidencePackKind](ctx context.Context, opts LLMOptions, pack T, lang i18n.Lang) (res InterpretResult, err error) {
 	start := time.Now()
 	defer func() { res.Duration = time.Since(start) }()
@@ -540,7 +540,7 @@ func atxHeading(line string) (level int, ok bool) {
 // deterministic render-layer fallback for i18n/journey_llm.go's prompt
 // instruction (already asks the model to use level-3 subsection headings),
 // since a document's outline structure shouldn't depend on a model's
-// instruction-following (architecture doc §4.2).
+// instruction-following.
 //
 // Shifts EVERY level uniformly, not just "## " -> "### ", because a model
 // that only partially follows the instruction — nesting its own
@@ -595,7 +595,7 @@ func downgradeHeadingLevels(text string) string {
 //
 // Applied at Markdown-render time (localizeFinding's SourceLLMInferred
 // branch, findings.go), not at Finding-construction time (llm_findings.go)
-// — R2: once findings render through a structured VM instead of a
+// — once findings render through a structured VM instead of a
 // hand-composed template sentence, the serializer always knows it's about
 // to write into Markdown structure, so escaping is its job. j-<id>.json
 // therefore carries the model's raw, unescaped output; only the rendered

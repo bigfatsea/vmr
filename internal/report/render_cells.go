@@ -1,7 +1,7 @@
-// Ver 2026-07-28 19:20, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // Cell and chart formatting: pure functions from numbers to Markdown
-// fragments, shared by every section. Nothing here knows what a Report2 is
+// fragments, shared by every section. Nothing here knows what a Report is
 // — that separation is what keeps the section files about *what* to show
 // rather than how to spell it.
 package report
@@ -23,7 +23,7 @@ func cut(s string, n int) string {
 }
 
 // shortDate renders a Row.Date ("2026-07-14") as "MM-dd" ("07-14") for the
-// §5 按日期活跃度 x-axis, where the year is implied by the report's own date
+// daily-activity x-axis, where the year is implied by the report's own date
 // range and would otherwise crowd 11+ daily labels.
 func shortDate(s string) string {
 	if len(s) == 10 {
@@ -45,7 +45,7 @@ func fmtDurMS(v int64) string {
 // numStr formats a float without a trailing ".0" for the common whole-number
 // case (an unweighted requests count, or a token_weights sum that happens to
 // land on an integer) but keeps two decimals for a genuinely fractional
-// value (a weighted token sum, or a $ cost amount) — §2.5's quota-vs-
+// value (a weighted token sum, or a $ cost amount) — the quota-vs-
 // consumption sub-table's WindowConsumed/Live.Used cells.
 func numStr(v float64) string {
 	if v == math.Trunc(v) {
@@ -171,18 +171,18 @@ func pctHundred(v float64) string {
 	return strconv.FormatFloat(v, 'f', 1, 64) + "%"
 }
 
-// p5095Cell renders a "p50/p95" duration pair for the §5 workload tables.
+// p5095Cell renders a "p50/p95" duration pair for the per-client workload tables.
 func p5095Cell(p50, p95 int64) string {
 	return fmtDurMS(p50) + "/" + fmtDurMS(p95)
 }
 
-// tokP5095Cell renders a "p50/p95" token-count pair (§5 按客户端 In/Out
+// tokP5095Cell renders a "p50/p95" token-count pair (per-client In/Out
 // columns) - same shape as p5095Cell but token-scaled, not duration-scaled.
 func tokP5095Cell(p50, p95 int64) string {
 	return fmtutil.FmtTokens(p50) + "/" + fmtutil.FmtTokens(p95)
 }
 
-// ---- chart data prep (rendering itself is ChartVM/renderChart, R2-b) ----
+// ---- chart data prep (rendering itself is ChartVM/renderChart) ----
 
 // hourLabels returns the fixed 24-hour x-axis category list ("00".."23"),
 // shared by every hourly chart.

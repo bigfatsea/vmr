@@ -1,4 +1,4 @@
-// Ver 2026-08-20 17:45, by Sonnet 5
+// Ver 2026-09-23 02:50, by pi
 
 package main
 
@@ -11,12 +11,36 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/analyze"
 	"vmr/internal/audit"
+	"vmr/internal/ctxgraph"
 	"vmr/internal/dashboard"
 	"vmr/internal/i18n"
 	"vmr/internal/journey"
 	"vmr/internal/report"
 )
+
+// TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot covers P6.5's actual
+type testJourneySetup struct {
+	chains [][]*ctxgraph.Lineage
+}
+
+func setupJourneyRun(paths []string, outDir string, includeSelfTraffic bool, llmKey string, selfTrafficTags []string, showUngrouped bool, lang i18n.Lang) (*testJourneySetup, error) {
+	run := &analyze.Run{
+		Paths:              paths,
+		OutDir:             outDir,
+		IncludeSelfTraffic: includeSelfTraffic,
+		SelfTrafficTags:    selfTrafficTags,
+		ShowUngrouped:      showUngrouped,
+		Lang:               lang,
+	}
+	run.LLMOpts.APIKey = llmKey
+	su, err := run.SetupJourney()
+	if err != nil {
+		return nil, err
+	}
+	return &testJourneySetup{chains: su.Chains}, nil
+}
 
 // TestCmdAnalyze_ProducesFullSuiteInOneOutputRoot covers P6.5's actual
 // user-facing promise: one call, one output directory, both halves'

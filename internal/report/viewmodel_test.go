@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // Unit tests for the ViewModel types and the fixed serializer: structure —
 // heading levels, table geometry, fold/details wrappers, block order,
@@ -10,10 +10,8 @@ package report
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"vmr/internal/i18n"
-	"vmr/internal/taskseg"
 )
 
 func TestRenderMarkdownStructure(t *testing.T) {
@@ -150,7 +148,7 @@ type unknownBlock struct{}
 func (unknownBlock) isBlock() {}
 
 func TestSummaryInteractiveShare(t *testing.T) {
-	rep := &Report2{
+	rep := &Report{
 		Workloads: []WorkloadRow{
 			{Class: "interactive", TrafficStats: TrafficStats{Requests: 40}},
 			{Class: "heartbeat", TrafficStats: TrafficStats{Requests: 5}},
@@ -160,16 +158,16 @@ func TestSummaryInteractiveShare(t *testing.T) {
 	if n := summaryInteractiveShare(rep); n != 40 {
 		t.Errorf("interactive share = %d, want 40", n)
 	}
-	if n := summaryInteractiveShare(&Report2{}); n != -1 {
+	if n := summaryInteractiveShare(&Report{}); n != -1 {
 		t.Errorf("empty Workloads = %d, want -1", n)
 	}
 	if n := summaryInteractiveShare(nil); n != -1 {
-		t.Errorf("nil Report2 = %d, want -1", n)
+		t.Errorf("nil Report = %d, want -1", n)
 	}
 }
 
 func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
-	base := &Report2{Meta: Meta{Format: Format, Inputs: []string{"a.jsonl"}}}
+	base := &Report{Meta: Meta{Format: Format, Inputs: []string{"a.jsonl"}}}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
 		loaded := *base
 		loaded.Meta.ReportConfigPath = "/etc/vmr/report.yaml"
@@ -196,9 +194,9 @@ func TestMarkdownNamesItsReportConfigSource(t *testing.T) {
 func TestMacroMarkdownFindingsFollowLang(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, heartbeatDreamDiaryTiedRecords())
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	mdEN := MacroMarkdown(rep, i18n.EN, nil, nil)
@@ -225,7 +223,7 @@ func TestMacroMarkdownFindingsFollowLang(t *testing.T) {
 // logs), so this is the only test exercising renderFlow's mermaid output.
 func TestVmCompactionChainBlocks_FlowVM(t *testing.T) {
 	t.Run("three node chain becomes FlowVM", func(t *testing.T) {
-		rep := &Report2{Sessions: []SessionRow{
+		rep := &Report{Sessions: []SessionRow{
 			{ID: "l-aaa"},
 			{ID: "l-bbb", ContinuedFrom: "l-aaa"},
 			{ID: "l-ccc", ContinuedFrom: "l-bbb"},
@@ -262,7 +260,7 @@ func TestVmCompactionChainBlocks_FlowVM(t *testing.T) {
 	})
 
 	t.Run("two node chain stays a ParaVM note", func(t *testing.T) {
-		rep := &Report2{Sessions: []SessionRow{
+		rep := &Report{Sessions: []SessionRow{
 			{ID: "l-aaa"},
 			{ID: "l-bbb", ContinuedFrom: "l-aaa"},
 		}}

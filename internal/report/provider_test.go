@@ -1,4 +1,4 @@
-// Ver 2026-08-12 23:40, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -8,7 +8,7 @@ import (
 func f64(v float64) *float64 { return &v }
 
 func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{
 			Endpoint: "openai-completions:volcengine2:deepseek-v4-flash",
 			Attempts: 10, OK: 9, Failed: 1, ErrorClasses: map[string]int{"timeout": 1},
@@ -70,7 +70,7 @@ func TestBuildProvidersRollsUpAcrossModels(t *testing.T) {
 }
 
 func TestBuildProvidersHandlesBothEndpointLabelFormats(t *testing.T) {
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:new-fmt:model-a", TokensIn: 10},
 		{Endpoint: "openai-completions/old-fmt/model-b", TokensIn: 20},
 	}}
@@ -88,7 +88,7 @@ func TestBuildProvidersHandlesBothEndpointLabelFormats(t *testing.T) {
 }
 
 func TestBuildProvidersQuotaRef(t *testing.T) {
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:withquota:m", TokensIn: 10},
 		{Endpoint: "openai-completions:noquota:m", TokensIn: 5},
 	}}
@@ -112,7 +112,7 @@ func TestBuildProvidersQuotaRef(t *testing.T) {
 // (alphabetical tie-break), or two runs over the same input could produce
 // byte-different report output (TestBuildIsDeterministic's failure mode).
 func TestBuildProvidersDeterministicTieBreak(t *testing.T) {
-	rep := &Report2{EndpointsAll: []EndpointRow{
+	rep := &Report{EndpointsAll: []EndpointRow{
 		{Endpoint: "openai-completions:zeta:m", TokensIn: 100},
 		{Endpoint: "openai-completions:alpha:m", TokensIn: 100},
 	}}

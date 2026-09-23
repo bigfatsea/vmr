@@ -1,4 +1,4 @@
-// Ver 2026-07-24 12:35, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package audit writes one JSONL record per chat request: the client-side
 // exchange plus every upstream attempt, raw and unaggregated. This package
@@ -235,9 +235,9 @@ type Attempt struct {
 	// — see the LiveStats design doc's decision table; do not unify them.
 	KeyLabel string `json:"key_label,omitempty"`
 
-	// Transient, non-serialized Agent Guard carrier (R-5, K-G14) — see
+	// Transient, non-serialized Agent Guard carrier — see
 	// SetSanitizedRunes in guard_attempt.go. Its BlockInfo counterpart was
-	// removed with the online Tool Call gate (ADR-15).
+	// removed with the online Tool Call gate.
 	sanitizedRunes map[string]int
 }
 
@@ -394,7 +394,7 @@ var credentialHeaders = []string{"Authorization", "X-Api-Key", "Api-Key", "X-Aut
 // vmr's adapters know about, and so isn't in credentialHeaders, still
 // arrives on the client request and would otherwise sit in the audit file
 // in cleartext. atomic.Pointer rather than the registries' mutex-guarded
-// copy-on-write pattern (see adapter.registry/strategy.conditions) because
+// copy-on-write pattern (see adapter.registry) because
 // this is a whole-value replace on every (re)load, never an incremental
 // update — same shape as retentionDays above, just for a slice instead of
 // an int.

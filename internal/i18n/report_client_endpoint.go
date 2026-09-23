@@ -1,6 +1,6 @@
 // Ver 2026-08-12 23:40, by Opus 5
 
-// Pairs with internal/report/viewmodel_client_endpoint.go (§5.5 Per-Client
+// Pairs with internal/report/viewmodel_client_endpoint.go (Per-Client
 // Upstream Attribution).
 package i18n
 

@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -30,7 +30,7 @@ func TestGuardCollector_NilResultWhenNothingScanned(t *testing.T) {
 // thing, and only the latter should ever produce a nil GuardSummary.
 func TestGuardCollector_FallbackPathCoversNilGuardRecord(t *testing.T) {
 	gc := newGuardCollector()
-	gc.add(&rec2{})
+	gc.add(&recRow{})
 	got := gc.result()
 	if got == nil {
 		t.Fatal("result() = nil, want coverage of the fallback-scanned record")
@@ -46,7 +46,7 @@ func TestGuardCollector_FallbackPathCoversNilGuardRecord(t *testing.T) {
 func TestGuardCollector_Aggregation(t *testing.T) {
 	gc := newGuardCollector()
 	// Record 1: two hits of the same rule, two distinct fingerprints.
-	gc.add(&rec2{guard: &audit.GuardRecord{
+	gc.add(&recRow{guard: &audit.GuardRecord{
 		Ver: 1,
 		Hits: []audit.Hit{
 			{Rule: "gcp-api-key", Tier: 1, Count: 3, FP: "fp-a"},
@@ -56,7 +56,7 @@ func TestGuardCollector_Aggregation(t *testing.T) {
 	// Record 2: same rule again (same fingerprint as record 1's first hit —
 	// must not double-count UniqueFP), plus a Tier2 rule and a historical
 	// replace-era restore count.
-	gc.add(&rec2{guard: &audit.GuardRecord{
+	gc.add(&recRow{guard: &audit.GuardRecord{
 		Ver: 1,
 		Hits: []audit.Hit{
 			{Rule: "gcp-api-key", Tier: 1, Count: 5, FP: "fp-a"},
@@ -66,7 +66,7 @@ func TestGuardCollector_Aggregation(t *testing.T) {
 	// Record 3: no hits at all, but Guard is non-nil (Agent Guard was
 	// active and found nothing) — must count toward RecordsScanned, not
 	// RecordsWithHits.
-	gc.add(&rec2{guard: &audit.GuardRecord{Ver: 1}})
+	gc.add(&recRow{guard: &audit.GuardRecord{Ver: 1}})
 
 	got := gc.result()
 	if got == nil {
@@ -125,7 +125,7 @@ func TestGuardCollector_MaxPerRecordDistinctCredentialsNotAmplification(t *testi
 	for i := range hits {
 		hits[i] = audit.Hit{Rule: "openai-project-key", Tier: 1, Count: 1, FP: fmt.Sprintf("fp-%d", i)}
 	}
-	gc.add(&rec2{guard: &audit.GuardRecord{Ver: 1, Hits: hits}})
+	gc.add(&recRow{guard: &audit.GuardRecord{Ver: 1, Hits: hits}})
 
 	got := gc.result()
 	if got == nil {
@@ -148,8 +148,8 @@ func TestGuardCollector_MaxPerRecordDistinctCredentialsNotAmplification(t *testi
 // silently picking one version's number as if it were universal.
 func TestGuardCollector_VersionConflict(t *testing.T) {
 	gc := newGuardCollector()
-	gc.add(&rec2{guard: &audit.GuardRecord{Ver: 1}})
-	gc.add(&rec2{guard: &audit.GuardRecord{Ver: 2}})
+	gc.add(&recRow{guard: &audit.GuardRecord{Ver: 1}})
+	gc.add(&recRow{guard: &audit.GuardRecord{Ver: 2}})
 	got := gc.result()
 	if got.RulesetVersion != 0 {
 		t.Errorf("RulesetVersion = %d, want 0 on a version conflict", got.RulesetVersion)
@@ -158,8 +158,8 @@ func TestGuardCollector_VersionConflict(t *testing.T) {
 
 func TestGuardCollector_RecordsScanFailed(t *testing.T) {
 	gc := newGuardCollector()
-	gc.add(&rec2{guardScanFailed: true})
-	gc.add(&rec2{guard: &audit.GuardRecord{Ver: 1}})
+	gc.add(&recRow{guardScanFailed: true})
+	gc.add(&recRow{guard: &audit.GuardRecord{Ver: 1}})
 	got := gc.result()
 	if got.RecordsScanFailed != 1 {
 		t.Errorf("RecordsScanFailed = %d, want 1", got.RecordsScanFailed)

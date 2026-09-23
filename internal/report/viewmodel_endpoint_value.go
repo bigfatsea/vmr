@@ -1,9 +1,9 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:00, by Claude Opus 5.5
 
-// §6.6 端点性价比 view model: not "what did this endpoint cost" (§2
-// already answers that) but "what did it cost per unit of work delivered,
+// 端点性价比 view model: not "what did this endpoint cost" (the cost
+// section already answers that) but "what did it cost per unit of work delivered,
 // and what did its failures cost in time". Every figure is derived at
-// render time from fields §2 and §3 already carry. Pairs with
+// render time from fields the cost and reliability sections already carry. Pairs with
 // internal/i18n/report_endpoint_value.go.
 package report
 
@@ -29,7 +29,7 @@ type valueRow struct {
 	wastedMS     int64
 }
 
-func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmEndpointValueSection(rep *Report, lang i18n.Lang) SectionVM {
 	rows := endpointValueRows(rep)
 	if len(rows) == 0 {
 		return SectionVM{}
@@ -80,11 +80,11 @@ func vmEndpointValueSection(rep *Report2, lang i18n.Lang) SectionVM {
 // endpointValueRows builds the sorted body. Sort key: cheapest per unit
 // of output first when pricing is available (that is the question the
 // section exists to answer), else most wasted time first.
-func endpointValueRows(rep *Report2) []valueRow {
+func endpointValueRows(rep *Report) []valueRow {
 	var out []valueRow
 	for _, e := range rep.EndpointsAll {
 		// An endpoint that never served a request has no unit of work to
-		// divide by; its failures still show up in §3 端点健康.
+		// divide by; its failures still show up in the endpoint-health table.
 		if e.RequestsOK == 0 && e.WastedMS == 0 {
 			continue
 		}

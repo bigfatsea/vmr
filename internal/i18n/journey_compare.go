@@ -20,7 +20,7 @@ import (
 type CompareText struct {
 	Title string
 	// PartialBanner is the ⚠️ line shown when either side is head-truncated
-	// (D19: the "-partial" filename suffix is retired; partiality lives as
+	// (the "-partial" filename suffix is retired; partiality lives as
 	// the Comparison's Partial field and this banner).
 	PartialBanner                  string
 	SummaryCard                    func(items []string) string

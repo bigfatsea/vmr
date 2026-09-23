@@ -1,7 +1,7 @@
-// Ver 2026-09-22 18:05, by coding
+// Ver 2026-09-12 12:00, by dev
 
 // The per-request data layer: requests/index.json is the machine-readable
-// single source of truth for request rows (D7/§3.7 — the human-readable
+// single source of truth for request rows (the human-readable
 // vmr-requests*.md index family was deleted; interactive browsing is the
 // request-browser.html skeleton page's job, triage stays on
 // requests/failed.md). The index carries a SessionMeta projection (session
@@ -32,7 +32,7 @@ import (
 // requests/failed.jsonl stays a plain flat JSONL — it's a filtered
 // dump of Requests, not itself an independent cache.
 // SessionMeta carries one session's title, alias, and per-task title mapping
-// projected into requests/index.json (§3.3).
+// projected into requests/index.json.
 type SessionMeta struct {
 	Title string            `json:"title,omitempty"`
 	Alias string            `json:"alias,omitempty"`
@@ -80,9 +80,9 @@ func WriteRequestsJSONL(rows []RequestRow, path string) (n int, err error) {
 // WriteRequestsIndex writes requests/index.json (the machine-readable single source of truth
 // for per-request drill-down, populated with session analysis projection and journey cross-links).
 // The legacy human-readable Markdown request indexes (vmr-requests.md, vmr-requests-<tag>.md,
-// vmr-requests-cron-*.md) are retired per D7 / §3.7, so unlike the macro slices there is no
+// vmr-requests-cron-*.md) are retired, so unlike the macro slices there is no
 // language axis and no detail-page directory to link against — the index is pure JSON.
-func WriteRequestsIndex(rep *Report2, sess *SessionAnalysis, dir string, journeyLink map[string]string) error {
+func WriteRequestsIndex(rep *Report, sess *SessionAnalysis, dir string, journeyLink map[string]string) error {
 	rows := rep.RequestRows()
 	sessions := make(map[string]SessionMeta)
 	if sess != nil {

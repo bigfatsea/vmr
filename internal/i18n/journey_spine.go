@@ -1,4 +1,4 @@
-// Ver 2026-09-22 03:10, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Pairs with internal/journey/render_spine.go and its viewmodel counterpart
 // internal/journey/viewmodel_spine.go — the decision-spine layer
@@ -28,7 +28,7 @@ type SpineText struct {
 	OverviewCostLine func(money string) string
 
 	// OverviewFailedStepsLine is rendered in the overview card when any
-	// requests in this Journey failed at the HTTP/upstream layer (问题 8).
+	// requests in this Journey failed at the HTTP/upstream layer.
 	OverviewFailedStepsLine func(failed, total int) string
 
 	SpineTitle                string
@@ -78,7 +78,7 @@ type SpineText struct {
 	FindingsNone  string
 	// FindingGroupTitle is the per-detector group header rendered above a
 	// set of findings sharing one Code — "*N* hits of this detector", so a
-	// 162-item flat list stops reading as 162 distinct problems (问题 15).
+	// 162-item flat list stops reading as 162 distinct problems.
 	FindingGroupTitle func(code string, count int, firstStep int) string
 	FindingHeader     func(idx int, code string, stepSeq int) string
 	FindingRelated    func(seqs string) string

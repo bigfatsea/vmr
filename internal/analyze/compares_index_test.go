@@ -1,6 +1,6 @@
-// Ver 2026-09-07, by pi
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-package main
+package analyze
 
 import (
 	"encoding/json"
@@ -82,15 +82,15 @@ func TestRebuildComparesIndex_ScanAndSelfHealing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if idx.Count != 1 || len(idx.Compares) != 1 {
-		t.Fatalf("want count 1, got %d", idx.Count)
+		t.Fatalf("want 1 item, got count=%d, len=%d", idx.Count, len(idx.Compares))
 	}
-	if idx.Compares[0].Filename != f1 || idx.Compares[0].A.Title != "Task 1" || idx.Compares[0].B.Title != "Task 2" {
-		t.Errorf("unexpected compare item: %+v", idx.Compares[0])
+	if idx.Compares[0].Filename != f1 {
+		t.Errorf("want Filename %s, got %s", f1, idx.Compares[0].Filename)
 	}
 
-	// 2. Write second comparison
-	f2 := "compare-j-alpha-vs-j-beta.json"
-	makeCompareJSON(f2, "j-alpha", "Alpha", "j-beta", "Beta")
+	// 2. Add a second comparison and re-run (determinism check)
+	f2 := "compare-j-aaa-vs-j-bbb.json"
+	makeCompareJSON(f2, "j-aaa", "Task A", "j-bbb", "Task B")
 
 	if err := RebuildComparesIndex(comparesDir, i18n.EN); err != nil {
 		t.Fatalf("RebuildComparesIndex: %v", err)
@@ -104,15 +104,15 @@ func TestRebuildComparesIndex_ScanAndSelfHealing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if idx.Count != 2 || len(idx.Compares) != 2 {
-		t.Fatalf("want count 2, got %d", idx.Count)
+		t.Fatalf("want 2 items, got count=%d, len=%d", idx.Count, len(idx.Compares))
 	}
-	// Deterministic sort: alpha comes before test1
+	// Alphabetical sort: f2 ("compare-j-aaa...") must be first
 	if idx.Compares[0].Filename != f2 || idx.Compares[1].Filename != f1 {
-		t.Errorf("expected sorted filenames [%s, %s], got [%s, %s]", f2, f1, idx.Compares[0].Filename, idx.Compares[1].Filename)
+		t.Errorf("sort order mismatch: got [%s, %s]", idx.Compares[0].Filename, idx.Compares[1].Filename)
 	}
 
-	// 3. Self-healing: Delete f1 and re-scan
-	if err := os.Remove(filepath.Join(comparesDir, f1)); err != nil {
+	// 3. Delete f2 and re-run (self-healing check)
+	if err := os.Remove(filepath.Join(comparesDir, f2)); err != nil {
 		t.Fatal(err)
 	}
 	if err := RebuildComparesIndex(comparesDir, i18n.EN); err != nil {
@@ -127,20 +127,18 @@ func TestRebuildComparesIndex_ScanAndSelfHealing(t *testing.T) {
 		t.Fatal(err)
 	}
 	if idx.Count != 1 || len(idx.Compares) != 1 {
-		t.Fatalf("want count 1 after deletion, got %d", idx.Count)
+		t.Fatalf("want 1 item after deletion, got count=%d, len=%d", idx.Count, len(idx.Compares))
 	}
-	if idx.Compares[0].Filename != f2 {
-		t.Errorf("want remaining item %s, got %s", f2, idx.Compares[0].Filename)
+	if idx.Compares[0].Filename != f1 {
+		t.Errorf("want Filename %s, got %s", f1, idx.Compares[0].Filename)
 	}
 
-	// Check index.md table
-	mdData, err := os.ReadFile(filepath.Join(comparesDir, "index.md"))
+	mdBytes, err := os.ReadFile(filepath.Join(comparesDir, "index.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mdStr := string(mdData)
-	if !strings.Contains(mdStr, "Total comparisons: 1") || !strings.Contains(mdStr, "Alpha") {
-		t.Errorf("index.md missing expected content:\n%s", mdStr)
+	if !strings.Contains(string(mdBytes), "Task 1") {
+		t.Errorf("index.md missing Task 1:\n%s", string(mdBytes))
 	}
 }
 

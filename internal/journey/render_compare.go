@@ -1,4 +1,4 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package journey
 
@@ -16,7 +16,7 @@ import (
 // diff table with notable rows starred, and a tool-usage side-by-side.
 // Purely a view over already-computed Comparison data — same fact-layer-
 // renderer convention as RenderMarkdown (no judgment calls happen here).
-// cmp.Rows[].Label is the English baseline Compare persisted (R1) — this
+// cmp.Rows[].Label is the English baseline Compare persisted — this
 // function looks the label up fresh in lang from r.Metric
 // (i18n.MetricLabel) rather than reading Label back, so a compare-*.json
 // read off disk at a different original language than the current render
@@ -74,7 +74,7 @@ func RenderComparisonMarkdown(cmp Comparison, lang i18n.Lang) string {
 	// The interpretation layer's persisted sections, last — overall first,
 	// then the divergence-point reading. A nil or failed record renders
 	// nothing, reproducing exactly the old caller-side append's byte layout
-	// ("\n" before each present section) from the JSON records alone (§3.6).
+	// ("\n" before each present section) from the JSON records alone.
 	for _, rec := range []*LLMInterpretation{cmp.LLMInterpretation, cmp.LLMDivergence} {
 		if sec := RenderLLMSection(rec, lang); sec != "" {
 			w("\n%s", sec)
@@ -367,7 +367,7 @@ func renderInitialInstruction(w func(string, ...any), f InitialInstructionFact, 
 	if f.A.Found && f.B.Found && f.A.Text == f.B.Text && f.A.Text != "" {
 		// Mirrors renderSysPrompt's exact-match merge: two full excerpts of
 		// the same instruction wastes about as much space as this whole
-		// section otherwise takes (see KNOWN_ISSUES §2.59).
+		// section otherwise takes.
 		w("%s", t.InitialInstructionIdentical)
 		return
 	}
@@ -450,8 +450,8 @@ func formatMetric(kind MetricKind, v float64) string {
 // "156×" / "0.02×" / "+40%" / newLabel / "-100%" / "—". A symmetric
 // relative percentage (the earlier formatDeltaRel) collapsed every large
 // "B ≫ A" gap toward ±100%: 1.6× and 156× both printed "+99%", so the
-// column the compare view exists to fill couldn't tell them apart (问题 6
-// / R5-1). newLabel is the localized "from nothing" word (a==0, b>0).
+// column the compare view exists to fill couldn't tell them apart.
+// newLabel is the localized "from nothing" word (a==0, b>0).
 // MetricDiff.DeltaRel — the machine-readable field — is unchanged; this is
 // display only.
 func formatDelta(a, b float64, newLabel string) string {

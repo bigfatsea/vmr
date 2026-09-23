@@ -149,7 +149,7 @@ func buildVMSysPrompt(s *JourneySummary, lang i18n.Lang, linkDetails bool) []VMB
 		filename := reqdetail.SysPromptEvidenceFileName(*e.sysHash)
 		if linkDetails {
 			// Same two-levels-up path as the spine detail links: sysprompt
-			// evidence lives at requests/evidence/ (§4 topology), not beside
+			// evidence lives at requests/evidence/, not beside
 			// the journey .md.
 			blocks = append(blocks, vmTextBlock(t.SysPromptEraLink(e.fromSeq, e.toSeq, e.chars, "../../requests/evidence/"+filename)))
 		} else {

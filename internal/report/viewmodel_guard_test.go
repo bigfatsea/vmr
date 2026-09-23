@@ -1,4 +1,4 @@
-// Ver 2026-09-13, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -10,11 +10,11 @@ import (
 )
 
 // TestVMGuardSection_NilIsZeroValue is the ADR-12 backward-compat
-// assertion at the unit level: a Report2 with Guard == nil (every report
+// assertion at the unit level: a Report with Guard == nil (every report
 // today) renders no "guard" section at all — the zero SectionVM
 // BuildMacroReportVM's own loop already skips (vmStickySection's pattern).
 func TestVMGuardSection_NilIsZeroValue(t *testing.T) {
-	rep := &Report2{}
+	rep := &Report{}
 	for _, lang := range []i18n.Lang{i18n.EN, i18n.ZH} {
 		sec := vmGuardSection(rep, lang)
 		if sec.Title != "" || len(sec.Blocks) != 0 {
@@ -27,20 +27,20 @@ func TestVMGuardSection_NilIsZeroValue(t *testing.T) {
 // contract: no Guard means no slice to write (slices.go's WriteMacroSlices
 // skips macro/guard.json entirely in that case).
 func TestBuildGuardSlice_NilOnNoGuard(t *testing.T) {
-	if gs := BuildGuardSlice(&Report2{}); gs != nil {
+	if gs := BuildGuardSlice(&Report{}); gs != nil {
 		t.Errorf("BuildGuardSlice(no Guard) = %+v, want nil", gs)
 	}
 	if gs := BuildGuardSlice(nil); gs != nil {
-		t.Errorf("BuildGuardSlice(nil Report2) = %+v, want nil", gs)
+		t.Errorf("BuildGuardSlice(nil Report) = %+v, want nil", gs)
 	}
 }
 
-// syntheticGuardReport builds a Report2 with a populated GuardSummary —
+// syntheticGuardReport builds a Report with a populated GuardSummary —
 // the shape aggregate.go's guardCollector would produce once M3/M4 wiring
 // exists, used here to exercise the render path end-to-end without that
 // wiring.
-func syntheticGuardReport() *Report2 {
-	return &Report2{
+func syntheticGuardReport() *Report {
+	return &Report{
 		Guard: &GuardSummary{
 			RecordsScanned:  120,
 			RecordsWithHits: 5,
@@ -55,7 +55,7 @@ func syntheticGuardReport() *Report2 {
 
 // TestVMGuardSection_Populated confirms both languages render the section
 // with the tier split, the amplification note, and the block/restore
-// lines — end-to-end proof the M2 wiring (aggregate -> Report2 -> ViewModel)
+// lines — end-to-end proof the M2 wiring (aggregate -> Report -> ViewModel)
 // actually produces readable output once a producer (M3/M4) exists.
 func TestVMGuardSection_Populated(t *testing.T) {
 	rep := syntheticGuardReport()
@@ -94,6 +94,6 @@ func TestBuildGuardSlice_Populated(t *testing.T) {
 		t.Fatal("BuildGuardSlice returned nil for a populated Guard")
 	}
 	if gs.Summary.RecordsScanned != 120 || len(gs.Summary.Rules) != 2 {
-		t.Errorf("GuardSlice.Summary = %+v, did not carry Report2.Guard through unchanged", gs.Summary)
+		t.Errorf("GuardSlice.Summary = %+v, did not carry Report.Guard through unchanged", gs.Summary)
 	}
 }

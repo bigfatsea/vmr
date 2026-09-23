@@ -1,9 +1,7 @@
 // Ver 2026-09-15, by pi
 
-// Pure spine helpers (structuralTags, oneLineTruncate, padRight, joinInts).
-// The *Journey-based renderers that used to live here
-// (renderOverviewCard/renderToolTimeline/renderFindingsSection) were
-// replaced by viewmodel_spine.go (D11).
+// Pure spine helpers (structuralTags, oneLineTruncate, padRight, joinInts),
+// called from viewmodel_spine.go's builders.
 package journey
 
 import (

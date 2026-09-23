@@ -1,4 +1,4 @@
-// Ver 2026-08-31, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -91,7 +91,7 @@ func TestClusterFailedRequests_MissingTimestamps(t *testing.T) {
 }
 
 func TestBuildRequestRow_UsageFlags(t *testing.T) {
-	rc := &rec2{
+	rc := &recRow{
 		usageInOK:  true,
 		usageOutOK: false,
 	}
@@ -100,7 +100,7 @@ func TestBuildRequestRow_UsageFlags(t *testing.T) {
 		t.Errorf("got UsageInOK=%v, UsageOutOK=%v, want true, false", rr.UsageInOK, rr.UsageOutOK)
 	}
 
-	rc2 := &rec2{
+	rc2 := &recRow{
 		usageInOK:  false,
 		usageOutOK: true,
 	}

@@ -1,9 +1,9 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-23 03:40, by Claude Opus 5.5
 
 // ViewModel builder for the document-level pieces the section files don't
-// own: the H1 + meta header, §0's summary table and auto highlights, §8's
-// link section, the appendix (as the report-level Disclaimers/Footnotes),
-// and the assembly of the full MacroReportVM. Pairs with
+// own: the H1 + meta header, the summary section's table and auto highlights,
+// the request-index link section, the appendix (as the report-level
+// Disclaimers/Footnotes), and the assembly of the full MacroReportVM. Pairs with
 // internal/i18n/report_doc.go.
 package report
 
@@ -20,7 +20,7 @@ import (
 )
 
 // JourneysLinkInfo carries the "vmr-report.md → journeys/index.md"
-// navigation edge (P6.2a, architecture doc §7.5).
+// navigation edge.
 type JourneysLinkInfo struct {
 	// Path is relative to vmr-report.md itself, e.g. "journeys/index.md".
 	Path                   string
@@ -30,9 +30,9 @@ type JourneysLinkInfo struct {
 
 // BuildMacroReportVM builds the whole vmr-report.md view model in lang.
 // journeyIdx is nil when this run's output root has no journeys index to link
-// to; journeyLink is the lineage-id → rendered-journey-filename map the §6
+// to; journeyLink is the lineage-id → rendered-journey-filename map the
 // session table links against (nil/empty when none).
-func BuildMacroReportVM(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo, journeyLink map[string]string) *MacroReportVM {
+func BuildMacroReportVM(rep *Report, lang i18n.Lang, journeyIdx *JourneysLinkInfo, journeyLink map[string]string) *MacroReportVM {
 	t := i18n.Doc(lang)
 	vm := &MacroReportVM{Title: t.Title}
 	vm.Meta = vmMetaHeader(rep, lang, journeyIdx)
@@ -68,18 +68,18 @@ func BuildMacroReportVM(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkIn
 
 // MacroMarkdown is the VM path's one-call entry: build the view model and
 // serialize it.
-func MacroMarkdown(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo, journeyLink map[string]string) string {
+func MacroMarkdown(rep *Report, lang i18n.Lang, journeyIdx *JourneysLinkInfo, journeyLink map[string]string) string {
 	return RenderMarkdown(BuildMacroReportVM(rep, lang, journeyIdx, journeyLink))
 }
 
 // LoadReport assembles the macro report's in-memory shape from the on-disk
-// slice set (D2/D11: with the monolithic vmr-report.json gone, the slices
+// slice set (with the monolithic vmr-report.json gone, the slices
 // are the only persisted macro data, so the markdown rebuild reads exactly
 // what a -render-only run reads). The manifest contributes the provenance
 // facts that live there by design (inputs, window, format version);
 // summary.json's meta carries the rest; finance.json restores the pricing
 // metadata. requests/index.json, when present, restores rep.requests.
-func LoadReport(dir string) (*Report2, error) {
+func LoadReport(dir string) (*Report, error) {
 	m, err := ValidateManifest(dir)
 	if err != nil {
 		return nil, fmt.Errorf("validate manifest: %w", err)
@@ -119,7 +119,7 @@ func LoadReport(dir string) (*Report2, error) {
 	for _, in := range m.Inputs {
 		inputs = append(inputs, in.Path)
 	}
-	rep := &Report2{
+	rep := &Report{
 		Pricing:                       fin.Pricing,
 		Overall:                       sum.Overall,
 		Efficiency:                    sum.Efficiency,
@@ -180,10 +180,10 @@ func LoadReport(dir string) (*Report2, error) {
 	return rep, nil
 }
 
-// vmMetaHeader builds the blocks between the H1 and §0: the data-source
+// vmMetaHeader builds the blocks between the H1 and the summary section: the data-source
 // line (with the report window), the report-config disclosure, the
 // collapsible input list, and the details/journeys link lines.
-func vmMetaHeader(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo) []BlockVM {
+func vmMetaHeader(rep *Report, lang i18n.Lang, journeyIdx *JourneysLinkInfo) []BlockVM {
 	t := i18n.Doc(lang)
 	var blocks []BlockVM
 	blocks = append(blocks, ParaVM{Text: t.MetaLine(t.MetaInputSummary(len(rep.Meta.Inputs)), rep.Meta.Format,
@@ -194,7 +194,7 @@ func vmMetaHeader(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo) []
 		Body:    strings.Join(rep.Meta.Inputs, ", ") + "\n",
 	})
 	// clientsWithSiblingFile is empty since the per-client sibling files
-	// were retired (D7), so the detail link line is never suffixed here.
+	// no longer exist, so the detail link line is never suffixed here.
 	blocks = append(blocks, ParaVM{Text: t.DetailLinkLine + "\n\n"})
 	if journeyIdx != nil {
 		blocks = append(blocks, ParaVM{Text: t.JourneyIndexLinkLine(journeyIdx.Path, journeyIdx.JourneyCount, journeyIdx.FromDisplay, journeyIdx.ToDisplay)})
@@ -202,9 +202,9 @@ func vmMetaHeader(rep *Report2, lang i18n.Lang, journeyIdx *JourneysLinkInfo) []
 	return blocks
 }
 
-// ---- §0 摘要 ----
+// ---- 摘要 ----
 
-func vmSummarySection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmSummarySection(rep *Report, lang i18n.Lang) SectionVM {
 	t := i18n.Doc(lang)
 	o := rep.Overall
 	sec := SectionVM{ID: "summary", Title: t.SummaryTitle}
@@ -217,7 +217,7 @@ func vmSummarySection(rep *Report2, lang i18n.Lang) SectionVM {
 		durCell(o.DurMSP95, p95n),
 		summaryCostCell(rep, o, t.SummaryCostUnknown))
 	sec.Blocks = append(sec.Blocks, tbl)
-	// P-07: name the interactive share explicitly — the top-line request
+	// Name the interactive share explicitly — the top-line request
 	// figure includes every workload class.
 	if n := summaryInteractiveShare(rep); n >= 0 && o.Requests > 0 {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.SummaryInteractiveNote(o.Requests, n, pctStr(float64(n)/float64(o.Requests)))})
@@ -231,10 +231,10 @@ func vmSummarySection(rep *Report2, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// summaryCostCell is §0's headline money cell: "Unpriced" rather than a
+// summaryCostCell is the summary section's headline money cell: "Unpriced" rather than a
 // number whenever nothing resolved a rate — never 0, which reads as "this
 // traffic was free".
-func summaryCostCell(rep *Report2, o Row, unknown string) string {
+func summaryCostCell(rep *Report, o Row, unknown string) string {
 	if rep.Pricing == nil || o.CostEstimate == nil {
 		return unknown
 	}
@@ -247,8 +247,8 @@ func summaryCostCell(rep *Report2, o Row, unknown string) string {
 
 // summaryInteractiveShare returns how many of rep's total requests belong
 // to the "interactive" workload class, or -1 when rep.Workloads is empty
-// (a signal the caller should skip the note). (P-07)
-func summaryInteractiveShare(rep *Report2) int {
+// (a signal the caller should skip the note).
+func summaryInteractiveShare(rep *Report) int {
 	if rep == nil || len(rep.Workloads) == 0 {
 		return -1
 	}
@@ -262,16 +262,16 @@ func summaryInteractiveShare(rep *Report2) int {
 }
 
 // highlightWasteFloorBytes is the minimum absolute tool-schema waste for
-// the §0 auto-highlight — below ~8 MB across the whole window it isn't a
+// the summary auto-highlight — below ~8 MB across the whole window it isn't a
 // headline, whatever the utilization ratio.
 const highlightWasteFloorBytes = 8 << 20
 
 // highlights generates ≤3 auto highlights from the finished buckets. Each
-// carries Code+Params alongside its rendered Text (R1: summary.json's
+// carries Code+Params alongside its rendered Text (summary.json's
 // persisted highlights[] must stay language-invariant — see
 // BuildSummarySlice, which calls this with i18n.EN for that path; Markdown
 // rendering calls it directly with the real lang, same split as findings).
-func highlights(rep *Report2, lang i18n.Lang) []Highlight {
+func highlights(rep *Report, lang i18n.Lang) []Highlight {
 	t := i18n.Doc(lang)
 	var out []Highlight
 	// 1. workload with low cache-eff
@@ -356,20 +356,19 @@ func topErrorClass(e *EndpointRow, lang i18n.Lang) string {
 	return i18n.Doc(lang).TopErrorSuffix(cls, n)
 }
 
-// ---- §8 请求详单 ----
+// ---- 请求详单 ----
 
-func vmRequestIndexSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmRequestIndexSection(rep *Report, lang i18n.Lang) SectionVM {
 	t := i18n.Doc(lang)
 	sec := SectionVM{ID: "request-index", Title: t.RequestIndexTitle}
 	sec.Blocks = append(sec.Blocks, ParaVM{Text: t.RequestIndexBody + "\n"})
-	// No per-client sibling links: the whole sibling family was retired
-	// with the human-readable request index (D7).
+	// No per-client sibling links: that whole sibling family is retired.
 	if rep.Meta.DetailsEnabled {
 		sec.Blocks = append(sec.Blocks, ParaVM{Text: t.DetailsCaptureBody})
 	} else {
 		// Default run (-details=false): details/*.md was never
 		// materialized, so point at the on-demand read primitive with a
-		// real coordinate from this run's own data (P6.2b).
+		// real coordinate from this run's own data.
 		example := ""
 		if rows := rep.RequestRows(); len(rows) > 0 {
 			example = rows[0].Req
@@ -383,11 +382,11 @@ func vmRequestIndexSection(rep *Report2, lang i18n.Lang) SectionVM {
 
 // vmAppendixSection is the appendix's "##" heading; its lines are the
 // report-level Disclaimers/Footnotes the serializer emits last.
-func vmAppendixSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmAppendixSection(rep *Report, lang i18n.Lang) SectionVM {
 	return SectionVM{ID: "appendix", Title: i18n.Doc(lang).AppendixTitle}
 }
 
-func vmAppendixClosing(rep *Report2, lang i18n.Lang) ([]string, []FootnoteVM) {
+func vmAppendixClosing(rep *Report, lang i18n.Lang) ([]string, []FootnoteVM) {
 	t := i18n.Doc(lang)
 	disclaimers := []string{
 		t.AppendixInputLine(strings.Join(rep.Meta.Inputs, ", "), rep.Meta.Format, rep.Meta.Records, rep.Meta.ParseErrors),

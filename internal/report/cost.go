@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // Package report provides cost calculation formulas and pricing resolvers for offline reports.
 package report
@@ -21,7 +21,7 @@ import (
 // real. It feeds EndpointRow.CostEstimateEst / WindowEstimatedPct, the
 // operator's calibration signal: a request with real input usage and a
 // degraded output side is ~1% estimated, not 100%.
-func costFor(pr pricing.Rate, rc *rec2) (c, estCost float64) {
+func costFor(pr pricing.Rate, rc *recRow) (c, estCost float64) {
 	raw, _ := quota.TokenCountersSides(quota.TokenUsage{
 		Fresh: rc.usage.Fresh(), CacheRead: rc.usage.CacheRead, CacheWrite: rc.usage.CacheWrite, Out: rc.usage.Out,
 	}, rc.usageInOK, rc.usageOutOK, rc.estInFresh, rc.estOut)
@@ -41,7 +41,7 @@ func costFor(pr pricing.Rate, rc *rec2) (c, estCost float64) {
 // rate for its endpoint — kept separate from aggState.ingestRecord
 // (aggregate.go) so that method stays focused on fan-out, not per-bucket
 // pricing detail.
-func accumulateCost(rep *Report2, mr, dr *Row, epsAll map[string]*EndpointRow, byClient map[string]*ClientRow, pricingSrc *pricing.Resolver, rc *rec2) {
+func accumulateCost(rep *Report, mr, dr *Row, epsAll map[string]*EndpointRow, byClient map[string]*ClientRow, pricingSrc *pricing.Resolver, rc *recRow) {
 	if pricingSrc == nil || rc.endpoint == "" {
 		return
 	}

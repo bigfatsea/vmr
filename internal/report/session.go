@@ -1,4 +1,4 @@
-// Ver 2026-07-29 22:30, by Sonnet 5
+// Ver 2026-09-23 03:25, by Pi Agent
 
 // Session analysis: group audit records into agent sessions → tasks → turns
 // and extract per-request features, all offline and rule-based (no LLM).
@@ -11,17 +11,6 @@
 // OpenClaw wrapper templates, chat_id, Claude Code metadata.user_id) are
 // used when present and silently skipped when not: a request that matches
 // nothing still groups by the generic rule, it just carries fewer tags.
-//
-// Grouping itself is a thin consumer of
-// internal/ctxgraph: AnalyzeSessionsCached runs ctxgraph.ScanCached/StitchGraph
-// over the same paths and uses its already-split Lineages as the one-session-per-
-// Lineage grouping unit, and ctxgraph.Classify for each record's delta
-// against its predecessor — replacing this package's own former private
-// message-hash vector + LCP window search (the exact duplication design doc
-// flagged: "同一个数据结构，被四个功能各自绕过"). Every OTHER feature
-// collect() extracts (Tags, ToolsDeclared, RoleChars/Tokens, chat_id, NoReply,
-// realUsers, …) stays exactly as it was — those are report-domain concerns
-// ctxgraph has no reason to know about.
 package report
 
 import (
@@ -48,6 +37,10 @@ import (
 // plus rule-extracted features. Fields are best-effort — absent signals stay
 // zero-valued.
 type ReqInfo struct {
+	// Facts is the canonical recordFacts extraction result this ReqInfo was
+	// built from (nil on test-constructed instances).
+	Facts *recordFacts
+
 	// identity within the input set
 	Path string
 	Line int
@@ -109,10 +102,9 @@ type ReqInfo struct {
 	// manifest is this record's ctxgraph.Manifest, correlated by (Path,Line)
 	// after ctxgraph.ScanCached runs — the message-hash vector, system-prompt
 	// hash, and leading-system-message count all live there now; this
-	// package no longer computes its own copy. nil
-	// for a record ctxgraph couldn't build a Manifest for at all (body
-	// wasn't a parseable chat object — same case collect() already bails
-	// out of early, see the body-parse guard below).
+	// package no longer computes its own copy. nil for a record ctxgraph
+	// couldn't build a Manifest for at all (body wasn't a parseable chat
+	// object).
 	manifest *ctxgraph.Manifest
 	// prevManifest is the manifest immediately preceding this record's own
 	// within its ctxgraph.Lineage (nil at a lineage's first manifest) —
@@ -153,7 +145,7 @@ type SessionInfo struct {
 	// than inventing a run-scoped one. This is also what makes a report's
 	// session row and a journey JourneyIndexRow.Lineages entry joinable by
 	// set membership instead of a cross-command hash-and-compare (see
-	// DevPlan P6.1 / architecture doc §7.3b).
+	// session grouping's own doc comment).
 	ID string
 	// DisplayAlias is the old s%02d positional label, kept purely for
 	// human scannability within a single report (report readers already
@@ -166,6 +158,8 @@ type SessionInfo struct {
 	IsContinuation bool   // anchor is a compaction summary (link may be off-log)
 	Recs           []*ReqInfo
 	Tasks          []*TaskInfo
+
+	segmenter *taskseg.Segmenter
 }
 
 // TaskInfo is one user-turn burst within a session.
@@ -194,54 +188,32 @@ func (a *SessionAnalysis) Lookup(path string, line int) *ReqInfo {
 
 // AnalyzeSessionsCached reads the audit files and produces the session
 // grouping plus per-request features. Unparseable lines are skipped
-// (BuildCached counts them); records without a chat body land in Ungrouped. prior may be
-// nil. prof is the taskseg.Profile collect() uses to recognize real user
+// (Build counts them); records without a chat body land in Ungrouped. prior may be
+// nil. prof is the taskseg.Profile extraction uses to recognize real user
 // instructions, a deliberate no-reply skip, and a framework-specific chat_id —
 // resolved once at cmd/vmr's composition root (see resolveTaskProfile), not
 // decided independently by report and journey.
 //
-// The file-hash-keyed cache (ctxgraph.FileCache/ScanCached) covers only the
-// ctxgraph.ScanCached pass. The analyzeFile pass below — report's own per-request
-// parse into ReqInfo — is NOT cached and reparses every file on every call;
-// see docs/VirtualModelRouter_Design_v4_Analytics.md's requests/index.json
-// section for why only the ctxgraph.Manifest-based half is.
-//
-// Per-file work runs on a bounded worker pool (analysisWorkerCount): collect()
-// is a pure function of one record with no shared mutable state, so files are
-// independent. This is safe specifically because the one genuinely
-// cross-record step — sort by timestamp, then assignNames/group/
-// linkCompactions — still runs serially after every file's records are merged
-// back in original path order, each file's own records still in line order. A
-// stable sort by TS over that merged slice is order-independent, tie-breaks
-// included: which file is read first never changes what the sort sees.
-//
-// ctxgraph.ScanCached/StitchGraph read the same paths in a goroutine alongside
-// collect() (group() needs the resulting Graph to assign sessions by Lineage).
-// Concurrent rather than back-to-back keeps this from roughly doubling
-// wall-clock on a large corpus, at the cost of transiently oversubscribing CPU
-// — acceptable for an offline command, not a hot path.
-//
-// On error, every already-dispatched file finishes reading before the first
-// error in path order is returned: wasted work on a rare, non-performance-
-// sensitive path, traded for not needing goroutine cancellation machinery.
+// The file-hash-keyed cache (ctxgraph.FileCache) covers both the
+// ctxgraph.Manifests and report's own recordFacts. On a cache hit, analyzeFile
+// reuses the cached facts and manifests with ZERO audit-file decoding; on a
+// miss, a single pass decodes each line once to produce both Manifests and
+// recordFacts.
 func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof taskseg.Profile) (*SessionAnalysis, *ctxgraph.FileCache, error) {
 	if prof == nil {
 		return nil, nil, errors.New("report: prof is nil")
 	}
+	if err := ctxgraph.CheckPathCollisions(paths); err != nil {
+		return nil, nil, err
+	}
 	a := &SessionAnalysis{byKey: map[string]*ReqInfo{}}
 
-	var g *ctxgraph.Graph
-	var cache *ctxgraph.FileCache
-	var scanErr error
-	var scanWG sync.WaitGroup
-	scanWG.Add(1)
-	go func() {
-		defer scanWG.Done()
-		g, cache, scanErr = ctxgraph.ScanCached(paths, prior)
-		if scanErr == nil {
-			ctxgraph.StitchGraph(g)
+	cache := &ctxgraph.FileCache{Files: make(map[string]ctxgraph.CachedFile, len(paths))}
+	if prior != nil {
+		for k, v := range prior.Files {
+			cache.Files[k] = v
 		}
-	}()
+	}
 
 	results := make([]fileAnalysisResult, len(paths))
 	sem := make(chan struct{}, analysisWorkerCount(len(paths)))
@@ -252,14 +224,10 @@ func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof tasks
 		go func(i int, path string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i] = analyzeFile(path, prof)
+			results[i] = analyzeFile(path, prior, prof)
 		}(i, path)
 	}
 	wg.Wait()
-	scanWG.Wait()
-	if scanErr != nil {
-		return nil, nil, scanErr
-	}
 
 	for _, res := range results {
 		if res.err != nil {
@@ -269,7 +237,14 @@ func AnalyzeSessionsCached(paths []string, prior *ctxgraph.FileCache, prof tasks
 			a.Recs = append(a.Recs, r)
 			a.byKey[fmt.Sprintf("%s\x00%d", r.Path, r.Line)] = r
 		}
+		cache.Files[res.hash] = res.cf
 	}
+
+	g, cache, err := ctxgraph.ScanCached(paths, cache)
+	if err != nil {
+		return nil, nil, err
+	}
+	ctxgraph.StitchGraph(g)
 
 	sort.SliceStable(a.Recs, func(i, j int) bool { return a.Recs[i].TS.Before(a.Recs[j].TS) })
 	assignNames(a.Recs)
@@ -299,192 +274,161 @@ func analysisWorkerCount(files int) int {
 // fileAnalysisResult is one file's independently-collected records — see
 // AnalyzeSessions for why computing this on its own goroutine is safe.
 type fileAnalysisResult struct {
-	recs []*ReqInfo
-	err  error
+	path      string
+	hash      string
+	recs      []*ReqInfo
+	manifests []*ctxgraph.Manifest
+	noBody    int
+	cf        ctxgraph.CachedFile
+	fromCache bool
+	err       error
 }
 
-// analyzeFile reads and collect()s every record in one audit file. Error
-// formatting matches exactly what the old sequential AnalyzeSessions
-// returned for each failure mode (OpenLogFile's own error already names the
-// path; a scan error gets path-wrapped here) — callers must not wrap
-// res.err again.
-func analyzeFile(path string, prof taskseg.Profile) fileAnalysisResult {
+func hasNilManifest(ms []*ctxgraph.Manifest) bool {
+	for _, m := range ms {
+		if m == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// analyzeFile resolves one file's analysis: on cache hit, it restores ReqInfo
+// from cached facts without opening the audit file; on cache miss, it parses
+// each record once to produce both Manifests and recordFacts.
+func analyzeFile(path string, prior *ctxgraph.FileCache, prof taskseg.Profile) fileAnalysisResult {
+	hash, err := ctxgraph.HashFile(path)
+	if err != nil {
+		return fileAnalysisResult{path: path, err: err}
+	}
+	if prior != nil {
+		if cached, ok := prior.Files[hash]; ok &&
+			cached.SchemaVersion == ctxgraph.CacheSchemaVersion &&
+			cached.FactsVersion == FactsSchemaVersion &&
+			!hasNilManifest(cached.Manifests) {
+			if ff, ok := loadCachedFacts(prior, hash, prof); ok {
+				cached.CanonicalPath = ctxgraph.CanonicalPath(path)
+				recs := make([]*ReqInfo, 0, len(ff.Records))
+				for i := range ff.Records {
+					recs = append(recs, reqInfoFromFacts(path, &ff.Records[i]))
+				}
+				return fileAnalysisResult{
+					path:      path,
+					hash:      hash,
+					recs:      recs,
+					manifests: cached.Manifests,
+					noBody:    cached.NoBody,
+					cf:        cached,
+					fromCache: true,
+				}
+			}
+		}
+	}
+
 	rc, err := audit.OpenLogFile(path)
 	if err != nil {
-		return fileAnalysisResult{err: err}
+		return fileAnalysisResult{path: path, hash: hash, err: err}
 	}
 	defer rc.Close()
+
+	var manifests []*ctxgraph.Manifest
 	var recs []*ReqInfo
+	var ff fileFacts
+	ff.Profile = prof.Name()
+	noBody := 0
 	line := 0
 	scanErr := audit.ForEachLine(rc, audit.MaxLogLine, func(lineBytes []byte) {
 		line++
 		var rec audit.Record
 		if err := json.Unmarshal(lineBytes, &rec); err != nil {
+			noBody++
+			ff.ParseErrors++
 			return
 		}
-		recs = append(recs, collect(&rec, path, line, prof))
-	}, func() { line++ }) // skipped oversized lines still advance the physical line number
+		if m, ok := ctxgraph.BuildManifest(&rec, path, line); ok {
+			m.Bytes = len(lineBytes)
+			manifests = append(manifests, m)
+		} else {
+			noBody++
+		}
+		rf := extractRecordFacts(&rec, line, prof)
+		ff.Records = append(ff.Records, rf)
+		recs = append(recs, reqInfoFromFacts(path, &rf))
+	}, func() {
+		line++
+		noBody++
+		ff.ParseErrors++
+	})
 	if scanErr != nil {
-		return fileAnalysisResult{err: fmt.Errorf("%s: %w", path, scanErr)}
+		return fileAnalysisResult{path: path, hash: hash, err: fmt.Errorf("%s: %w", path, scanErr)}
 	}
-	return fileAnalysisResult{recs: recs}
-}
 
-// ---- per-record collection ----
+	ff.Version = FactsSchemaVersion
+	factsData, err := json.Marshal(ff)
+	if err != nil {
+		return fileAnalysisResult{path: path, hash: hash, err: err}
+	}
 
-// collectResponse extracts collect()'s response-derived features (usage,
-// finish reason, tool call names, reassembled text, NoReply) from a
-// record's non-nil client response — split out of collect() itself purely
-// to keep function length maintainable, not
-// because it's an independently meaningful step.
-func collectResponse(r *ReqInfo, resp *audit.Message, prof taskseg.Profile) {
-	r.Usage, r.UsageInOK, r.UsageOutOK = chatmsg.ExtractUsageSides(resp.Body, r.Protocol)
-	s := taskseg.ResponseSummary(resp.Body)
-	if s == nil {
-		return
+	cf := ctxgraph.CachedFile{
+		Hash:          hash,
+		SchemaVersion: ctxgraph.CacheSchemaVersion,
+		FactsVersion:  FactsSchemaVersion,
+		CanonicalPath: ctxgraph.CanonicalPath(path),
+		Manifests:     manifests,
+		NoBody:        noBody,
+		Facts:         factsData,
 	}
-	r.Finish = s.Finish
-	for _, tc := range s.ToolCalls {
-		if tc.Name != "" {
-			r.ToolCalls = append(r.ToolCalls, tc.Name)
-		}
-	}
-	r.respText = fmtutil.CapStr(strings.TrimSpace(s.Content), 256<<10)
-	// A deliberate no-reply skip (e.g. OpenClaw's empty-content or explicit
-	// "NO_REPLY" marker convention — see prof.NoReply): the record is sent
-	// successfully but the LLM skipped acting on it — the next record
-	// carrying the same user instruction is a retry of THIS one, not a new
-	// task.
-	r.NoReply = prof.NoReply(r.Finish, r.respText)
-}
 
-// collectRoleUsage accumulates reqdetail.RoleChars(body)/reqdetail.RoleTokens(body) onto r's
-// per-role maps, lazily allocating each on first use.
-func collectRoleUsage(r *ReqInfo, body map[string]any) {
-	for role, c := range reqdetail.RoleChars(body) {
-		if r.RoleChars == nil {
-			r.RoleChars = map[string]int64{}
-		}
-		r.RoleChars[role] += c
-	}
-	for role, t := range reqdetail.RoleTokens(body) {
-		if r.RoleTokens == nil {
-			r.RoleTokens = map[string]int64{}
-		}
-		r.RoleTokens[role] += t
+	return fileAnalysisResult{
+		path:      path,
+		hash:      hash,
+		recs:      recs,
+		manifests: manifests,
+		noBody:    noBody,
+		cf:        cf,
 	}
 }
 
-// collect extracts everything needed from one record while its parsed JSON
-// is in hand; only compact metadata is retained. prof recognizes real user
-// instructions, a deliberate no-reply skip, and a framework-specific
-// chat_id — see taskseg.Profile.
-func collect(rec *audit.Record, path string, line int, prof taskseg.Profile) *ReqInfo {
-	r := &ReqInfo{
-		Path: path, Line: line, TS: rec.TS,
-		Model: rec.Model, Protocol: rec.Protocol, Outcome: rec.Outcome,
-		ClientKeyTag: rec.ClientKeyTag,
+// reqInfoFromFacts creates a ReqInfo view model backed by rf's canonical facts.
+func reqInfoFromFacts(path string, rf *recordFacts) *ReqInfo {
+	return &ReqInfo{
+		Facts:            rf,
+		Path:             path,
+		Line:             rf.Line,
+		TS:               rf.TS,
+		Model:            rf.Model,
+		Protocol:         rf.Protocol,
+		Outcome:          rf.Outcome,
+		ClientKeyTag:     rf.ClientKey,
+		TraceID:          rf.TraceID,
+		ChatID:           rf.ChatID,
+		ToolsSig:         rf.ToolsSig,
+		ToolsDeclared:    rf.ToolsDeclared,
+		declBytes:        rf.DeclBytes,
+		Tags:             rf.Tags,
+		Compaction:       rf.Compaction,
+		ToolCalls:        rf.ToolCalls,
+		Finish:           rf.Finish,
+		Truncated:        rf.Truncated,
+		Usage:            rf.Usage,
+		UsageInOK:        rf.UsageInOK,
+		UsageOutOK:       rf.UsageOutOK,
+		RoleChars:        rf.RoleChars,
+		RoleTokens:       rf.RoleTokens,
+		Fallbacks:        rf.Fallbacks,
+		Images:           rf.Images,
+		ImagesCompressed: rf.ImagesCompressed,
+		realUsers:        rf.RealUsers,
+		firstText:        rf.FirstText,
+		respText:         rf.RespText,
+		NoReply:          rf.NoReply,
+		realModel:        rf.RealModel,
+		attempts:         len(rf.Attempts),
+		durMS:            rf.DurMS,
+		ttftMS:           rf.TTFTMS,
+		stream:           rf.Stream,
+		Msgs:             rf.Msgs,
 	}
-	if tp := rec.Client.Request.Headers.Get("Traceparent"); tp != "" {
-		if parts := strings.Split(tp, "-"); len(parts) >= 2 {
-			r.TraceID = parts[1]
-		}
-	}
-	for _, at := range rec.Attempts {
-		if reqdetail.AttemptErrorClass(at) == "truncated" && rec.Outcome == "ok" {
-			r.Truncated = true
-		}
-	}
-	r.realModel = reqdetail.RealModel(rec)
-	n, compressed := reqdetail.CountImages(rec.Images)
-	r.Images, r.ImagesCompressed = n, compressed
-	r.attempts = len(rec.Attempts)
-	if r.attempts > 1 {
-		r.Fallbacks = 1
-	}
-	r.durMS, r.ttftMS, r.stream = rec.DurMS, rec.TTFTMS, rec.Stream
-	// bytesIn/bytesOut are NOT computed here even though they're cheap to
-	// derive from rec.Client.*.Body: nothing in this package ever reads
-	// them off ReqInfo (Build's own pass computes its own copy, into rec2,
-	// since that's the one that actually feeds the aggregate report) — this
-	// used to duplicate that same json.Marshal-based sizing on every
-	// record's full body for no reason.
-	//
-	// Attempt.Norm is likewise NOT pulled onto ReqInfo here: it's an
-	// attempt-level, per-endpoint signal (which endpoint's response needed a
-	// think_strip/soft_block quirk fix), not a per-request/session one — a
-	// "last non-empty attempt" copy would silently drop an earlier failed
-	// attempt's marker on any request with a failover chain. ingest.go's own
-	// EndpointRow.IngestAttempt reads rec.Attempts[i].Norm directly,
-	// attributed to the specific EndpointRow that attempt hit
-	// (EndpointRow.NormCounts).
-	if rec.Client.Response != nil {
-		collectResponse(r, rec.Client.Response, prof)
-	}
-
-	body, ok := rec.Client.Request.Body.(map[string]any)
-	if !ok {
-		return r
-	}
-	r.ToolsDeclared = chatmsg.ToolNames(body)
-	if tools, hasTools := body["tools"]; hasTools || len(r.ToolsDeclared) > 0 {
-		r.ToolsSig = reqdetail.ToolsSig(r.ToolsDeclared)
-		if raw, err := json.Marshal(tools); err == nil {
-			r.declBytes = int64(len(raw))
-		}
-	}
-	// SessKey (metadata.user_id, else "anchor:" + first non-system message
-	// hash) is NOT computed here — group() sources it straight from this
-	// record's correlated ctxgraph.Manifest.SessKey once ctxgraph.ScanCached has
-	// run (one computation, not two).
-
-	msgs := chatmsg.Messages(body) // anthropic system becomes message #0 — same shape both protocols
-	r.Msgs = len(msgs)
-	collectRoleUsage(r, body)
-	rawMsgs := chatmsg.RawArray(body)
-	off := chatmsg.MsgOffset(body)
-	// leadSys mirrors ctxgraph.Manifest.LeadSys's definition (count of
-	// contiguous leading role=="system" messages) — recomputed here as a
-	// cheap, hash-free loop bound purely to skip that block in THIS loop;
-	// nothing outside collect() reads it (the grouping code below reads
-	// r.manifest.LeadSys instead, once correlated).
-	leadSys := 0
-	var lastUser string
-	for i, m := range msgs {
-		if m.Role == "system" && i == leadSys { // leading system block
-			leadSys++
-			continue
-		}
-		if r.firstText == "" {
-			r.firstText = fmtutil.CapStr(m.Text, 512<<10)
-		}
-		if m.Role == "user" {
-			lastUser = m.Text
-		}
-	}
-	// One dedicated pass building the real-instruction index (see
-	// taskseg.IndexRealUsers) rather than folding prof.RealUserText's regex
-	// work into the loop above — the extra array pass is cheap; what matters
-	// (per performance requirements) is that this regex only runs
-	// once per user message, not that it shares a loop with leadSys/firstText.
-	r.realUsers = taskseg.IndexRealUsers(prof, msgs, rawMsgs, off)
-
-	r.ChatID = prof.ChatID(msgs)
-
-	// Compaction: summarization system prompt, or the no-tools +
-	// max_completion_tokens shape (three-signal compaction heuristic).
-	_, hasMaxCT := body["max_completion_tokens"]
-	sysText := ""
-	if leadSys > 0 {
-		sysText = msgs[0].Text
-	}
-	if strings.Contains(strings.ToLower(fmtutil.CapStr(sysText, 200)), "summarization") ||
-		(len(r.ToolsDeclared) == 0 && hasMaxCT && r.TraceID == "") {
-		r.Compaction = true
-	}
-
-	r.Tags = templateTags(r.firstText, lastUser, r.Compaction)
-	return r
 }
 
 // templateTags classifies known message shapes. Unknown shapes get no tag —
@@ -512,7 +456,7 @@ func templateTags(firstText, lastUser string, compaction bool) []string {
 // ---- grouping ----
 
 // assignNames gives every record its deterministic detail filename, so
-// WriteDetails and the requests export agree on links. No batch-order
+// detail export and the requests export agree on links. No batch-order
 // state (an earlier design threaded a "used" collision-counter map through
 // the batch) is needed any more: the
 // name is keyed by this record's own coordinate hash
@@ -650,44 +594,34 @@ func linkStitchedLineages(g *ctxgraph.Graph, sessionOfLineage map[int]*SessionIn
 	}
 }
 
-// attach adds a record to a session: its parent is the previous record
-// already attached to this SAME session (== the same ctxgraph.Lineage,
-// compaction-tagged records excluded), its delta boundary comes from
-// ctxgraph.Classify against that parent's own manifest, and it opens a new
-// task when warranted. Classify is called fresh on the two manifests rather
-// than trusting Lineage.Edges' positional adjacency, so this stays correct
-// even when a Compaction-tagged record (excluded from s.Recs) happens to sit
-// between them in the raw manifest sequence.
+// attach adds a record to a session: its delta boundary, task boundary, and
+// instruction preview are computed by the canonical taskseg.Segmenter, ensuring
+// compaction-tagged records are excluded as predecessors and the segmentation
+// logic is identical between report and journey.
 func attach(s *SessionInfo, r *ReqInfo) {
+	if s.segmenter == nil {
+		s.segmenter = taskseg.NewSegmenter()
+	}
 	var parent *ReqInfo
 	if len(s.Recs) > 0 {
 		parent = s.Recs[len(s.Recs)-1]
 	}
-	newTask := parent == nil
-	if parent != nil {
-		p := parent
-		e := ctxgraph.Classify(p.manifest, r.manifest)
-		r.DeltaStart = r.manifest.LeadSys + e.LCP
-		r.ReplacedTail = len(p.manifest.Keys) - e.LCP
-		r.SysChanged = p.manifest.SysHash != r.manifest.SysHash
-		r.Parent = p
-		traceChanged := r.TraceID != "" && p.TraceID != "" && r.TraceID != p.TraceID
-		hasNewInstr := taskseg.HasNewInstruction(r.realUsers, taskseg.ManifestKeySet(p.manifest), r.manifest, r.DeltaStart, r.Msgs)
-		// If the parent record ended in NO_REPLY (the LLM skipped its
-		// reply), the user's instruction in this record is a RETRY of the
-		// parent's skipped instruction, not a new user intent. We treat
-		// the retry as the same task to keep task boundaries aligned with
-		// actual user actions (a user types once → one task; multiple
-		// records may result from retries / streaming re-sends).
-		newTask = taskseg.IsNewTask(traceChanged, p.NoReply, hasNewInstr)
-	} else {
-		r.DeltaStart = 0 // whole request is "new" for the session's first record
-	}
-	r.NewInstruction = taskseg.LastInstruction(r.realUsers, r.DeltaStart)
+	b := s.segmenter.Commit(taskseg.StepInput{
+		Manifest:   r.manifest,
+		RealUsers:  r.realUsers,
+		TotalMsgs:  r.Msgs,
+		NoReply:    r.NoReply,
+		Compaction: r.Compaction,
+	})
+	r.Parent = parent
+	r.DeltaStart = b.DeltaStart
+	r.ReplacedTail = b.ReplacedTail
+	r.SysChanged = b.SysChanged
+	r.NewInstruction = b.Instruction
 
 	s.Recs = append(s.Recs, r)
 	r.SessSeq = len(s.Recs)
-	if newTask || len(s.Tasks) == 0 {
+	if b.NewTask || len(s.Tasks) == 0 {
 		s.Tasks = append(s.Tasks, &TaskInfo{Title: taskTitle(r)})
 	}
 	t := s.Tasks[len(s.Tasks)-1]
@@ -698,8 +632,8 @@ func attach(s *SessionInfo, r *ReqInfo) {
 // taskTitle resolves this task's title: r.NewInstruction (already
 // taskseg.LastInstruction-derived) when non-empty, else a fallback —
 // heartbeat first, then a generic placeholder. Not localized: this fallback
-// is computed inside AnalyzeSessions, the one full-corpus pass report.BuildCached
-// deliberately runs only once (see build_cached.go's own "two-read design"
+// is computed inside AnalyzeSessions, the one full-corpus pass report.Build
+// deliberately runs only once (see build.go's own "two-read design"
 // doc comment) — localizing it would mean re-running that whole pass a
 // second time per language just for a rare placeholder string. See
 // taskseg.TaskTitle's own doc comment for why it takes the fallback as a

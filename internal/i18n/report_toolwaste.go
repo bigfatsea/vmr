@@ -1,11 +1,11 @@
 // Ver 2026-08-29, by Sonnet 5
 
-// Chrome strings for the §7 tool-waste totals line (vmToolWasteTotals in
+// Chrome strings for the tool-waste totals line (vmToolWasteTotals in
 // internal/report/viewmodel_efficiency.go). Fixed UI strings only; every
 // number comes from the report's own rep.Tools rows.
 package i18n
 
-// ToolWasteText is the §7 tool-waste totals line's labels, in one language.
+// ToolWasteText is the tool-waste totals line's labels, in one language.
 type ToolWasteText struct {
 	StatShipped string
 	StatDead    string

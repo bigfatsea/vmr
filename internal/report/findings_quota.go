@@ -1,6 +1,6 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-23 04:06, by Claude Opus 5.5
 
-// §7 Provider Quota Exhaustion finding (quota design specification). Split out of
+// Provider Quota Exhaustion finding (quota design specification). Split out of
 // metrics.go on purpose (see that file's own note in the dev plan on why:
 // buildFindings is already long and internal/report/metrics.go carries no
 // archtest line budget of its own to grow into unnoticed).
@@ -36,7 +36,7 @@ const quotaExhaustionThresholdPct = 90.0
 // by provider name, then by the row's model scope — the same "report only
 // the worst one" convention buildFindings' other detectors already use (see
 // e.g. its worst-tool-shape / worst-session selection).
-func quotaExhaustionFinding(rep *Report2, lang i18n.Lang) *Finding {
+func quotaExhaustionFinding(rep *Report, lang i18n.Lang) *Finding {
 	var worst *ProviderQuotaRow
 	for i := range rep.ProviderQuotas {
 		r := &rep.ProviderQuotas[i]

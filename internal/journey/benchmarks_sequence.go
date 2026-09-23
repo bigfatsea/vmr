@@ -1,4 +1,4 @@
-// Ver 2026-08-16 18:30, by Gemini 3.7 Flash
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 package journey
 
@@ -27,7 +27,7 @@ type patternStats struct {
 }
 
 // isSelfRepeat reports whether all tool names in names are identical (e.g. exec -> exec).
-// Excluded from N-gram pattern mining so genuine cross-tool workflows surface (问题 18b).
+// Excluded from N-gram pattern mining so genuine cross-tool workflows surface.
 func isSelfRepeat(names []string) bool {
 	for i := 1; i < len(names); i++ {
 		if names[i] != names[0] {

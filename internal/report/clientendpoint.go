@@ -1,10 +1,9 @@
-// Ver 2026-08-12 23:40, by Opus 5
+// Ver 2026-09-23 04:04, by Claude Opus 5.5
 
-// §5.5 按客户端的上游归属: for each client_key_tag, which upstream
+// 按客户端的上游归属: for each client_key_tag, which upstream
 // endpoints (protocol:provider:model) it actually hit and how many tokens
-// landed on each. Grouped by client, not a client×endpoint matrix — see
-// the cost analysis design's
-// §3.2 for why: the matrix's sparse cells add nothing a grouped table
+// landed on each. Grouped by client, not a client×endpoint matrix — the
+// matrix's sparse cells add nothing a grouped table
 // doesn't already answer.
 //
 // Must be a streaming collector (unlike provider.go's post-hoc roll-up):
@@ -24,7 +23,7 @@ func newClientEndpointCollector() *clientEndpointCollector {
 	return &clientEndpointCollector{byKey: map[string]*ClientEndpointRow{}}
 }
 
-func (c *clientEndpointCollector) add(rc *rec2) {
+func (c *clientEndpointCollector) add(rc *recRow) {
 	if rc.clientKey == "" || rc.endpoint == "" {
 		return
 	}
@@ -48,8 +47,8 @@ func (c *clientEndpointCollector) add(rc *rec2) {
 }
 
 // clientEndpointScale reports how many distinct clients and how many rows
-// §5.5 will render. §5.5 is a client×endpoint product with no Top-N cap by
-// design (see the dev plan's risk table) — this is what lets a deployment
+// the section will render. It is a client×endpoint product with no Top-N cap by
+// design — this is what lets a deployment
 // whose section has quietly grown to hundreds of rows notice, instead of
 // finding out by scrolling. Lives here rather than inline in aggregate.go's
 // finishBuckets: counting this collector's own output is this collector's

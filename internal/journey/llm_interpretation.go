@@ -3,7 +3,8 @@
 // The persisted half of the LLM interpretation layer: the
 // LLMInterpretation record (what -llm-addr's outcome becomes inside
 // j-<id>.json's llm_interpretation / compare-*.json's
-// llm_interpretation+llm_divergence, design doc §3.6) and its one
+// llm_interpretation+llm_divergence, the design doc's interpretation
+// record) and its one
 // renderer. Split out of llm.go when that file grew past its archtest
 // budget: llm.go owns the calling/caching machinery, this file owns the
 // record both renderers consume — the .md's LLM section is a pure function
@@ -35,7 +36,7 @@ const (
 
 // LLMInterpretation is one Interpret call's persisted outcome —
 // JourneySummary's / Comparison's llm_interpretation (and the divergence
-// call's llm_divergence) field. Design doc §3.6: the interpretation lands in
+// call's llm_divergence) field. The interpretation lands in
 // the journey JSON (模型、耗时、状态与正文) so the .md's LLM section is a pure
 // function of the JSON — that is what lets -render-only reproduce it without
 // scraping the old .md (the removed bypass-splice hack). Text carries the
@@ -54,7 +55,7 @@ type LLMInterpretation struct {
 	Cached     bool   `json:"cached,omitempty"`
 	Text       string `json:"text,omitempty"`
 	// LLMLang is the language the model was prompted in (Interpret's own
-	// lang argument). R1's LLM-original-text exemption (same as
+	// lang argument). The LLM-original-text exemption (same as
 	// Finding.LLMLang): Text is the model's own generated language and is
 	// never re-derivable in another language without a new call, so it is
 	// exempt from language-invariance as long as this field says which
@@ -107,7 +108,7 @@ func scopeTitleLabel(lang i18n.Lang, scope string) string {
 // clearly separated section, never blended into the fact-layer sections
 // above it. A nil or failed record renders nothing: the full run also left
 // the .md without a section in those cases, so this is what keeps
-// -render-only byte-identical (D11). scope on the record distinguishes
+// -render-only byte-identical. scope on the record distinguishes
 // compare-*.md's two possible sections (see LLMInterpretation.Scope).
 func RenderLLMSection(rec *LLMInterpretation, lang i18n.Lang) string {
 	if rec == nil || rec.Status != LLMStatusOK {

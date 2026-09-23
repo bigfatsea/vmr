@@ -1,4 +1,4 @@
-// Ver 2026-07-28 21:00, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -61,7 +61,7 @@ func TestStickyFirstRequestOfEachSessionIsExcluded(t *testing.T) {
 // "it switched".
 func TestStickyUngroupedRecordsAreCountedNotClassified(t *testing.T) {
 	sc := newStickyCollector()
-	sc.add(&rec2{endpoint: "epA", model: "coding", usageInOK: true, usageOutOK: true})
+	sc.add(&recRow{endpoint: "epA", model: "coding", usageInOK: true, usageOutOK: true})
 	sc.bySession["s1"] = []stickyEntry{stickyE(1, "epA", "coding", 0, 1), stickyE(2, "epA", "coding", 5, 5)}
 	got := sc.result()
 	if got.Ungrouped != 1 {
@@ -76,8 +76,8 @@ func TestStickyUngroupedRecordsAreCountedNotClassified(t *testing.T) {
 // must not be miscounted as ungrouped either.
 func TestStickySkipsRecordsWithNoServingEndpoint(t *testing.T) {
 	sc := newStickyCollector()
-	sc.add(&rec2{endpoint: "", sessionID: "", model: "coding"})
-	sc.add(&rec2{endpoint: "", sessionID: "s1", model: "coding"})
+	sc.add(&recRow{endpoint: "", sessionID: "", model: "coding"})
+	sc.add(&recRow{endpoint: "", sessionID: "s1", model: "coding"})
 	if sc.ungrouped != 0 || len(sc.bySession) != 0 {
 		t.Errorf("ungrouped=%d sessions=%d, want 0/0", sc.ungrouped, len(sc.bySession))
 	}
@@ -88,7 +88,7 @@ func TestStickySkipsRecordsWithNoServingEndpoint(t *testing.T) {
 // on a provider that reports them inconsistently.
 func TestStickyFreshNeverNegative(t *testing.T) {
 	sc := newStickyCollector()
-	sc.add(&rec2{
+	sc.add(&recRow{
 		endpoint: "epA", sessionID: "s1", model: "coding", usageInOK: true, usageOutOK: true,
 		usage: chatmsg.Usage{In: 10, CacheRead: 100, CacheWrite: 50},
 	})

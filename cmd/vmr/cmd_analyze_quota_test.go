@@ -1,4 +1,4 @@
-// Ver 2026-08-13, by Opus 5
+// Ver 2026-09-23 02:50, by pi
 package main
 
 import (
@@ -309,7 +309,7 @@ func TestCmdReport_QuotaSourceMetaWiredWhenSubTableRenders(t *testing.T) {
 	if err := json.Unmarshal(data, &sum); err != nil {
 		t.Fatal(err)
 	}
-	var rep report.Report2
+	var rep report.Report
 	if sum.Meta != nil {
 		rep.Meta.QuotaJSONPath = sum.Meta.QuotaJSONPath
 		rep.Meta.QuotaInputOutsideLogDir = sum.Meta.QuotaInputOutsideLogDir

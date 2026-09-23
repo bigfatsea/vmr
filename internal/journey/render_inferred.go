@@ -8,8 +8,8 @@ import "vmr/internal/i18n"
 // formatFindingHeader renders the header line for a finding, adding an [AI推测] tag
 // and confidence badge when Source == SourceLLMInferred. When all carries another
 // Finding with the same Code but a different Source (a rule detector and an LLM
-// detector both independently firing on the same Code — see P1b.5's
-// FindingPlanExecutionMisalignment, produced by both detectPlanExecutionMisalignment
+// detector both independently firing on the same Code — see the
+// Plan Execution Misalignment finding, produced by both detectPlanExecutionMisalignment
 // and detectLLMPlanMisalignment), a rule-sourced entry is also tagged (normally left
 // bare) so the two independent hits read as clearly distinct verdicts rather than a
 // duplicate.

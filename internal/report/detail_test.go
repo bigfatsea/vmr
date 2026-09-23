@@ -1,4 +1,4 @@
-// Ver 2026-08-20 00:00, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -167,7 +167,7 @@ func TestWriteDetailsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, nil, nil, i18n.EN, taskseg.OpenClawAware)
+	n, err := writeDetailsBaseline([]string{src}, out, nil, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestWriteDetailsByTag(t *testing.T) {
 	}
 	dir := t.TempDir()
 	out := filepath.Join(dir, "details")
-	n, err := WriteDetails([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware)
+	n, err := writeDetailsBaseline([]string{src}, out, a, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldDir := filepath.Join(dir, "old-details")
-	oldN, err := WriteDetails([]string{path}, oldDir, sess, nil, i18n.EN, taskseg.OpenClawAware)
+	oldN, err := writeDetailsBaseline([]string{path}, oldDir, sess, nil, i18n.EN, taskseg.OpenClawAware)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestBuildOnRecordMatchesWriteDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, dw.Submit, taskseg.OpenClawAware, nil, nil, nil); err != nil {
+	if _, _, _, err := Build(BuildOptions{Paths: []string{path}, OnRecord: dw.Submit}); err != nil {
 		t.Fatal(err)
 	}
 	newN, err := dw.Close()
@@ -395,7 +395,7 @@ func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	fullOut := filepath.Join(dir, "full-details")
-	if _, err := WriteDetails([]string{targetPath, otherPath}, fullOut, fullSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
+	if _, err := writeDetailsBaseline([]string{targetPath, otherPath}, fullOut, fullSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
 		t.Fatal(err)
 	}
 
@@ -404,7 +404,7 @@ func TestWriteDetails_SubsetMatchesFullCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	subsetOut := filepath.Join(dir, "subset-details")
-	if _, err := WriteDetails([]string{targetPath}, subsetOut, subsetSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
+	if _, err := writeDetailsBaseline([]string{targetPath}, subsetOut, subsetSess, nil, i18n.EN, taskseg.OpenClawAware); err != nil {
 		t.Fatal(err)
 	}
 

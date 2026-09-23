@@ -1,7 +1,7 @@
-// Ver 2026-09-21, by Sonnet 5
+// Ver 2026-09-23 04:16, by Claude Opus 5.5
 
 // vmr analyze -open: a one-shot local viewer for this run's output
-// directory — distinct from analytics.serve (KNOWN_ISSUES §1.5, "analytics.serve
+// directory — distinct from analytics.serve (KNOWN_ISSUES' output-conventions section, "analytics.serve
 // 与 -open 的分工"). That one is a long-running, authenticated mount point
 // sized for request-browser's real query workload; this is a zero-config,
 // single-invocation viewer for the document pages `vmr analyze` just wrote,

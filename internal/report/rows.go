@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // The report's data shape: every struct that Build fills in and that both
 // renderers (vmr-report.md, rebuilt from the slices) read back out. Split out of
@@ -17,27 +17,27 @@ import (
 )
 
 // Format is the aggregate report's structure version — the same version
-// unit as the snapshot manifest (§8.1: 整套产物一个版本单位), so it is an
-// alias, never an independently bumped number.
+// unit as the snapshot manifest — the whole product is one version unit —
+// so it is an alias, never an independently bumped number.
 const Format = ManifestFormat
 
 // SlowThresholdMS is the default "unbearably slow" cutoff for slow_requests
 // (V2 C-family / F-family). 30s matches the V2 spec.
 const SlowThresholdMS = 30_000
 
-// Report2 is the report half's in-memory aggregate shape: what Build
+// Report is the report half's in-memory aggregate shape: what Build
 // fills in and what both consumers read back out. It is NOT persisted —
-// since D2 the five macro slices (slices.go) are the only persisted macro
-// data; -render-only rebuilds an in-memory Report2 from those slices via
+// the five macro slices (slices.go) are the only persisted macro
+// data; -render-only rebuilds an in-memory Report from those slices via
 // LoadReport (viewmodel_doc.go), and the ViewModel builders (viewmodel_*.go)
 // consume the same shape in the full-run path. Keeping one shape for both
 // directions is what makes full-run and -render-only renders take the same
-// code path (D11/§5.0) without a second persistence layer.
+// code path without a second persistence layer.
 //
 // Every aggregating bucket carries the derived fields that are cheap to
 // compute during finish* (fresh tokens, cache_efficiency, slow_requests,
 // true stream_ms percentiles) since the raw sums already exist then.
-type Report2 struct {
+type Report struct {
 	Meta           Meta               `json:"meta"`
 	Overall        Row                `json:"overall"`
 	ByModel        []Row              `json:"by_model"`
@@ -57,7 +57,7 @@ type Report2 struct {
 	ProviderQuotas []ProviderQuotaRow `json:"provider_quotas,omitempty"`
 	// Skipped-window stats: EndpointsAll rows whose provider name matched no
 	// quotas entry (see quotaWindow.skippedAttempts) — rendered as the note
-	// under the §2.5 quota sub-table and carried in the JSON contract so a
+	// under the provider-quota sub-table and carried in the JSON contract so a
 	// programmatic consumer sees the same "contributed nothing" disclosure.
 	ProviderQuotaSkippedAttempts  int                 `json:"provider_quota_skipped_attempts,omitempty"`
 	ProviderQuotaSkippedProviders []string            `json:"provider_quota_skipped_providers,omitempty"`
@@ -101,7 +101,7 @@ type Meta struct {
 	// some under -render-all before the report half ran. Not simply the
 	// -details flag: a flag-only check goes stale the moment the two
 	// halves of one `vmr analyze` invocation can populate details/
-	// independently. §8's link line
+	// independently. The request-detail index's link line
 	// reads it to decide between "here are the links" and "here's how to
 	// fetch one on demand" (`vmr replay -print -req <coord>`); this is a
 	// directory-level approximation for that one summary sentence — the
@@ -109,7 +109,7 @@ type Meta struct {
 	// individually and never produces a dead link either way.
 	DetailsEnabled bool `json:"details_enabled,omitempty"`
 	// SelfTrafficExcluded is how many records this run's self-traffic
-	// exclusion (P6.4) skipped from every aggregation bucket — vmr
+	// exclusion skipped from every aggregation bucket — vmr
 	// journey's own -llm-addr calls routed back through this instance, not
 	// the workload actually being analyzed. Counted, never silently
 	// dropped; 0 when no exclusion tags were configured or none matched.
@@ -133,8 +133,8 @@ type Meta struct {
 	// later.
 	ReportConfigPath string `json:"report_config_path,omitempty"`
 	// QuotaJSONPath/QuotaInputOutsideLogDir are cmd_report.go's
-	// composition-root facts about §2.5's live-quota counter, set on rep
-	// AFTER Build/BuildCached returns (report itself never imports config,
+	// composition-root facts about the live-quota sub-table, set on rep
+	// AFTER Build returns (report itself never imports config,
 	// so it can't compute either of these) — see cmdReport's own comment
 	// at the call site. Both zero-valued when the sub-table has nothing to
 	// render (no point naming a source for a table that isn't shown).
@@ -205,7 +205,7 @@ type Row struct {
 
 	TrafficStats
 
-	// Confidence / sample-size disclosures (§3.3)
+	// Confidence / sample-size disclosures
 	TokensCoveragePct float64 `json:"tokens_coverage_pct,omitempty"`
 	DurLowN           bool    `json:"dur_low_n,omitempty"`
 
@@ -240,7 +240,7 @@ type Row struct {
 	// were declared with JSON tags from this file's first version and never
 	// once written, so they could only ever render as absent (both were
 	// omitempty). Per-request message counts do exist and are reported —
-	// RequestRow.Msgs, from rec2.msgs — the bucket-level roll-up simply
+	// RequestRow.Msgs, from recRow.msgs — the bucket-level roll-up simply
 	// never had an accumulator or a reader. A field in this file is a public
 	// contract; one that cannot carry a value is a promise the report can't
 	// keep.
@@ -349,9 +349,10 @@ type EndpointRow struct {
 	// Kept in SEPARATE fields rather than folded into TokensInFresh/TokensOut
 	// on purpose — every existing consumer of those two (cache efficiency,
 	// $ estimates, per-endpoint token tables) is asking about measured usage
-	// and must not silently start averaging an estimate into it. §2.5's quota
-	// column is the one consumer that deliberately adds them, because the
-	// router charged both (see providerquota.go's MetricTokens branch).
+	// and must not silently start averaging an estimate into it. The provider-
+	// quota sub-table's live column is the one consumer that deliberately adds
+	// them, because the router charged both (see providerquota.go's MetricTokens
+	// branch).
 	TokensInFreshEst int64   `json:"tokens_in_fresh_est,omitempty"`
 	TokensOutEst     int64   `json:"tokens_out_est,omitempty"`
 	TokensEstimated  int     `json:"tokens_estimated,omitempty"`
@@ -443,15 +444,15 @@ type WorkloadRow struct {
 	ToolCallRate          float64 `json:"tool_call_rate,omitempty"`
 }
 
-// SessionRow is the per-session drill-down (§6 Sessions & Tasks): no latency columns in
-// Markdown, but the data stays in JSON (P6). context_growth = last/first turn.
+// SessionRow is the per-session drill-down: no latency columns in
+// Markdown, but the data stays in JSON. context_growth = last/first turn.
 type SessionRow struct {
 	// ID is the underlying Lineage's content-addressed identity
 	// ("l-<hash8>", see SessionInfo.ID's doc comment) — stable across
 	// independent runs/subsets, joinable against journey's
 	// JourneyIndexRow.Lineages by set membership. Alias is the old
 	// run-scoped s%02d label, kept only for human scannability within
-	// this one report; never use it as a lookup key (P6.1).
+	// this one report; never use it as a lookup key.
 	ID            string `json:"id"`
 	Alias         string `json:"alias,omitempty"`
 	Title         string `json:"title,omitempty"`
@@ -467,7 +468,7 @@ type SessionRow struct {
 	Fallbacks int `json:"fallbacks,omitempty"`
 	Truncated int `json:"truncated,omitempty"`
 
-	// latency kept in JSON for P6 completeness, not shown in MD
+	// latency kept in JSON for completeness, not shown in MD
 	TTFTKnown int   `json:"ttft_known,omitempty"`
 	TTFTMSP95 int64 `json:"ttft_ms_p95,omitempty"`
 	DurMSMax  int64 `json:"dur_ms_max,omitempty"`
@@ -488,7 +489,7 @@ type SessionRow struct {
 	ttfts []int64
 }
 
-// CompactionRow is one standalone compaction LLM call (CCR N-4): a
+// CompactionRow is one standalone compaction LLM call: a
 // report-only, body-sniffed concept (ReqInfo.Compaction) distinct from the
 // anchor-gluing-style structural session splits SessionRow.ContinuedFrom
 // already covers — this row is specifically about
@@ -515,7 +516,7 @@ type CompactionRow struct {
 	SurvivedEntities  []string `json:"survived_entities,omitempty"`
 }
 
-// ToolShapeRow is per declared-tool-set waste (§7 Efficiency & Waste's Top-N tool shapes): F-family.
+// ToolShapeRow is per declared-tool-set waste (the efficiency table's Top-N tool shapes): F-family.
 type ToolShapeRow struct {
 	Shape         string         `json:"shape"`
 	Requests      int            `json:"requests"`
@@ -530,14 +531,14 @@ type ToolShapeRow struct {
 	SchemaWasteBytes   int64   `json:"schema_waste_bytes"`  // shipped × (1 - utilization)
 }
 
-// Finding is one row of the §7 efficiency/waste table.
+// Finding is one row of the efficiency/waste table.
 type Finding struct {
 	// Code is a stable, non-localized identifier for programmatic consumption.
 	Code FindingCode `json:"code"`
 	// Params carries the raw values that drove this finding (a shape name,
 	// a byte count, a percentage as a bare float, a session id — never a
 	// pre-formatted or pre-escaped string) so a consumer can reconstruct
-	// the sentence in any language without re-aggregating (R1: language is
+	// the sentence in any language without re-aggregating (language is
 	// a render-time concern, never baked into the data product). Keys are
 	// finding-specific; see buildFindings' call sites for what each Code
 	// populates.
@@ -545,7 +546,7 @@ type Finding struct {
 	// Finding/Value/Implicated/Action are narrative text. Build populates
 	// them with the English baseline (buildFindingsForJSON) and nothing
 	// overwrites that afterward — the persisted JSON is deliberately
-	// language-invariant (R1). They stay for one transition version so an
+	// language-invariant. They stay for one transition version so an
 	// existing consumer reading plain sentences doesn't break; new code
 	// should prefer Code+Params. Markdown rendering computes its own
 	// separate copy in the report's actual display language — see
@@ -557,7 +558,7 @@ type Finding struct {
 	Action     string `json:"action,omitempty"`
 }
 
-// FindingCode identifies which §7 finding a row is, independent of its
+// FindingCode identifies which efficiency finding a row is, independent of its
 // (localized) display text. See Finding.Code.
 type FindingCode string
 
@@ -587,7 +588,7 @@ const (
 // Highlight is one row of summary.json's opening highlights list — same
 // Code+Params+Text split as Finding, and for the same reason: highlights()
 // used to return bare localized sentences, which meant summary.json's
-// highlights field baked language into the data product (R1 violation).
+// highlights field baked language into the data product.
 // Text carries the English baseline for the persisted JSON; Markdown
 // rendering calls highlights() directly with the real lang and never reads
 // a persisted copy.
@@ -598,10 +599,10 @@ type Highlight struct {
 }
 
 // RequestRow is one row of requests/index.json's "requests" field: the per-request drill-down
-// backing the redesigned index (§8 Request Detail Index). Every field is rule-extracted;
+// backing the request-detail index. Every field is rule-extracted;
 // unavailable signals are omitted rather than fabricated.
 type RequestRow struct {
-	// TS is epoch milliseconds (§5.6: the machine form is ms for sorting and
+	// TS is epoch milliseconds (the machine form is ms for sorting and
 	// JS Date/dur_ms alignment); TSDisplay is the DisplayZone-formatted
 	// string the frontend shows verbatim so it never does timezone math.
 	TS             int64   `json:"ts"`
@@ -697,10 +698,9 @@ type StickyModelRow struct {
 }
 
 // GuardSummary is Agent Guard's offline credential-exposure aggregate
-// (the Agent Guard spec M2; guardcol.go builds
-// it from every ingested record's audit.Record.Guard — the Authoritative
-// Fast Path — or, when that is nil, the Fallback Path's own scan of
-// Client.Request/Response.Body (ADR-12; guardscan.go).
+// (guardcol.go builds it from every ingested record's audit.Record.Guard —
+// the Authoritative Fast Path — or, when that is nil, the Fallback Path's
+// own scan of Client.Request/Response.Body; guardscan.go).
 type GuardSummary struct {
 	// RecordsScanned counts every record Agent Guard produced a verdict
 	// for, stamped or fallback-scanned — the denominator for
@@ -708,7 +708,7 @@ type GuardSummary struct {
 	RecordsScanned  int `json:"records_scanned"`
 	RecordsWithHits int `json:"records_with_hits"`
 	// RecordsStamped/RecordsFallbackScanned split RecordsScanned by
-	// source (ADR-12's two paths).
+	// source (stamped vs fallback-scanned).
 	RecordsStamped         int            `json:"records_stamped,omitempty"`
 	RecordsFallbackScanned int            `json:"records_fallback_scanned,omitempty"`
 	RecordsScanFailed      int            `json:"records_scan_failed,omitempty"`
@@ -718,12 +718,12 @@ type GuardSummary struct {
 	// report as a single number, so it is only set when every scanned
 	// record agrees (see guardcol.go's result()).
 	RulesetVersion int `json:"ruleset_version,omitempty"`
-	// Providers is the M2.4 Provider exposure attribution — §4.7's
+	// Providers is the provider exposure attribution — the guard report's
 	// highest-value block: which actual upstream (the served attempt,
 	// never the virtual model's whole candidate set — Failover can change
 	// which provider a retry lands on) outbound hits actually reached.
 	Providers []GuardProviderRow `json:"providers,omitempty"`
-	// Inbound is the M2.3 inbound forensics block — nil when the
+	// Inbound is the inbound forensics block — nil when the
 	// Fallback Path never had a response body to scan (Authoritative
 	// records with no equivalent stamped inbound signal yet, or records
 	// with no Client.Response at all).
@@ -731,7 +731,7 @@ type GuardSummary struct {
 }
 
 // GuardRuleRow is one credential rule's aggregate across the whole window —
-// the ranking table §4.7 of the design spec calls for: rule × unique
+// the ranking table the design spec calls for: rule × unique
 // fingerprint count × total hit count × "context amplification factor"
 // (MaxPerRecord — see audit.Hit.Count's own doc comment for why that is
 // the correct measure of amplification, not a leak count).
@@ -745,7 +745,7 @@ type GuardRuleRow struct {
 }
 
 // GuardProviderRow is one actual upstream provider's outbound-credential
-// exposure (M2.4; §4.7's "which relay to drop first" answer) — attributed
+// exposure (the "which relay to drop first" answer) — attributed
 // by the record's actually-served endpoint, never the virtual model's
 // whole candidate set.
 type GuardProviderRow struct {
@@ -755,9 +755,9 @@ type GuardProviderRow struct {
 	RecordsWith       int    `json:"records_with"`
 }
 
-// GuardInboundSummary is the M2.3 inbound forensics block: what the
-// client actually received (K-G14 — this reports what happened, not what
-// was blocked; nothing here implies interception).
+// GuardInboundSummary is the inbound forensics block: what the
+// client actually received — this reports what happened, not what
+// was blocked; nothing here implies interception.
 type GuardInboundSummary struct {
 	// RuneCounts sums guard.ClassifyRunes' categories across every scanned
 	// response's assistant text and tool-call arguments (a re-scan of what
@@ -773,7 +773,7 @@ type GuardInboundSummary struct {
 	// SanitizedRuneCounts is the only record of what existed before the
 	// strip — "the client would have received this many invisible
 	// characters had sanitization been off." Rendered separately, never
-	// merged into RuneCounts (K-G14: "already happened" vs. "was
+	// merged into RuneCounts ("already happened" vs. "was
 	// intercepted" must stay distinguishable).
 	SanitizedRuneCounts map[string]int `json:"sanitized_rune_counts,omitempty"`
 	// ToolCallsInspected is every tool call InspectToolCall judged,
@@ -784,8 +784,8 @@ type GuardInboundSummary struct {
 	// category, a protected-path write, or a credential echo), grouped by
 	// category — see guardcol.go's aggregation.
 	ToolFindings []GuardToolRiskRow `json:"tool_findings,omitempty"`
-	// ToolEchoEvents/EchoTools are ADR-6's decryption-oracle signal, the
-	// high-risk half (§4.7(2)): a credential the SAME request sent
+	// ToolEchoEvents/EchoTools are the decryption-oracle signal, the
+	// high-risk half: a credential the SAME request sent
 	// reappearing inside a tool call's own arguments, cross-referenced per
 	// record, never across records. Zero is the real-corpus baseline any
 	// prior calibration found — any nonzero value here is worth a human
@@ -795,14 +795,13 @@ type GuardInboundSummary struct {
 	// TextEchoEvents is the same cross-reference against the assistant's
 	// plain text instead of tool arguments — the low-risk half: normal
 	// conversation ("your key sk-... is set") reappearing in prose is not
-	// an attack signal (K-G8-style reasoning), but the count is kept for
-	// the text-vs-tool-arg contrast the design spec's own corpus analysis
-	// is built on.
+	// an attack signal, but the count is kept as the baseline the
+	// tool-arg half is read against.
 	TextEchoEvents int `json:"text_echo_events,omitempty"`
 }
 
 // GuardToolRiskRow is one high-risk category's tally across every
-// inspected tool call (the design spec's command-pattern/protected-path library).
+// inspected tool call (guard's command-pattern/protected-path library).
 type GuardToolRiskRow struct {
 	Category string   `json:"category"`
 	CWE      string   `json:"cwe,omitempty"`
@@ -811,14 +810,14 @@ type GuardToolRiskRow struct {
 }
 
 // ProviderRow is one upstream account's (config.yaml's providers[].name)
-// cross-model summary — §2.5 账户消耗与额度. Rolled up post-hoc from the
+// cross-model summary for the provider quota section. Rolled up post-hoc from the
 // already-finished EndpointsAll rows rather than accumulated independently
 // (see provider.go's buildProviders): every field here is additive, so no
 // new streaming state is needed. Deliberately carries no P50/P95 —
 // percentiles aren't additive, and giving this bucket real ones would mean
 // buffering a whole extra per-request slice during aggregation just for a
 // question ("is this account under pressure") that doesn't need them; each
-// endpoint's own percentiles are already in §5. DurMSMean is the honest
+// endpoint's own percentiles are already on the endpoint rows. DurMSMean is the honest
 // substitute.
 type ProviderRow struct {
 	Provider     string         `json:"provider"`
@@ -844,7 +843,7 @@ type ProviderRow struct {
 	CostEstimate *float64 `json:"cost_estimate,omitempty"`
 
 	// Quota is a read-only snapshot of this account's config.yaml quota
-	// declaration — one entry per Limit (P3: a provider can carry more than
+	// declaration — one entry per Limit (a provider can carry more than
 	// one window) — purely as a reference point, see ProviderQuotaRef's own
 	// doc comment for what it deliberately is NOT.
 	Quota []ProviderQuotaRef `json:"quota,omitempty"`
@@ -852,7 +851,7 @@ type ProviderRow struct {
 
 // ProviderQuotaRef is one row's worth of a config.yaml provider's declared
 // quota Limits, plus the computation inputs and Live state
-// buildProviderQuotaRows needs to build §2.5's "额度与消耗对照" sub-table
+// buildProviderQuotaRows needs to build the "额度与消耗对照" sub-table
 // row for it — the same map (cmd_report.go's buildProviderQuotas) feeds
 // both ProviderRow.Quota (below) and that sub-table, so the two never
 // disagree on what an account's declared quota is.
@@ -865,7 +864,7 @@ type ProviderRow struct {
 // Limit's real membership (especially the wildcard shape) isn't derivable
 // from config alone. A per-model Limit with no live buckets yet (nothing
 // charged against it since vmr-quota.json was last written) contributes
-// ZERO refs, and so is silently absent from §2.5 until its first charge —
+// ZERO refs, and so is silently absent from that sub-table until its first charge —
 // a documented gap, not an oversight: filling it would mean also
 // enumerating models from this run's own audit corpus and merging that
 // with the live-file enumeration, which is more machinery than the current
@@ -926,7 +925,7 @@ type LiveQuota struct {
 	EstimatedPct float64 `json:"estimated_pct,omitempty"`
 }
 
-// ProviderQuotaRow is one row of §2.5's "额度与消耗对照" sub-table
+// ProviderQuotaRow is one row of the "额度与消耗对照" sub-table
 // (providerquota.go's buildProviderQuotaRows) — every config.yaml account
 // that declares a quota:, with two independently-windowed consumption
 // figures placed side by side ON PURPOSE, never subtracted or ratioed
@@ -954,7 +953,7 @@ type ProviderQuotaRow struct {
 	Amount   float64 `json:"amount"`
 	// Models is this Limit's Scope (see ProviderQuotaRef.Models) — the
 	// column that tells apart a provider's several rows when it carries
-	// more than one Limit (P3).
+	// more than one Limit.
 	Models []string `json:"models,omitempty"`
 
 	// WindowConsumed is this window's recomputed base(metric) total — always
@@ -1000,19 +999,18 @@ type ProviderQuotaRow struct {
 	PeriodEndsAt time.Time `json:"period_ends_at"`
 	// PeriodElapsedPct is 1 - quota.TimeLeftFrac(now, PeriodStart,
 	// PeriodEndsAt), as a percentage — "周期已过%", read side by side with
-	// Live.Pct ("已用%") to judge burn rate without any extrapolation (see
-	// the dev plan's period-progress rewrite: quota.Headroom<1 is exactly
-	// equivalent to Live.Pct > PeriodElapsedPct).
+	// Live.Pct ("已用%") to judge burn rate without any extrapolation
+	// (quota.Headroom<1 is exactly equivalent to Live.Pct > PeriodElapsedPct).
 	PeriodElapsedPct float64 `json:"period_elapsed_pct"`
 }
 
 // ClientEndpointRow is one (client_key_tag, upstream endpoint) pair's token
-// consumption — §5.5 按客户端的上游归属. Rendered grouped by ClientKey
+// consumption (per-client upstream attribution). Rendered grouped by ClientKey
 // (viewmodel_client_endpoint.go), not as a client×endpoint matrix — see this
-// file's package doc comment / the dev doc's §3.2 for why. Streaming-
+// file's package doc comment for why. Streaming-
 // collected (clientendpoint.go) since no existing bucket is keyed this way.
-// Deliberately token/request-only: no $ (already answered by §2's by-client
-// table) and no percentiles (this row's whole point is the endpoint-level
+// Deliberately token/request-only: no $ (already answered by the cost
+// section's by-client table) and no percentiles (this row's whole point is the endpoint-level
 // split, not a new latency view).
 type ClientEndpointRow struct {
 	ClientKey string `json:"client_key"`
@@ -1025,4 +1023,4 @@ type ClientEndpointRow struct {
 	TokensOut      int64 `json:"tokens_out"`
 }
 
-func (r *Report2) RequestRows() []RequestRow { return r.requests }
+func (r *Report) RequestRows() []RequestRow { return r.requests }

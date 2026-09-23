@@ -18,12 +18,11 @@ type DetailText struct {
 	ListSep       string // joins e.g. multiple detected capabilities ("`image`、`tools`" vs "`image`, `tools`")
 	FactsLine     func(caps, estTokens string) string
 
-	// BackToIndexLine is the "detail → request browser" return edge
-	// (P6.2e). A detail page lives at requests/details/r-<...>.md; the
+	// BackToIndexLine is the "detail → request browser" return edge.
+	// A detail page lives at requests/details/r-<...>.md; the
 	// browser skeleton is two levels up at the report root, and its path
 	// never varies regardless of which command rendered this page
 	// (generation-time guarantee, same class as PrevTurnLink below).
-	// D7 deleted the markdown request index this used to point at.
 	BackToIndexLine  string
 	PrevTurnLink     func(ts, file string) string
 	ThisTurnCalls    string // "本轮调用: " prefix
@@ -41,7 +40,7 @@ type DetailText struct {
 	MessagesTitle         func(n int) string
 	RoleTokenShare        func(line string) string
 	HistoryVsNewNote      func(deltaStart int) string
-	// HistoryFoldedNote (P13.3) replaces re-rendering each message before
+	// HistoryFoldedNote replaces re-rendering each message before
 	// deltaStart with one link to the previous turn's own detail page —
 	// those messages are byte-identical to what that page already shows.
 	HistoryFoldedNote func(n int, ts, file string) string

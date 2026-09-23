@@ -1,4 +1,4 @@
-// Ver 2026-09-22 18:05, by coding
+// Ver 2026-09-12 12:00, by dev
 
 // Derived-metric helpers, true per-bucket percentiles, and the small
 // per-record extraction helpers shared by Build. Every finish* computes the
@@ -287,7 +287,7 @@ func freshestModel(rows []Row) *Row {
 	return best
 }
 
-// buildFindings assembles the §7 efficiency/waste table from the finished
+// buildFindings assembles the efficiency/waste table from the finished
 // buckets. One row per actionable finding, each naming the implicated entity
 // and a suggested action.
 //
@@ -309,7 +309,7 @@ func freshestModel(rows []Row) *Row {
 // TestBuildFindingsIsDeterministic comparing rep.Efficiency (not just
 // rep.Workloads/Tools/ByModel themselves, which the sort later in Build
 // does make deterministic) across repeated Build() calls.
-func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
+func buildFindings(rep *Report, lang i18n.Lang) []Finding {
 	var out []Finding
 	for _, f := range []*Finding{
 		findToolSchemaWaste(rep, lang),
@@ -330,8 +330,8 @@ func buildFindings(rep *Report2, lang i18n.Lang) []Finding {
 // findToolSchemaWaste picks the worst (highest SchemaWasteBytes, tie-broken
 // by Shape) among shapes under 20% declare-utilization — mirrors the
 // criteria rep.Tools' own later sort uses, so "the worst shape" means the
-// same thing here as it does in §7's own table.
-func findToolSchemaWaste(rep *Report2, lang i18n.Lang) *Finding {
+// same thing here as it does in the tool-waste table's own sort.
+func findToolSchemaWaste(rep *Report, lang i18n.Lang) *Finding {
 	var worst *ToolShapeRow
 	for i := range rep.Tools {
 		t := &rep.Tools[i]
@@ -363,7 +363,7 @@ func findToolSchemaWaste(rep *Report2, lang i18n.Lang) *Finding {
 
 // findCacheMiss reports the global fresh-input share, naming the dominant
 // model behind it when one model alone accounts for at least half of it.
-func findCacheMiss(rep *Report2, lang i18n.Lang) *Finding {
+func findCacheMiss(rep *Report, lang i18n.Lang) *Finding {
 	if rep.Overall.TokensKnown <= 0 {
 		return nil
 	}
@@ -398,7 +398,7 @@ func findCacheMiss(rep *Report2, lang i18n.Lang) *Finding {
 // "dream_diary" from one otherwise-identical run to the next before this
 // fix, since both classes routinely sit at the same rounded ~1% cache
 // efficiency in real corpora.
-func findCronRedundancy(rep *Report2, lang i18n.Lang) *Finding {
+func findCronRedundancy(rep *Report, lang i18n.Lang) *Finding {
 	var worst *WorkloadRow
 	for i := range rep.Workloads {
 		w := &rep.Workloads[i]
@@ -427,7 +427,7 @@ func findCronRedundancy(rep *Report2, lang i18n.Lang) *Finding {
 }
 
 // findOutputTruncation fires when any stream broke off truncated this window.
-func findOutputTruncation(rep *Report2, lang i18n.Lang) *Finding {
+func findOutputTruncation(rep *Report, lang i18n.Lang) *Finding {
 	trunc := rep.Overall.Truncated
 	if trunc <= 0 {
 		return nil
@@ -444,7 +444,7 @@ func findOutputTruncation(rep *Report2, lang i18n.Lang) *Finding {
 }
 
 // findSlowRequests fires when any request crossed SlowThresholdMS.
-func findSlowRequests(rep *Report2, lang i18n.Lang) *Finding {
+func findSlowRequests(rep *Report, lang i18n.Lang) *Finding {
 	if rep.Overall.RequestsWithDur <= 0 {
 		return nil
 	}
@@ -470,7 +470,7 @@ func findSlowRequests(rep *Report2, lang i18n.Lang) *Finding {
 // tie-broken by ID for determinism over rep.Sessions' as-yet-unsorted
 // order — see buildFindings' own doc history), reporting only when growth
 // reaches 5x.
-func findContextGrowth(rep *Report2, lang i18n.Lang) *Finding {
+func findContextGrowth(rep *Report, lang i18n.Lang) *Finding {
 	var worst *SessionRow
 	for i := range rep.Sessions {
 		s := &rep.Sessions[i]
@@ -503,10 +503,10 @@ func findContextGrowth(rep *Report2, lang i18n.Lang) *Finding {
 }
 
 // buildFindingsForJSON is buildFindings fixed to English — the only call
-// Build itself makes (aggregate.go), so this is Report2.Efficiency's
+// Build itself makes (aggregate.go), so this is Report.Efficiency's
 // language-agnostic default: a deterministic baseline Build computes
 // without needing a lang parameter. Nothing overwrites rep.Efficiency
-// afterward (R1: the persisted JSON stays language-invariant regardless of
+// afterward (the persisted JSON stays language-invariant regardless of
 // -lang — see BuildSummarySlice, which reads it as-is). Kept as its own
 // named function (not an inline i18n.EN literal at the call site) so
 // aggregate.go's own call site never needs to import internal/i18n itself
@@ -516,7 +516,7 @@ func findContextGrowth(rep *Report2, lang i18n.Lang) *Finding {
 // rep.Efficiency — it computes its own independent buildFindings(rep, lang)
 // call with the report's actual display language, so Markdown rendering
 // never depends on this English baseline at all.
-func buildFindingsForJSON(rep *Report2) []Finding {
+func buildFindingsForJSON(rep *Report) []Finding {
 	return buildFindings(rep, i18n.EN)
 }
 

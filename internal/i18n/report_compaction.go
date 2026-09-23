@@ -1,6 +1,6 @@
 // Ver 2026-08-01, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_compaction.go (§6.7 Compaction Reconstruction).
+// Pairs with internal/report/viewmodel_compaction.go (Compaction Reconstruction).
 package i18n
 
 // CompactionText is viewmodel_compaction.go's text, in one language.

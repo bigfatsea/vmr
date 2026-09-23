@@ -1,12 +1,11 @@
-// Ver 2026-08-05, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // The divergence-point LLM interpretation layer — the -compare counterpart
 // to llm.go's overall EvidencePack — see llm.go's evidencePackKind doc
 // comment for how the three pack shapes coexist through the same
 // Interpret/cacheKey call chain. The evidence pack is deliberately scoped
 // to a small window around the divergence point (not the two full
-// Journeys): the journey design specification's
-// own EvidencePack discipline is "a restricted evidence package, must
+// Journeys): the EvidencePack discipline is "a restricted evidence package, must
 // declare what it can't see" — the same discipline already applies to
 // -compare's system-prompt/deliverable excerpts, reused here for a
 // different evidence source (Step briefs, not raw text).

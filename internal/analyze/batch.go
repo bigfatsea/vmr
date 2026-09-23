@@ -1,6 +1,6 @@
-// Ver 2026-08-30, by Sonnet 5
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-package main
+package analyze
 
 import "vmr/internal/ctxgraph"
 

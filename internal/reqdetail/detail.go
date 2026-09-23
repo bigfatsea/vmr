@@ -271,7 +271,7 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 // turn's link (when m has a predecessor in its own lineage) and this
 // turn's own features (tool calls, trace id, chat id, tool signature). No
 // session/task position (that's the caller's index/spine to render, not
-// this leaf's) and no compaction cross-reference (a report-side §6.7
+// this leaf's) and no compaction cross-reference (a report-side compaction
 // analysis conclusion, not a fact of this record). See this file's package
 // doc for the full "what was cut and why" list.
 func renderSessionHeader(b *strings.Builder, m, prev *ctxgraph.Manifest, f sessionFeatures, t i18n.DetailText) {

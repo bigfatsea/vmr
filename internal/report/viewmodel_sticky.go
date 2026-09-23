@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:06, by Claude Opus 5.5
 
-// §6.5 Sticky 有效性 view model: the cache-efficiency gap between requests
+// Sticky 有效性 view model: the cache-efficiency gap between requests
 // that stayed on their session's previous endpoint and those that
 // switched. See StickyEffect (rows.go) for the measurement's definition
 // and its limits. Pairs with internal/i18n/report_sticky.go.
@@ -13,7 +13,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmStickySection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmStickySection(rep *Report, lang i18n.Lang) SectionVM {
 	eff := rep.Sticky
 	if eff == nil {
 		return SectionVM{}

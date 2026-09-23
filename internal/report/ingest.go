@@ -1,9 +1,9 @@
-// Ver 2026-08-15, by Sonnet 5
+// Ver 2026-09-23 04:04, by Claude Opus 5.5
 
 // The per-bucket accumulation half of rows.go's TrafficStats/Row/HourRow/
 // EndpointRow/ClientRow/WorkloadRow/SessionRow declarations — split into its
 // own file once TrafficStats stopped meaning "6 Row types
-// share a field core but no shared type" (the architecture review's R3
+// share a field core but no shared type" (the architecture review's
 // finding): aggregate.go's per-record loop now just calls these methods
 // instead of inlining 7 near-identical closures. diagnosticNormMarker
 // (aggregate.go) and SlowThresholdMS (rows.go) are this file's only
@@ -15,7 +15,7 @@ package report
 // here vs stay on each row type. Requests/OK/Errors/tokens/duration-basis
 // only; TTFT/stream/bytes/images/roles are each row type's own, added by
 // its own Ingest wrapper below.
-func (s *TrafficStats) Ingest(rc *rec2) {
+func (s *TrafficStats) Ingest(rc *recRow) {
 	s.Requests++
 	switch rc.outcome {
 	case "ok":
@@ -51,7 +51,7 @@ func (s *TrafficStats) Ingest(rc *rec2) {
 // TrafficStats core, plus family A's remaining volume/outcome fields,
 // family D (wire/payload), and the TTFT/stream/TokOutPerSec basis the core
 // doesn't cover (see TrafficStats' doc comment for why those stay here).
-func (r *Row) Ingest(rc *rec2) {
+func (r *Row) Ingest(rc *recRow) {
 	r.TrafficStats.Ingest(rc)
 	if rc.outcome == "canceled" {
 		r.Canceled++
@@ -111,7 +111,7 @@ func (r *Row) Ingest(rc *rec2) {
 }
 
 // Ingest accumulates one record into an hour/hour-of-day bucket.
-func (h *HourRow) Ingest(rc *rec2) {
+func (h *HourRow) Ingest(rc *recRow) {
 	h.TrafficStats.Ingest(rc)
 	if rc.fallbacks > 0 {
 		h.Fallbacks++
@@ -184,7 +184,7 @@ func (e *EndpointRow) IngestAttempt(a attemptFacts) {
 // one record this endpoint actually served the client from — see
 // IngestAttempt's doc comment for why this stays a separate method rather
 // than a shared TrafficStats.Ingest call.
-func (e *EndpointRow) IngestRequest(rc *rec2) {
+func (e *EndpointRow) IngestRequest(rc *recRow) {
 	e.Requests++
 	if rc.outcome == "ok" {
 		e.RequestsOK++
@@ -243,7 +243,7 @@ func (e *EndpointRow) IngestRequest(rc *rec2) {
 // EndpointRow/SessionRow): ClientRow has never exposed a TTFT/stream
 // percentile, so collecting the raw samples would only grow-then-discard a
 // slice on every streaming/timed record for no reader.
-func (c *ClientRow) Ingest(rc *rec2) {
+func (c *ClientRow) Ingest(rc *recRow) {
 	c.TrafficStats.Ingest(rc)
 	// Percentile samples are per side, so each side's sample joins only
 	// when that side is known (see chatmsg.ExtractUsageSides).
@@ -258,7 +258,7 @@ func (c *ClientRow) Ingest(rc *rec2) {
 // Ingest accumulates one record into a workload-class bucket. streamOK is
 // deliberately NOT collected here — see ClientRow.Ingest's comment; same
 // reasoning, WorkloadRow has never exposed a stream percentile either.
-func (w *WorkloadRow) Ingest(rc *rec2) {
+func (w *WorkloadRow) Ingest(rc *recRow) {
 	w.TrafficStats.Ingest(rc)
 	w.ToolCalls += len(rc.toolCalls)
 	if len(rc.toolCalls) > 0 {
@@ -267,7 +267,7 @@ func (w *WorkloadRow) Ingest(rc *rec2) {
 }
 
 // Ingest accumulates one record into a session bucket.
-func (s *SessionRow) Ingest(rc *rec2) {
+func (s *SessionRow) Ingest(rc *recRow) {
 	s.TrafficStats.Ingest(rc)
 	if rc.fallbacks > 0 {
 		s.Fallbacks++

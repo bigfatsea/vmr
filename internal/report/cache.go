@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-23 03:44, by Claude Opus 5.5
 
-// Package report owns product-level L2/L3 caching and fingerprint verification (§7, D1/D8).
+// Package report owns product-level L2/L3 caching and fingerprint verification.
 package report
 
 import (
@@ -21,14 +21,15 @@ import (
 	"vmr/internal/pricing"
 )
 
-// RendererVersion is the current version of the report presentation renderer (§7.1, §7.4).
+// RendererVersion is the current version of the report presentation renderer.
 // Bumping this invalidates L3 Markdown presentation cache while leaving L2 data cache intact.
 // v2: journey .md spine/evidence links retargeted at requests/details|evidence/ (two
 // levels up), journeys/index.md + requests/failed.md wording — a renderer-only change,
 // so existing snapshots need this bump for -render-only to pick it up.
 const RendererVersion = 2
 
-// ComputeInputHashes hashes all input paths using ctxgraph.HashFile sha256 (no mtime fast path, §7.2).
+// ComputeInputHashes hashes all input paths using ctxgraph.HashFile sha256 (no mtime fast path —
+// a changed file with an unchanged mtime must not get a stale cache hit).
 func ComputeInputHashes(paths []string) ([][]byte, error) {
 	hashes := make([][]byte, 0, len(paths))
 	for _, p := range paths {
@@ -45,13 +46,13 @@ func ComputeInputHashes(paths []string) ([][]byte, error) {
 	return hashes, nil
 }
 
-// Cache directory and filename under output root (§7.1).
+// Cache directory and filename under output root.
 const (
 	CacheDirName  = ".cache"
 	CacheFileName = "fingerprint.json"
 )
 
-// CacheRecord stores the L2 and L3 fingerprints of a committed analysis snapshot (§7.1).
+// CacheRecord stores the L2 and L3 fingerprints of a committed analysis snapshot.
 type CacheRecord struct {
 	L2Digest        string `json:"l2_digest"`
 	VMFingerprint   string `json:"vm_fingerprint,omitempty"`
@@ -61,7 +62,7 @@ type CacheRecord struct {
 }
 
 // AnalysisParams encapsulates every CLI flag or configuration setting
-// that can alter sampling, filtering, currency conversion, or output text (§7.2).
+// that can alter sampling, filtering, currency conversion, or output text.
 type AnalysisParams struct {
 	Lang               string
 	TaskProfile        string
@@ -70,7 +71,7 @@ type AnalysisParams struct {
 	SelfTrafficTags    []string
 	// LLMSelfTag is the exclusion tag derived from the effective llm_key
 	// (audit.KeyTag), empty when no key — part of the effective self-traffic
-	// exclusion set alongside SelfTrafficTags (§7.2's analysis-params rule:
+	// exclusion set alongside SelfTrafficTags (the analysis-params rule:
 	// anything that changes a persisted number goes in the fingerprint).
 	LLMSelfTag string
 	// LLMAddr/LLMModel identify an -llm-addr interpretation run; they only
@@ -87,7 +88,7 @@ type AnalysisParams struct {
 
 // ComputePricingFingerprint computes the deterministic SHA-256 fingerprint
 // over configuration that affects financial numbers: provider overrides,
-// top-level exchange rates, and standard table generation stamp (D8 / §7.2).
+// top-level exchange rates, and standard table generation stamp.
 func ComputePricingFingerprint(standardGen string, exchangeRates map[string]float64, policies map[string]pricing.ProviderPolicy) []byte {
 	var components [][]byte
 	components = append(components, digest.EncodeString(standardGen))
@@ -145,7 +146,7 @@ func encodeOptFloat64(v *float64) []byte {
 }
 
 // ComputeAnalysisParamsFingerprint computes the deterministic SHA-256 fingerprint
-// over analysis sampling and scope parameters (§7.2).
+// over analysis sampling and scope parameters.
 func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 	var components [][]byte
 	components = append(components,
@@ -190,7 +191,7 @@ func ComputeAnalysisParamsFingerprint(p AnalysisParams) []byte {
 	return d[:]
 }
 
-// ComputeL2Digest computes the product-level L2 data cache digest (§7.1, §7.2):
+// ComputeL2Digest computes the product-level L2 data cache digest:
 // digest.Digest(输入文件哈希按序…, 配置指纹, 格式版本, 分析参数).
 func ComputeL2Digest(inputHashes [][]byte, pricingFP []byte, formatVersion int, paramsFP []byte) [32]byte {
 	var components [][]byte
@@ -232,7 +233,7 @@ func ComputeVMFingerprintFromManifest(outDir string) ([32]byte, error) {
 	return ComputeVMFingerprint(sliceHashes), nil
 }
 
-// ComputeL3Digest computes the presentation-layer L3 cache digest (§7.1, §7.2):
+// ComputeL3Digest computes the presentation-layer L3 cache digest:
 // digest.Digest(ViewModel 指纹, 渲染器版本, 语言).
 func ComputeL3Digest(vmFP []byte, rendererVersion int, lang string) [32]byte {
 	return digest.Digest(vmFP, digest.EncodeInt64(int64(rendererVersion)), digest.EncodeString(lang))

@@ -1,4 +1,4 @@
-// Ver 2026-08-20 17:20, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -9,7 +9,6 @@ import (
 
 	"vmr/internal/audit"
 	"vmr/internal/i18n"
-	"vmr/internal/taskseg"
 )
 
 // selfTrafficFixtureRecords returns two records that differ only in
@@ -49,10 +48,9 @@ func TestIngestRecord_ExcludesSelfTraffic(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, selfTrafficFixtureRecords())
 
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil,
-		taskseg.OpenClawAware, nil, nil, map[string]bool{"vmrstory": true})
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}, ExcludeClientTags: map[string]bool{"vmrstory": true}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	if rep.Overall.Requests != 1 {
 		t.Errorf("Overall.Requests = %d, want 1 (the vmrstory record must be excluded)", rep.Overall.Requests)
@@ -84,10 +82,9 @@ func TestSelfTrafficExclusion_ConfiguredButNothingMatched(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, selfTrafficFixtureRecords())
 
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil,
-		taskseg.OpenClawAware, nil, nil, map[string]bool{"some-tag-not-in-this-log": true})
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}, ExcludeClientTags: map[string]bool{"some-tag-not-in-this-log": true}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	if rep.Meta.SelfTrafficExcluded != 0 {
 		t.Fatalf("SelfTrafficExcluded = %d, want 0 (nothing in the fixture matches)", rep.Meta.SelfTrafficExcluded)
@@ -110,10 +107,9 @@ func TestIngestRecord_NoExclusionByDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, selfTrafficFixtureRecords())
 
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil,
-		taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	if rep.Overall.Requests != 2 {
 		t.Errorf("Overall.Requests = %d, want 2 (nil exclusion set excludes nothing)", rep.Overall.Requests)
@@ -192,10 +188,9 @@ func TestExcludeSelfTraffic_ToolsAndCompactionsDontLeak(t *testing.T) {
 	dir := t.TempDir()
 	path := writeTempJSONL(t, dir, []map[string]any{workloadWithTool, selfTrafficWithTool, selfTrafficCompaction})
 
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil,
-		taskseg.OpenClawAware, nil, nil, map[string]bool{"vmrstory": true})
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}, ExcludeClientTags: map[string]bool{"vmrstory": true}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 
 	for _, ts := range rep.Tools {
@@ -229,10 +224,9 @@ func TestExcludeSelfTraffic_DetailsNotMaterialized(t *testing.T) {
 		onRecordTags = append(onRecordTags, rec.ClientKeyTag)
 	}
 
-	_, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, onRecord,
-		taskseg.OpenClawAware, nil, nil, map[string]bool{"vmrstory": true})
+	_, _, _, err := Build(BuildOptions{Paths: []string{path}, OnRecord: onRecord, ExcludeClientTags: map[string]bool{"vmrstory": true}})
 	if err != nil {
-		t.Fatalf("BuildCached: %v", err)
+		t.Fatalf("Build: %v", err)
 	}
 	for _, tag := range onRecordTags {
 		if tag == "vmrstory" {

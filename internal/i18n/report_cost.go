@@ -1,6 +1,6 @@
 // Ver 2026-09-22 17:35, by coding
 
-// Pairs with internal/report/viewmodel_cost.go (§2 Cost Estimate).
+// Pairs with internal/report/viewmodel_cost.go (Cost Estimate).
 package i18n
 
 import "fmt"
@@ -21,7 +21,7 @@ type CostText struct {
 	ByClientHeaders       [4]string // client_key, fresh, out, estimated cost
 	NoDataBody            string
 	FrozenSnapshotSummary string
-	// StandardTableSummary / ProviderRulesApplied render the §2 pricing-
+	// StandardTableSummary / ProviderRulesApplied render the pricing-
 	// source traceability line: the standard table's own generation stamp
 	// and how many config.yaml rate rules were layered on top.
 	StandardTableSummary func(generated string) string
@@ -29,7 +29,7 @@ type CostText struct {
 	Disclaimer           func(asOf, currency string) string
 	ScopeFootnote        string
 
-	// TotalLabel names the totals row every §2 table now carries.
+	// TotalLabel names the totals row every cost table carries.
 	TotalLabel string
 	// UnpricedNote is rendered under a table that had rows it could not
 	// price — n of total, in that table's own unit ("days", "endpoints").

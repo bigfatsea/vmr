@@ -1,4 +1,4 @@
-// Ver 2026-07-25, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"vmr/internal/audit"
-	"vmr/internal/taskseg"
 )
 
 var realLogPath = "../../logs/vmr-audit-2026-07-24.jsonl"
@@ -72,7 +71,7 @@ func TestBuild_InvariantsOnSyntheticCorpus(t *testing.T) {
 	}
 
 	path := writeJSONL(t, recs)
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -144,7 +143,7 @@ func TestRealLogE2E(t *testing.T) {
 		t.Skip("SKIP_SLOW_E2E set")
 	}
 
-	new, _, _, err := BuildCached([]string{targetPath}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	new, _, _, err := Build(BuildOptions{Paths: []string{targetPath}})
 	if err != nil {
 		t.Fatal(err)
 	}

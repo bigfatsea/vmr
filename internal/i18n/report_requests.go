@@ -1,7 +1,7 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
 // Pairs with internal/report/requests_failed.go (requests/failed.md — the one
-// human-readable request document after D7 retired the per-group index family).
+// human-readable request document after the per-group index family was retired).
 package i18n
 
 import "fmt"

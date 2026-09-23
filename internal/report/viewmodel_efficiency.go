@@ -1,6 +1,6 @@
-// Ver 2026-09-22 19:10, by coding
+// Ver 2026-09-23 04:00, by Claude Opus 5.5
 
-// §7 效率与浪费 view model: the findings list and the per-tool-shape
+// 效率与浪费 view model: the findings list and the per-tool-shape
 // detail behind the declared-but-never-called tool waste figure. Pairs
 // with internal/i18n/report_efficiency.go (plus report_toolwaste.go's
 // stat labels for the top-line totals).
@@ -20,7 +20,7 @@ import (
 	"vmr/internal/reqdetail"
 )
 
-func vmEfficiencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
+func vmEfficiencySection(rep *Report, o Row, lang i18n.Lang) SectionVM {
 	_ = o
 	t := i18n.Efficiency(lang)
 	sec := SectionVM{ID: "efficiency", Title: t.Title}
@@ -61,12 +61,12 @@ func vmEfficiencySection(rep *Report2, o Row, lang i18n.Lang) SectionVM {
 	return sec
 }
 
-// vmToolWasteTotals is §7's top-line: the four window totals leading the
+// vmToolWasteTotals is the tool-waste block's top-line: the four window totals leading the
 // tool-waste block (bytes shipped, dead-weight bytes, wasted tokens,
 // tool-set shape count) — the report's headline efficiency figures.
 // Reuses i18n.ToolWaste's own labels so the JSON slice and this block
 // can't disagree.
-func vmToolWasteTotals(sec *SectionVM, rep *Report2, lang i18n.Lang) {
+func vmToolWasteTotals(sec *SectionVM, rep *Report, lang i18n.Lang) {
 	if len(rep.Tools) == 0 {
 		return
 	}
@@ -93,7 +93,7 @@ func vmToolWasteTotals(sec *SectionVM, rep *Report2, lang i18n.Lang) {
 const toolWasteBytesPerToken = 4
 
 // twTokens renders a byte count as its rough wasted-token equivalent for
-// the §7 tool-waste block.
+// the tool-waste block.
 func twTokens(bytes int64) string {
 	tok := bytes / toolWasteBytesPerToken
 	switch {

@@ -1,4 +1,4 @@
-// Ver 2026-07-13 02:00, by Fable 5
+// Ver 2026-09-23 04:15, by Claude Opus 5.5
 package audit
 
 import (
@@ -432,5 +432,113 @@ func TestWriteBufPool_OversizedBufferNotRecycled(t *testing.T) {
 	defer writeBufPool.Put(buf)
 	if buf.Cap() > maxPooledWriteBufCap {
 		t.Errorf("writeBufPool contained oversized buffer with cap %d, want <= %d", buf.Cap(), maxPooledWriteBufCap)
+	}
+}
+
+func TestRecord_ServedEndpoint(t *testing.T) {
+	// 1. nil record
+	var nilRec *Record
+	if ep := nilRec.ServedEndpoint(); ep != "" {
+		t.Errorf("nilRec.ServedEndpoint() = %q, want empty", ep)
+	}
+
+	// 2. empty record
+	emptyRec := &Record{}
+	if ep := emptyRec.ServedEndpoint(); ep != "" {
+		t.Errorf("emptyRec.ServedEndpoint() = %q, want empty", ep)
+	}
+
+	// 3. attempts without forwarded
+	unfRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep1", Response: &Message{Status: 500}},
+			{Endpoint: "ep2", Response: nil, Error: "dial error"},
+		},
+	}
+	if ep := unfRec.ServedEndpoint(); ep != "" {
+		t.Errorf("unfRec.ServedEndpoint() = %q, want empty", ep)
+	}
+
+	// 4. single forwarded attempt with error
+	fwdErrRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep-err", Forwarded: true, Error: "truncated mid-stream", Response: &Message{Status: 200}},
+		},
+	}
+	if ep := fwdErrRec.ServedEndpoint(); ep != "ep-err" {
+		t.Errorf("fwdErrRec.ServedEndpoint() = %q, want ep-err", ep)
+	}
+
+	// 5. single forwarded attempt without error
+	fwdOKRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep-ok", Forwarded: true, Response: &Message{Status: 200}},
+		},
+	}
+	if ep := fwdOKRec.ServedEndpoint(); ep != "ep-ok" {
+		t.Errorf("fwdOKRec.ServedEndpoint() = %q, want ep-ok", ep)
+	}
+
+	// 6. multiple attempts: ep1 ok, ep2 forwarded with error -> prefers ok (ep1)
+	prefOKRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep-ok", Forwarded: true, Response: &Message{Status: 200}},
+			{Endpoint: "ep-err", Forwarded: true, Error: "failover error", Response: &Message{Status: 200}},
+		},
+	}
+	if ep := prefOKRec.ServedEndpoint(); ep != "ep-ok" {
+		t.Errorf("prefOKRec.ServedEndpoint() = %q, want ep-ok", ep)
+	}
+
+	// 7. multiple attempts: ep1 forwarded with error, ep2 forwarded with error -> returns last forwarded (ep2)
+	bothErrRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep-err1", Forwarded: true, Error: "error 1", Response: &Message{Status: 200}},
+			{Endpoint: "ep-err2", Forwarded: true, Error: "error 2", Response: &Message{Status: 200}},
+		},
+	}
+	if ep := bothErrRec.ServedEndpoint(); ep != "ep-err2" {
+		t.Errorf("bothErrRec.ServedEndpoint() = %q, want ep-err2", ep)
+	}
+
+	// 8. multiple attempts: ep1 forwarded and ok, ep2 forwarded and ok -> returns last ok (ep2)
+	bothOKRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "ep-ok1", Forwarded: true, Response: &Message{Status: 200}},
+			{Endpoint: "ep-ok2", Forwarded: true, Response: &Message{Status: 200}},
+		},
+	}
+	if ep := bothOKRec.ServedEndpoint(); ep != "ep-ok2" {
+		t.Errorf("bothOKRec.ServedEndpoint() = %q, want ep-ok2", ep)
+	}
+
+	// 9. historical record without Forwarded field: IsForwarded fallback (< 400, no ErrorClass)
+	histRec := &Record{
+		Attempts: []Attempt{
+			{Endpoint: "hist-ep", Response: &Message{Status: 200}},
+		},
+	}
+	if ep := histRec.ServedEndpoint(); ep != "hist-ep" {
+		t.Errorf("histRec.ServedEndpoint() = %q, want hist-ep", ep)
+	}
+}
+
+// A record written before the forwarded field existed: a committed 2xx that
+// was cut mid-stream still served the client and keeps the attribution,
+// while a softblock (2xx + content) never does.
+func TestRecord_ServedEndpoint_LegacyTruncatedAndSoftblock(t *testing.T) {
+	truncated := &Record{Attempts: []Attempt{{
+		Endpoint: "openai-completions:p:m", Response: &Message{Status: 200},
+		Error: "truncated: stream idle timeout", ErrorClass: "truncated",
+	}}}
+	if ep := truncated.ServedEndpoint(); ep != "openai-completions:p:m" {
+		t.Errorf("legacy truncated 2xx: ServedEndpoint() = %q, want the endpoint", ep)
+	}
+	softblock := &Record{Attempts: []Attempt{{
+		Endpoint: "openai-completions:p:m", Response: &Message{Status: 200},
+		Error: "content", ErrorClass: "content",
+	}}}
+	if ep := softblock.ServedEndpoint(); ep != "" {
+		t.Errorf("legacy softblock: ServedEndpoint() = %q, want empty", ep)
 	}
 }

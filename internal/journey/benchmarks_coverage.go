@@ -53,7 +53,8 @@ var anthropicOnlyCoverage = struct {
 // protocolShare is empty (never computed, e.g. a
 // hand-built BenchmarkStats, or protocolShare's own zero-Steps edge case:
 // asserting "Anthropic traffic is scarce" from data we don't actually have
-// would be exactly the kind of unearned claim §5.6's discipline rules out)
+// would be exactly the kind of unearned claim the honesty-disclosure
+// discipline rules out)
 // or this corpus is (up to floating-point noise) 100% anthropic-messages —
 // the only case where anthropicOnlyCoverage's signals are NOT structurally
 // blind on some slice of the data. No intermediate threshold: any non-

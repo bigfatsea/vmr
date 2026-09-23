@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:10, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_endpoint_value.go (§6.6 Endpoint Value).
+// Pairs with internal/report/viewmodel_endpoint_value.go (Endpoint Value).
 package i18n
 
 import "fmt"

@@ -1,4 +1,4 @@
-// Ver 2026-08-07, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 package report
 
 import (
@@ -16,7 +16,7 @@ func rf(v float64) *float64 { return &v }
 // now produce a strictly higher $ figure than the same usage priced with
 // cache_read excluded.
 func TestCostFor_IncludesCacheRead(t *testing.T) {
-	rc := &rec2{usageInOK: true, usageOutOK: true}
+	rc := &recRow{usageInOK: true, usageOutOK: true}
 	rc.usage.In = 1_000_000
 	rc.usage.CacheRead = 500_000
 	rc.usage.Out = 100_000
@@ -41,7 +41,7 @@ func TestCostFor_IncludesCacheRead(t *testing.T) {
 }
 
 func TestCostFor_MissingRateComponent_TreatedAsZero(t *testing.T) {
-	rc := &rec2{usageInOK: true, usageOutOK: true}
+	rc := &recRow{usageInOK: true, usageOutOK: true}
 	rc.usage.In = 1_000_000
 	rate := pricing.Rate{InFresh: rf(2.0)} // everything else nil
 	got, _ := costFor(rate, rc)
@@ -58,7 +58,7 @@ func TestCostFor_MissingRateComponent_TreatedAsZero(t *testing.T) {
 // it prices the same degraded byte-count estimate (rc.estInFresh/rc.estOut)
 // internal/router/quota.go's tokenCharge degraded branch charges.
 func TestCostFor_NoUsage_PricesDegradedEstimate(t *testing.T) {
-	rc := &rec2{estInFresh: 1_000_000, estOut: 500_000}
+	rc := &recRow{estInFresh: 1_000_000, estOut: 500_000}
 	rate := pricing.Rate{InFresh: rf(2.0), CacheRead: rf(0.5), CacheWrite: rf(1.0), Out: rf(4.0)}
 	got, estCost := costFor(rate, rc)
 	// No cache components: the degraded estimate can't tell cache hits
@@ -78,7 +78,7 @@ func TestCostFor_NoUsage_PricesDegradedEstimate(t *testing.T) {
 // figure, which would inflate WindowEstimatedPct toward 100% for an account
 // that is in fact ~99% exactly billed.
 func TestCostFor_SplitSide(t *testing.T) {
-	rc := &rec2{usageInOK: true, usageOutOK: false, estOut: 10}
+	rc := &recRow{usageInOK: true, usageOutOK: false, estOut: 10}
 	rc.usage.In = 200_000
 	rate := pricing.Rate{InFresh: rf(3.0), Out: rf(15.0)}
 	got, estCost := costFor(rate, rc)
@@ -97,7 +97,7 @@ func TestCostFor_SplitSide(t *testing.T) {
 }
 
 func TestCostFor_NoUsageNoEstimate_ReturnsZero(t *testing.T) {
-	rc := &rec2{} // estInFresh/estOut both zero: e.g. a replay record with no response at all
+	rc := &recRow{} // estInFresh/estOut both zero: e.g. a replay record with no response at all
 	rate := pricing.Rate{InFresh: rf(999)}
 	got, estCost := costFor(rate, rc)
 	if got != 0 || estCost != 0 {

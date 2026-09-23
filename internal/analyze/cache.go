@@ -1,12 +1,10 @@
-// Ver 2026-09-07, by pi
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-// vmr analyze's product-level cache layer (Phase 4, D1/§7.3): the L2 digest
+// vmr analyze's product-level cache layer: the L2 digest
 // computation over (input hashes, pricing fingerprint, format version,
 // analysis params), the L2/L3 hit checks, and the cache-record writes for
-// both the full-run path and -render-only. Split out of cmd_analyze.go so
-// that file stays "pure CLI-layer routing" and inside its archtest line
-// budget; the cache concerns share their test file cmd_analyze_cache_test.go.
-package main
+// both the full-run path and -render-only.
+package analyze
 
 import (
 	"encoding/hex"
@@ -21,120 +19,99 @@ import (
 	"vmr/internal/report"
 )
 
-func analyzeModeString(r *analyzeRun) string {
+func analyzeModeString(r *Run) string {
 	switch {
-	case r.macroOnly:
+	case r.MacroOnly:
 		return "macro-only"
-	case r.listOnly:
+	case r.ListOnly:
 		return "list-only"
-	case r.benchmarkFlag:
+	case r.BenchmarkFlag:
 		return "benchmark"
-	case r.compareArg != "":
-		return "compare:" + r.compareArg
-	case r.journeyArg != "":
-		return "journey:" + r.journeyArg
-	case r.journeyOnly:
+	case r.CompareArg != "":
+		return "compare:" + r.CompareArg
+	case r.JourneyArg != "":
+		return "journey:" + r.JourneyArg
+	case r.JourneyOnly:
 		return "journey-only"
 	default:
 		return "default"
 	}
 }
 
-// configHasQuotaLimits reports whether any provider declares a quota limit —
-// i.e. whether §2.5 / finance.json's provider_quotas will render at all.
-func configHasQuotaLimits(r *analyzeRun) bool {
-	if r.cfg == nil {
-		return false
-	}
-	for _, p := range r.cfg.Providers {
-		if p.Quota != nil && len(p.Quota.Limits) > 0 {
-			return true
-		}
-	}
-	return false
+// ComputeTargetL2 computes the L2 product cache digest for the given run and mode.
+func ComputeTargetL2(r *Run, mode string) ([32]byte, bool) {
+	return computeTargetL2(r, mode)
 }
 
-func computeTargetL2(r *analyzeRun, mode string) ([32]byte, bool) {
-	inHashes, err := report.ComputeInputHashes(r.paths)
+func computeTargetL2(r *Run, mode string) ([32]byte, bool) {
+	inHashes, err := report.ComputeInputHashes(r.Paths)
 	if err != nil || len(inHashes) == 0 {
 		return [32]byte{}, false
 	}
-	// NEW-D: when the config carries quota limits, §2.5 and finance.json's
-	// provider_quotas are a function of <log_dir>/vmr-quota.json — a live
-	// counter file the routing half rewrites on every charged request, plus
-	// wall-clock-derived period progress. It changes rendered numbers exactly
-	// like the audit inputs do (§7.2's "does it change any persisted value"
-	// test), so its content must invalidate L2. File absent => nothing
-	// folded; a later appearance flips the digest, which is correct (the
-	// report gains the live column).
-	if r.cfg != nil && r.cfg.LogDir != "" && configHasQuotaLimits(r) {
-		qp := filepath.Join(r.cfg.LogDir, "vmr-quota.json")
-		if _, statErr := os.Stat(qp); statErr == nil {
-			if qh, hErr := report.ComputeInputHashes([]string{qp}); hErr == nil && len(qh) == 1 {
+	// When quota JSON is available, its content invalidates L2.
+	if r.QuotaJSONPath != "" {
+		if _, statErr := os.Stat(r.QuotaJSONPath); statErr == nil {
+			if qh, hErr := report.ComputeInputHashes([]string{r.QuotaJSONPath}); hErr == nil && len(qh) == 1 {
 				inHashes = append(inHashes, qh[0])
 			}
 		}
 	}
-	pricingFP := resolvePricingFingerprint(r.cfg, r.exchangeRate)
-	// LLM identity rides the params fingerprint only on the modes that
-	// consume it: on -journey/-compare an L2 hit must not silently swallow a
-	// requested -llm-addr interpretation, while on the batch shapes the
-	// resolved value is deliberately ignored (never consulted downstream).
+	pricingFP := r.PricingFingerprint
 	llmAddr, llmModel := "", ""
 	if strings.HasPrefix(mode, "journey:") || strings.HasPrefix(mode, "compare:") {
-		llmAddr, llmModel = r.llmAddr, r.llmModel
+		llmAddr, llmModel = r.LLMOpts.Addr, r.LLMOpts.Model
 	}
 	paramsFP := report.ComputeAnalysisParamsFingerprint(report.AnalysisParams{
-		Lang:               r.lang.String(),
-		TaskProfile:        resolveTaskProfile().Name(),
-		IncludePartial:     r.includePartial,
-		IncludeSelfTraffic: r.includeSelfTraffic,
-		SelfTrafficTags:    r.selfTrafficTags,
-		LLMSelfTag:         llmSelfTag(r.llmKey),
+		Lang:               r.Lang.String(),
+		TaskProfile:        r.profile().Name(),
+		IncludePartial:     r.IncludePartial,
+		IncludeSelfTraffic: r.IncludeSelfTraffic,
+		SelfTrafficTags:    r.SelfTrafficTags,
+		LLMSelfTag:         r.LLMSelfTag,
 		LLMAddr:            llmAddr,
 		LLMModel:           llmModel,
-		DisplayCCY:         r.displayCCY,
-		RenderAll:          r.renderAllFlag,
-		Details:            r.detailsOn,
+		DisplayCCY:         r.DisplayCCY,
+		RenderAll:          r.RenderAllFlag,
+		Details:            r.DetailsOn,
 		Mode:               mode,
 	})
 	return report.ComputeL2Digest(inHashes, pricingFP, report.ManifestFormat, paramsFP), true
 }
 
-func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
-	if r.noCache {
+func tryL2Cache(r *Run, targetL2 [32]byte, mode string) bool {
+	if r.NoCache {
 		return false
 	}
-	rec, hit := report.CheckL2Cache(r.outDir, targetL2)
+	rec, hit := report.CheckL2Cache(r.OutDir, targetL2)
 	if !hit {
 		return false
 	}
 	if zoomArtifactMissing(r, mode) {
 		return false
 	}
-	vmFP, err := report.ComputeVMFingerprintFromManifest(r.outDir)
+	vmFP, err := report.ComputeVMFingerprintFromManifest(r.OutDir)
 	if err != nil {
 		return false
 	}
-	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.lang.String())
-	l3Hit := report.CheckL3Cache(r.outDir, targetL3, mode)
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.Lang.String())
+	l3Hit := report.CheckL3Cache(r.OutDir, targetL3, mode)
 	if !l3Hit {
-		if err := renderAllFromDisk(r.outDir, r.lang); err != nil {
+		if err := renderAllFromDisk(r.OutDir, r.Lang); err != nil {
 			return false
 		}
 		rec.VMFingerprint = hex.EncodeToString(vmFP[:])
 		rec.L3Digest = hex.EncodeToString(targetL3[:])
 		rec.RendererVersion = report.RendererVersion
-		_ = report.SaveCacheRecord(r.outDir, rec)
+		_ = report.SaveCacheRecord(r.OutDir, rec)
 	}
 
-	if err := dashboard.WriteSkeletons(r.outDir); err != nil {
+	if err := dashboard.WriteSkeletons(r.OutDir); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: dashboard skeleton refresh failed (pages may be stale until next analyze): %v\n", err)
 	}
-	if err := RebuildComparesIndex(filepath.Join(r.outDir, "compares"), r.lang); err != nil {
+	if err := RebuildComparesIndex(filepath.Join(r.OutDir, "compares"), r.Lang); err != nil {
 		fmt.Fprintf(os.Stderr, "compares index rebuild failed (stale until next analyze): %v\n", err)
 	}
-	// D20/§3.4: the orphan sweep is the default-suite full run's job, and an
+	// The orphan sweep is the default-suite full run's job, and an
 	// L2 hit still IS that run (identical inputs, params, and mode digest).
 	// Without this, anything that lands in journeys/details/ between two
 	// identical runs — a manual copy, a crashed zoom run's leftovers —
@@ -144,15 +121,15 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 	// the last full run); their L2 digests differ from the default suite's
 	// anyway, so this branch only ever fires on a true full-run hit.
 	if mode == "default" {
-		if idx := journey.LoadJourneyIndex(filepath.Join(r.outDir, "journeys", "index.json")); idx != nil {
+		if idx := journey.LoadJourneyIndex(filepath.Join(r.OutDir, "journeys", "index.json")); idx != nil {
 			ids := make([]string, len(idx.Journeys))
 			for i, row := range idx.Journeys {
 				ids[i] = row.ID
 			}
-			_, _ = journey.CleanOrphanJourneys(filepath.Join(r.outDir, "journeys", "details"), ids)
+			_, _ = journey.CleanOrphanJourneys(filepath.Join(r.OutDir, "journeys", "details"), ids)
 		}
 	}
-	if r.lang == i18n.ZH {
+	if r.Lang == i18n.ZH {
 		fmt.Fprintln(os.Stderr, "L2/L3 缓存命中，产物已是最新（-no-cache 可强制重算）")
 	} else {
 		fmt.Fprintln(os.Stderr, "L2/L3 cache hit: outputs are up to date (-no-cache forces rebuild)")
@@ -160,14 +137,14 @@ func tryL2Cache(r *analyzeRun, targetL2 [32]byte, mode string) bool {
 	return true
 }
 
-func zoomArtifactMissing(r *analyzeRun, mode string) bool {
+func zoomArtifactMissing(r *Run, mode string) bool {
 	if strings.HasPrefix(mode, "compare:") {
-		parts := strings.Split(r.compareArg, ",")
+		parts := strings.Split(r.CompareArg, ",")
 		if len(parts) != 2 {
 			return true
 		}
 		p0, p1 := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
-		comparesDir := filepath.Join(r.outDir, "compares")
+		comparesDir := filepath.Join(r.OutDir, "compares")
 		if strings.ContainsAny(p0+p1, "*?[]") {
 			matches, err := filepath.Glob(filepath.Join(comparesDir, "compare-"+p0+"-vs-"+p1+".json"))
 			return err != nil || len(matches) == 0
@@ -180,8 +157,8 @@ func zoomArtifactMissing(r *analyzeRun, mode string) bool {
 		return err != nil || len(matches) == 0
 	}
 	if strings.HasPrefix(mode, "journey:") {
-		arg := strings.TrimSpace(r.journeyArg)
-		detailsDir := filepath.Join(r.outDir, "journeys", "details")
+		arg := strings.TrimSpace(r.JourneyArg)
+		detailsDir := filepath.Join(r.OutDir, "journeys", "details")
 		tokens := strings.Split(arg, ",")
 		for _, tok := range tokens {
 			tok = strings.TrimSpace(tok)
@@ -209,17 +186,17 @@ func zoomArtifactMissing(r *analyzeRun, mode string) bool {
 	return false
 }
 
-func recordPostAnalyzeCache(r *analyzeRun) {
+func recordPostAnalyzeCache(r *Run) {
 	mode := analyzeModeString(r)
 	targetL2, ok := computeTargetL2(r, mode)
 	if !ok {
 		return
 	}
-	vmFP, err := report.ComputeVMFingerprintFromManifest(r.outDir)
+	vmFP, err := report.ComputeVMFingerprintFromManifest(r.OutDir)
 	if err != nil {
 		return
 	}
-	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.lang.String())
+	targetL3 := report.ComputeL3Digest(vmFP[:], report.RendererVersion, r.Lang.String())
 	rec := &report.CacheRecord{
 		L2Digest:        hex.EncodeToString(targetL2[:]),
 		VMFingerprint:   hex.EncodeToString(vmFP[:]),
@@ -227,7 +204,7 @@ func recordPostAnalyzeCache(r *analyzeRun) {
 		FormatVersion:   report.ManifestFormat,
 		RendererVersion: report.RendererVersion,
 	}
-	_ = report.SaveCacheRecord(r.outDir, rec)
+	_ = report.SaveCacheRecord(r.OutDir, rec)
 }
 
 func tryRenderOnlyL3Cache(outDir string, requestedLang string, langPassed bool) bool {

@@ -1,4 +1,4 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Rule-derived, Step-level "suspect list" findings for a single Journey —
 // the same Finding/FindingCode shape internal/report's buildFindings already
@@ -12,9 +12,8 @@
 //
 // Every detector here is pure rule/structure matching — no LLM call, no
 // judgment about WHY something happened, only THAT a structural pattern
-// matched. Findings are explicitly a "candidate/suspect list, not a verdict"
-// (the journey design specification's
-// candidate-list framing): wording is "detected N suspected occurrences, recommend manual
+// matched. Findings are explicitly a "candidate/suspect list, not a verdict":
+// wording is "detected N suspected occurrences, recommend manual
 // review", never "the agent made a mistake here".
 package journey
 
@@ -63,22 +62,22 @@ type Finding struct {
 	// Params carries the raw values that drove this finding (a tool name, a
 	// repeat count, a step sequence, a comma-joined entity list — never a
 	// pre-formatted or pre-localized string) so a consumer can reconstruct
-	// the sentence in any language without recomputing the detector (R1:
-	// language is a render-time concern, never baked into the data
+	// the sentence in any language without recomputing the detector (language
+	// is a render-time concern, never baked into the data
 	// product — same split as internal/report's Finding.Params). Empty for
 	// LLM-inferred findings (Source == SourceLLMInferred) — see LLMLang.
 	Params map[string]string `json:"params,omitempty"`
 	// LLMLang is the language the LLM was prompted in, set only when
 	// Source == SourceLLMInferred. Finding/Evidence/Action for an
-	// LLM-inferred finding are the model's own generated text — R1's LLM-
-	// original-text exemption: they are NOT re-derivable in another
+	// LLM-inferred finding are the model's own generated text — the
+	// LLM-original-text exemption: they are NOT re-derivable in another
 	// language without a new model call, so they are exempted from the
 	// language-invariance requirement rather than reduced to Code+Params,
 	// as long as this field says which language they were generated in.
 	LLMLang string `json:"llm_lang,omitempty"`
 	// Finding/Evidence/Action are narrative text. For a rule-derived
 	// finding (Source unset) these are the English baseline, reconstructible
-	// from Code+Params — j-<id>.json no longer follows lang for these (R1).
+	// from Code+Params — j-<id>.json no longer follows lang for these.
 	// For an LLM-inferred finding (Source == SourceLLMInferred) these are
 	// the model's own original-language text — see LLMLang above. Either
 	// way, j-<id>.md renders its own copy at the actual display language
@@ -117,7 +116,7 @@ const (
 // findings_toolresult.go) over j and returns the combined, Step-order-
 // sorted candidate list. Selection (which Steps match, which Code, which
 // RelatedSeq) never depended on lang; the Finding/Evidence/Action text now
-// doesn't either (R1) — this always builds the English baseline plus each
+// doesn't either — this always builds the English baseline plus each
 // finding's Params, so j-<id>.json is language-invariant. Markdown rendering
 // reconstructs the actually-requested language from Code+Params at render
 // time (localizeFinding, called from buildVMFindings) rather than reading
@@ -173,7 +172,8 @@ func ComputeFindings(j *Journey) []Finding {
 // persisted j-<id>.json. That's why Markdown-structure escaping
 // (sanitizeMDStruct) happens here rather than at Finding-construction time
 // (llm_findings.go) — ComputeLLMFindings' own doc comment and
-// KNOWN_ISSUES §1.5 explain why: the JSON stays the model's raw text,
+// KNOWN_ISSUES' engineering-conventions section explain why: the JSON stays
+// the model's raw text,
 // Markdown gets the escaped copy, and the two concerns (re-localize vs.
 // Markdown-escape) are independent — this branch always does the second,
 // never the first.
@@ -236,7 +236,7 @@ const exactRepeatThreshold = 3
 // within a step or two of the previous attempt (occasionally interleaving
 // one unrelated call); the same call three times spread across a long
 // session is working rhythm, not a loop. Without this bound the global
-// count flagged exactly those rhythmic repeats (§2.115). Same
+// count flagged exactly those rhythmic repeats. Same
 // calibration-pending status as exactRepeatThreshold.
 const maxRepeatGap = 2
 

@@ -1,8 +1,7 @@
 // Ver 2026-09-15, by pi
 
 // Pure Markdown formatting helpers (codeFence, escapeHTML, escapeCell,
-// pctStr). The *Journey-based RenderMarkdown that used to live here is now
-// viewmodel.go's RenderMarkdownFromSummary (D11).
+// pctStr), called from the render builders.
 package journey
 
 import (

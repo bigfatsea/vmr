@@ -20,7 +20,7 @@ type JourneyIndexText struct {
 	SelfTrafficActive   func(excluded int) string
 	SelfTrafficInactive string
 	// NoiseFoldSummary is the <summary> line for the collapsed heartbeat
-	// block (P6.3, narrowed to heartbeat-only by P14.1's IsNoiseCategory —
+	// block (narrowed to heartbeat-only —
 	// cron/subagent moved into the main table) — n is how many rows it holds.
 	NoiseFoldSummary func(n int) string
 

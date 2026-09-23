@@ -1,4 +1,4 @@
-// Ver 2026-09-21 23:30, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
 // Phase 1b LLM semantic detectors for single Journey analysis.
 //
@@ -26,7 +26,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-// --- P1b.1: Tool Result Misinterpretation (E3) ------------------------------
+// --- Tool Result Misinterpretation (E3) ------------------------------
 
 // buildToolMisinterpretationPack assembles the detector's evidence pack from
 // j's suspicious tool pairs — nil when the candidate filter finds none (the
@@ -85,7 +85,7 @@ func detectLLMToolResultMisinterpretation(ctx context.Context, j *Journey, opts 
 	return findings
 }
 
-// --- P1b.2: Semantic Oscillation (E4) ---------------------------------------
+// --- Semantic Oscillation (E4) ---------------------------------------
 
 func detectOscillationCandidates(steps []*Step) []OscillationCandidate {
 	const windowSize = 6
@@ -211,7 +211,7 @@ func detectLLMSemanticOscillation(ctx context.Context, j *Journey, opts LLMOptio
 	return findings
 }
 
-// --- P1b.3: Long-term Goal Drift (E5) ----------------------------------------
+// --- Long-term Goal Drift (E5) ----------------------------------------
 
 // buildGoalDriftPack assembles the drift detector's evidence pack from j's
 // checkpoints — nil when j has no stated root intent, is too short to audit,
@@ -269,8 +269,8 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	// Step 1 IS the root intent by construction (extractRootUserIntent
 	// returns the first user message's text) — any "drift anchored at
 	// step 1" verdict is a contradiction in terms, and the observed
-	// failure mode (LLM occasionally returns DriftStepSeq:1, see review
-	// P-09 / KNOWN_ISSUES §2.53) is exactly that category mistake. The
+	// failure mode (LLM occasionally returns DriftStepSeq:1) is exactly
+	// that category mistake. The
 	// evidence pack's first checkpoint is Step 1 by buildGoalDriftPack's
 	// own loop, so this guard also keeps "first checkpoint" and "drift
 	// anchor" on different steps and prevents the same step from being
@@ -302,7 +302,7 @@ func detectLLMGoalDrift(ctx context.Context, j *Journey, opts LLMOptions, lang i
 	return nil
 }
 
-// --- P1b.4: Compaction Constraint Dropped (E7) ------------------------------
+// --- Compaction Constraint Dropped (E7) ------------------------------
 
 // buildConstraintPack assembles the compaction-constraint detector's
 // evidence pack from j's compaction excerpts — nil when there are none.
@@ -361,7 +361,7 @@ func detectLLMConstraintDropped(ctx context.Context, j *Journey, opts LLMOptions
 	return findings
 }
 
-// --- P1b.5: Plan Execution Misalignment (PCPC) ------------------------------
+// --- Plan Execution Misalignment ------------------------------
 
 // buildPlanAuditPack assembles the plan-misalignment detector's evidence
 // pack — the plan baseline found in j's text plus the tool index to audit
@@ -459,7 +459,7 @@ func detectLLMPlanMisalignment(ctx context.Context, j *Journey, opts LLMOptions,
 	return nil
 }
 
-// --- P1b.6: Unverified Completion Claim (E2) --------------------------------
+// --- Unverified Completion Claim (E2) --------------------------------
 
 // buildCompletionClaimPack assembles the unverified-completion-claim
 // detector's evidence pack from the final step's outcome plus the
@@ -633,17 +633,17 @@ func anchoredInTranscript(f Finding, pool string) bool {
 // ComputeLLMFindings runs all Phase 1b LLM semantic detectors against j.
 // Fail-open: if LLM call fails or returns non-conforming output, errors are ignored
 // and only valid high-confidence findings are returned. Every surviving
-// finding's EvidenceAnchor is verified against the real transcript (B3) —
+// finding's EvidenceAnchor is verified against the real transcript —
 // one that doesn't appear verbatim is dropped, however confident the model
 // claimed to be. A finding whose StepSeq is not one of the Journey's real
 // step numbers is dropped too (never clamped — clamping would map an
 // attacker-chosen sequence onto a legitimate step). The returned findings'
 // LLM-authored text (Evidence/Action/EvidenceAnchor) is the model's raw
-// output, unescaped — R1/R2: j-<id>.json should show what the model
+// output, unescaped — j-<id>.json should show what the model
 // actually said, not a Markdown-safe rewrite of it. Markdown-structure
 // escaping happens at render time instead, in localizeFinding's
 // SourceLLMInferred branch (findings.go) — see that function's doc comment
-// and KNOWN_ISSUES §1.5 for why.
+// and KNOWN_ISSUES' engineering-conventions section for why.
 func ComputeLLMFindings(ctx context.Context, j *Journey, opts LLMOptions, lang i18n.Lang) ([]Finding, error) {
 	if !opts.Enabled() {
 		return nil, nil

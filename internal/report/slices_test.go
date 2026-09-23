@@ -1,4 +1,4 @@
-// Ver 2026-09-21 22:00, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -13,14 +13,13 @@ import (
 
 	"vmr/internal/fmtutil"
 	"vmr/internal/i18n"
-	"vmr/internal/taskseg"
 )
 
-// makeSampleReport builds a comprehensive Report2 for testing slice extraction.
-func makeSampleReport() *Report2 {
+// makeSampleReport builds a comprehensive Report for testing slice extraction.
+func makeSampleReport() *Report {
 	cost1 := 1.2345
 	cost2 := 0.5678
-	return &Report2{
+	return &Report{
 		Meta: Meta{
 			Format:      Format,
 			GeneratedAt: "2026-09-06T20:00:00Z",
@@ -262,9 +261,9 @@ func makeSampleReport() *Report2 {
 	}
 }
 
-// TestMacroSlices_EquivalenceWithReport2 verifies that the 5 domain slices
-// preserve all data from Report2 without information loss (TASK_SPEC Task 1/3).
-func TestMacroSlices_EquivalenceWithReport2(t *testing.T) {
+// TestMacroSlices_EquivalenceWithReport verifies that the 5 domain slices
+// preserve all data from Report without information loss (TASK_SPEC Task 1/3).
+func TestMacroSlices_EquivalenceWithReport(t *testing.T) {
 	rep := makeSampleReport()
 
 	// 1. Build the 5 slices
@@ -765,9 +764,9 @@ func TestSlicesAreLangInvariant(t *testing.T) {
 	now := time.Now()
 
 	build := func(lang i18n.Lang) (slices map[string][]byte, manifest *Manifest) {
-		rep, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+		rep, _, _, err := Build(BuildOptions{Paths: []string{path}, Now: now})
 		if err != nil {
-			t.Fatalf("BuildCached: %v", err)
+			t.Fatalf("Build: %v", err)
 		}
 		outDir := t.TempDir()
 		if err := WriteMacroSlices(outDir, rep); err != nil {

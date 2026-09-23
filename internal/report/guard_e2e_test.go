@@ -1,4 +1,4 @@
-// Ver 2026-09-16, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 package report
 
@@ -7,13 +7,12 @@ import (
 	"time"
 
 	"vmr/internal/audit"
-	"vmr/internal/taskseg"
 )
 
 // TestGuardE2E_BuildPopulatesReportGuard exercises the full pipeline a
 // real M3/M4 producer would drive: JSONL on disk -> Build's fresh-decode
-// path (extractRecordFacts -> buildRec2 -> ingestRecord -> guardCollector)
-// -> Report2.Guard. Proves the wiring end-to-end, not just guardcol.go in
+// path (extractRecordFacts -> buildRow -> ingestRecord -> guardCollector)
+// -> Report.Guard. Proves the wiring end-to-end, not just guardcol.go in
 // isolation (guardcol_test.go) or the ViewModel in isolation
 // (viewmodel_guard_test.go).
 func TestGuardE2E_BuildPopulatesReportGuard(t *testing.T) {
@@ -48,7 +47,7 @@ func TestGuardE2E_BuildPopulatesReportGuard(t *testing.T) {
 	}
 	path := writeJSONL(t, recs)
 
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestGuardE2E_FallbackScanCoversCleanRecord(t *testing.T) {
 			Client: audit.Exchange{Request: audit.Message{Body: map[string]any{"model": "coding"}}}},
 	}
 	path := writeJSONL(t, recs)
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -103,7 +102,7 @@ func TestGuardE2E_FallbackScanCoversCleanRecord(t *testing.T) {
 // Path never runs at all.
 func TestGuardE2E_NilOnEmptyLog(t *testing.T) {
 	path := writeJSONL(t, nil)
-	rep, _, _, err := BuildCached([]string{path}, time.Now(), nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, _, err := Build(BuildOptions{Paths: []string{path}})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -113,7 +112,7 @@ func TestGuardE2E_NilOnEmptyLog(t *testing.T) {
 }
 
 // TestGuardE2E_CacheHitPathCarriesGuard is the reason CacheSchemaVersion
-// was bumped (ctxgraph/cache.go's v11 note): a second BuildCached run over
+// was bumped (ctxgraph/cache.go's v11 note): a second Build run over
 // the same file must take the cache-hit path (ingestCachedFile, not a
 // fresh decode) and still see Guard data — proving factscache.go's
 // recordFacts.Guard round-trips through the on-disk/in-memory cache
@@ -128,17 +127,17 @@ func TestGuardE2E_CacheHitPathCarriesGuard(t *testing.T) {
 	path := writeJSONL(t, recs)
 	now := time.Now()
 
-	_, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	_, _, cache1, err := Build(BuildOptions{Paths: []string{path}, Now: now})
 	if err != nil {
-		t.Fatalf("first BuildCached (cold): %v", err)
+		t.Fatalf("first Build (cold): %v", err)
 	}
 
 	// Second run reuses cache1 for the same, unmodified file — scanFiles'
 	// cache-hit branch (onRecord == nil && ok) takes over and never
 	// reopens/re-decodes it.
-	rep2, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
+	rep2, _, _, err := Build(BuildOptions{Paths: []string{path}, Now: now, PriorCache: cache1})
 	if err != nil {
-		t.Fatalf("second BuildCached (warm): %v", err)
+		t.Fatalf("second Build (warm): %v", err)
 	}
 	if rep2.Guard == nil {
 		t.Fatal("rep2.Guard is nil on the cache-hit path — Guard did not survive the fact cache round trip")
@@ -179,9 +178,9 @@ func TestGuardE2E_InboundOnlyStampTriggersOutboundFallback(t *testing.T) {
 	path := writeJSONL(t, recs)
 	now := time.Now()
 
-	rep, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, cache1, err := Build(BuildOptions{Paths: []string{path}, Now: now})
 	if err != nil {
-		t.Fatalf("BuildCached cold: %v", err)
+		t.Fatalf("Build cold: %v", err)
 	}
 	if rep.Guard == nil {
 		t.Fatal("rep.Guard is nil, want outbound fallback to run")
@@ -198,9 +197,9 @@ func TestGuardE2E_InboundOnlyStampTriggersOutboundFallback(t *testing.T) {
 	}
 
 	// Warm cache run must produce the same result via factscache.
-	rep2, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
+	rep2, _, _, err := Build(BuildOptions{Paths: []string{path}, Now: now, PriorCache: cache1})
 	if err != nil {
-		t.Fatalf("BuildCached warm: %v", err)
+		t.Fatalf("Build warm: %v", err)
 	}
 	if rep2.Guard == nil {
 		t.Fatal("rep2.Guard is nil on warm cache")
@@ -243,9 +242,9 @@ func TestGuardE2E_ScanErrorStampTriggersFallback(t *testing.T) {
 	path := writeJSONL(t, recs)
 	now := time.Now()
 
-	rep, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, cache1, err := Build(BuildOptions{Paths: []string{path}, Now: now})
 	if err != nil {
-		t.Fatalf("BuildCached cold: %v", err)
+		t.Fatalf("Build cold: %v", err)
 	}
 	if rep.Guard == nil {
 		t.Fatal("rep.Guard is nil, want the fallback scan to have run on the errored record")
@@ -262,9 +261,9 @@ func TestGuardE2E_ScanErrorStampTriggersFallback(t *testing.T) {
 	}
 
 	// Warm cache run must produce the same result.
-	rep2, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
+	rep2, _, _, err := Build(BuildOptions{Paths: []string{path}, Now: now, PriorCache: cache1})
 	if err != nil {
-		t.Fatalf("BuildCached warm: %v", err)
+		t.Fatalf("Build warm: %v", err)
 	}
 	if rep2.Guard == nil || rep2.Guard.RecordsWithHits != 1 {
 		t.Errorf("rep2.Guard = %+v, want the same fallback hit on warm cache", rep2.Guard)
@@ -333,9 +332,9 @@ func TestGuardE2E_StampedRecordExtractsInboundForensics(t *testing.T) {
 	path := writeJSONL(t, recs)
 	now := time.Now()
 
-	rep, _, cache1, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, nil, nil, nil)
+	rep, _, cache1, err := Build(BuildOptions{Paths: []string{path}, Now: now})
 	if err != nil {
-		t.Fatalf("BuildCached cold: %v", err)
+		t.Fatalf("Build cold: %v", err)
 	}
 	if rep.Guard == nil {
 		t.Fatal("rep.Guard is nil")
@@ -357,9 +356,9 @@ func TestGuardE2E_StampedRecordExtractsInboundForensics(t *testing.T) {
 	}
 
 	// Warm cache run must produce identical inbound facts.
-	rep2, _, _, err := BuildCached([]string{path}, now, nil, nil, nil, nil, taskseg.OpenClawAware, cache1, nil, nil)
+	rep2, _, _, err := Build(BuildOptions{Paths: []string{path}, Now: now, PriorCache: cache1})
 	if err != nil {
-		t.Fatalf("BuildCached warm: %v", err)
+		t.Fatalf("Build warm: %v", err)
 	}
 	if rep2.Guard == nil || rep2.Guard.Inbound == nil {
 		t.Fatal("rep2.Guard or Inbound is nil on warm cache")

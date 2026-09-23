@@ -81,7 +81,7 @@ func vmStepHeader(ss *StepStructure, repeated, flagged bool, reply, reasoning st
 	header += "\n\n"
 	if linkDetails {
 		// journey .md lives at journeys/details/j-<id>.md; request detail
-		// files live at requests/details/r-<...>.md (§4 topology) — two
+		// files live at requests/details/r-<...>.md — two
 		// levels up, then into the requests/ tree.
 		header += t.SpineDetailLink("../../requests/details/" + vmDetailFileName(ss))
 	} else {
@@ -420,7 +420,7 @@ func buildVMFindings(s *JourneySummary, lang i18n.Lang) []VMBlock {
 	var order []FindingCode
 	for _, f := range s.Findings {
 		// Reconstruct rule-derived findings' text in the actual render
-		// language (R1) — s.Findings carries the English baseline (or, on
+		// language — s.Findings carries the English baseline (or, on
 		// a stale on-disk JSON predating this field, the language it was
 		// originally built with); LLM-inferred entries pass through
 		// unchanged (localizeFinding's own doc comment).

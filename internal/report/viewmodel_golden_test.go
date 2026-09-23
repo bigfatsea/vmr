@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-12 12:00, by dev
 
 // The VM-structure golden (§9 of the analyze architecture redesign): the
 // builders' output is compared as a STRUCTURED view model — JSON-serialized
@@ -98,9 +98,9 @@ func withClient(key string, stats TrafficStats, cost *float64) ClientRow {
 // paragraphs, tables with conditional notes, a folded table, a details
 // block, mermaid, footnotes, and both languages' full string sets —
 // without the volume that would make the golden unreadable.
-func goldenFixture() *Report2 {
+func goldenFixture() *Report {
 	f := func(v float64) *float64 { return &v }
-	rep := &Report2{
+	rep := &Report{
 		Meta: Meta{
 			Format: Format, Inputs: []string{"a.jsonl", "b.jsonl"},
 			Records: 7, ParseErrors: 1,

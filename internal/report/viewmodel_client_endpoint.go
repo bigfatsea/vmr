@@ -1,6 +1,6 @@
-// Ver 2026-09-15, by Opus 5
+// Ver 2026-09-23 04:06, by Claude Opus 5.5
 
-// §5.5 按客户端的上游归属 view model: one small heading + table per
+// 按客户端的上游归属 view model: one small heading + table per
 // client, each row an endpoint it hit. Grouped rather than a
 // client×endpoint matrix — see rows.go's ClientEndpointRow doc comment
 // for why. Pairs with internal/i18n/report_client_endpoint.go.
@@ -13,7 +13,7 @@ import (
 	"vmr/internal/i18n"
 )
 
-func vmClientEndpointSection(rep *Report2, lang i18n.Lang) SectionVM {
+func vmClientEndpointSection(rep *Report, lang i18n.Lang) SectionVM {
 	if len(rep.ClientEndpoints) == 0 {
 		return SectionVM{}
 	}

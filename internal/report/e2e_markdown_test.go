@@ -1,4 +1,4 @@
-// Ver 2026-09-22 13:20, by Sonnet 5
+// Ver 2026-09-12 12:00, by dev
 
 // The report side's end-to-end Markdown smoke (Phase 3, Step 3.7 / weight
 // doc's阶段 F "补齐" item): internal/journey already has one
@@ -20,7 +20,7 @@ import (
 )
 
 // TestGoldenReportMarkdown pins MacroMarkdown's byte output for the
-// goldenFixture() Report2 (viewmodel_golden_test.go), one file per
+// goldenFixture() Report (viewmodel_golden_test.go), one file per
 // language. Regenerate after an INTENTIONAL rendering change with
 // UPDATE_MD_GOLDEN=1 go test ./internal/report/ -run TestGoldenReportMarkdown
 // — review the diff, then commit.

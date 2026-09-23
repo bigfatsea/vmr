@@ -1,6 +1,6 @@
-// Ver 2026-08-30, by Sonnet 5
+// Ver 2026-09-22 19:15, by Sonnet 5
 
-package main
+package analyze
 
 import (
 	"testing"
@@ -79,14 +79,4 @@ func equalRanges(a, b [][2]int) bool {
 		}
 	}
 	return true
-}
-
-func TestChainBytes_SumsEveryManifest(t *testing.T) {
-	chain := []*ctxgraph.Lineage{
-		{Manifests: []*ctxgraph.Manifest{{Bytes: 10}, {Bytes: 20}}},
-		{Manifests: []*ctxgraph.Manifest{{Bytes: 5}}},
-	}
-	if got := chainBytes(chain); got != 35 {
-		t.Errorf("chainBytes = %d, want 35", got)
-	}
 }

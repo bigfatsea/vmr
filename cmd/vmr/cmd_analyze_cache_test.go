@@ -1,4 +1,4 @@
-// Ver 2026-09-15, by pi
+// Ver 2026-09-23 02:50, by pi
 
 package main
 
@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"vmr/internal/analyze"
 	"vmr/internal/audit"
 	"vmr/internal/config"
 	"vmr/internal/i18n"
@@ -20,6 +21,44 @@ import (
 )
 
 // readDirFiles reads all regular files in dir into a map[filename]content.
+type analyzeRun struct {
+	paths           []string
+	outDir          string
+	lang            i18n.Lang
+	noCache         bool
+	llmKey          string
+	llmAddr         string
+	llmModel        string
+	llmAddrExplicit bool
+	cfg             *config.Config
+	exchangeRate    map[string]float64
+}
+
+func computeTargetL2(r *analyzeRun, mode string) ([32]byte, bool) {
+	quotaJSONPath := ""
+	if r.cfg != nil && r.cfg.LogDir != "" && configHasQuotaLimits(r.cfg) {
+		quotaJSONPath = filepath.Join(r.cfg.LogDir, "vmr-quota.json")
+	}
+	pricingFP := resolvePricingFingerprint(r.cfg, r.exchangeRate)
+	run := &analyze.Run{
+		Paths:      r.paths,
+		OutDir:     r.outDir,
+		Lang:       r.lang,
+		NoCache:    r.noCache,
+		LLMSelfTag: analyze.LLMSelfTag(r.llmKey),
+		LLMOpts: analyze.LLMOptions{
+			LLMOptions: journey.LLMOptions{
+				Addr:  r.llmAddr,
+				Model: r.llmModel,
+			},
+		},
+		LLMAddrExplicit:    r.llmAddrExplicit,
+		PricingFingerprint: pricingFP,
+		QuotaJSONPath:      quotaJSONPath,
+	}
+	return analyze.ComputeTargetL2(run, mode)
+}
+
 func readDirFiles(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	out := map[string]string{}

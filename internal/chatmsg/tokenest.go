@@ -17,7 +17,7 @@ import (
 // it different BASES, which is exactly the failure mode the "an analytics
 // number reproducing another must be pinned, not commented" rule is about.
 // report's factscache and ctxgraph's manifest both call here directly, so
-// the macro report's §2 total and a journey's cost line can't disagree
+// the macro cost section's total and a journey's cost line can't disagree
 // about a record's degraded tokens at compile time, not by a comment's
 // promise.
 //
@@ -37,8 +37,8 @@ import (
 //   - Response side (EstimateResponseBodyTokens): no raw fallback, 0
 //     instead. The router's outTokenMeter never counted envelope bytes, and
 //     for truncated/opaque responses the raw bytes measure transport, not
-//     generation — the Q04 71x inflation. Falling back to raw would
-//     reintroduce it.
+//     generation — a 71x byte-count inflation observed in testing. Falling
+//     back to raw would reintroduce it.
 //
 // The asymmetry is behavior, pinned by
 // TestEstimateDegradedBasis_FallbackAsymmetry; do not "unify" it without

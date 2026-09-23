@@ -1,8 +1,8 @@
 // Ver 2026-09-15, by pi
 
-// Legacy renderDecisionSpine eating in-memory *Journey was deleted in Phase 3
-// in favor of viewmodel_spine.go (D11); capFullWith, positionalToolResults and
-// the truncation constants below are still live and used by it.
+// Pure helpers for the decision spine (capFullWith, positionalToolResults,
+// the truncation constants below), still called by viewmodel_spine.go's
+// decision-spine builder.
 package journey
 
 import "vmr/internal/chatmsg"

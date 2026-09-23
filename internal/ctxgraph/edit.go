@@ -74,8 +74,9 @@ func (k EditKind) Splits() bool {
 }
 
 // Threshold constants, calibrated against the 2026-07-14..28 corpus (7112
-// records, 168 multi-turn sessions) — see docs/VirtualModelRouter_Design_v4_Analytics.md
-// §5 for the resulting edit-kind distribution these values produce. Tune here when a
+// records, 168 multi-turn sessions) — see the Analytics design doc's
+// edit-classification section for the resulting edit-kind distribution these
+// values produce. Tune here when a
 // wider or different corpus disagrees; deliberately NOT a config knob —
 // users cannot calibrate what they have no way to measure, and getting
 // this wrong just means the report explains itself worse, it doesn't route

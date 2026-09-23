@@ -1,6 +1,6 @@
 // Ver 2026-09-22 02:25, by Sonnet 5
 
-// Pairs with internal/report/viewmodel_provider.go (§2.5 Provider Spend & Quota).
+// Pairs with internal/report/viewmodel_provider.go (Provider Spend & Quota).
 package i18n
 
 import (
@@ -14,13 +14,13 @@ type ProviderText struct {
 	Intro   string
 	Headers []string // provider, models, requests, success rate, fresh/cached/out, cache eff, dur mean, error rate, top error class — +cost appended conditionally
 	CostHdr func(cur string) string
-	// SkippedAttemptsNote renders the P-5-2 line under §2.5: some
+	// SkippedAttemptsNote renders the quota-subtable disclosure line: some
 	// EndpointsAll rows carried a provider name not found in the quotas
 	// map (traffic that contributed nothing to the window recomputation).
 	// names is the first-3 unknown provider names joined by ", " (or all
 	// of them when there are 3 or fewer); more is the count of names
 	// beyond the first 3 (0 when 3 or fewer). renderSkippedAttemptsNote
-	// only calls this when Report2.ProviderQuotaSkippedAttempts > 0.
+	// only calls this when Report.ProviderQuotaSkippedAttempts > 0.
 	SkippedAttemptsNote func(total int, names string, more int) string
 }
 
