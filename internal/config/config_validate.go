@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:41, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 package config
 
@@ -71,13 +71,13 @@ func (c *Config) validateBasic() error {
 // validCapabilities is the full documented capability vocabulary (see
 // config.example.yaml and UserGuide's model_defaults/capabilities section) —
 // not the narrower set internal/strategy currently wires a Condition for.
-// "audio"/"video"/"thinking" are legitimate forward-declarations with no
-// enforcing Condition yet (see strategy/conditions.go's init comment); they
-// must validate clean today so existing documented configs keep loading.
-// "text" is the universal baseline and never gates anything. The set this
-// guards against is typos ("tool", "vision", ...) that silently and
-// permanently eliminate a model from HasTools/HasImage routing instead of
-// erroring at load time.
+// "audio"/"video"/"thinking" are accepted forward-declarations with no
+// enforcing Condition yet, so existing documented configs keep loading —
+// Check() surfaces a SeverityWarning for them ("accepted but not enforced
+// by routing yet") so the no-op can't stay invisible. "text" is the
+// universal baseline and never gates anything. The set this guards against
+// is typos ("tool", "vision", ...) that silently and permanently eliminate
+// a model from HasTools/HasImage routing instead of erroring at load time.
 var validCapabilities = map[string]bool{
 	"text": true, "tools": true, "image": true,
 	"audio": true, "video": true, "thinking": true,

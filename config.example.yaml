@@ -153,7 +153,7 @@ model_defaults:
   "*":                          # optional wildcard fallback
     capabilities: [text, tools]
   MiniMax-M3:                   # key = real model name
-    capabilities: [text, tools, image, audio, video, thinking]
+    capabilities: [text, tools, image]
     max_context_tokens: 512000
     providers: [openrouter, minimax]   # omit = applies to all providers
 

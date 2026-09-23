@@ -135,7 +135,7 @@ model_defaults:
   "*":                          # 可选通配兜底
     capabilities: [text, tools]
   MiniMax-M3:                   # key = 真实模型名
-    capabilities: [text, tools, image, audio, video, thinking]
+    capabilities: [text, tools, image]
     max_context_tokens: 512000
     providers: [openrouter, minimax]   # 不写 = 对所有 provider 生效
 

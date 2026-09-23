@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 package config
 
 import (
@@ -286,6 +286,54 @@ models:
 `)
 	if issues := cfg.Check(); len(issues) != 0 {
 		t.Errorf("Check() = %+v, want empty — the fallback key matches a declared endpoint", issues)
+	}
+}
+
+// TestCheckFlagsUnenforcedCapabilities covers the forward-declared
+// capability words ("audio"/"video"/"thinking"): validate() accepts them,
+// but Check() must surface one SeverityWarning per declared word so a
+// no-op capability declaration can't stay invisible.
+func TestCheckFlagsUnenforcedCapabilities(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
+model_defaults:
+  MiniMax-M3:
+    capabilities: [text, image, audio, video, thinking]
+models:
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
+`)
+	issues := cfg.Check()
+	if len(issues) != 3 {
+		t.Fatalf("Check() = %+v, want exactly three capability warnings", issues)
+	}
+	for _, is := range issues {
+		if is.Severity != SeverityWarning || is.Field != "capabilities" || is.Model != "MiniMax-M3" {
+			t.Errorf("issue = %+v, want a capabilities SeverityWarning scoped to model_defaults key MiniMax-M3", is)
+		}
+		if !strings.Contains(is.Message, "is accepted but not enforced by routing yet") {
+			t.Errorf("message %q does not carry the accepted-but-not-enforced wording", is.Message)
+		}
+	}
+	if HasErrors(issues) {
+		t.Errorf("HasErrors must be false for a warning-only issue set, got true from %+v", issues)
+	}
+
+	// The words "text" and "image" (both with enforcing Conditions) must
+	// stay warning-free.
+	clean := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
+model_defaults:
+  MiniMax-M3:
+    capabilities: [text, image]
+models:
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
+`)
+	if issues := clean.Check(); len(issues) != 0 {
+		t.Errorf("Check() = %+v, want no issues for enforced capabilities only", issues)
 	}
 }
 

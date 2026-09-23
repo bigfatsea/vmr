@@ -1,4 +1,4 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Quota-Aware Routing's YAML-shape config types and their validation — see
 // docs/VirtualModelRouter_Design_v4_Quota.md for the full design and its
@@ -68,7 +68,7 @@ type QuotaConfig struct {
 //
 // Design note: unlike a providers[].pricing.rates row (where an explicit
 // 0.0 legitimately means "free"), an *explicit* 0.0 weight is rejected by
-// validate() below (must be > 0, per the design doc's §9.1 validation
+// validate() below (must be > 0, per the design doc's validation
 // checklist) — a zero token_weight would silently make a whole component
 // invisible to quota accounting, which is a materially different (and far
 // more dangerous) failure than a zero *price*.
@@ -136,7 +136,7 @@ type LimitConfig struct {
 	Models           []string            `yaml:"models"`
 	TokenWeights     *TokenWeightsConfig `yaml:"token_weights"`
 	ModelMultipliers map[string]float64  `yaml:"model_multipliers"`
-	// Rolling is a P1-era rejection-only field — see this type's doc
+	// Rolling is a rejection-only field — see this type's doc
 	// comment. It never reaches core.Limit.
 	Rolling bool `yaml:"rolling"`
 
@@ -183,7 +183,7 @@ var pureTimePattern = regexp.MustCompile(`^([0-9]{1,2}):([0-9]{2})(?::([0-9]{2})
 // fmtutil.DisplayZone) — the third form only makes sense for a "min"/"h"
 // Limit, where "which calendar day" is irrelevant and RFC3339 would force
 // spelling out an arbitrary date just to say "align to the top of the
-// hour" (see docs/VirtualModelRouter_Design_v4_Quota.md §9.1 and §12.2).
+// hour" (see the Quota design doc's period-anchor sections).
 // unit enforces that restriction; ok=false with a
 // nil error means the field was empty — the caller applies the default
 // (quota.DefaultSince) in that case, not this function, which has no

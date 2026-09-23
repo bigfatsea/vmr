@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:41, by Sonnet 5
+// Ver 2026-09-23 03:30, by Claude Opus 5.5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -19,7 +19,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"vmr/internal/fmtutil"
 	"vmr/internal/pricing"
 	"vmr/internal/rundir"
 )
@@ -133,7 +132,7 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 	}
 	v, err := time.ParseDuration(s)
 	if err != nil {
-		return fmt.Errorf("invalid duration %q: %w", s, err)
+		return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: invalid duration %q: %v", node.Line, s, err)}}
 	}
 	*d = Duration(v)
 	return nil
@@ -168,7 +167,7 @@ func (d *CalendarDuration) UnmarshalYAML(node *yaml.Node) error {
 	}
 	v, err := parseCalendarDuration(s)
 	if err != nil {
-		return err
+		return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: %v", node.Line, err)}}
 	}
 	*d = CalendarDuration(v)
 	return nil
@@ -348,8 +347,7 @@ type Config struct {
 	// case-insensitively, same as the built-in list. Absent/empty (the
 	// default) changes nothing.
 	ExtraRedactHeaders []string `yaml:"extra_redact_headers"`
-	// Guard is Agent Guard's config (the Agent Guard spec
-	// §4.5) — nil means the key is absent, which must mean zero code-path
+	// Guard is Agent Guard's config (the Agent Guard spec) — nil means the key is absent, which must mean zero code-path
 	// overhead and 100% byte-faithful passthrough (see guard.go's package
 	// doc comment). Still schema-only as of this field's introduction — no
 	// online wiring reads it yet.
@@ -415,64 +413,11 @@ type Config struct {
 
 	// EmptyEnvRefs is every ${NAME} the config text referenced that was unset
 	// or empty in the environment at load time, sorted. Not a yaml field —
-	// populated by Parse from expandEnv. Advisory only (a config can
-	// reference a var it doesn't need); cmd_start's startup banner surfaces
-	// it because a forgotten `api_key: ${VAR}` is the single most common
-	// "loads fine, 401s on the first request" failure.
+	// populated by Parse during node-level env expansion. Advisory only (a
+	// config can reference a var it doesn't need); cmd_start's startup banner
+	// surfaces it because a forgotten `api_key: ${VAR}` is the single most
+	// common "loads fine, 401s on the first request" failure.
 	EmptyEnvRefs []string `yaml:"-"`
-}
-
-var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-
-// expandEnv replaces ${NAME} with the environment value. Only the ${...} form
-// is recognized; a bare $ stays literal. Unset variables expand to "".
-//
-// This runs on the raw YAML text BEFORE parsing (see Parse) — a text-layer
-// substitution, not a per-scalar one. A substituted value containing a
-// newline, ": ", " #", or starting with "#" doesn't just fill in the scalar it
-// was written into: a newline or ": " can restructure the document (a new
-// top-level key, a value that swallows the rest of the line), and " #" or a
-// leading "#" starts a YAML comment — silently truncating the value with no
-// parse error at all (confirmed: `api_key: sk-real${SUFFIX}` with SUFFIX
-// containing " #..." parses cleanly with api_key holding only the text before
-// the space, and `api_key: ${KEY}` with KEY starting with "#" turns the line
-// into a comment, silently expanding to ""). No config author intends either
-// outcome, so both are hard load errors rather than a silent
-// misinterpretation — the same fail-fast rule this package applies to every
-// other "config that would look like it works but doesn't" case (see e.g.
-// resolvePricing's currency-factor check).
-// Not exhaustive: a value used inside a YAML flow collection (e.g.
-// `api_keys: [${VAR}]`) could still inject an extra element via a comma —
-// narrower and less common than the three checked here (needs flow-style
-// usage, which this codebase's own examples never write), left as a known
-// residual gap rather than hand-rolling a full YAML-metacharacter scanner.
-// The returned []string is every referenced ${NAME} that was unset or empty
-// at expansion time, sorted and deduped — the single most common "forgot to
-// set the key" cause (an api_key: ${VAR} whose VAR was never exported), which
-// otherwise loads as a valid-YAML empty string and only fails at the first
-// 401. Callers surface it (cmd_start's startup banner); it is advisory, never
-// a load error — a config can legitimately reference a var it doesn't need.
-func expandEnv(s string) (string, []string, error) {
-	var badVar string
-	empty := map[string]bool{}
-	out := envRe.ReplaceAllStringFunc(s, func(m string) string {
-		name := m[2 : len(m)-1]
-		v, ok := os.LookupEnv(name)
-		if !ok || v == "" {
-			empty[name] = true
-		}
-		if badVar == "" && (strings.Contains(v, "\n") || strings.Contains(v, ": ") || strings.Contains(v, " #") || strings.HasPrefix(strings.TrimSpace(v), "#")) {
-			badVar = name
-		}
-		return v
-	})
-	if badVar != "" {
-		return "", nil, fmt.Errorf("environment variable %q's value contains a newline, \": \", \" #\", or starts with \"#\" — expanding it into config.yaml could change the document's structure or silently truncate the value at a YAML comment, not just fill in a scalar; remove those characters from the value (or avoid interpolating it) before retrying", badVar)
-	}
-	if len(empty) == 0 {
-		return out, nil, nil
-	}
-	return out, fmtutil.SortedKeys(empty), nil
 }
 
 // expandTilde resolves a leading "~/" (or a bare "~") to the user's home

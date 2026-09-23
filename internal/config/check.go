@@ -1,4 +1,4 @@
-// Ver 2026-08-02, by Sonnet 5
+// Ver 2026-09-23 02:30, by GPT-5.2
 
 // Consistency/operational checks beyond validate(): things that don't stop
 // a config from loading and building a routing table (BuildSnapshot still
@@ -83,6 +83,32 @@ func (c *Config) Check() []Issue {
 	issues = append(issues, c.checkProviders()...)
 	issues = append(issues, c.checkModels()...)
 	issues = append(issues, c.checkFallbackReachability()...)
+	issues = append(issues, c.checkModelDefaultsCapabilities()...)
+	return issues
+}
+
+// checkModelDefaultsCapabilities warns about model_defaults entries declaring
+// a capability no routing Condition enforces ("audio"/"video"/"thinking"):
+// validate() accepts them so existing configs keep loading, but the words
+// have no effect on routing yet — an operator listing "thinking" here and
+// assuming it gates models onto thinking-capable endpoints would be silently
+// unprotected. Warning, not error: the entry is forward-compatible, not
+// broken.
+func (c *Config) checkModelDefaultsCapabilities() []Issue {
+	var issues []Issue
+	for _, key := range fmtutil.SortedKeys(c.ModelDefaults) {
+		for _, cap := range c.ModelDefaults[key].Capabilities {
+			switch cap {
+			case "audio", "video", "thinking":
+				issues = append(issues, Issue{
+					Model:    key,
+					Field:    "capabilities",
+					Message:  fmt.Sprintf("model_defaults[%q]: capability %q is accepted but not enforced by routing yet", key, cap),
+					Severity: SeverityWarning,
+				})
+			}
+		}
+	}
 	return issues
 }
 

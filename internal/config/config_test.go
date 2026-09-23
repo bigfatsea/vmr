@@ -1,7 +1,8 @@
-// Ver 2026-09-20 23:41, by Sonnet 5
+// Ver 2026-09-23 02:25, by Claude Opus 5.5
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -76,60 +77,333 @@ func TestParseTracksEmptyEnvRefs(t *testing.T) {
 	}
 }
 
-// TestParseRejectsEnvValueWithNewline pins the fix for a finding from the
-// 2026-08-12 review (VMR_项目全面Review报告 B5): expandEnv substitutes
-// ${VAR} into the raw YAML TEXT before parsing, so a value containing a
-// newline doesn't just fill in the scalar it was written into — it can
-// inject a new top-level key (here, a second listen: line) that changes
-// the document's structure. Must be a hard load error, not a config that
-// silently parses into something the author never wrote.
-func TestParseRejectsEnvValueWithNewline(t *testing.T) {
-	t.Setenv("VMR_TEST_KEY", "sk-test-123\nlisten: 0.0.0.0:1")
-	_, err := Parse([]byte(validYAML))
-	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") || !strings.Contains(err.Error(), "newline") {
-		t.Fatalf("want a rejection naming VMR_TEST_KEY and \"newline\", got %v", err)
+// TestParseEnvValueWithNewline verifies that expanding an environment variable
+// containing a newline preserves document structure: because expansion happens
+// at the YAML AST node level, a newline inside an expanded scalar does not inject
+// new YAML keys/directives, but is safely preserved as a literal string.
+func TestParseEnvValueWithNewline(t *testing.T) {
+	wantKey := "sk-test-123\nlisten: 0.0.0.0:1"
+	t.Setenv("VMR_TEST_KEY", wantKey)
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// Document structure is untouched: listen remains the one in validYAML.
+	if cfg.Listen != "127.0.0.1:9900" {
+		t.Errorf("listen overwritten: got %q, want 127.0.0.1:9900", cfg.Listen)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != wantKey {
+		t.Errorf("APIKey: got %q, want %q", p.APIKey, wantKey)
 	}
 }
 
-// TestParseRejectsEnvValueWithColonSpace is TestParseRejectsEnvValueWithNewline's
-// other trigger: a ": " inside an expanded value can turn what was meant to
-// be a scalar into a new key: value pair on the same line.
-func TestParseRejectsEnvValueWithColonSpace(t *testing.T) {
-	t.Setenv("VMR_TEST_KEY", "sk-test-123, extra: stuff")
-	_, err := Parse([]byte(validYAML))
-	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
-		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+// TestParseEnvValueWithColonSpace verifies that an environment value containing
+// ": " is loaded verbatim without restructuring the line into a new mapping pair.
+func TestParseEnvValueWithColonSpace(t *testing.T) {
+	wantKey := "sk-test-123, extra: stuff"
+	t.Setenv("VMR_TEST_KEY", wantKey)
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != wantKey {
+		t.Errorf("APIKey: got %q, want %q", p.APIKey, wantKey)
 	}
 }
 
-// TestParseRejectsEnvValueWithHashComment covers a gap an independent
-// review found in the first version of this guard: a " #" inside an
-// expanded value doesn't restructure the document, it starts a YAML
-// comment mid-scalar — silently truncating the value with no parse error
-// at all, which is arguably worse than the newline/colon cases (those at
-// least tend to produce a load error downstream; this one doesn't).
-func TestParseRejectsEnvValueWithHashComment(t *testing.T) {
-	t.Setenv("VMR_TEST_KEY", "sk-test-123 #rotated 2026-08")
-	_, err := Parse([]byte(validYAML))
-	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
-		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+// TestParseEnvValueWithHashComment verifies that an environment value containing
+// " #" is loaded verbatim and is not truncated as a YAML comment.
+func TestParseEnvValueWithHashComment(t *testing.T) {
+	wantKey := "sk-test-123 #rotated 2026-08"
+	t.Setenv("VMR_TEST_KEY", wantKey)
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != wantKey {
+		t.Errorf("APIKey: got %q, want %q", p.APIKey, wantKey)
 	}
 }
 
-// TestParseRejectsEnvValueWithLeadingHash covers an expanded value starting
-// with "#": in YAML, a line starting with "#" becomes a comment, silently
-// turning the key's value into an empty string without any parse error.
-func TestParseRejectsEnvValueWithLeadingHash(t *testing.T) {
-	t.Setenv("VMR_TEST_KEY", "#secret-api-key")
-	_, err := Parse([]byte(validYAML))
-	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
-		t.Fatalf("want a rejection naming VMR_TEST_KEY, got %v", err)
+// TestParseEnvValueWithLeadingHash verifies that an environment value starting
+// with "#" (with or without leading whitespace) is loaded verbatim and does not
+// turn into a comment or empty value.
+func TestParseEnvValueWithLeadingHash(t *testing.T) {
+	wantKey := "#secret-api-key"
+	t.Setenv("VMR_TEST_KEY", wantKey)
+	cfg, err := Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok || p.APIKey != wantKey {
+		t.Errorf("APIKey: got %q, want %q", p.APIKey, wantKey)
 	}
 
-	t.Setenv("VMR_TEST_KEY", "  #secret-with-leading-spaces")
-	_, err = Parse([]byte(validYAML))
-	if err == nil || !strings.Contains(err.Error(), "VMR_TEST_KEY") {
-		t.Fatalf("want a rejection naming VMR_TEST_KEY for leading-whitespace comment, got %v", err)
+	wantLeading := "  #secret-with-leading-spaces"
+	t.Setenv("VMR_TEST_KEY", wantLeading)
+	cfg, err = Parse([]byte(validYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	p, ok = cfg.ProviderByName("p1")
+	if !ok || p.APIKey != wantLeading {
+		t.Errorf("APIKey with leading spaces: got %q, want %q", p.APIKey, wantLeading)
+	}
+}
+
+// TestParseEnvFlowStyleCommaHarmless pins that comma injection in flow-style
+// collections (sequences or mappings) is completely harmless under node-level
+// expansion: an env var containing commas or quotes cannot split into extra
+// elements or keys.
+func TestParseEnvFlowStyleCommaHarmless(t *testing.T) {
+	flowYAML := `
+listen: 127.0.0.1:9900
+api_keys: ["${VMR_FLOW_KEY}"]
+providers:
+  - name: p1
+    base_url: {openai-completions: "${VMR_FLOW_URL}"}
+    api_key: sk-fixed-1234567890abcdef
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+          priority: 1
+`
+	// Comma in flow sequence cannot inject extra elements.
+	t.Setenv("VMR_FLOW_KEY", "sk-vmr-team-alice, extra-injected-element")
+	// Comma and colon in flow mapping cannot inject extra keys.
+	t.Setenv("VMR_FLOW_URL", "https://api.example.com/v1, other_key: injected")
+
+	cfg, err := Parse([]byte(flowYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(cfg.APIKeys) != 1 {
+		t.Fatalf("APIKeys length: got %d, want 1 (comma must not split sequence elements)", len(cfg.APIKeys))
+	}
+	if cfg.APIKeys[0] != "sk-vmr-team-alice, extra-injected-element" {
+		t.Errorf("APIKeys[0]: got %q", cfg.APIKeys[0])
+	}
+	p, ok := cfg.ProviderByName("p1")
+	if !ok {
+		t.Fatal("provider p1 not found")
+	}
+	u, ok := p.BaseURL["openai-completions"]
+	if !ok || u != "https://api.example.com/v1, other_key: injected" {
+		t.Errorf("BaseURL: got %v", u)
+	}
+}
+
+// TestParseEnvScalarTypeInference pins that expanded scalar nodes preserve their
+// scalar type inference behavior: an unquoted ${VAR} expanding to an integer,
+// boolean, or duration string correctly unmarshals into the target Go type.
+func TestParseEnvScalarTypeInference(t *testing.T) {
+	yamlWithVars := `
+listen: 127.0.0.1:9900
+max_request_body_mb: ${VMR_BODY_MB}
+timeouts:
+  probe: ${VMR_PROBE_TIMEOUT}
+providers:
+  - name: p1
+    base_url: {openai-completions: https://api.example.com/v1}
+    api_key: sk-fixed-1234567890abcdef
+guard:
+  inbound:
+    sanitize_invisible_runes: ${VMR_SANITIZE}
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+          priority: 1
+`
+	t.Setenv("VMR_BODY_MB", "16")
+	t.Setenv("VMR_PROBE_TIMEOUT", "25s")
+	t.Setenv("VMR_SANITIZE", "false")
+
+	cfg, err := Parse([]byte(yamlWithVars))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if cfg.MaxRequestBodyMB != 16 {
+		t.Errorf("MaxRequestBodyMB: got %d, want 16", cfg.MaxRequestBodyMB)
+	}
+	if cfg.Timeouts.Probe.D() != 25*time.Second {
+		t.Errorf("Timeouts.Probe: got %v, want 25s", cfg.Timeouts.Probe.D())
+	}
+	if cfg.Guard.Inbound.SanitizeInvisibleRunes == nil || *cfg.Guard.Inbound.SanitizeInvisibleRunes {
+		t.Errorf("SanitizeInvisibleRunes: got %v, want false", cfg.Guard.Inbound.SanitizeInvisibleRunes)
+	}
+}
+
+// TestParseEnvDoesNotExpandMappingKeys verifies that mapping keys are not
+// expanded: an env ref in a mapping key remains literal.
+func TestParseEnvDoesNotExpandMappingKeys(t *testing.T) {
+	yamlWithKeyEnv := `
+listen: 127.0.0.1:9900
+${VMR_UNEXPANDED_KEY}: ignored
+providers:
+  - name: p1
+    base_url: {openai-completions: https://api.example.com/v1}
+    api_key: sk-fixed-1234567890abcdef
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [p1]
+          models: [real-model]
+          priority: 1
+`
+	t.Setenv("VMR_UNEXPANDED_KEY", "listen")
+	// Because mapping keys are not expanded, the key remains literal "${VMR_UNEXPANDED_KEY}".
+	// Since that field is unknown to Config, strict KnownFields(true) will reject it.
+	_, err := Parse([]byte(yamlWithKeyEnv))
+	if err == nil || !strings.Contains(err.Error(), "field ${VMR_UNEXPANDED_KEY} not found") {
+		t.Fatalf("want error naming unknown field ${VMR_UNEXPANDED_KEY}, got %v", err)
+	}
+}
+
+// TestParseUnknownFieldPreservesOriginalLineNumber pins that unknown-field
+// decode errors report the exact line number from the original config file,
+// even when preceded by arbitrary comments and blank lines (verifying that
+// error reporting does not point to a synthesized/re-marshaled document).
+func TestParseUnknownFieldPreservesOriginalLineNumber(t *testing.T) {
+	// 20 lines of comments and empty lines before any real YAML content.
+	var lines []string
+	for i := 1; i <= 20; i++ {
+		if i%3 == 0 {
+			lines = append(lines, "")
+		} else {
+			lines = append(lines, fmt.Sprintf("# comment line %d", i))
+		}
+	}
+	lines = append(lines, "listen: 127.0.0.1:9900")                                         // line 21
+	lines = append(lines, "")                                                               // line 22
+	lines = append(lines, "# comment line 23")                                              // line 23
+	lines = append(lines, "bogus_top_level_field: true")                                    // line 24
+	lines = append(lines, "providers:")                                                     // line 25
+	lines = append(lines, "  - name: p1")                                                   // line 26
+	lines = append(lines, "    base_url: {openai-completions: https://api.example.com/v1}") // line 27
+	lines = append(lines, "    api_key: sk-fixed")                                          // line 28
+	lines = append(lines, "models:")                                                        // line 29
+	lines = append(lines, "  m1:")                                                          // line 30
+	lines = append(lines, "    endpoints:")                                                 // line 31
+	lines = append(lines, "      openai-completions:")                                      // line 32
+	lines = append(lines, "        - {providers: [p1], models: [m]}")                       // line 33
+
+	raw := strings.Join(lines, "\n") + "\n"
+	_, err := Parse([]byte(raw))
+	if err == nil {
+		t.Fatal("expected error for bogus_top_level_field, got nil")
+	}
+	if !strings.Contains(err.Error(), "line 24") {
+		t.Errorf("expected error to cite line 24, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "field bogus_top_level_field not found") {
+		t.Errorf("expected error to name bogus_top_level_field, got: %v", err)
+	}
+
+	// Also verify that unknown-field detection succeeds even when an unexpanded
+	// numeric env placeholder would otherwise trigger a type error in probe pass.
+	yamlWithEnvAndUnknown := `
+# 1
+# 2
+# 3
+listen: 127.0.0.1:9900
+max_request_body_mb: ${VMR_UNEXPANDED_BODY_MB}
+# 7
+bogus_field_after_env: true
+providers:
+  - name: p1
+    base_url: {openai-completions: https://api.example.com/v1}
+    api_key: sk-fixed
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [m]}
+`
+	_, err = Parse([]byte(yamlWithEnvAndUnknown))
+	if err == nil {
+		t.Fatal("expected error for bogus_field_after_env, got nil")
+	}
+	if !strings.Contains(err.Error(), "line 8") {
+		t.Errorf("expected error to cite line 8, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "field bogus_field_after_env not found") {
+		t.Errorf("expected error to name bogus_field_after_env, got: %v", err)
+	}
+	// The type error for ${VMR_UNEXPANDED_BODY_MB} should have been filtered out.
+	if strings.Contains(err.Error(), "cannot unmarshal") {
+		t.Errorf("type error should be ignored in favor of unknown field, got: %v", err)
+	}
+
+	// Also verify that a genuine type error (e.g. invalid string for int field)
+	// correctly reports the original line number on the second pass.
+	yamlWithTypeErr := `
+# 1
+# 2
+# 3
+# 4
+listen: 127.0.0.1:9900
+max_request_body_mb: not-a-number
+providers:
+  - name: p1
+    base_url: {openai-completions: https://api.example.com/v1}
+    api_key: sk-fixed
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - {providers: [p1], models: [m]}
+`
+	_, err = Parse([]byte(yamlWithTypeErr))
+	if err == nil {
+		t.Fatal("expected error for not-a-number, got nil")
+	}
+	if !strings.Contains(err.Error(), "line 7") {
+		t.Errorf("expected error to cite line 7 for type error, got: %v", err)
+	}
+}
+
+// TestParseLegacyPricingKeyPreservesOriginalLineNumberAndHint verifies that
+// legacy pricing keys report their exact line number in the original document
+// while retaining the targeted rename hint from legacyPricingKeyHint.
+func TestParseLegacyPricingKeyPreservesOriginalLineNumberAndHint(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 25; i++ {
+		lines = append(lines, fmt.Sprintf("# preamble comment %d", i))
+	}
+	lines = append(lines, "listen: 127.0.0.1:9900")                                         // line 26
+	lines = append(lines, "providers:")                                                     // line 27
+	lines = append(lines, "  - name: p1")                                                   // line 28
+	lines = append(lines, "    base_url: {openai-completions: https://api.example.com/v1}") // line 29
+	lines = append(lines, "    api_key: sk-fixed")                                          // line 30
+	lines = append(lines, "    pricing:")                                                   // line 31
+	lines = append(lines, "      map: {a: gpt-4o}")                                         // line 32
+	lines = append(lines, "models:")                                                        // line 33
+	lines = append(lines, "  m1:")                                                          // line 34
+	lines = append(lines, "    endpoints:")                                                 // line 35
+	lines = append(lines, "      openai-completions:")                                      // line 36
+	lines = append(lines, "        - {providers: [p1], models: [m]}")                       // line 37
+
+	raw := strings.Join(lines, "\n") + "\n"
+	_, err := Parse([]byte(raw))
+	if err == nil {
+		t.Fatal("expected error for legacy pricing map key, got nil")
+	}
+	if !strings.Contains(err.Error(), "line 32") {
+		t.Errorf("expected error to cite line 32, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "renamed map → aliases, overrides → rates") {
+		t.Errorf("expected error to contain legacy pricing key hint, got: %v", err)
 	}
 }
 

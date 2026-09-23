@@ -1,10 +1,8 @@
-// Ver 2026-09-14, by Sonnet 5
+// Ver 2026-09-23 08:10, by Claude Opus 5.5
 
-// Agent Guard's config schema (the Agent Guard spec
-// §4.5, ADR-15). Guard is a *Guard, not a value: a nil Config.Guard means
+// Agent Guard's config schema. Guard is a *Guard, not a value: a nil Config.Guard means
 // the guard: key is entirely absent from the YAML, which must mean zero
-// code path overhead and 100% original byte-faithful passthrough (ADR-2's
-// first anti-corrosion constraint) — the online outbound/inbound wiring
+// code path overhead and 100% original byte-faithful passthrough — the online outbound/inbound wiring
 // this schema feeds (server/guard.go, router/guard.go) checks that nil
 // first, before touching a single byte.
 package config
@@ -16,12 +14,14 @@ import (
 // Guard is the top-level guard: block. A nil Config.Guard is the "off"
 // state; once present, every field below has a sane, conservative default
 // (applyGuardDefaults) so a minimal `guard: {}` is valid and inert
-// (outbound.mode defaults to audit_only — see §4.5's "开箱即激进防护换不来
-// 安全感" rationale, never a stronger posture).
+// (outbound.mode defaults to audit_only, never a stronger posture: an
+// aggressive out-of-the-box default buys no real safety).
 type Guard struct {
 	// TrustedProviders lists providers this instance controls or fully
-	// trusts (e.g. an internal vLLM, a direct official endpoint) — see
-	// §4.3's Snapshot-time all-candidates-trusted exemption rule.
+	// trusts (e.g. an internal vLLM, a direct official endpoint): their
+	// responses skip inbound sanitization, and a virtual model whose
+	// candidates are all trusted skips the outbound scan (resolved once at
+	// snapshot time as ModelRoute.GuardAllTrusted).
 	TrustedProviders []string      `yaml:"trusted_providers"`
 	Outbound         GuardOutbound `yaml:"outbound"`
 	Inbound          GuardInbound  `yaml:"inbound"`
@@ -37,31 +37,31 @@ var validGuardOutboundModes = map[string]bool{
 	GuardOutboundOff: true, GuardOutboundAuditOnly: true, GuardOutboundBlock: true,
 }
 
-// GuardOutbound is guard.outbound: — see ADR-4/ADR-5/ADR-12. The former
+// GuardOutbound is guard.outbound:. The former
 // mode: replace (and its marker/session_ttl/max_entries/restore_scope/
 // max_restores_per_response knobs) was removed with the pseudonymization
 // machinery it existed to serve — see internal/guard's package doc. The
 // former salt knob (and its <rundir>/guard.salt resolution chain) was
-// removed when Hit.FP's fingerprint was downgraded to a deterministic,
-// unsalted hash (KNOWN_ISSUES K-G19) — there is nothing left to configure.
+// removed when Hit.FP's fingerprint became a deterministic,
+// unsalted hash (see KNOWN_ISSUES) — there is nothing left to configure.
 type GuardOutbound struct {
-	// Mode: off | audit_only | block. See §1.3's value/risk table —
-	// audit_only is the only mode calibrated purely from offline evidence;
+	// Mode: off | audit_only | block. audit_only is the only mode
+	// calibrated purely from offline evidence;
 	// block intervenes on the request path.
 	Mode string `yaml:"mode"`
 }
 
-// GuardInbound is guard.inbound: — see ADR-15/§4.4. Narrowed to a single
+// GuardInbound is guard.inbound:. Narrowed to a single
 // field: the online Tool Call double gate, its protected-path/command-
 // category tables, and the opaque/oversize block policies were all removed
-// (ADR-15) — a client's own approval gate and sandbox are the correct
+// — a client's own approval gate and sandbox are the correct
 // place to judge whether a command should run, and this gateway never had
 // more context than they do. Unicode-steganography sanitization is the one
 // online inbound capability that remains.
 type GuardInbound struct {
 	// SanitizeInvisibleRunes is a *bool for the same reason
 	// VirtualModel.Sticky/Fallback are (config.go): nil (key absent) must
-	// default to true (§4.5), distinct from an explicit `false` opting
+	// default to true, distinct from an explicit `false` opting
 	// out — a plain bool can't represent that distinction. Use
 	// SanitizeRunes() to read the resolved value.
 	SanitizeInvisibleRunes *bool `yaml:"sanitize_invisible_runes"`
@@ -76,8 +76,8 @@ func (i GuardInbound) SanitizeRunes() bool {
 
 // applyGuardDefaults fills every guard: sub-field applyDefaults' caller
 // left unset, once Config.Guard is non-nil. Every default here is the
-// conservative end of its range (§4.5's "放量路径固化为 off → audit_only →
-// block" rule) — enabling guard: at all must never itself turn on an
+// conservative end of its range (the rollout path is fixed as off →
+// audit_only → block) — enabling guard: at all must never itself turn on an
 // intervention stronger than audit-only.
 func (c *Config) applyGuardDefaults() {
 	if c.Guard == nil {
@@ -93,8 +93,8 @@ func (c *Config) applyGuardDefaults() {
 	// convention as VirtualModel.Sticky.
 }
 
-// validateGuard is §4.5's strict-validation table's "加载错误" half — there
-// is no corresponding "加载告警" half for guard: config anymore (checkGuard,
+// validateGuard is guard:'s load-error half — there is no corresponding
+// load-warning half for guard: config anymore (checkGuard,
 // its one warning case for a stale rules_version, was removed along with
 // that decorative field). Runs after validateProviders (needs
 // c.Providers settled for the trusted_providers existence check) and after
@@ -102,7 +102,7 @@ func (c *Config) applyGuardDefaults() {
 // an empty string can only mean "user explicitly wrote an empty string,"
 // which the enum whitelist already rejects — no separate empty-string
 // special case needed). The removed mode: replace fails the whitelist below
-// with a mode-specific hint; the seven guard.inbound keys ADR-15 removed
+// with a mode-specific hint; the seven guard.inbound keys that were removed
 // (tool_call_guard_mode/on_block/on_opaque_response/max_tool_arg_bytes/
 // on_oversize/protected_paths/blocked_command_categories) no longer exist
 // as struct fields at all, so a config still declaring them is rejected by
