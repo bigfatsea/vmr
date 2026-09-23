@@ -21,6 +21,8 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-23
+
 ### Changed
 - **Production comments no longer pin section numbers or review IDs**: several hundred `§N` references and milestone/review identifiers pointing at archived plans and reviews were removed or rewritten as named references, and `internal/archtest` now rejects new ones. `docs/KNOWN_ISSUES.md` was reorganized by domain (review-round groups and history narrative removed, every entry number kept), shrinking it by about a quarter.
 - **`vmr analyze` decodes each audit file once and not at all on a warm run**: the report half used to decode every record three times (manifest scan, session features, metric facts), and the session-feature pass was never cached. One pass now produces both the manifest and a single per-record fact record, cached by file content hash under the report's own schema version; warm runs rebuild sessions from the cache without opening the audit files.
@@ -417,7 +419,8 @@ commits and design docs hold the full reasoning.
 ## [0.1] - 2026-07-13
 First public release: local-first, single-binary LLM router behind one stable virtual model name — byte-faithful passthrough for the OpenAI and Anthropic protocols, error-class-aware failover (cooldowns, backoff, `Retry-After`, single-flight recovery probes), the JSONL flight-recorder audit log with auto-compression and expiry, `vmr report` usage/latency/session analytics, optional disk-cached inline-image downscaling.
 
-[Unreleased]: https://github.com/bigfatsea/vmr/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/bigfatsea/vmr/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/bigfatsea/vmr/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/bigfatsea/vmr/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/bigfatsea/vmr/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/bigfatsea/vmr/compare/v0.6.3...v0.6.4
