@@ -340,6 +340,7 @@ function mountConsole(opts) {
         <a class="nav-link${active === 'overview' ? ' active' : ''}" href="/status.html">Overview</a>
         <a class="nav-link${active === 'models' ? ' active' : ''}" href="/models.html">Models</a>
         <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Log</a>
+        <a class="nav-link${active === 'config' ? ' active' : ''}" href="/config.html">Config</a>
         <a class="nav-link${active === 'help' ? ' active' : ''}" href="/help.html">Help</a>
       </nav>
       <div class="hd-right">${refreshSlot}

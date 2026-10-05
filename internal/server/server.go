@@ -2,7 +2,8 @@
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /health, /status, /status.html, /models.html, /help, /help.html, /help.zh,
-// /help.zh.html, /log, /log.html. Anything else is 404.
+// /help.zh.html, /log, /log.html, /config, /config/validate, /config.html.
+// Anything else is 404.
 package server
 
 import (
@@ -51,6 +52,12 @@ type Server struct {
 	// exists. The two differ by however long config loading took.
 	started time.Time
 
+	// configReload runs one hot-reload attempt through `vmr start`'s reload
+	// closure (see ConfigReloader). Nil on every instance without a reload
+	// loop — PUT /config answers 501 instead of writing a file that would
+	// never take effect.
+	configReload ConfigReloader
+
 	// bodyReadTimeout overrides defaultBodyReadTimeout when positive —
 	// tests tighten it to keep slow-body scenarios fast; production leaves
 	// it zero and gets the default.
@@ -78,6 +85,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /help.zh.html", s.helpPageZH)
 	mux.HandleFunc("GET /log", s.auth(s.adminLog))
 	mux.HandleFunc("GET /log.html", s.logPage)
+	mux.HandleFunc("GET /config", s.auth(s.adminConfigGet))
+	mux.HandleFunc("PUT /config", s.auth(s.adminConfigPut))
+	mux.HandleFunc("POST /config/validate", s.auth(s.adminConfigValidate))
+	mux.HandleFunc("GET /config.html", s.configPage)
 	mux.HandleFunc("GET /favicon.ico", s.logoIcon)
 	mux.HandleFunc("GET /vmr-logo.svg", s.logoIcon)
 	mux.HandleFunc("GET /assets/vmr-logo.svg", s.logoIcon)

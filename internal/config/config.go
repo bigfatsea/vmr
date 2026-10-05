@@ -269,6 +269,21 @@ type AnalyticsConfig struct {
 	ServeDir string `yaml:"serve_dir"`
 }
 
+// AdminConfig holds opt-in management-plane switches. The zero value keeps
+// every one of them off — the surfaces they unlock do not exist unless
+// explicitly enabled, the same polarity as AnalyticsConfig.Serve.
+type AdminConfig struct {
+	// ConfigEdit enables the online config editor: auth-gated GET /config,
+	// PUT /config and POST /config/validate plus the /config.html console
+	// page (internal/server/admin_config.go). Edits run the exact hot-reload
+	// validation pipeline (Parse → Check → BuildSnapshot), then are written
+	// atomically back to the config file and reloaded — the file stays the
+	// single source of truth; nothing here keeps an in-memory config. Auth
+	// follows the same policy as /status: api_keys when configured, open
+	// when not (single-operator LAN stance). Follows hot reload.
+	ConfigEdit bool `yaml:"config_edit"`
+}
+
 // ModelDefaultEntry declares capabilities and context ceiling for a real
 // upstream model across all virtual models that route to it. Keyed by real
 // model name under Config.ModelDefaults ("*" for fallback).
@@ -339,6 +354,9 @@ type Config struct {
 	ImageCacheDir       string          `yaml:"image_cache_dir"`
 	ImageDownscaleMaxPx int             `yaml:"image_downscale"` // 0/absent = disabled; else longer-side px cap for inline request images (global default; a model's own setting takes priority)
 	Analytics           AnalyticsConfig `yaml:"analytics"`
+	// Admin is the opt-in management plane (see AdminConfig) — zero value
+	// means every admin surface is off.
+	Admin AdminConfig `yaml:"admin"`
 	// ExtraRedactHeaders names additional client request headers to mask in
 	// the audit trail the same way the built-in credential list (see
 	// audit.credentialHeaders) already masks Authorization/X-Api-Key/etc —

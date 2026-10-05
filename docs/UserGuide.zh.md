@@ -26,7 +26,8 @@
   - [Sticky Model 会话亲和](#sticky-model-会话亲和)
   - [额度感知路由 Quota-Aware Routing](#额度感知路由-quota-aware-routing)
 - [内置控制台与实时遥测](#内置控制台与实时遥测)
-  - [控制台四大页面](#控制台四大页面)
+  - [控制台页面](#控制台页面)
+  - [配置在线编辑](#配置在线编辑)
   - [实时遥测 API (GET /stats)](#实时遥测-api-get-stats)
 - [审计与报表](#审计与报表)
   - [审计日志](#审计日志)
@@ -516,12 +517,13 @@ providers:
 
 除离线审计日志分析外，vmr 还在路由主进程内集成了零内部依赖的实时遥测引擎（`internal/livestats`），并通过统一内置控制台（CSR 架构，`//go:embed` 嵌入单二进制，零外部 CDN 依赖）提供开箱即用的实时可视化运维体验。所有控制台页面共享统一的 API Key 鉴权弹窗与 `localStorage` 凭据（`VMRAuth`）。
 
-### 控制台四大页面
+### 控制台页面
 
 - **概览大屏 Overview (`GET /status.html`)**：核心运行大屏。顶部状态条实时展示并发度、总请求数、Token 吞吐（含 Prompt 缓存命中率）与端点健康度；**正在执行请求（Live Requests）** 实时列出活动与排队中的请求（首列为单调递增序列号 Seq，其后为 State / Elapsed / Caller / Model / Provider : Model / Attempts / TTFT / Tok in / Tok out，支持 >5s 流式卡顿告警；已结束的请求整行置灰，直至被挤出槽位）；按提供商与模型的**性能分位表**基于全局最近 300 条请求呈现实际数据（支持 last 10 / 30 / 100 / 300 窗口切换，按 Requests 数量倒序排列）；纯 SVG **流量与用量图表**将 fresh in、cache write、cache read、tok out 单柱多层堆叠呈现，支持 12h / 24h / 3d / 7d 范围无缝切换，并附带模型和调用方分组消耗；底部提供默认折叠的**近期失败明细（Recent Failures）**（24 小时内至多 100 条错误）。并发与 Live Requests 采用自适应快轮询（活跃时 ~2s，空闲时 15s，切到后台暂停）；整页随 5 分钟倒计时时钟自动刷新。
 - **模型与配额 Models (`GET /models.html`)**：拓扑与配额配置大屏。展示每条账号的 **配额预算（Quota Budgets）**（配置限额、已用进度、Headroom 比值、24h 流量占比与重置倒计时），以及按协议分表呈现的**虚拟模型与端点拓扑（Virtual Models & Endpoint Topology）**（每个协议一张独立表格，各端点展示优先级 P0/FB 区分、健康度、Headroom 与上下文窗口/能力芯片）。跟随 5 分钟倒计时刷新，不进行高频轮询。
 - **实时终端日志 Log (`GET /log.html`)**：纯宽屏实时日志终端，基于 `GET /log` 保持长连接接收服务端标准日志（相当于浏览器中的 `tail -f`）。工具栏提供日志级别芯片过滤、子串搜索高亮、⌘P 暂停/恢复、一键拷贝与平滑自动滚动交接（"↓ N new" 提示）。
 - **Agent 配置向导 Help (`GET /help.html` 与 `GET /help.zh.html`)**：针对主流 AI 编程助手与 Agent（Claude Code, Codex, OpenClaw, OpenCode, Cursor, Hermes, Pi Agent, WorkBuddy 等）的折叠式向导，包含一键复制的各协议 Base URL，以及从 `/status` 动态拉取的模型与协议矩阵，支持在线连通性测试。
+- **配置编辑器 Config (`GET /config.html`)**：配置在线编辑入口（opt-in，见下文[配置在线编辑](#配置在线编辑)）——在原始配置文件之上的文本域编辑器，提供 Validate 与 Save & apply 按钮，以及由响应头驱动的时效/重载状态徽标。
 
 ### 实时遥测 API (GET /stats)
 
@@ -530,6 +532,12 @@ providers:
 - **历史归档汇总**：按小时滚动统计（默认 48h，可通过 `?range=24h|3d|7d` 切换）与本地日历日汇总，由磁盘轻量 WAL（`vmr-stats-YYYYMMDD-HH.jsonl`，0600）与追加式 Rollup 文件（`vmr-stats-rollup.jsonl`）持久化。
 - **性能环形缓冲**：按 Provider 记录最近 10/100 次调用的最近邻分位点（TTFT p50/p90）以及 Token 产出生成速率（`toks` p50/p10，低于 50ms 的脉冲样本自动过滤），并由服务端自动计算多端点合并的 `overall` 总体分位。
 - **近期失败环**：纯内存记录最近至多 100 次失败或取消请求的终态端点与权威 `error_class` 标签。
+
+### 配置在线编辑
+
+可选功能，默认关闭：设置 `admin.config_edit: true`（随热重载生效，无需重启）后，运行中的实例即获得受鉴权保护的编辑面——`GET /config`（从磁盘返回配置文件原文，附 `ETag`/mtime/时效/重载状态响应头）、`POST /config/validate`（对候选配置跑完整校验，不落盘）、`PUT /config`（先校验后写盘），以及 `/config.html` 控制台页。鉴权与 `/status` 同策略：配了 `api_keys` 就要凭证，没配就开放——单人/局域网的既定取舍。
+
+设计要点是配置文件始终是唯一事实源。PUT 先走与热重载完全相同的校验管线（`config.Parse` → `Check()` → `BuildSnapshot`），全部通过后才原子写回文件（临时文件 + rename，保持 0600），再经由与 fsnotify/SIGHUP 同一条 reload 闭包生效——响应体会如实报告重载是否已生效，日志中显示为 `CONFIG RELOAD trigger=api`。被拒绝的候选配置绝不碰文件（错误文本携带校验器自己的行号）；`If-Match` 前置条件把「文件在我加载后被别人改过」变成 409 而不是静默覆盖。两个固有代价：`GET /config` 返回文件原文，含其中所有 `api_key` 明文——这就是「编辑文件」本身的含义；每次 PUT 后 fsnotify 会在相同字节上再跑一次重载（幂等，多一行 `CONFIG RELOAD` 日志）。
 
 ## 审计与报表
 

@@ -112,6 +112,14 @@ listen: 127.0.0.1:8800
 # analytics:                      # /reports/ static hosting for analyze reports and dashboard (default disabled)
 #   serve: false                 # true = serve /reports/*; false = bare 404 (same as no route). Follows hot-reload.
 #   serve_dir: ./reports         # root directory to serve; relative paths resolved against vmr start workdir. Follows hot-reload.
+# admin:                           # opt-in management-plane switches (all off by default)
+#   config_edit: false            # true = enable the online config editor: GET/PUT /config and POST /config/validate,
+#                                  # plus the /config.html console page. Edits run the exact hot-reload validation
+#                                  # pipeline (Parse → Check → BuildSnapshot), then are written atomically back to
+#                                  # this config file (0600 preserved) and hot-reloaded — the file stays the single
+#                                  # source of truth. Auth follows the same policy as /status: api_keys when configured,
+#                                  # open when not (single-operator LAN stance). GET /config returns the raw file text,
+#                                  # including every api_key in it — that is inherent to editing the file. Follows hot-reload.
 # timeouts:                       # "how long one wait may take" — request-path upper bounds, Go duration syntax
 #   connect: 10s
 #   response_header: 120s        # time to first byte from upstream

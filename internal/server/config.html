@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<!-- Ver 2026-10-05 17:10, by Claude Opus 4.6 — online config editor.
+     The server side (admin_config.go) validates a PUT with the exact
+     hot-reload pipeline, writes it atomically back to config.yaml and
+     reloads; this page is only the pen. GET returns the FILE from disk,
+     and the headers carry the staleness/reload state the badges show. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Config</title>
+<link rel="icon" href="/vmr-logo.svg" type="image/svg+xml">
+<style>
+/*{{CONSOLE_CSS}}*/
+
+/* ===== Config-page private styles ===== */
+/* Overlay editor: a transparent-text textarea sits on top of a <pre> that
+   renders the same text with YAML highlighting. The textarea keeps all
+   editing (caret, undo, selection); the <pre> is paint-only, scroll-synced. */
+.editor-wrap{position:relative;width:100%;min-height:52vh;flex:1;
+  background:var(--well);border:1px solid var(--border);border-radius:6px;
+  overflow:hidden;resize:vertical}
+#hl,#editor{
+  position:absolute;inset:0;margin:0;padding:10px 12px;box-sizing:border-box;
+  font-family:var(--font-mono);font-size:12.5px;line-height:1.45;
+  white-space:pre;overflow-wrap:normal;tab-size:2;
+}
+#hl{overflow:hidden;pointer-events:none;color:var(--text)}
+#hl .c{color:var(--text-dim);font-style:italic}
+#hl .k{color:#79c0ff;font-weight:600}
+#hl .s{color:#a5d6ff}
+#hl .n{color:#f2cc60}
+#editor{background:transparent;color:transparent;caret-color:var(--text);
+  border:0;border-radius:6px;overflow:auto;width:100%;height:100%}
+#editor:focus{outline:1px solid var(--accent)}
+#editor:disabled{opacity:.5}
+#editor::placeholder{color:var(--text-dim)}
+.meta-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 10px}
+.meta-row .count{font-size:var(--fs-sm)}
+.btnrow{display:flex;gap:8px;align-items:center;margin:10px 0 0;flex-wrap:wrap}
+#result{margin-top:12px}
+#result .box{border:1px solid var(--border);border-radius:6px;padding:10px 12px;
+  font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word}
+#result .ok{border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.07)}
+#result .err{border-color:rgba(248,81,73,.4);background:rgba(248,81,73,.07)}
+#result .warn{border-color:rgba(210,153,34,.4);background:rgba(210,153,34,.07)}
+.issue-line{display:block}
+.dirty{color:var(--yellow)}
+main.page{display:flex;flex-direction:column;min-height:calc(100vh - 100px)}
+</style>
+</head>
+<body>
+
+<main class="page">
+  <div class="section-head" id="top">Configuration file
+    <span class="badge b-dim" id="path-badge" title="config file path on disk">—</span>
+    <span class="badge b-dim" id="mtime-badge" title="config file mtime on disk">mtime —</span>
+    <span class="badge b-dim" id="stale-badge" title="whether the running config is older than the file on disk">running: —</span>
+    <span class="badge b-dim" id="reload-badge" title="last reload attempt (any trigger)">reload: —</span>
+    <span class="count">edits run the hot-reload validation pipeline first — a rejected config never replaces the running one</span>
+  </div>
+
+  <div class="meta-row">
+    <span class="count" id="dirty-note"></span>
+    <span class="count" id="size-note"></span>
+  </div>
+
+  <div class="editor-wrap">
+    <pre id="hl" aria-hidden="true"></pre>
+    <textarea id="editor" spellcheck="false" wrap="off" placeholder="loading…"></textarea>
+  </div>
+
+  <div class="btnrow">
+    <button class="btn" id="btn-reload" title="Discard local edits and re-read the file from disk">↺ Reload from disk</button>
+    <button class="btn" id="btn-validate" title="Run Parse → Check → BuildSnapshot on the text below, without saving">Validate</button>
+    <button class="btn primary" id="btn-save" title="Validate, write atomically back to config.yaml, and hot-reload">Save &amp; apply</button>
+    <span class="count" id="save-note"></span>
+  </div>
+
+  <div id="result" hidden></div>
+</main>
+
+<script>
+/*{{CONSOLE_JS}}*/
+
+const consoleApi = mountConsole({ active: 'config', rail: [], refresh: 'static' });
+
+const $ = id => document.getElementById(id);
+const editor = $('editor');
+const hl = $('hl');
+let currentETag = '';   // of the file as last fetched — If-Match on save
+let savedText = '';     // disk contents as last fetched, for the dirty marker
+
+/* ===== YAML highlighting (overlay <pre> under the transparent textarea) =====
+   One single-pass alternation scan over the HTML-escaped text — a token is
+   wrapped exactly once, so the pass can never re-enter its own output. The
+   tokenizer is deliberately shallow: comments (#… to end of line), quoted
+   strings, line-start keys (with an optional list dash), and scalars
+   (true/false/null/~ plus numbers). A # inside quotes stays a string because
+   the string alternative is tried first; anything else degenerates to plain
+   text, never to wrong structure — this is paint, not parsing. */
+const escHTML = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const YAML_TOKEN = /(#.*$)|("(?:[^"\\]|\\.)*"|'[^']*')|(^[ \t]*-?[ \t]*[\w.\/-]+(?=[ \t]*:))|(\b(?:true|false|null|~)\b)|(\b\d+(?:\.\d+)?\b)/gm;
+function highlightYAML(src) {
+  return escHTML(src).replace(YAML_TOKEN, (m, c, s, k, w) =>
+    `<span class="${c ? 'c' : s ? 's' : k ? 'k' : 'n'}">${m}</span>`) + '\n';
+}
+function renderHighlight() {
+  hl.innerHTML = highlightYAML(editor.value);
+  hl.scrollTop = editor.scrollTop;
+  hl.scrollLeft = editor.scrollLeft;
+}
+editor.addEventListener('scroll', () => {
+  hl.scrollTop = editor.scrollTop;
+  hl.scrollLeft = editor.scrollLeft;
+});
+// Tab inserts two spaces (execCommand keeps the native undo stack).
+editor.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || editor.disabled) return;
+  e.preventDefault();
+  if (!document.execCommand || !document.execCommand('insertText', false, '  ')) {
+    editor.setRangeText('  ', editor.selectionStart, editor.selectionEnd, 'end');
+  }
+  renderHighlight();
+});
+
+async function authFetch(url, opts) {
+  opts = opts || {};
+  return VMRAuth.guard(async () => {
+    const headers = Object.assign({}, opts.headers || {});
+    const k = VMRAuth.get();
+    if (k) headers['Authorization'] = 'Bearer ' + k;
+    return fetch(url, Object.assign({}, opts, { headers }));
+  });
+}
+
+function setBadges(h) {
+  $('path-badge').textContent = (h.get('X-Config-Path') || location.origin).replace(/^.*\//, '') ;
+  $('path-badge').title = 'config file on disk';
+  const mtime = h.get('X-Config-Mtime');
+  $('mtime-badge').textContent = 'mtime ' + (mtime ? fmtTime(new Date(mtime)) : '—');
+  const stale = h.get('X-Config-Stale');
+  const sb = $('stale-badge');
+  sb.textContent = stale === 'true' ? 'running: STALE' : stale === 'false' ? 'running: current' : 'running: —';
+  sb.className = 'badge ' + (stale === 'true' ? 'b-warn' : 'b-dim');
+  const rl = h.get('X-Reload-State');
+  const rb = $('reload-badge');
+  rb.textContent = 'reload: ' + (rl || '—');
+  rb.className = 'badge ' + (rl === 'rejected' ? 'b-err' : rl === 'ok' ? 'b-ok' : 'b-dim');
+}
+
+function fmtTime(d) {
+  if (!d || isNaN(d)) return '—';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function showResult(kind, text) {
+  const box = $('result');
+  box.hidden = false;
+  box.innerHTML = `<div class="box ${kind}">${esc(text)}</div>`;
+}
+
+function showIssues(prefix, issues) {
+  if (!issues || !issues.length) return '';
+  return issues.map(i => `<span class="issue-line">${esc(prefix + '[' + i.severity + '] ' + i.message)}</span>`).join('');
+}
+
+function markDirty() {
+  const dirty = editor.value !== savedText && savedText !== '';
+  $('dirty-note').textContent = dirty ? '● unsaved local edits' : '';
+  $('dirty-note').className = 'count' + (dirty ? ' dirty' : '');
+  $('size-note').textContent = editor.value ? editor.value.split('\n').length + ' lines · ' + editor.value.length + ' bytes' : '';
+}
+
+async function load() {
+  const resp = await authFetch('/config');
+  if (!resp.ok) {
+    const detail = resp.status === 403
+      ? 'config editing is not enabled on this instance (set admin.config_edit: true in config.yaml)'
+      : 'GET /config → ' + resp.status + '\n' + (await errorBody(resp));
+    editor.value = '';
+    editor.disabled = true;
+    renderHighlight();   // clear the overlay <pre> too — its text would ghost through the transparent textarea
+    showResult('err', detail);
+    return;
+  }
+  editor.disabled = false;
+  editor.value = await resp.text();
+  renderHighlight();
+  savedText = editor.value;
+  currentETag = (resp.headers.get('ETag') || '').replace(/"/g, '');
+  setBadges(resp.headers);
+  $('result').hidden = true;
+  markDirty();
+}
+
+// errorBody extracts the router.WriteError envelope's message for display.
+async function errorBody(resp) {
+  try {
+    const j = await resp.json();
+    if (j.error && j.error.message) return j.error.message;
+    return j.error || j.message || JSON.stringify(j);
+  } catch { return resp.statusText; }
+}
+
+$('btn-reload').onclick = load;
+
+$('btn-validate').onclick = async () => {
+  const resp = await authFetch('/config/validate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/yaml' },
+    body: editor.value,
+  });
+  const j = await resp.json();
+  if (!j.ok) {
+    showResult('err', 'invalid config — nothing was written\n\n' + j.error);
+    return;
+  }
+  const lines = showIssues('check ', j.issues);
+  if (lines) {
+    $('result').hidden = false;
+    $('result').innerHTML = `<div class="box warn"><span class="issue-line">config is loadable; operational checks flagged:</span>${lines}</div>`;
+  } else {
+    showResult('ok', 'config is valid — Parse → Check → BuildSnapshot all passed');
+  }
+};
+
+$('btn-save').onclick = async () => {
+  const headers = { 'Content-Type': 'text/yaml' };
+  if (currentETag) headers['If-Match'] = currentETag;   // lost-update guard
+  const resp = await authFetch('/config', { method: 'PUT', headers, body: editor.value });
+  const j = await resp.json().catch(() => null);
+  const errMsg = j ? (j.error && j.error.message ? j.error.message : (j.error || j.message || JSON.stringify(j))) : '';
+  if (resp.status === 409) {
+    showResult('err', (errMsg || 'conflict') + '\nThe file changed on disk since you loaded it. Click "Reload from disk" and re-apply your edit.');
+    return;
+  }
+  if (resp.status === 403) {
+    showResult('err', errMsg || 'config editing is not enabled on this instance (admin.config_edit)');
+    return;
+  }
+  if (!resp.ok) {
+    showResult('err', 'PUT /config → ' + resp.status + '\n' + (errMsg || 'write rejected') + '\nNothing was changed.');
+    return;
+  }
+  const issues = showIssues('check ', j.issues);
+  const envNote = (j.empty_env_refs && j.empty_env_refs.length)
+    ? `<span class="issue-line">unset env vars referenced: ${esc(j.empty_env_refs.join(', '))}</span>` : '';
+  const state = j.reloaded
+    ? 'SAVED and live — hot reload applied the new config'
+    : 'SAVED to disk, but the reload was REJECTED — the running config is unchanged. Check the Log page for the reason.';
+  const kind = j.reloaded ? (issues || envNote ? 'warn' : 'ok') : 'err';
+  $('result').hidden = false;
+  $('result').innerHTML = `<div class="box ${kind}"><span class="issue-line">${esc(state)}</span>${envNote}${issues}</div>`;
+  // refresh badges + baseline from what is now on disk
+  await load();
+};
+
+editor.addEventListener('input', markDirty);
+editor.addEventListener('input', renderHighlight);
+load();
+</script>
+</body>
+</html>

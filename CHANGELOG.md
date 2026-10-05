@@ -21,6 +21,9 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+### Added
+- **Online config editing (`admin.config_edit`, opt-in, off by default)**: auth-gated `GET /config` (raw file from disk with ETag/mtime/staleness/reload-state headers), `POST /config/validate` (candidate check without writing), `PUT /config` (validate → atomic write → hot reload, trigger `api`), and a `/config.html` console page. Every edit runs the exact hot-reload validation pipeline before anything touches the file, which stays the single source of truth; a rejected candidate never lands on disk and a reload outcome is reported in the PUT response. Auth follows the same policy as `/status`: `api_keys` when configured, open when not.
+
 ## [0.7.2] - 2026-09-23
 
 ### Changed

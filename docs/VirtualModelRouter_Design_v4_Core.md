@@ -116,11 +116,12 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 * **基础健康检查**：`GET /health`（免鉴权，仅应答进程存活与运行时间，不泄露拓扑信息）。
 * **运维与状态**：`GET /status`（受鉴权保护，暴露进程元数据、配置时效、并发及配额快照）。
 * **实时遥测与日志**：`GET /stats`（指标聚合与活跃请求）、`GET /log`（实时控制台日志流）。
-* **统一控制台**：`GET /status.html`（系统全景监控）、`GET /models.html`（模型与配额拓扑）、`GET /log.html`（日志终端）、`GET /help.html`（Agent 配置向导）。
+* **配置在线编辑（opt-in）**：`GET /config`（返回磁盘上的配置文件原文 + `ETag`/mtime/时效/重载状态响应头）、`POST /config/validate`（只校验不落盘）、`PUT /config`（校验 → 原子写回 → 触发 trigger=`api` 的热重载）。默认关闭（`admin.config_edit`，随热重载生效）；鉴权与 `/status` 同策略（配 `api_keys` 要凭证，未配则开放）。设计红线：**配置文件始终是唯一事实源**——写入口只是「另一支笔」，绝不引入进程内配置状态；校验走与热重载逐字相同的管线，被拒候选永不落盘。
+* **统一控制台**：`GET /status.html`（系统全景监控）、`GET /models.html`（模型与配额拓扑）、`GET /log.html`（日志终端）、`GET /config.html`（配置编辑器）、`GET /help.html`（Agent 配置向导）。
 * **静态分析报告托管**：`GET /reports/*`（可选，只读托管本地生成的分析报告，受鉴权保护）。
 
 ### 4.5 统一控制台契约
-四个控制台页面共享一套内嵌运行时与一组数据契约：
+五个控制台页面共享一套内嵌运行时与一组数据契约：
 
 * **共享运行时**：`console.css`/`console.js` 单一来源（`go:embed`），每页在首次服务时经注入标记内联一次，无标记的页面原样返回。公共面：`mountConsole`（页头、导航栏、页脚、鉴权弹窗；`refresh` 三态 `countdown`/`stream`/`static`）、`VMRAuth`（401 → 密钥弹窗 → 重试一次的统一流程，`localStorage` 单键跨页共享）、共享数字格式化（两位小数、整体去尾零、千分位——页面禁止各自手搓）与共享弹窗机制（Esc、点击外部、焦点管理）。
 * **刷新纪律**：Overview 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests/Recent Failures/并发区附加自适应轮询（活跃 ~1s、空闲 15s）；Log 页由流状态驱动；Help 静态。

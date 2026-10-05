@@ -97,6 +97,12 @@ listen: 127.0.0.1:8800
 # analytics:                      # 用于 analyze 报表与看板的 /reports/ 静态托管（默认关闭）
 #   serve: false                 # true = 对外服务 /reports/*；false = 裸 404（与未挂载无区别）。随热重载生效
 #   serve_dir: ./reports         # 静态托管根目录；相对路径按 vmr start 工作目录解析。随热重载生效
+# admin:                           # 可选管理面开关（默认全部关闭）
+#   config_edit: false            # true = 启用配置在线编辑：GET/PUT /config 与 POST /config/validate，以及 /config.html 控制台页。
+#                                  # 每次保存先走与热重载完全相同的校验管线（Parse → Check → BuildSnapshot），再原子写回
+#                                  # 本配置文件（保持 0600）并触发热重载——文件始终是唯一事实源。鉴权与 /status 同策略：
+#                                  # 配了 api_keys 就要凭证，没配就开放（单人/局域网定位）。GET /config 返回文件原文，
+#                                  # 含其中所有 api_key 明文——这是「编辑文件」本身的固有属性。随热重载生效。
 # timeouts:                       # "等多久"——请求路径上的等待上限，Go duration 语法
 #   connect: 10s
 #   response_header: 120s        # 从上游收到首字节的时间

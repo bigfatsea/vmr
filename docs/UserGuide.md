@@ -26,7 +26,8 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Sticky Model (session affinity)](#sticky-model-session-affinity)
   - [Quota-Aware Routing](#quota-aware-routing)
 - [Built-in console and live telemetry](#built-in-console-and-live-telemetry)
-  - [The four console pages](#the-four-console-pages)
+  - [The console pages](#the-console-pages)
+  - [Online config editing](#online-config-editing)
   - [Live telemetry API (GET /stats)](#live-telemetry-api-get-stats)
 - [Audit and reporting](#audit-and-reporting)
   - [The audit log](#the-audit-log)
@@ -523,12 +524,13 @@ Full design: `docs/VirtualModelRouter_Design_v4_Quota.md`.
 
 Beyond offline audit analysis, vmr runs a zero-dependency real-time telemetry engine (`internal/livestats`) and serves a unified built-in browser console (`//go:embed`, zero external CDN dependencies) directly from the running binary. All console pages share a single API key authentication modal and localStorage cache (`VMRAuth`).
 
-### The four console pages
+### The console pages
 
 - **Overview (`GET /status.html`)**: The operational home. A top vitals strip (concurrency, requests, tokens, and endpoint health counts), the active **Live Requests** table (Seq, State, Elapsed, Caller, Model, Provider : Model, Attempts, TTFT with >5s stall warnings, estimated tokens; ended rows gray out until pushed out of the slot capacity), performance percentiles by Provider & Model (TTFT p50/p90 and output generation throughput `Tok OUT/s` p50/p10 computed over the global last 300 requests with last-10/30/100/300 window switching, sorted by request volume descending), an interactive traffic & usage section (pure-SVG chart with four-layer stacked token bars — fresh in, cache write, cache read, tok out — and 12h/24h/3d/7d range control, plus per-provider and per-caller usage tables), and a collapsible **Recent Failures** ring (up to 100 errors within 24h). Concurrency, Live Requests, and Recent Failures poll adaptively (~2s active, 15s idle, paused when the tab is hidden); the whole page refreshes every 5 minutes.
 - **Models (`GET /models.html`)**: The configuration and quota home. Displays Quota Budgets (configured amounts, usage progress, headroom ratio, 24h traffic share, and reset times) alongside Virtual Models & Endpoint Topology grouped into separate tables by protocol (priority tiers, provider:model endpoints, health status, headroom, and context-window/capability badges). Refreshes on the same 5-minute countdown clock without fast polling.
 - **Terminal Log (`GET /log.html`)**: A full-bleed, browser-based live terminal streaming the process's stdout/stderr log in real time (`GET /log`). Includes level filtering chips, substring search with match highlighting, ⌘P pause/resume, clipboard copy, and automatic smooth scroll handoff ("↓ N new" chip).
 - **Configuration Guide (`GET /help.html` and `GET /help.zh.html`)**: Interactive setup snippets for major agent frameworks (Claude Code, Codex, OpenClaw, OpenCode, Cursor, Hermes, Pi Agent, WorkBuddy) with copyable per-protocol Base URLs and dynamic model tables populated live from `/status`.
+- **Config editor (`GET /config.html`)**: The online config editing surface (opt-in, see [Online config editing](#online-config-editing) below) — a textarea over the raw config file with Validate and Save & apply, plus staleness/reload-state badges fed by the response headers.
 
 ### Live telemetry API (GET /stats)
 
@@ -537,6 +539,12 @@ Beyond offline audit analysis, vmr runs a zero-dependency real-time telemetry en
 - **Rollups**: hourly rollups (default 48h, configurable `?range=24h|3d|7d`) and daily local calendar-day rollups backed by a durable slim WAL (`vmr-stats-YYYYMMDD-HH.jsonl`, 0600) and append-only rollup archive (`vmr-stats-rollup.jsonl`).
 - **Performance rings**: per-provider nearest-rank TTFT percentiles (p50/p90) and output generation throughput `toks` (p50/p10, floored at a 50ms generation span to eliminate burst noise), plus a server-computed `overall` window block.
 - **Recent failures**: a circular ring of recent failed or canceled attempts (up to 100 within 24h) stamped with the router's authoritative `error_class`.
+
+### Online config editing
+
+Optional, off by default: set `admin.config_edit: true` (it follows hot reload, so no restart) and the running instance gains an auth-gated editing surface — `GET /config` (the raw config file from disk, with `ETag`/mtime/staleness/reload-state headers), `POST /config/validate` (runs the full candidate check, writes nothing), `PUT /config` (validate, then write), and the `/config.html` console page. Auth follows the same policy as `/status`: `api_keys` when configured, open when not — the single-operator LAN stance.
+
+The design point is that the config file stays the single source of truth. A PUT is checked with the exact hot-reload pipeline (`config.Parse` → `Check()` → `BuildSnapshot`), and only then written atomically back to the file (temp file + rename, mode 0600 preserved) and reloaded through the same closure fsnotify and SIGHUP use — the response reports whether the reload actually applied, and the log shows the attempt as `CONFIG RELOAD trigger=api`. A rejected candidate never touches the file (the error text comes back with the validator's own line numbers); an `If-Match` precondition turns "the file changed under me since I loaded it" into a 409 instead of a silent lost update. Two inherent caveats: `GET /config` returns the raw file text including every `api_key` in it — that is what editing the file means — and after each PUT the fsnotify watcher re-runs the reload once on identical bytes (idempotent; one extra `CONFIG RELOAD` log line).
 
 ## Audit and reporting
 

@@ -319,7 +319,14 @@ func cmdStart(args []string) error {
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: server.New(rt, auditLog).WithLogTee(tee).WithLiveStats(liveAgg).
-			WithGuard(vmrGuard).WithInstance(*path, startTime).Handler(),
+			WithGuard(vmrGuard).WithInstance(*path, startTime).
+			WithConfigReload(func() router.ReloadState {
+				// One trigger label among fsnotify/SIGHUP, serialized by the same
+				// reloadMu; the returned ReloadState is necessarily this attempt —
+				// reload() runs to completion before it returns.
+				reload("api")
+				return rt.ReloadState()
+			}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second, // drop connections that stall before sending headers
 		// Close idle keep-alives after 120s so a vanished client can't park a
 		// socket forever. Applies only BETWEEN requests — in-flight requests,
