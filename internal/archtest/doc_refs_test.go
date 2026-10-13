@@ -256,12 +256,13 @@ func TestArchitecture_DocReferences(t *testing.T) {
 	root := repoRootDir(t)
 	w := loadDocWorld(t, root)
 
-	// Top-level docs/ only, deliberately not docs/future-strategy/: those
-	// are dated point-in-time strategy notes and review reports whose whole
-	// value is recording what was true when they were written — several
-	// legitimately discuss files that have since been deleted. Holding them
-	// to current-state accuracy would either produce permanent noise or
-	// pressure someone into editing history to silence a test.
+	// Top-level docs/ only. Dated point-in-time strategy notes, evaluations
+	// and review reports live in the untracked archived/ directory, not
+	// here: their whole value is recording what was true when they were
+	// written, and several legitimately discuss files that have since been
+	// deleted — holding them to current-state accuracy would either produce
+	// permanent noise or pressure someone into editing history to silence a
+	// test.
 	docs := []string{"CLAUDE.md", "README.md", "README.zh.md"}
 	entries, err := os.ReadDir(filepath.Join(root, "docs"))
 	if err != nil {
@@ -391,7 +392,7 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		// The .go-source-comment branch: same checkDocRefs, a source file
 		// docRel instead of a doc's.
 		{"missing source file in a .go comment", "internal/report/detail.go", "see internal/report/nosuchfile.go"},
-		{"missing future-strategy doc in a .go comment", "internal/report/detail.go", "see docs/future-strategy/nosuch_xyz.md"},
+		{"missing doc under a since-archived directory in a .go comment", "internal/report/detail.go", "see docs/future-strategy/nosuch_xyz.md"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -410,7 +411,7 @@ func TestArchitecture_DocReferences_Negative(t *testing.T) {
 		{"CLAUDE.md", "see internal/router/router.go and docs/UserGuide.md"},
 		{"CLAUDE.md", "one section per internal/report/viewmodel_*.go"},
 		{"CLAUDE.md", "`time.Duration` and `json.RawMessage` are out of scope"},
-		{"internal/report/detail.go", "see docs/future-strategy/agent_session_visualization_deepdive_v1.0.md"},
+		{"internal/report/detail.go", "see docs/ROADMAP.md"},
 		{"internal/report/detail.go", "moved to internal/reqdetail/render.go"},
 		// Symbol noise in a .go comment stays silent: only packages this repo
 		// owns are checkable, so parameter-shaped mentions and stdlib types
