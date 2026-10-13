@@ -207,8 +207,8 @@ func TestServe_QuotaReordering_MisalignedResetDays(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
 	endpoint := w.Header().Get("X-VMR-Endpoint")
-	if endpoint != "openai-completions/plan-c/mc" {
-		t.Fatalf("winning endpoint = %s, want openai-completions/plan-c/mc (plan-c has the least time left relative to its usage)", endpoint)
+	if endpoint != "openai-completions:plan-c:mc" {
+		t.Fatalf("winning endpoint = %s, want openai-completions:plan-c:mc (plan-c has the least time left relative to its usage)", endpoint)
 	}
 	if got := w.Header().Get("X-VMR-Route-Reason"); got == "" || !strings.Contains(got, "pick=quota") {
 		t.Errorf("X-VMR-Route-Reason = %q, want it to show pick=quota", got)
@@ -319,7 +319,7 @@ models:
 	if w2.Code != 200 {
 		t.Fatalf("second call status=%d body=%s", w2.Code, w2.Body)
 	}
-	if got := w2.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p1/m1" {
-		t.Fatalf("second call endpoint = %s, want openai-completions/p1/m1 (sticky must override quota's demotion)", got)
+	if got := w2.Header().Get("X-VMR-Endpoint"); got != "openai-completions:p1:m1" {
+		t.Fatalf("second call endpoint = %s, want openai-completions:p1:m1 (sticky must override quota's demotion)", got)
 	}
 }

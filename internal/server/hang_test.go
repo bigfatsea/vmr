@@ -47,7 +47,7 @@ func TestErrorBodyStallStillFailsOver(t *testing.T) {
 
 	start := time.Now()
 	resp, body := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:model-two" {
 		t.Fatalf("expected failover to p2, got status=%d ep=%s body=%s",
 			resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"), body)
 	}

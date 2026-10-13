@@ -104,7 +104,7 @@ func TestAnthropicIngressFailoverAndHeaders(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages/a2/real-b" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages:a2:real-b" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -189,14 +189,14 @@ models:
 	ts := newRouterServer(t, yaml)
 
 	resp, _ := chat(t, ts, `{"model":"coding","messages":[{"role":"user","content":"hi"}]}`, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/oai/model-one" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:oai:model-one" {
 		t.Errorf("openai-completions-face coding: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	resp, body := messages(t, ts, `{"model":"coding","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`, nil)
 	if resp.StatusCode != 200 || !strings.Contains(body, "PONG") {
 		t.Errorf("anthropic-face coding: status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages/anth/real-a" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "anthropic-messages:anth:real-a" {
 		t.Errorf("anthropic-face endpoint: %s", got)
 	}
 }

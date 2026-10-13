@@ -1,4 +1,4 @@
-// Ver 2026-09-12 12:00, by dev
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 package main
 
 import (
@@ -201,7 +201,7 @@ models:
 
 // TestCmdCheck_EndpointBareLabelWithNoOverrides locks in that an endpoint
 // with no role_map/sticky_ttl/capabilities/max_context_tokens to report
-// renders a bare "- p=N. provider/model:" with nothing after the colon.
+// renders a bare "- p=N. provider:model" with nothing after the model.
 func TestCmdCheck_EndpointBareLabelWithNoOverrides(t *testing.T) {
 	path := writeTempFile(t, "config.yaml", `
 listen: 127.0.0.1:0
@@ -217,8 +217,43 @@ models:
           models: [real-model]
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, "- p=0. p1/real-model:\n") {
-		t.Errorf("endpoint should render a bare label with nothing after the colon:\n%s", out)
+	if !strings.Contains(out, "- p=0. p1:real-model\n") {
+		t.Errorf("endpoint should render a bare label with no trailing colon or padding:\n%s", out)
+	}
+}
+
+// TestCmdCheck_EndpointKeepsModelColonAndSlash: a model name carrying its own
+// ':' (ollama tag) or '/' (OpenRouter vendor prefix) renders verbatim after
+// the first ':', and the duplicate-endpoint ⚠️ still lands on the right line
+// (cmd_check and config.Check build the match key from one EndpointLabel).
+func TestCmdCheck_EndpointKeepsModelColonAndSlash(t *testing.T) {
+	path := writeTempFile(t, "config.yaml", `
+listen: 127.0.0.1:0
+providers:
+  - name: orp
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: test-key
+  - name: oll
+    base_url: {openai-completions: https://example.com/v1}
+    api_key: test-key
+models:
+  m1:
+    endpoints:
+      openai-completions:
+        - providers: [orp]
+          models: ["z-ai/glm-5.2", "z-ai/glm-5.2"]
+        - providers: [oll]
+          models: ["qwen3:8b"]
+`)
+	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
+	if !strings.Contains(out, "- p=0. oll:qwen3:8b\n") {
+		t.Errorf("ollama-tag model must render verbatim with no trailing colon:\n%s", out)
+	}
+	if got := strings.Count(out, "- p=0. orp:z-ai/glm-5.2 ⚠️"); got != 2 {
+		t.Errorf("duplicate endpoint lines flagged = %d, want 2:\n%s", got, out)
+	}
+	if !strings.Contains(out, "endpoint openai-completions:orp:z-ai/glm-5.2 declared more than once") {
+		t.Errorf("Failed summary must name the endpoint in colon form:\n%s", out)
 	}
 }
 
@@ -297,7 +332,7 @@ models:
   b: {endpoints: {openai-completions: [{providers: [p1], models: [m2]}]}}
 `)
 	out := captureStdout(t, func() { _ = cmdCheck([]string{"-c", path}) })
-	if !strings.Contains(out, "- p=0. p1/m1:\n\nb:\n") {
+	if !strings.Contains(out, "- p=0. p1:m1\n\nb:\n") {
 		t.Errorf("expected exactly one blank line between model \"a\" and model \"b\":\n%s", out)
 	}
 }
@@ -554,12 +589,12 @@ models:
 		t.Errorf("output missing a direct proxy line:\n%s", out)
 	}
 
-	// Models section: endpoints in try order, same "- p=N. provider/model:"
+	// Models section: endpoints in try order, same "- p=N. provider:model"
 	// label printModels uses.
 	if !strings.Contains(out, "vm:\n") || !strings.Contains(out, "openai-completions:\n") {
 		t.Errorf("output missing model group:\n%s", out)
 	}
-	if !strings.Contains(out, "- p=1. p1/real-a:") || !strings.Contains(out, "- p=2. p2/real-b:") {
+	if !strings.Contains(out, "- p=1. p1:real-a") || !strings.Contains(out, "- p=2. p2:real-b") {
 		t.Errorf("output missing endpoints in try order:\n%s", out)
 	}
 }
@@ -650,7 +685,7 @@ models:
 	if !strings.Contains(rest, "openai-completions:") || !strings.Contains(rest, "anthropic-messages:") {
 		t.Errorf("both protocol faces must nest under the same agent: block, got:\n%s", rest)
 	}
-	if !strings.Contains(rest, "p1/m-openai") || !strings.Contains(rest, "p1/m-anthropic") {
+	if !strings.Contains(rest, "p1:m-openai") || !strings.Contains(rest, "p1:m-anthropic") {
 		t.Errorf("both protocol faces' endpoints must be present, got:\n%s", rest)
 	}
 }
@@ -761,7 +796,7 @@ func TestCmdStatus_WithMockServer(t *testing.T) {
 					"protocol": "openai-completions",
 					"endpoints": []map[string]any{
 						{
-							"endpoint":             "openai-completions/p1/m",
+							"endpoint":             "openai-completions:p1:m",
 							"protocol":             "openai-completions",
 							"priority":             1,
 							"consecutive_failures": 0,
@@ -800,7 +835,7 @@ models:
 	if !strings.Contains(got, "vm [openai-completions]") {
 		t.Errorf("output should show model name: %q", got)
 	}
-	if !strings.Contains(got, "openai-completions/p1/m") {
+	if !strings.Contains(got, "openai-completions:p1:m") {
 		t.Errorf("output should show endpoint: %q", got)
 	}
 	if !strings.Contains(got, "ok") {
@@ -883,7 +918,7 @@ func TestCmdStatus_HalfOpenRendersDistinctFromOK(t *testing.T) {
 					"protocol": "openai-completions",
 					"endpoints": []map[string]any{
 						{
-							"endpoint":             "openai-completions/p1/m",
+							"endpoint":             "openai-completions:p1:m",
 							"protocol":             "openai-completions",
 							"priority":             1,
 							"consecutive_failures": 3,
@@ -1023,5 +1058,73 @@ models:
 	}
 	if receivedAuth != "Bearer "+expectedKey {
 		t.Errorf("received auth via -key = %q, want Bearer %s", receivedAuth, expectedKey)
+	}
+}
+
+// TestCmdCheck_DirectRoutes: with direct_routing on, vmr check (and the
+// startup summary, which shares printModels) lists every addressable
+// provider:model name per protocol, with a key count for an api_keys group;
+// off, the section is absent.
+func TestCmdCheck_DirectRoutes(t *testing.T) {
+	const yaml = `
+listen: 127.0.0.1:0
+direct_routing: %s
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: test-key}
+  - {name: pool, base_url: {openai-completions: https://example.com/v1}, api_keys: {a: test-key-a, b: test-key-b}}
+models:
+  vm: {endpoints: {openai-completions: [{providers: [p1, pool], models: [m]}]}}
+`
+	on := captureStdout(t, func() {
+		_ = cmdCheck([]string{"-c", writeTempFile(t, "config.yaml", fmt.Sprintf(yaml, "true"))})
+	})
+	for _, want := range []string{"=== Direct routes (direct_routing: true) ===", "    - p1:m\n", "    - pool:m (2 keys)\n", "    - pool-a:m\n"} {
+		if !strings.Contains(on, want) {
+			t.Errorf("vmr check output missing %q:\n%s", want, on)
+		}
+	}
+	off := captureStdout(t, func() {
+		_ = cmdCheck([]string{"-c", writeTempFile(t, "config.yaml", fmt.Sprintf(yaml, "false"))})
+	})
+	if strings.Contains(off, "Direct routes") {
+		t.Errorf("direct_routing off must not print the section:\n%s", off)
+	}
+}
+
+// TestCmdCheck_Models: `vmr check models` prints the provider → models and
+// virtual model → upstreams catalog from the routing snapshot — api_keys
+// groups collapse to their written name, tiers are priority-ordered with
+// fallback marked, and disabled / unreferenced providers still show up.
+func TestCmdCheck_Models(t *testing.T) {
+	const yaml = `
+listen: 127.0.0.1:0
+direct_routing: true
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com/v1}, api_key: test-key}
+  - {name: pool, base_url: {openai-completions: https://example.com/v1}, api_keys: {a: test-key-a, b: test-key-b}}
+  - {name: off, disabled: true, base_url: {openai-completions: https://example.com/v1}, api_key: test-key}
+  - {name: idle, base_url: {openai-completions: https://example.com/v1}, api_key: test-key}
+fallback_endpoints:
+  openai-completions: [{providers: [p1], models: [fb], priority: 9}]
+models:
+  vm: {endpoints: {openai-completions: [{providers: [p1], models: [m], priority: 1}, {providers: [pool], models: [m], priority: 2}]}}
+`
+	out := captureStdout(t, func() {
+		if err := cmdCheck([]string{"-c", writeTempFile(t, "config.yaml", yaml), "models"}); err != nil {
+			t.Fatalf("cmdCheck models: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"=== Providers → Models ===", "=== Virtual Models → Upstreams ===",
+		"pool (a, b)\n", "idle  (no models referenced)\n", "off  (disabled)\n",
+		"vm / openai-completions\n", "  p=1   p1:m\n", "pool-a:m", "pool-b:m", // key order within a tier is not pinned
+		"  p=9   p1:fb (fallback)\n", "vm@2  [direct]", "fallback@9  [direct]",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("check models output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "=== Global Settings ===") {
+		t.Errorf("check models must not print the full summary:\n%s", out)
 	}
 }

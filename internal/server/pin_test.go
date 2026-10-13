@@ -41,13 +41,13 @@ func TestPinProviderOverridesPriority(t *testing.T) {
 
 	// No pin: normal routing picks p1 (priority 1).
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p1/m1" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p1:m1" {
 		t.Fatalf("unpinned: status=%d ep=%s, want p1", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 
 	// Pin provider p2: must force p2 despite lower priority.
 	resp, body := chat(t, ts, simpleReq, map[string]string{"X-VMR-Provider": "p2"})
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:m2" {
 		t.Fatalf("pinned: status=%d body=%s ep=%s, want p2", resp.StatusCode, body, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	if got := resp.Header.Get("X-VMR-Route-Reason"); !strings.Contains(got, "pin=provider=p2") {
@@ -67,7 +67,7 @@ func TestPinTargetModel(t *testing.T) {
 	ts := newRouterServer(t, pinYAML(u1.srv.URL, u2.srv.URL))
 
 	resp, _ := chat(t, ts, simpleReq, map[string]string{"X-VMR-Target-Model": "m2"})
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:m2" {
 		t.Fatalf("model pin: status=%d ep=%s, want p2/m2", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }
@@ -78,7 +78,7 @@ func TestPinProviderAndModel(t *testing.T) {
 	ts := newRouterServer(t, pinYAML(u1.srv.URL, u2.srv.URL))
 
 	resp, _ := chat(t, ts, simpleReq, map[string]string{"X-VMR-Provider": "p2", "X-VMR-Target-Model": "m2"})
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:m2" {
 		t.Fatalf("both pin: status=%d ep=%s, want p2/m2", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 }

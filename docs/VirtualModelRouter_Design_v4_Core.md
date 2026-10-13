@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-23 02:43, by Claude Opus 5.5 -->
+<!-- Ver 2026-10-13 08:12, by Claude Opus 5.5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -25,6 +25,7 @@ vmr 是本地运行、单二进制、配置驱动的 LLM 智能路由器。客�
 | 概念 | 职责 |
 | --- | --- |
 | **Virtual Model** | 对外暴露的虚拟模型名，代表能力而非特定厂商；对应一组按协议隔离的 Endpoint-Group。 |
+| **Direct Route** | 可选（`direct_routing`）的 `provider:model` 直连名：跳过虚拟模型，直达配置已声明的某个真实模型的 Endpoint（见直连寻址一节）。 |
 | **Provider** | 可复用的上游账号抽象：包含名称、凭据、代理设置以及按协议分键的 `base_url` 映射。 |
 | **Endpoint** | 最小调度单位：Provider × 实际模型名 × 调度属性；由 Endpoint-Group 展开而成。 |
 | **Adapter** | 协议适配器：负责出站请求构造、模型字段重写、响应协议探测与错误分类。 |
@@ -112,7 +113,7 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 
 ### 4.4 核心 HTTP 端点
 * **协议入口**：`POST /v1/chat/completions`、`POST /v1/messages`、`POST /v1/responses`。
-* **模型发现**：`GET /v1/models`（聚合全部虚拟模型，输出协议兼容列表）。
+* **模型发现**：`GET /v1/models`（聚合全部虚拟模型，输出协议兼容列表；开启直连寻址时附带 `provider:model` 直连名，`owned_by` 为 provider）。
 * **基础健康检查**：`GET /health`（免鉴权，仅应答进程存活与运行时间，不泄露拓扑信息）。
 * **运维与状态**：`GET /status`（受鉴权保护，暴露进程元数据、配置时效、并发及配额快照）。
 * **实时遥测与日志**：`GET /stats`（指标聚合与活跃请求）、`GET /log`（实时控制台日志流）。
@@ -125,7 +126,7 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 
 * **共享运行时**：`console.css`/`console.js` 单一来源（`go:embed`），每页在首次服务时经注入标记内联一次，无标记的页面原样返回。公共面：`mountConsole`（页头、导航栏、页脚、鉴权弹窗；`refresh` 三态 `countdown`/`stream`/`static`）、`VMRAuth`（401 → 密钥弹窗 → 重试一次的统一流程，`localStorage` 单键跨页共享）、共享数字格式化（两位小数、整体去尾零、千分位——页面禁止各自手搓）与共享弹窗机制（Esc、点击外部、焦点管理）。
 * **刷新纪律**：Overview 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests/Recent Failures/并发区附加自适应轮询（活跃 ~1s、空闲 15s）；Log 页由流状态驱动；Help 静态。
-* **`/status` `alerts[]` 纪律**：只放**可操作状态**，滚动统计量绝不进——config 校验问题各一条（`kind: config`）；端点仅在 cooldown 期间在列（`consecutive_failures > 0` 但未冷却的降级态由拓扑表 Health 列承载，否则无流量时残留失败计数不消零，会把徽章永久钉在非零，违反告警收敛纪律）；quota `used_frac ≥ 1` 为 error、`≥ 0.9` 为 warning，阈值刻意写死不作配置项。排序：error 优先，再按 `kind`+`ref` 稳定排序；同一账号多限额触发合并为一条。
+* **`/status` `alerts[]` 纪律**：只放**可操作状态**，滚动统计量绝不进——config 校验问题各一条（`kind: config`，严重度随问题走：error 级问题如缺失 api_key 是 error，其余 warning；同类问题在 `Config.Check` 源头合并成一条——如同一 capability 声明在多个模型上、同一 `api_keys` 组被禁用——所有消费者共享同一份收敛后的文案）；端点仅在 cooldown 期间在列（`consecutive_failures > 0` 但未冷却的降级态由拓扑表 Health 列承载，否则无流量时残留失败计数不消零，会把徽章永久钉在非零，违反告警收敛纪律）；quota `used_frac ≥ 1` 为 error、`≥ 0.9` 为 warning，阈值刻意写死不作配置项。排序：error 优先，再按 `kind`+`ref` 稳定排序；同一账号多限额触发合并为一条。
 * **`/status` 端点行契约**：`provider`/`key_label`/`model` 取自 `core.Endpoint`；`from_fallback` 恒出现（含 `false` 零值，供前端切分）；`headroom` 从路由半区既有的配额导出读取（禁止第二套公式重推，与配额差分测试纪律一致），未配额端点省略该字段。
 * **流量计数只有一个来源**：`/status` 的 `traffic` 块只保留 sticky 注册表规模；请求数、结果分布与 token 用量一律由 livestats 账本（`/stats`）提供，重启后可恢复。进程内不再维护第二本计数器。
 
@@ -208,6 +209,15 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ### 6.5 额度感知重排（Quota Pacing）
 针对按周期计费的套餐账号，通过 Headroom 余量比进行配速调度。紧随策略多键排序之后，仅在同一优先级梯队内部调整顺序，不越级、不淘汰。完整机制见 `docs/VirtualModelRouter_Design_v4_Quota.md`。
+
+### 6.6 直连寻址（Direct Routing）
+可选、默认关闭（`direct_routing: true`，随热重载生效）。开启后客户端可在 `model` 字段写 `provider:model`（如 `cliproxy:gemini-3.8-flash-high`）跳过虚拟模型、直达某个真实模型。本质是把钉住路由（`X-VMR-Provider`/`X-VMR-Target-Model`）从请求头搬进模型名——只能改模型名、不能加自定义头的客户端（多数 Agent CLI/IDE）因此也能点名后端。
+* **可寻址集合 = 已声明的三元组**：快照构建时从全部虚拟模型路由（含 fallback，已滤掉 disabled provider）派生 `Snapshot.Direct[protocol]["provider:model"]`，与 pin 同为「只收窄不开口」——不产生新 HealthKey，quota 分桶与 livestats 维度受配置约束，客户端无法借此调用配置里没写的模型；一对组合只在其被声明的协议上可达，不按 provider 的 `base_url` 扩到别的协议。
+* **共享身份**：直连 Endpoint 是原 Endpoint 的副本（`Priority` 归零、`FromFallback` 清除），`HealthKey` = 协议/provider/模型/key 哈希不变，健康状态、sticky 指针、quota 指针、provider 并发闸与原 Endpoint 天然同一份。
+* **管线不变、不挂 fallback**：健康过滤、条件准入、pin、排序、额度重排、会话亲和原样生效，冷却端点不强行放行；直连路由不注入 `fallback_endpoints`——客户端点名一个模型，失败返回该上游自己的错误。会话亲和键（客户端标签 + System 哈希 + 首条消息哈希）与模型名无关，直连成功同样移动该会话的粘性指针，同会话随后改走虚拟模型时若候选含该端点会回流过去，这是缓存连续性的正确结果。
+* **命名**：provider 名禁止含 `:`/`/`，按第一个 `:` 切分无歧义，模型名可含 `:`/`/`。`api_keys` 型 provider 的原名寻址全部 key（key 间照常额度重排与 failover），展开名 `<name>-<label>` 只寻址一把 key（原名由 `config.Provider.Group` 保留）。开启时以「provider 名 + `:`」开头的虚拟模型名是加载错误。
+* **单一查找入口**：`Snapshot.Route(protocol, name)` 先查虚拟模型再查直连表，是请求路径上唯一的路由查找（Serve、图片降采样、Guard 豁免）。直连表与 `Models` 分开存放，遍历 `Models` 的消费方（`/status` 拓扑、alerts、diagnose、quota 状态行）保持只见虚拟模型；`/v1/models` 与 `vmr check` 显式列出直连名。
+* **对外表现**：响应 `model` 字段改写为客户端发来的直连名（与虚拟模型同一改写规则）；审计 `model` 记直连名，分析半区按模型切分处单列一行，无需任何分析侧改动。
 
 ---
 
@@ -358,6 +368,8 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 | **协议私有约束分类** | 归入独立枚举 `ErrQuirk`（切换且零冷却） | 区分于 `ErrContextLimit`；若归入 `ErrEndpoint` 会触发 10min 长冷却误伤健康端点。 |
 | **内容合规与窗口超限** | `ErrContent` / `ErrContextLimit` 零冷却切换 | 该类错误属于请求内容或模型静态参数属性，非端点故障，切换下一端点不处罚健康度。 |
 | **代理路由模型** | Provider 级显式布尔开关，无全局/环境变量隐式回退 | 流量走向必须在 config.yaml 静态可查，隐式环境变量是排障最难发现的陷阱；直连 DNS/TLS 检查对代理端点自动跳过。 |
+| **直连寻址范围** | 只开放虚拟模型或 fallback 已声明的 (协议, provider, 模型)，默认关闭，不挂 fallback | 放开任意模型会产生请求期临时 Endpoint（热重载时健康状态被 Prune、`/status` 不可见）、按模型分桶的 quota 无界增长，且任何持 vmr key 的客户端可调用付费账号上的任意模型；默认关闭是因为直连让客户端绕过虚拟模型编码的优先级策略。 |
+| **直连表存放** | 独立的 `Snapshot.Direct` + 单一查找 `Snapshot.Route` | 混入 `Models` 会让所有遍历虚拟模型的消费方（拓扑、告警、诊断、配额行）各自加过滤；分表只需改三处查找。 |
 | **准入与排序分离** | 淘汰（`strategy.Eligible`，看请求事实）与排序（`strategy.Sort`，只看端点 `Priority`）是两个独立函数 | `Sort` 的签名不接收请求，排序不可能感知请求。只有一个排序键且无配置入口，所以不设接口与注册表；出现第二个排序维度时再引入。 |
 | **窗口超限降级** | `WithinContext` 单独实现，不放进硬条件表 | 唯一需要“全体超限时不真拒绝、留给上游 400 兜底”的条件，硬编码两行避免破坏接口纯洁性。 |
 | **会话亲和（Sticky）** | 默认开启，基于 System Prompt + 首条消息联合哈希 | 保护 Prompt Cache 降低延迟与成本；TTL 挂在 Provider 账号级（基础设施属性），免跨模型重复配置；设 24h 校验上限防内存淘汰失效。 |

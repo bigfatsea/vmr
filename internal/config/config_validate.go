@@ -1,4 +1,4 @@
-// Ver 2026-09-23 02:30, by GPT-5.2
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 package config
 
@@ -95,16 +95,17 @@ func validateCapabilities(ctx string, caps []string) error {
 }
 
 // validateIdentSegment rejects a name that would serve as the provider
-// segment of the protocol:provider:model audit label (see core.EndpointLabel):
-// a ':' turns SplitEndpointLabel's three-field split into a mis-parse (the
-// provider tail gets folded into the model segment, corrupting every analysis-
-// half grouping/detail/file name that keyed off it), and
-// a '/' collides with the path-ish separators used downstream. Shared by
-// provider names (validateProviders) and api_keys labels
-// (expandProviderAPIKeys), since both are concatenated into that segment.
+// segment of the protocol:provider:model audit label (see core.EndpointLabel)
+// or the provider half of a direct-routing provider:model name: a ':' turns
+// the first-separator split into a mis-parse (the provider tail gets folded
+// into the model segment, corrupting every analysis-half grouping/detail/file
+// name that keyed off it), and a '/' would make the segment look like part of
+// a model's own vendor/model path. Shared by provider names
+// (validateProviders) and api_keys labels (expandProviderAPIKeys), since both
+// are concatenated into that segment.
 func validateIdentSegment(name string) error {
 	if strings.ContainsAny(name, ":/") {
-		return fmt.Errorf("name %q must not contain ':' or '/' (breaks the protocol:provider:model audit label — see core.EndpointLabel)", name)
+		return fmt.Errorf("name %q must not contain ':' or '/' (breaks the provider:model and protocol:provider:model names — see core.EndpointLabel)", name)
 	}
 	return nil
 }
@@ -224,6 +225,9 @@ func (c *Config) validateModels() error {
 		m := c.Models[name]
 		if len(m.Endpoints) == 0 {
 			return fmt.Errorf("model %q: no endpoints", name)
+		}
+		if prov, _, ok := strings.Cut(name, ":"); ok && c.DirectRouting && c.IsProviderName(prov) {
+			return fmt.Errorf("model %q: with direct_routing enabled, a virtual model name must not start with a provider name followed by ':' (%q would also be the direct-routing name of provider %q) — rename the model", name, name, prov)
 		}
 		if m.ImageDownscaleMaxPx != nil && *m.ImageDownscaleMaxPx < 0 {
 			return fmt.Errorf("model %q: image_downscale must be >= 0 (got %d; 0 = force-disabled for this model)", name, *m.ImageDownscaleMaxPx)

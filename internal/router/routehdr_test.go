@@ -4,6 +4,7 @@ package router
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"vmr/internal/core"
 )
@@ -61,7 +62,7 @@ func TestFailoverTrail(t *testing.T) {
 	ft.add(&core.Endpoint{Provider: "local", Model: "x"}, 0) // build/network failure: no HTTP response
 	ft.apply(h)
 
-	want := "deepseek/deepseek-v4:429, minimax/m2:500, local/x:err"
+	want := "deepseek:deepseek-v4=429, minimax:m2=500, local:x=err"
 	if got := h.Get("X-VMR-Failover"); got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -75,7 +76,27 @@ func TestFailoverTrailStripsHeaderBreakers(t *testing.T) {
 	ft.add(&core.Endpoint{Provider: "ev\r\nil", Model: "a:b,c"}, 500)
 	h := http.Header{}
 	ft.apply(h)
-	if got := h.Get("X-VMR-Failover"); got != "evil/abc:500" {
+	if got := h.Get("X-VMR-Failover"); got != "evil:a:bc=500" {
 		t.Errorf("got %q", got)
+	}
+}
+
+// A model carrying its own ':' (ollama tag) or '/' (OpenRouter prefix) keeps
+// both in the header, and allBusy still reads the outcome after the last '='.
+func TestFailoverTrailKeepsModelColonAndSlash(t *testing.T) {
+	var ft failoverTrail
+	ft.addBusy(&core.Endpoint{Provider: "oll", Model: "qwen3:8b"}, false, 0)
+	ft.addBusy(&core.Endpoint{Provider: "orp", Model: "z-ai/glm-5.2"}, true, 2*time.Second)
+	h := http.Header{}
+	ft.apply(h)
+	if got, want := h.Get("X-VMR-Failover"), "oll:qwen3:8b=busy, orp:z-ai/glm-5.2=busy_timeout(2.00s)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if !ft.allBusy() {
+		t.Error("allBusy must be true for an all-busy trail whose models contain ':' and '/'")
+	}
+	ft.add(&core.Endpoint{Provider: "oll", Model: "qwen3:8b"}, 500)
+	if ft.allBusy() {
+		t.Error("allBusy must be false once a non-busy outcome joins the trail")
 	}
 }

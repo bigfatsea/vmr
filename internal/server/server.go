@@ -1,4 +1,4 @@
-// Ver 2026-09-23 08:10, by Claude Opus 5.5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Package server is the HTTP surface: auth, /v1/chat/completions, /v1/models,
 // /health, /status, /status.html, /models.html, /help, /help.html, /help.zh,
@@ -315,7 +315,8 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// have images" — it feeds rec.Images here AND computeRequestFacts'
 		// imageCount below, so the call cannot be skipped when auditing is off
 		// even if the effective cap is 0.
-		body, images := downscaleImages(body, protocol, snap, snap.Models[protocol][probeModel])
+		route, _ := snap.Route(protocol, probeModel)
+		body, images := downscaleImages(body, protocol, snap, route)
 		if len(images) > 0 {
 			rec.Images = toAuditImages(images)
 		}
@@ -469,7 +470,8 @@ func toAuditImages(images []imgprep.ImageInfo) []audit.ImageInfo {
 	return out
 }
 
-// models lists all virtual models in a merged shape both OpenAI clients
+// models lists all virtual models (plus direct-routing names when
+// direct_routing is on) in a merged shape both OpenAI clients
 // (object:"list", object:"model") and Anthropic clients (type:"model",
 // has_more) can parse; extra keys are ignored by either side.
 func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
@@ -500,6 +502,18 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 			}
 			seen[name] = true
 			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: protocol})
+		}
+	}
+	// Direct routing names (empty unless direct_routing is on): owned_by
+	// carries the provider part, which is what the field means upstream.
+	for _, protocol := range fmtutil.SortedKeys(snap.Direct) {
+		for _, name := range fmtutil.SortedKeys(snap.Direct[protocol]) {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			prov, _, _ := strings.Cut(name, ":")
+			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: prov, Protocol: protocol})
 		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })

@@ -8,7 +8,9 @@ core's, and neither is an afterthought to the other.
 
 - **Routing half** — hides provider, account, key, priority, and failover behind a stable
   virtual model name (`coding`, `agent`, `claude`), with error-aware failover,
-  prompt-cache session stickiness, and token-plan quota pacing.
+  prompt-cache session stickiness, and token-plan quota pacing. Opt-in `direct_routing` also
+  makes each declared real model addressable as `provider:model` — a lookup over endpoints the
+  config already declares, never a way to reach an undeclared one.
 - **Analytics half** — `vmr analyze` (unified entry point producing the full navigable suite, or zooming into specific views with `-journey`/`-compare`/`-benchmark`): read-only, offline consumers of the routing half's JSONL audit log. Neither is on the request path.
 
 Three ingress protocols, **never translated into each other** — `POST /v1/chat/completions`

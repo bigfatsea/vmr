@@ -3,7 +3,7 @@
 // vmr — Virtual Model Router. Single binary, config driven.
 //
 //	vmr start    -c config.yaml   run the router
-//	vmr check    -c config.yaml   validate config and print a summary (or, with a trailing log|cache arg, just that resolved directory — vmr.sh uses this)
+//	vmr check    -c config.yaml   validate config and print a summary (or, with a trailing log|cache arg, just that resolved directory — vmr.sh uses this; models = compact provider→models and virtual-model→upstreams catalog)
 //	vmr status   -c config.yaml   show identity + endpoint health of a running instance
 //	             -addr host:port  ... of whatever instance holds that port instead (no config needed)
 //	vmr analyze  [audit.jsonl]    the single analysis entry point: default is the full navigable suite (aggregate report + journey half) in one call; -journey/-compare/-benchmark zoom into exactly one journey-side view instead
@@ -70,7 +70,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage: vmr <start|check> [-c config.yaml]
-       vmr check [-c config.yaml] [log|cache]   (prints just that resolved directory instead of the full summary)
+       vmr check [-c config.yaml] [log|cache|models]   (log|cache: just that resolved directory; models: compact provider→models and virtual-model→upstreams catalog)
        vmr status [-c config.yaml | -addr host:port] [-key KEY] [-brief]   (./vmr.sh ps lists every instance on this machine)
        vmr analyze [-c config.yaml] [-o dir] [-journey id | -compare id1,id2 | -benchmark] [-render-all] [-details] [-include-partial] [-include-self-traffic] [-lang en|zh] [-currency CODE] [audit.jsonl|glob]...   (single analysis entry point; no selector = default suite: journey half then report half, category=task candidates only unless -render-all; -journey/-compare/-benchmark zoom into exactly one journey-side view, no report half)
        vmr diagnose [-c config.yaml] [-no-test-routing] [-json]

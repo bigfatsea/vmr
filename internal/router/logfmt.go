@@ -50,14 +50,13 @@ func clientTag(rec *audit.Record) string {
 	return tagCol(tag)
 }
 
-// epLabel is the log-only endpoint label — colon-joined protocol:provider:model
-// (as opposed to Endpoint.Name()'s slash form, which is a stable identifier
-// used in the admin status API and the X-VMR-Endpoint header and must not
-// change shape). Only probe.go still calls this directly — a probe request
+// epLabel is the log endpoint label — protocol:provider:model, the same
+// string as Endpoint.Name() and the audit label. Only probe.go still calls
+// this directly — a probe request
 // is never streamed, so there's no stream marker to carry; tryOne's own
 // attemptPrefix builds the client-facing "virtual -> physical" form inline.
 func epLabel(ep *core.Endpoint) string {
-	return ep.AdapterType + ":" + ep.Provider + ":" + ep.Model
+	return core.EndpointLabel(ep.AdapterType, ep.Provider, ep.Model)
 }
 
 // fmtDur renders an elapsed duration for the dur= column — see
@@ -138,7 +137,7 @@ func attemptPrefix(rec *audit.Record, creq *core.CanonicalRequest, ep *core.Endp
 	if creq.Stream {
 		arrow = "»"
 	}
-	prefix := fmt.Sprintf("%s%s:%s %s %s:%s", clientTag(rec), ep.AdapterType, creq.Model, arrow, ep.Provider, ep.Model)
+	prefix := fmt.Sprintf("%s%s:%s %s %s", clientTag(rec), ep.AdapterType, creq.Model, arrow, core.ProviderModel(ep.Provider, ep.Model))
 	if caps := capField(creq.Facts); caps != "" {
 		prefix += ", " + caps
 	}

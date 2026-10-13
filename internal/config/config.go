@@ -1,4 +1,4 @@
-// Ver 2026-09-23 03:30, by Claude Opus 5.5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Package config loads, expands (${ENV}) and validates the YAML config.
 // A config that fails validation is never installed — the caller keeps the
@@ -357,6 +357,14 @@ type Config struct {
 	// Admin is the opt-in management plane (see AdminConfig) — zero value
 	// means every admin surface is off.
 	Admin AdminConfig `yaml:"admin"`
+	// DirectRouting (opt-in, default off, follows hot reload) makes every
+	// (protocol, provider, model) triple some virtual model or
+	// fallback_endpoints already declares addressable by name as
+	// "provider:model" — skipping the virtual-model layer, never reaching
+	// an endpoint the config doesn't declare (router's direct.go). Off by
+	// default because it lets any client bypass the priority policy a
+	// virtual model encodes (free tier before paid, say).
+	DirectRouting bool `yaml:"direct_routing"`
 	// ExtraRedactHeaders names additional client request headers to mask in
 	// the audit trail the same way the built-in credential list (see
 	// audit.credentialHeaders) already masks Authorization/X-Api-Key/etc —
@@ -532,6 +540,18 @@ func (c *Config) ProviderByName(name string) (Provider, bool) {
 		}
 	}
 	return Provider{}, false
+}
+
+// IsProviderName reports whether name is a provider name as written in
+// config — an api_keys group name — or one of its expanded "<name>-<label>"
+// entries. Direct routing's "provider:model" names accept either form.
+func (c *Config) IsProviderName(name string) bool {
+	for _, p := range c.Providers {
+		if p.Name == name || p.GroupName() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Config) MaxRequestBodyBytes() int64 { return int64(c.MaxRequestBodyMB) << 20 }

@@ -101,7 +101,7 @@ func (ft *failoverTrail) add(ep *core.Endpoint, status int) {
 	if status > 0 {
 		what = strconv.Itoa(status)
 	}
-	*ft = append(*ft, headerSafe(ep.Provider)+"/"+headerSafe(ep.Model)+":"+what)
+	*ft = append(*ft, trailEntry(ep, what))
 }
 
 func (ft *failoverTrail) addBusy(ep *core.Endpoint, timedOut bool, waited time.Duration) {
@@ -109,7 +109,14 @@ func (ft *failoverTrail) addBusy(ep *core.Endpoint, timedOut bool, waited time.D
 	if timedOut {
 		what = "busy_timeout(" + fmtDur(waited) + ")"
 	}
-	*ft = append(*ft, headerSafe(ep.Provider)+"/"+headerSafe(ep.Model)+":"+what)
+	*ft = append(*ft, trailEntry(ep, what))
+}
+
+// trailEntry renders one X-VMR-Failover item as "provider:model=what". The
+// '=' (not ':') carries the outcome because a model may itself end in a ':'
+// tag (ollama's qwen3:8b); consumers split the outcome off at the LAST '='.
+func trailEntry(ep *core.Endpoint, what string) string {
+	return core.ProviderModel(headerSafe(ep.Provider), headerSafe(ep.Model)) + "=" + what
 }
 
 func (ft failoverTrail) apply(h http.Header) {
@@ -125,11 +132,11 @@ func (ft failoverTrail) allBusy() bool {
 		return false
 	}
 	for _, entry := range ft {
-		colon := strings.LastIndexByte(entry, ':')
-		if colon < 0 {
+		eq := strings.LastIndexByte(entry, '=')
+		if eq < 0 {
 			return false
 		}
-		what := entry[colon+1:]
+		what := entry[eq+1:]
 		if what != "busy" && !strings.HasPrefix(what, "busy_timeout(") {
 			return false
 		}
@@ -141,10 +148,12 @@ func (ft failoverTrail) allBusy() bool {
 // and model names come from config.yaml, not from a request, so this is a
 // belt-and-suspenders guard against a config typo producing a header Go's
 // writer would reject (which would fail the whole response, not just this
-// diagnostic) — not a defense against hostile input.
+// diagnostic) — not a defense against hostile input. ',' goes too: it is the
+// entry separator, while ':' and '=' stay (a model tag keeps its ':', and the
+// outcome is split off at the last '=').
 func headerSafe(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || r == ',' || r == ':' {
+		if r < 0x20 || r == 0x7f || r == ',' {
 			return -1
 		}
 		return r

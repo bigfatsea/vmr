@@ -313,7 +313,7 @@ models:
 			if ep.Model != "m1" {
 				t.Fatalf("model = %q, want m1", ep.Model)
 			}
-			if ep.Endpoint != "openai-completions/"+ep.Provider+"/m1" {
+			if ep.Endpoint != "openai-completions:"+ep.Provider+":m1" {
 				t.Fatalf("synthetic endpoint name %q doesn't follow provider %q (name must stay unchanged)", ep.Endpoint, ep.Provider)
 			}
 			got[ident{ep.Provider, ep.KeyLabel, ep.Model, ep.FromFallback}]++
@@ -365,11 +365,11 @@ fallback_endpoints:
 	rt.Install(snap)
 
 	rows := fetchEndpointRows(t, rt)
-	main, ok := rows["openai-completions/p1/m1"]
+	main, ok := rows["openai-completions:p1:m1"]
 	if !ok || main.FromFallback {
 		t.Fatalf("main endpoint row = %+v, want from_fallback=false", main)
 	}
-	fb, ok := rows["openai-completions/p2/m1"]
+	fb, ok := rows["openai-completions:p2:m1"]
 	if !ok || !fb.FromFallback {
 		t.Fatalf("fallback endpoint row = %+v, want from_fallback=true", fb)
 	}
@@ -412,7 +412,7 @@ func TestAdminStatus_HeadroomJoinDifferential(t *testing.T) {
 	var ep endpointRow
 	for _, m := range models {
 		for _, e := range m.Endpoints {
-			if e.Endpoint == "openai-completions/p1/m1" {
+			if e.Endpoint == "openai-completions:p1:m1" {
 				ep = e
 			}
 		}
@@ -461,7 +461,7 @@ func TestAdminStatus_HeadroomExhaustedIsZeroNotOmitted(t *testing.T) {
 	rt.Quota.Charge("p1", "requests/1mo", quota.PeriodStart(l, time.Now()), quota.Counters{Requests: 500}, 0)
 
 	rows := fetchEndpointRows(t, rt)
-	ep, ok := rows["openai-completions/p1/m1"]
+	ep, ok := rows["openai-completions:p1:m1"]
 	if !ok {
 		t.Fatalf("missing endpoint row: %v", rows)
 	}
@@ -490,7 +490,7 @@ func TestAdminStatus_HeadroomOmittedWithoutQuota(t *testing.T) {
 	rt.Install(snap) // no quota.Registry wired, and none configured anyway
 
 	rows := fetchEndpointRows(t, rt)
-	ep, ok := rows["openai-completions/p1/m1"]
+	ep, ok := rows["openai-completions:p1:m1"]
 	if !ok {
 		t.Fatalf("missing endpoint row: %v", rows)
 	}

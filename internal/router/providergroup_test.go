@@ -303,8 +303,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/fb/fallback-model" {
-		t.Errorf("endpoint=%s, want openai-completions/fb/fallback-model", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions:fb:fallback-model" {
+		t.Errorf("endpoint=%s, want openai-completions:fb:fallback-model", got)
 	}
 	if own.hits != 1 || fb.hits != 1 {
 		t.Errorf("hits: own=%d fb=%d, want 1/1", own.hits, fb.hits)

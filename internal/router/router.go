@@ -1,4 +1,4 @@
-// Ver 2026-09-23 04:04, by Claude Opus 5.5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Package router holds the failover loop: health filter → multi-key sort →
 // try candidates in order. This is the core of the project and should stay small.
@@ -131,16 +131,14 @@ func (rt *Router) Serve(w http.ResponseWriter, r *http.Request, creq *core.Canon
 		WriteError(w, http.StatusServiceUnavailable, "service_unavailable", "router not yet initialized")
 		return
 	}
-	route, ok := snap.Models[protocol][creq.Model]
+	route, ok := snap.Route(protocol, creq.Model)
 	if !ok {
 		if other := otherProtocolFor(snap, protocol, creq.Model); other != "" {
 			WriteError(w, http.StatusNotFound, "not_found_error",
 				fmt.Sprintf("model %q speaks the %s protocol; call it via POST %s", creq.Model, other, IngressPath(other)))
 			return
 		}
-		WriteError(w, http.StatusNotFound, "not_found_error",
-			fmt.Sprintf("model %q not found; models on this endpoint: %s",
-				creq.Model, strings.Join(modelNames(snap, protocol), ", ")))
+		WriteError(w, http.StatusNotFound, "not_found_error", unknownModelMessage(snap, protocol, creq.Model))
 		return
 	}
 
@@ -450,11 +448,13 @@ func modelNames(s *Snapshot, protocol string) []string {
 // name, or "" if none does. Used to give a helpful "wrong entry point" 404
 // instead of a bare "not found" when the client hit the wrong ingress path.
 func otherProtocolFor(s *Snapshot, protocol, name string) string {
-	for p, byName := range s.Models {
+	// Direct's protocols are a subset of Models' (direct routes derive from
+	// virtual model routes), so walking Models' keys covers both via Route.
+	for _, p := range fmtutil.SortedKeys(s.Models) {
 		if p == protocol {
 			continue
 		}
-		if _, ok := byName[name]; ok {
+		if _, ok := s.Route(p, name); ok {
 			return p
 		}
 	}

@@ -1,4 +1,4 @@
-// Ver 2026-09-23 08:10, by Claude Opus 5.5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Snapshot construction and installation: turning a validated config.Config
 // into the immutable, atomically-swappable routing table Serve reads. Split
@@ -87,6 +87,10 @@ func (r *ModelRoute) EffectiveImageDownscaleMaxPx(globalMaxPx int) int {
 type Snapshot struct {
 	Cfg    *config.Config
 	Models map[string]map[string]*ModelRoute
+	// Direct is direct routing's "provider:model" table, keyed protocol ->
+	// name like Models; nil unless Cfg.DirectRouting (see direct.go). Look
+	// names up through Route, never Models alone.
+	Direct map[string]map[string]*ModelRoute
 
 	// clients maps "<protocol>/<provider>" to the http.Client serving that
 	// provider. Built in Install (travels with the snapshot to avoid races);
@@ -179,6 +183,9 @@ func BuildSnapshot(cfg *config.Config) (*Snapshot, error) {
 			}
 			byName[name] = route
 		}
+	}
+	if cfg.DirectRouting {
+		snap.Direct = buildDirectRoutes(cfg, snap.Models)
 	}
 	return snap, nil
 }

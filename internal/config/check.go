@@ -1,4 +1,4 @@
-// Ver 2026-09-23 02:30, by GPT-5.2
+// Ver 2026-10-13 18:10, by Sonnet 5.5
 
 // Consistency/operational checks beyond validate(): things that don't stop
 // a config from loading and building a routing table (BuildSnapshot still
@@ -14,6 +14,9 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
+	"strconv"
+	"strings"
 
 	"vmr/internal/core"
 	"vmr/internal/fmtutil"
@@ -59,7 +62,7 @@ func (s *Severity) UnmarshalText(text []byte) error {
 // that want to annotate a specific rendered line (vmr check) — Field names
 // which one ("api_key" | "timeouts.probe" | "endpoint" | "listen" | "disabled" | "fallback");
 // all empty means the issue is global. Endpoint carries the full
-// "protocol/provider/model" key for "endpoint".
+// "protocol:provider:model" key (core.EndpointLabel) for "endpoint".
 type Issue struct {
 	Provider string   `json:"provider,omitempty"`
 	Model    string   `json:"model,omitempty"`
@@ -93,21 +96,26 @@ func (c *Config) Check() []Issue {
 // have no effect on routing yet — an operator listing "thinking" here and
 // assuming it gates models onto thinking-capable endpoints would be silently
 // unprotected. Warning, not error: the entry is forward-compatible, not
-// broken.
+// broken. One issue per capability naming every model_defaults key that
+// declares it — the same advice repeated per key would bury the list.
 func (c *Config) checkModelDefaultsCapabilities() []Issue {
-	var issues []Issue
+	byCap := map[string][]string{}
 	for _, key := range fmtutil.SortedKeys(c.ModelDefaults) {
 		for _, cap := range c.ModelDefaults[key].Capabilities {
 			switch cap {
 			case "audio", "video", "thinking":
-				issues = append(issues, Issue{
-					Model:    key,
-					Field:    "capabilities",
-					Message:  fmt.Sprintf("model_defaults[%q]: capability %q is accepted but not enforced by routing yet", key, cap),
-					Severity: SeverityWarning,
-				})
+				byCap[cap] = append(byCap[cap], strconv.Quote(key))
 			}
 		}
+	}
+	var issues []Issue
+	for _, cap := range fmtutil.SortedKeys(byCap) {
+		issues = append(issues, Issue{
+			Field: "capabilities",
+			Message: fmt.Sprintf("model_defaults: capability %q is accepted but not enforced by routing yet — it changes nothing today (only image and tools gate routing); declared for %s",
+				cap, strings.Join(byCap[cap], ", ")),
+			Severity: SeverityWarning,
+		})
 	}
 	return issues
 }
@@ -146,7 +154,7 @@ func (c *Config) checkListenExposure() []Issue {
 		return nil
 	}
 	return []Issue{{Field: "listen", Severity: SeverityWarning, Message: fmt.Sprintf(
-		"listen (%s) is not loopback-only and no api_keys are configured — vmr is an open proxy exposing every configured upstream credential to anyone who can reach this address",
+		"listen (%s) is not loopback-only and api_keys is empty, so vmr is an open proxy: anyone who can reach this address can spend every configured upstream credential — set api_keys, or listen on 127.0.0.1",
 		c.Listen)}}
 }
 
@@ -236,7 +244,7 @@ func (c *Config) checkProviders() []Issue {
 				break
 			}
 		}
-		issue := Issue{Provider: p.Name, Field: "api_key", Message: fmt.Sprintf("provider %q: api_key missing", p.Name)}
+		issue := Issue{Provider: p.Name, Field: "api_key", Message: fmt.Sprintf("provider %q: api_key missing or empty — set it (if it comes from ${ENV_VAR}, check the variable is exported)", p.Name)}
 		if allInternal {
 			issue.Severity = SeverityWarning
 			issue.Message = fmt.Sprintf("provider %q: no api_key — self-hosted upstream with no auth, fine if it truly needs none", p.Name)
@@ -259,28 +267,42 @@ func (c *Config) checkProviders() []Issue {
 // issue at all: that's just an offline account parked in config, same as
 // before this field existed.
 func (c *Config) checkDisabledReferences() []Issue {
-	disabled := map[string]bool{}
+	groupOf := map[string]string{}
+	var groups []string
+	keys := map[string][]string{} // group -> disabled api_keys labels
 	for _, p := range c.Providers {
-		if p.Disabled {
-			disabled[p.Name] = true
+		if !p.Disabled {
+			continue
+		}
+		g := p.GroupName()
+		if _, seen := keys[g]; !seen {
+			groups = append(groups, g)
+			keys[g] = nil
+		}
+		groupOf[p.Name] = g
+		if p.Name != g {
+			keys[g] = append(keys[g], strings.TrimPrefix(p.Name, g+"-"))
 		}
 	}
-	if len(disabled) == 0 {
+	if len(groupOf) == 0 {
 		return nil
 	}
-	var issues []Issue
-	sayRef := func(pn, where string) {
-		if !disabled[pn] {
+	// One issue per provider group: an api_keys group expands to several
+	// providers that are referenced (and disabled) together, and listing
+	// each key separately repeats the same advice.
+	where := map[string][]string{}
+	note := func(pn, at string) {
+		g, ok := groupOf[pn]
+		if !ok || slices.Contains(where[g], at) {
 			return
 		}
-		issues = append(issues, Issue{Provider: pn, Field: "disabled", Severity: SeverityWarning,
-			Message: fmt.Sprintf("provider %q is disabled but still referenced by %s; it carries no traffic until re-enabled", pn, where)})
+		where[g] = append(where[g], at)
 	}
 	for _, name := range fmtutil.SortedKeys(c.Models) {
 		for _, protocol := range fmtutil.SortedKeys(c.Models[name].Endpoints) {
 			for _, eg := range c.Models[name].Endpoints[protocol] {
 				for _, pn := range eg.Providers {
-					sayRef(pn, fmt.Sprintf("model %q endpoints.%s", name, protocol))
+					note(pn, fmt.Sprintf("model %q (%s)", name, protocol))
 				}
 			}
 		}
@@ -288,9 +310,24 @@ func (c *Config) checkDisabledReferences() []Issue {
 	for _, protocol := range fmtutil.SortedKeys(c.FallbackEndpoints) {
 		for _, fb := range c.FallbackEndpoints[protocol] {
 			for _, pn := range fb.Providers {
-				sayRef(pn, fmt.Sprintf("fallback_endpoints.%s", protocol))
+				note(pn, fmt.Sprintf("fallback_endpoints (%s)", protocol))
 			}
 		}
+	}
+	slices.Sort(groups)
+	var issues []Issue
+	for _, g := range groups {
+		if len(where[g]) == 0 {
+			continue
+		}
+		label := strconv.Quote(g)
+		if len(keys[g]) > 0 {
+			slices.Sort(keys[g])
+			label += " (keys " + strings.Join(keys[g], ", ") + ")"
+		}
+		issues = append(issues, Issue{Provider: g, Field: "disabled", Severity: SeverityWarning,
+			Message: fmt.Sprintf("provider %s is disabled but still referenced by %s; it carries no traffic until re-enabled",
+				label, strings.Join(where[g], ", "))})
 	}
 	return issues
 }
@@ -315,7 +352,7 @@ func (c *Config) checkModels() []Issue {
 			for _, eg := range groups {
 				for _, pn := range eg.Providers {
 					for _, mn := range eg.Models {
-						key := protocol + "/" + pn + "/" + mn
+						key := core.EndpointLabel(protocol, pn, mn)
 						if seen[key] {
 							issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
 								"model %q: endpoint %s declared more than once", name, key)})
@@ -335,7 +372,7 @@ func (c *Config) checkModels() []Issue {
 				for _, fb := range groups {
 					for _, pn := range fb.Providers {
 						for _, mn := range fb.Models {
-							key := protocol + "/" + pn + "/" + mn
+							key := core.EndpointLabel(protocol, pn, mn)
 							if seen[key] {
 								issues = append(issues, Issue{Model: name, Endpoint: key, Field: "endpoint", Message: fmt.Sprintf(
 									"model %q: fallback endpoint %s duplicates an endpoint already declared under this model", name, key)})

@@ -1,4 +1,4 @@
-// Ver 2026-09-23 03:30, by Claude Opus 5.5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Agent Guard's outbound mount point. chatHandler's own call site is two
 // lines (the call, then a blocked-check) — with the scan/aggregate/record/trust-
@@ -65,7 +65,7 @@ func (s *Server) applyOutboundGuard(w http.ResponseWriter, rec *audit.Record, sn
 	if snap.Cfg.Guard == nil || s.guard == nil {
 		return body, false
 	}
-	if route := snap.Models[protocol][model]; route != nil && route.GuardAllTrusted {
+	if route, _ := snap.Route(protocol, model); route != nil && route.GuardAllTrusted {
 		return body, false
 	}
 	defer func() {

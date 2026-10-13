@@ -1,4 +1,4 @@
-// Ver 2026-09-23 02:30, by GPT-5.2
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Package replay implements `vmr replay`: rebuild and resend one request
 // from an audit JSONL record, using the exact same adapter.BuildRequest vmr
@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"vmr/internal/adapter"
@@ -506,10 +507,19 @@ func loadRecordByLine(path string, line int) (*recordView, int, error) {
 // {provider,models} groups). Errors (rather than guessing) when
 // provider/protocol match more than one candidate model — an EndpointGroup's
 // Models list can legitimately hold several, and picking the wrong one
-// would replay against a model the record was never sent to.
+// would replay against a model the record was never sent to. A
+// direct-routing record ("provider:model") resolves to its own model part.
 func resolveModel(cfg *config.Config, protocol, virtualModel, provider string) (string, error) {
 	vm, ok := cfg.Models[virtualModel]
 	if !ok {
+		// A direct-routing record ("provider:model") names its upstream
+		// model itself. Not gated on direct_routing: the record proves the
+		// route existed when it was written.
+		if prov, model, isDirect := strings.Cut(virtualModel, ":"); isDirect && model != "" {
+			if p, found := cfg.ProviderByName(provider); found && (prov == p.Name || prov == p.GroupName()) {
+				return model, nil
+			}
+		}
 		return "", fmt.Errorf("virtual model %q not found in config; pass -model to specify the upstream model explicitly", virtualModel)
 	}
 	var candidates []string

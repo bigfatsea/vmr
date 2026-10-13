@@ -18,8 +18,8 @@
 //   - Endpoint.HealthKey / Name / Freeze: pure computations over Endpoint's
 //     own fields with no single owning half — HealthKey is the identity the
 //     health registry, quota, probes, and /status all key on; Name is the
-//     display form deliberately kept separate from EndpointLabel (the audit
-//     format); Freeze memoizes those two for snapshot construction.
+//     display form, identical to EndpointLabel (the audit format); Freeze
+//     memoizes those two for snapshot construction.
 //   - StickyBackstopTTL: canonical value kept here so config can validate
 //     against it without importing internal/sticky; sticky re-exports it.
 //
@@ -269,13 +269,10 @@ func (e *Endpoint) computeHealthKey() string {
 	return e.AdapterType + "/" + e.Provider + "/" + e.Model + "/" + hex.EncodeToString(sum[:4])
 }
 
-// Name is the human-readable, "/"-joined endpoint identity used by
-// internal/server/admin.go's /status and live log lines — a DIFFERENT
-// format from endpointlabel.go's EndpointLabel (":"-joined), which is the
-// audit-log's on-disk contract instead. The two coexist on purpose: this one
-// is free to change shape without touching a single historical audit
-// record; EndpointLabel's format cannot, since old records already contain
-// it. Do not unify them.
+// Name is the human-readable endpoint identity used by
+// internal/server/admin.go's /status, the X-VMR-Endpoint header and live log
+// lines. It is EndpointLabel's exact ":"-joined form, so what an operator
+// sees on the wire, in /status and in the audit log is one string.
 func (e *Endpoint) Name() string {
 	if e.name != "" {
 		return e.name
@@ -284,7 +281,7 @@ func (e *Endpoint) Name() string {
 }
 
 func (e *Endpoint) computeName() string {
-	return e.AdapterType + "/" + e.Provider + "/" + e.Model
+	return EndpointLabel(e.AdapterType, e.Provider, e.Model)
 }
 
 // QuotaMetric is the counting unit a Limit is measured in — the Quota

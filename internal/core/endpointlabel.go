@@ -1,16 +1,26 @@
 // Ver 2026-08-13, by Opus 5
 
-// Package core defines the canonical "protocol:provider:model" audit-log endpoint label format.
-// This is distinct from human-facing display names (Endpoint.Name() joined by "/").
+// Package core defines the canonical "protocol:provider:model" endpoint label
+// format, shared by the audit log and every human-facing endpoint name.
 package core
 
 import "strings"
 
+// ProviderModel is the one "provider:model" spelling — the direct-routing
+// name, live log lines, check/diagnose output and the UI all render a
+// provider/model pair through it. Providers cannot contain ':' or '/'
+// (config validation), so the first ':' always splits it and the model tail,
+// which may itself hold ':' or '/' (ollama tags, OpenRouter vendor prefixes),
+// is kept verbatim.
+func ProviderModel(provider, model string) string {
+	return provider + ":" + model
+}
+
 // EndpointLabel produces the audit-log-standard "protocol:provider:model"
 // label — the single source every writer (router.go's tryOne, replay.go's
-// Run) must use instead of inlining the same strings.Join literal.
+// Run) and Endpoint.Name() must use instead of inlining the same join.
 func EndpointLabel(adapterType, provider, model string) string {
-	return adapterType + ":" + provider + ":" + model
+	return adapterType + ":" + ProviderModel(provider, model)
 }
 
 // SplitEndpointLabel parses an endpoint label ("protocol:provider:model" or legacy "/"-joined).

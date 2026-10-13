@@ -28,7 +28,7 @@ func TestRouteHeadersOnSuccessfulFailover(t *testing.T) {
 	}
 	// The request succeeded, yet the response still explains what it cost
 	// to get there — that's the whole point of setting it before the call.
-	want := "p1/m1:500, p2/m2:429, p3/m3:503"
+	want := "p1:m1=500, p2:m2=429, p3:m3=503"
 	if got := resp.Header.Get("X-VMR-Failover"); got != want {
 		t.Errorf("X-VMR-Failover = %q, want %q", got, want)
 	}
@@ -77,7 +77,7 @@ func TestRouteHeadersWhenEveryEndpointFails(t *testing.T) {
 	if strings.Count(got, ",") != 3 {
 		t.Errorf("X-VMR-Failover = %q, want all four attempts listed", got)
 	}
-	if !strings.HasSuffix(got, "p4/m4:500") {
+	if !strings.HasSuffix(got, "p4:m4=500") {
 		t.Errorf("X-VMR-Failover = %q, want it to end with the last attempt", got)
 	}
 }

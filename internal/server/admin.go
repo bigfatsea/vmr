@@ -32,7 +32,7 @@ type (
 		Protocol string `json:"protocol"`
 		Priority int    `json:"priority"`
 		// G3/G5: endpoint identity split out from the synthetic Endpoint name
-		// (adapter/provider/model, still emitted unchanged) plus the fallback
+		// (protocol:provider:model, still emitted unchanged) plus the fallback
 		// marker — from_fallback is a plain bool (no omitempty): the Overview
 		// page splits the main and fallback topology tables on it, so the
 		// zero value must be present as `false`, not vanish.

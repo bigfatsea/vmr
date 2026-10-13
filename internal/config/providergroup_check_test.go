@@ -21,15 +21,15 @@ models:
         - {providers: [p1, p2], models: [x]}
 `)
 	issues := cfg.Check()
-	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
-		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions/p1/x (p2/x should be untouched)", issues)
+	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions:p1:x" {
+		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions:p1:x (p2:x should be untouched)", issues)
 	}
 }
 
 // TestCheckFlagsFallbackDuplicatingOwnEndpoint pins the new check: a
 // fallback_endpoints: entry that would silently duplicate an endpoint the
 // model already declares for itself must be flagged, using the same
-// protocol/provider/model key format as an ordinary duplicate.
+// protocol:provider:model key format as an ordinary duplicate.
 func TestCheckFlagsFallbackDuplicatingOwnEndpoint(t *testing.T) {
 	cfg := mustParse(t, `
 listen: 127.0.0.1:0
@@ -45,8 +45,8 @@ models:
         - {providers: [p1], models: [x]}
 `)
 	issues := cfg.Check()
-	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
-		t.Errorf("Check() = %+v, want exactly one fallback-duplicate issue for openai-completions/p1/x", issues)
+	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions:p1:x" {
+		t.Errorf("Check() = %+v, want exactly one fallback-duplicate issue for openai-completions:p1:x", issues)
 	}
 }
 

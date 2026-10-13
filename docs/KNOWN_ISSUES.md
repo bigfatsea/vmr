@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-23 08:10, by Claude Opus 5.5 -->
+<!-- Ver 2026-10-13 08:12, by Claude Opus 5.5 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -106,7 +106,9 @@
 - **不引入端点级通用运行时 quirks 插件系统**：坚持编译期确定性，只对已证实的厂商行为差异做受控修复。
 - **`TopLevelProbe` 的契约是「探测」不是「校验」，不检查尾随字节**：它回答「这团字节是不是某个协议的对话请求」（结构探测，供 `RequestFacts` 与 sticky 指纹用），不承诺「字节流在探针返回的结构之后没有尾随垃圾」。加尾随检查会背离字节保真透传：透传层本就把原样字节直送上游，多余的校验只会把合法流量拦下来。
 - **淘汰（`strategy.Eligible`）与排序（`strategy.Sort`）是两个独立函数**：淘汰依赖请求事实，排序只比较端点属性（`Priority`），`Sort` 的签名不接收请求——分离由类型保证。原先的 `Dimension` 接口与运行时注册表只有一个实现、没有配置入口，已删除；真出现第二个排序维度时再引入接口。
-- **ProviderGroup 的多 Key（`api_keys:`）已实现，运行时均衡与分级 Failover 仍不做**：运行时 KeyPool（请求期在池内随机选 Key）会违反 `core.Endpoint`「构造后不可变、`HealthKey()` 只算一次」这条贯穿 health/sticky/quota 的不变式。实际落地是「配置期展开成多个独立 `core.Endpoint`」：`Provider.APIKeys`（`{label: key}`）在 `config.Parse` 里展开成 `<name>-<label>` 命名的独立 `Provider` 并就地重写引用，下游全部按 `Provider.Name` 字符串解析、零改动。这个形状架构性地绕开了均衡（谁排第一不可预先指定，只能读 `vmr check` 的实际展开结果）与配额聚合（每把 key 独立 Provider 名、独立 quota 池）两个难题；分级 Failover（402 跳 Key / 5xx 跳 Provider）留到看到真实需求。
+- **直连寻址（`direct_routing`）只开放已声明的三元组、默认关闭、不挂 fallback、不越过冷却**（`internal/router/direct.go`）：① **可寻址集合 = 某个虚拟模型或 `fallback_endpoints` 已展开出的 (协议, provider, 模型)**，与 pin 头同为「只收窄不开口」——放开任意模型会产生请求期临时 Endpoint（其 HealthKey 不在快照集合里，热重载被 `Health.Prune` 清掉、`/status` 看不见）、让按模型分桶的 quota 被客户端随意写的名字撑大，还让任何持 vmr key 的客户端调用付费账号上的任意模型。想直连新模型 = 把它写进任一虚拟模型或 fallback。同理不按 provider 的 `base_url` 把一对组合自动扩到它没被声明的协议上。② **默认关闭**：直连让客户端绕过虚拟模型编码的优先级策略（免费先于付费）。③ **不注入 fallback、单层优先级**：客户端点名一个模型，静默落到别的模型违背本意；同一 `api_keys` 组的多把 key 之间照常额度重排与 failover。④ **健康过滤/条件准入/pin/sticky 原样生效，冷却不强行放行**（只沿用既有的半开 last-resort 释放）：冷却代表真实的近期 429/5xx，点名并不改变上游状态。⑤ **响应 `model` 改写为客户端发来的 `provider:model`**（respnorm 既有规则），保持请求名 = 响应名。⑥ **sticky 键与模型名无关**，直连成功会移动该会话的粘性指针——是缓存连续性的正确结果，不是串扰。⑦ **直连名不进 `/status` 拓扑与 models.html**（`Snapshot.Direct` 与 `Models` 分开存放），只在 `/v1/models` 与 `vmr check` 列出；控制台按 vmodel 的 livestats 行会出现直连名，受配置约束不会无界。**适用于**：「放开任意 provider:任意模型」「直连自动挂 fallback」「直连跳过冷却」「直连名进拓扑表」的提议——先推翻上面对应的理由。
+- **provider 与 model 的组合标识统一用 `:`，不用 `/`、`@` 等**（`core.ProviderModel` / `core.EndpointLabel`，`Endpoint.Name()` 即后者）：直连名 `provider:model`、三段审计标签 `protocol:provider:model`、`/status` 的 `endpoint` 字段、`X-VMR-Endpoint` 头、实时日志、`vmr check` / `vmr diagnose` 输出全部同一拼法。理由：① 模型名自己可能含 `/`（OpenRouter 的 `z-ai/glm-5.2`、Fireworks 的 `accounts/.../x`）或 `:`（Ollama 的 `qwen3:8b`、Bedrock 的 `...-v2:0`），可解析性靠「provider 名禁止含 `:` 与 `/`（`validateIdentSegment`）+ 按第一个（三段为前两个）`:` 拆、尾部原样保留」保证，与分隔符选哪个无关；② 真正的区别是可读性——模型里的 `/` 是上游自己的厂商命名空间（模型厂商 ≠ vmr 的 provider：同一个 DeepSeek 模型可跑在多个自建渠道上），用不同标点区分两个维度，`openrouter:z-ai/glm-5.2` 才看得出边界，`openrouter/z-ai/glm-5.2` 会把 `z-ai` 误读成 provider；③ 审计日志的冒号格式是磁盘契约，历史记录已固化（`SplitEndpointLabel` 兼容更早的斜杠格式），统一向它靠拢不改任何已落盘数据；④ `@` 被 Vertex 模型名占用（`claude-3-5-sonnet@20240620`），`|`、`>`、`::` 对 shell/URL 不友好且无收益。**对应的格式约束**：`vmr check` 的端点行不带结尾 `:`（`ollama:qwen3:8b:` 有歧义），靠固定宽度对齐；`X-VMR-Failover` 条目为 `provider:model=outcome`（outcome 在最后一个 `=` 之后），因为 `:` 已被模型 tag 占用。**不适用于**价格表键 `provider/model`（litellm 表自己的命名空间）、`HealthKey`（含 key 指纹的内部键）、`quota` 的 `metric/every`。
+- **ProviderGroup 的多 Key（`api_keys:`）已实现，运行时均衡与分级 Failover 仍不做**：运行时 KeyPool（请求期在池内随机选 Key）会违反 `core.Endpoint`「构造后不可变、`HealthKey()` 只算一次」这条贯穿 health/sticky/quota 的不变式。实际落地是「配置期展开成多个独立 `core.Endpoint`」：`Provider.APIKeys`（`{label: key}`）在 `config.Parse` 里展开成 `<name>-<label>` 命名的独立 `Provider` 并就地重写引用，下游全部按 `Provider.Name` 字符串解析、零改动（唯一保留展开前原名的是 `Provider.Group`，只供直连寻址的 `<原名>:model` 一次寻址全部 key）。这个形状架构性地绕开了均衡（谁排第一不可预先指定，只能读 `vmr check` 的实际展开结果）与配额聚合（每把 key 独立 Provider 名、独立 quota 池）两个难题；分级 Failover（402 跳 Key / 5xx 跳 Provider）留到看到真实需求。
 
 ### 1.3 校验与防御性编程
 
@@ -643,6 +645,12 @@
 - **现状**：archtest 的文档引用守卫只扫描生产 `.go` 文件注释中**形似路径**的引用（`docs/...`、`*.go` 等）。两类真实悬空引用它抓不到：① 注释里不带 `.md` 路径的裸文档名——grep 字面串的方式对它们天然盲；② 非 `.go` 的 embed 资产头注释（`internal/server` 下的 `help.html`/`assets/console.css`），守卫不扫非 `.go` 文件。历史上两类均已实际发生过并清理，但机制性盲区仍在。
 - **为什么可接受**：让守卫识别任意自然语言里的裸文档名会引入大量误报（注释里合法出现 `console.js`、`KNOWN_ISSUES` 等裸词的场景太多）；非 `.go` 资产的注释同理不宜纳入静态扫描。改为「约定 + 复查轮人工全量裸词扫描」。
 - **触发条件**：再出现「清理轮修完所有字面引用后复查仍有悬空引用」的结果，再做一轮全量裸文档名扫描。
+
+#### 2.180 [低，待单独处理] 告警与拓扑表的端点标识 `provider:key_label:model` 与审计标签同为三段冒号、含义不同
+
+- **现状**：`internal/server/alerts.go` 的 `endpointAlerts` 与 `status.html` 的端点去重键用 `provider:key_label:model`（中间段是 `api_keys` 展开后的 key 标签），而 `protocol:provider:model`（`Endpoint.Name()`、审计标签）的第一段是协议。两者段数相同、语义不同，肉眼容易当成同一种格式。分隔符统一（见「provider 与 model 的组合标识统一用 `:`」这条取舍）刻意没有动它：它在 UI 内部用来让告警行与 Health 悬浮提示对上同一把键，改动要连带 `status.html` / `models.html` 的前端匹配逻辑。
+- **可能方案**：把 key 标签并入 provider 段（展开后的 provider 名本来就是 `<name>-<label>`），退化成统一的 `provider:model`；或给它一个有别于三段审计标签的显式前缀。
+- **为什么待定**：只影响告警行的展示与前端去重键，无功能后果；需连同前端一并改并补前端对照测试，单独排一轮。
 
 ### G. Agent Guard（在线接线与离线取证）
 

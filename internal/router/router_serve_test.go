@@ -129,8 +129,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p3/m3" {
-		t.Errorf("endpoint=%s, want openai-completions/p3/m3", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions:p3:m3" {
+		t.Errorf("endpoint=%s, want openai-completions:p3:m3", got)
 	}
 	if got := w.Header().Get("X-VMR-Attempts"); got != "3" {
 		t.Errorf("attempts=%s, want 3", got)
@@ -673,8 +673,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (content flag should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
-		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions:p2:m2" {
+		t.Errorf("endpoint=%s, want openai-completions:p2:m2", got)
 	}
 	// u1 must still be available (no cooldown applied for content flags).
 	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
@@ -724,7 +724,7 @@ models:
 	rt.Install(mustSnapshot(t, cfg))
 
 	w := serveReq(rt, "vm", []byte(`{"model":"vm"}`))
-	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions/p2/m2" {
+	if w.Code != 200 || w.Header().Get("X-VMR-Endpoint") != "openai-completions:p2:m2" {
 		t.Fatalf("status=%d endpoint=%s, want 200 via p2 (a broken error body must fail over, not return as ErrClient)", w.Code, w.Header().Get("X-VMR-Endpoint"))
 	}
 	ep := endpointFor(t, cfg, "openai-completions", "vm")
@@ -766,8 +766,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (quirk rejection should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
-		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions:p2:m2" {
+		t.Errorf("endpoint=%s, want openai-completions:p2:m2", got)
 	}
 	// u1 must still be available (no cooldown applied for quirk rejections).
 	endpoint := endpointFor(t, cfg, "openai-completions", "vm")
@@ -807,8 +807,8 @@ models:
 	if w.Code != 200 {
 		t.Fatalf("status=%d, want 200 (context-limit rejection should failover to u2)", w.Code)
 	}
-	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions/p2/m2" {
-		t.Errorf("endpoint=%s, want openai-completions/p2/m2", got)
+	if got := w.Header().Get("X-VMR-Endpoint"); got != "openai-completions:p2:m2" {
+		t.Errorf("endpoint=%s, want openai-completions:p2:m2", got)
 	}
 	// u1 must still be available (no cooldown applied for context-limit rejections).
 	endpoint := endpointFor(t, cfg, "openai-completions", "vm")

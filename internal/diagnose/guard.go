@@ -80,7 +80,7 @@ func runGuardProbesPhase(ctx context.Context, cfg *config.Config, endpoints []*c
 
 // testEndpointGuard dispatches one security probe against an endpoint.
 func testEndpointGuard(ctx context.Context, cfg *config.Config, ep *core.Endpoint, probeType string, timeout time.Duration) Result {
-	target := fmt.Sprintf("%s/%s/%s [%s]", ep.AdapterType, ep.Provider, ep.Model, probeType)
+	target := fmt.Sprintf("%s [%s]", core.EndpointLabel(ep.AdapterType, ep.Provider, ep.Model), probeType)
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok {
 		return Result{Phase: "guard", Target: target, Status: StatusFail, Detail: "unknown adapter " + ep.AdapterType}

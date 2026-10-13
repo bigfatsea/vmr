@@ -36,7 +36,7 @@ func printStatus(st *statusResponse) {
 		}
 	}
 	for _, is := range st.Instance.Config.Issues {
-		fmt.Printf("  WARNING: %s\n", is.Message)
+		fmt.Printf("  %s: %s\n", strings.ToUpper(is.Severity.String()), is.Message)
 	}
 	if rl := st.Instance.Config.Reload; rl != nil && !rl.At.IsZero() {
 		state := "ok"

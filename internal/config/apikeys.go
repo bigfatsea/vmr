@@ -1,4 +1,4 @@
-// Ver 2026-08-22, by Sonnet 5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 package config
 
@@ -43,6 +43,7 @@ func (c *Config) expandProviderAPIKeys() error {
 	for _, p := range c.Providers {
 		if len(p.APIKeys) == 0 {
 			p.KeyLabel = keyTailLabel(p.APIKey)
+			p.Group = p.Name
 			expanded = append(expanded, p)
 			continue
 		}
@@ -62,6 +63,7 @@ func (c *Config) expandProviderAPIKeys() error {
 			child.APIKey = key
 			child.APIKeys = nil
 			child.KeyLabel = label
+			child.Group = p.Name
 			expanded = append(expanded, child)
 			names = append(names, child.Name)
 		}

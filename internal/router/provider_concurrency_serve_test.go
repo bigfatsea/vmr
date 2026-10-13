@@ -91,8 +91,8 @@ models:
 	if w2.Code != 200 {
 		t.Fatalf("request 2 code = %d, want 200", w2.Code)
 	}
-	if failover := w2.Header().Get("X-VMR-Failover"); !strings.Contains(failover, "p1/m1:busy") {
-		t.Errorf("expected p1/m1:busy in X-VMR-Failover, got %q", failover)
+	if failover := w2.Header().Get("X-VMR-Failover"); !strings.Contains(failover, "p1:m1=busy") {
+		t.Errorf("expected p1:m1=busy in X-VMR-Failover, got %q", failover)
 	}
 	if p2Hits.Load() != 1 {
 		t.Errorf("p2Hits = %d, want 1", p2Hits.Load())
@@ -273,7 +273,7 @@ models:
 	if ep := w2.Header().Get("X-VMR-Endpoint"); !strings.Contains(ep, "p2") {
 		t.Fatalf("step 2 should failover to p2, got %s", ep)
 	}
-	if failover := w2.Header().Get("X-VMR-Failover"); !strings.Contains(failover, "p1/m1:busy_timeout") {
+	if failover := w2.Header().Get("X-VMR-Failover"); !strings.Contains(failover, "p1:m1=busy_timeout") {
 		t.Errorf("expected busy_timeout in X-VMR-Failover, got %q", failover)
 	}
 

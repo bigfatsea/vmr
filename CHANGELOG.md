@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-23 04:17, by Claude Opus 5.5 -->
+<!-- Ver 2026-10-13 17:40, by Sonnet 5.5 -->
 
 # Changelog
 
@@ -21,7 +21,13 @@ commits and design docs hold the full reasoning.
 
 ## [Unreleased]
 
+### Changed
+- **One `:` spelling for every provider/model name.** Endpoint identities that used to render as `protocol/provider/model` or `provider/model` now use the same `:` form the audit log and direct routing already had: `/status`'s `endpoint` field and the `X-VMR-Endpoint` response header (`openai-completions:p1:m1`), `vmr check` / `vmr check models` / the startup summary (`- p=0. p1:m1`), `vmr diagnose` targets, and `check` warning text. A model name's own `/` or `:` (`z-ai/glm-5.2`, `qwen3:8b`) is kept verbatim after the first `:`. `vmr check` endpoint lines no longer end in `:` — values stay column-aligned instead. `X-VMR-Failover` entries are now `provider:model=outcome` (e.g. `deepseek:deepseek-v4=429, minimax:m2=500`, `local:x=err`, `p1:m1=busy`) and no longer drop a model's own `:`. Anything that parsed the old slash forms out of `/status`, `X-VMR-Endpoint` or `X-VMR-Failover` must switch to the colon forms; audit records are unchanged.
+- **Config check messages are grouped and actionable.** `Config.Check` now merges same-cause findings at the source, so `vmr check`, the startup/reload log, `vmr diagnose`, `vmr status` and the console's alert list all show one line per cause instead of a repeated line per item: one warning per unenforced `model_defaults` capability (naming every model that declares it) and one per disabled provider group (an `api_keys` group lists its disabled keys once, with every place that still references it). The open-proxy and missing-`api_key` messages now say how to fix them. A config issue of error severity (a missing `api_key` on a public upstream) now reaches `/status` `alerts[]` and the console as an error alert instead of a warning, and `vmr status` labels it `ERROR`.
+
 ### Added
+- **`vmr check models`** (`./vmr.sh check models`): a compact, read-only catalog of what the config routes to — every provider with the models some virtual model or `fallback_endpoints` references (disabled and unreferenced providers included, `[direct]` marked when direct routing exposes the name), then each virtual model's try-order per protocol, one line per priority tier. Built from the same routing snapshot as the router; no network I/O.
+- **Direct routing (`direct_routing`, opt-in, off by default)**: a client may name a real upstream model as `provider:model` (e.g. `cliproxy:gemini-3.8-flash-high`) instead of a virtual model. Only (protocol, provider, model) triples some virtual model or `fallback_endpoints` already declares are reachable — no undeclared model, no cross-protocol widening, no fallback attached; health, conditions, pin headers, quota and Sticky Model apply unchanged and share state with the declared endpoints. An `api_keys` provider's written name addresses every key, `<name>-<label>` a single one. `GET /v1/models`, `vmr check` and the startup summary list the direct names; the response `model` and the audit record carry the name the client sent, and `vmr replay` resolves such records without `-model`. With the switch on, a virtual model named `<provider>:...` is a load error.
 - **Online config editing (`admin.config_edit`, opt-in, off by default)**: auth-gated `GET /config` (raw file from disk with ETag/mtime/staleness/reload-state headers), `POST /config/validate` (candidate check without writing), `PUT /config` (validate → atomic write → hot reload, trigger `api`), and a `/config.html` console page. Every edit runs the exact hot-reload validation pipeline before anything touches the file, which stays the single source of truth; a rejected candidate never lands on disk and a reload outcome is reported in the PUT response. Auth follows the same policy as `/status`: `api_keys` when configured, open when not.
 
 ## [0.7.2] - 2026-09-23

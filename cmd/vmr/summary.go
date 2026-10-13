@@ -49,12 +49,18 @@ func logConfigSummary(logger *log.Logger, cfg *config.Config, snap *router.Snaps
 }
 
 // providerProxyEntry is one provider's resolved proxy setting, keyed by its
-// "protocol/name" for display — the human-readable description (direct /
+// "protocol:name" (proxyEntryName) for display — the human-readable description (direct /
 // direct (proxy: false) / redacted proxy URL) cmd_check.go's printProviders
 // renders per-provider via providerProxyLine.
 type providerProxyEntry struct {
 	Name  string
 	Proxy string
+}
+
+// proxyEntryName is the "protocol:provider" key a providerProxyEntry carries —
+// the same ':' joining as every other endpoint-ish name in check output.
+func proxyEntryName(protocol, provider string) string {
+	return protocol + ":" + provider
 }
 
 // redactProxyURL masks a proxy URL's embedded credentials (userinfo) for
@@ -84,7 +90,7 @@ func providerProxyEntries(cfg *config.Config) []providerProxyEntry {
 			if mode, proxyURL := cfg.ProxySpecFor(p, protocol); mode == config.ProxyURL {
 				desc = redactProxyURL(proxyURL)
 			}
-			entries = append(entries, providerProxyEntry{Name: protocol + "/" + p.Name, Proxy: desc})
+			entries = append(entries, providerProxyEntry{Name: proxyEntryName(protocol, p.Name), Proxy: desc})
 		}
 	}
 	return entries

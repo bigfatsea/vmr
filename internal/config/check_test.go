@@ -229,8 +229,8 @@ models:
         - {providers: [p1], models: [x, x]}
 `)
 	issues := cfg.Check()
-	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions/p1/x" {
-		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions/p1/x", issues)
+	if len(issues) != 1 || issues[0].Model != "m" || issues[0].Field != "endpoint" || issues[0].Endpoint != "openai-completions:p1:x" {
+		t.Errorf("Check() = %+v, want exactly one duplicate-endpoint issue for openai-completions:p1:x", issues)
 	}
 }
 
@@ -289,6 +289,29 @@ models:
 	}
 }
 
+// TestCheckGroupsUnenforcedCapabilitiesAcrossModels pins that one capability
+// declared on several model_defaults keys is ONE warning naming every key,
+// not a repeated line per key.
+func TestCheckGroupsUnenforcedCapabilitiesAcrossModels(t *testing.T) {
+	cfg := mustParse(t, `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
+model_defaults:
+  a: {capabilities: [text, thinking]}
+  b: {capabilities: [thinking, video]}
+models:
+  m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
+`)
+	issues := cfg.Check()
+	if len(issues) != 2 {
+		t.Fatalf("Check() = %+v, want one warning per capability (thinking, video)", issues)
+	}
+	if m := issues[0].Message; !strings.Contains(m, `"thinking"`) || !strings.Contains(m, `"a", "b"`) {
+		t.Errorf("thinking warning = %q, want it to name both model_defaults keys", m)
+	}
+}
+
 // TestCheckFlagsUnenforcedCapabilities covers the forward-declared
 // capability words ("audio"/"video"/"thinking"): validate() accepts them,
 // but Check() must surface one SeverityWarning per declared word so a
@@ -309,8 +332,8 @@ models:
 		t.Fatalf("Check() = %+v, want exactly three capability warnings", issues)
 	}
 	for _, is := range issues {
-		if is.Severity != SeverityWarning || is.Field != "capabilities" || is.Model != "MiniMax-M3" {
-			t.Errorf("issue = %+v, want a capabilities SeverityWarning scoped to model_defaults key MiniMax-M3", is)
+		if is.Severity != SeverityWarning || is.Field != "capabilities" || !strings.Contains(is.Message, `"MiniMax-M3"`) {
+			t.Errorf("issue = %+v, want a capabilities SeverityWarning naming model_defaults key MiniMax-M3", is)
 		}
 		if !strings.Contains(is.Message, "is accepted but not enforced by routing yet") {
 			t.Errorf("message %q does not carry the accepted-but-not-enforced wording", is.Message)

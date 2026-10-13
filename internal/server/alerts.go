@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"vmr/internal/config"
 	"vmr/internal/core"
 	"vmr/internal/health"
 	"vmr/internal/quota"
@@ -49,7 +50,8 @@ type statusAlert struct {
 // statusAlerts builds /status's top-level alerts[] from three sources, in
 // the shape the console's alerts[] section fixes:
 //
-//   - config: one warning per snap.Cfg.Check() issue, ref = the config file
+//   - config: one alert per snap.Cfg.Check() issue (an error-severity issue —
+//     a missing api_key — is an error alert), ref = the config file
 //     path the instance is running from ("" when the server was built
 //     without one — tests/embedding);
 //   - endpoint: one warning per endpoint the health state machine is holding
@@ -71,8 +73,12 @@ type statusAlert struct {
 func (s *Server) statusAlerts(snap *router.Snapshot, now time.Time, qs []router.QuotaProviderStatus) []statusAlert {
 	var out []statusAlert
 	for _, iss := range snap.Cfg.Check() {
+		sev := alertSeverityWarning
+		if iss.Severity == config.SeverityError {
+			sev = alertSeverityError
+		}
 		out = append(out, statusAlert{
-			Severity: alertSeverityWarning, Kind: alertKindConfig,
+			Severity: sev, Kind: alertKindConfig,
 			Message: iss.Message, Ref: s.inst.configPath,
 		})
 	}

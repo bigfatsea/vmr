@@ -663,10 +663,10 @@ models:
 		if r.Phase != "connect" {
 			continue
 		}
-		if strings.HasPrefix(r.Target, "openai-completions/") {
+		if strings.HasPrefix(r.Target, "openai-completions:") {
 			connOpenAI = r
 		}
-		if strings.HasPrefix(r.Target, "anthropic-messages/") {
+		if strings.HasPrefix(r.Target, "anthropic-messages:") {
 			connAnthropic = r
 		}
 		if r.Phase == "role" {
@@ -750,16 +750,16 @@ models:
 			if !strings.Contains(r.Detail, "virtual model(s)") {
 				t.Errorf("config detail = %q, want it to say \"virtual model(s)\"", r.Detail)
 			}
-		case r.Phase == "env" && r.Target == "openai-completions/good":
+		case r.Phase == "env" && r.Target == "openai-completions:good":
 			haveEnvGood = true
-		case r.Phase == "env" && r.Target == "openai-completions/bad":
+		case r.Phase == "env" && r.Target == "openai-completions:bad":
 			haveEnvBad = true
-		case r.Phase == "connect" && strings.Contains(r.Target, "/good/"):
+		case r.Phase == "connect" && strings.Contains(r.Target, ":good:"):
 			haveConnGood = true
 			if r.Status != StatusOK {
 				t.Errorf("good endpoint connect status = %s, want ok", r.Status)
 			}
-		case r.Phase == "connect" && strings.Contains(r.Target, "/bad/"):
+		case r.Phase == "connect" && strings.Contains(r.Target, ":bad:"):
 			haveConnBad = true
 			if r.Status != StatusFail {
 				t.Errorf("bad endpoint connect status = %s, want fail", r.Status)
@@ -778,7 +778,7 @@ models:
 	// priority 0 (bad) sorts first; its connectivity failure must be
 	// reflected in the route preview even though diagnose never touches a
 	// live health registry.
-	if !strings.Contains(routeEntries[0].Target, "p=0. bad/m") {
+	if !strings.Contains(routeEntries[0].Target, "p=0. bad:m") {
 		t.Errorf("first route entry = %+v, want priority-0 (bad) endpoint first", routeEntries[0])
 	}
 	if routeEntries[0].Group != "vm [openai-completions]" || routeEntries[1].Group != "vm [openai-completions]" {
@@ -835,7 +835,7 @@ models:
 		}
 	}
 	got := strings.Join(targets, ",")
-	want := "openai-completions/alpha/m1,openai-completions/alpha/m2,openai-completions/zulu/m1"
+	want := "openai-completions:alpha:m1,openai-completions:alpha:m2,openai-completions:zulu:m1"
 	if got != want {
 		t.Errorf("connect targets = %q, want %q (provider-sorted, same provider's endpoints adjacent)", got, want)
 	}
@@ -867,7 +867,7 @@ models:
 		}
 	}
 	got := strings.Join(targets, ",")
-	want := "openai-completions/p1/m,openai-completions/p2/m"
+	want := "openai-completions:p1:m,openai-completions:p2:m"
 	if got != want {
 		t.Errorf("connect targets = %q, want %q (both providers on the shared entry must be tested)", got, want)
 	}
@@ -1078,8 +1078,8 @@ func TestFormatTable_GroupedFixedWidth(t *testing.T) {
 	ranAt := time.Date(2026, 7, 19, 10, 42, 7, 0, time.UTC)
 	rep := &Report{RanAt: ranAt, Results: []Result{
 		{Phase: "config", Target: "config.yaml", Status: StatusOK, Detail: "1 provider(s), 1 model(s)"},
-		{Phase: "env", Target: "openai-completions/short", Status: StatusOK, Detail: "dns:ok api_key:set"},
-		{Phase: "env", Target: "openai-completions/a-much-longer-name", Status: StatusFail, Detail: "dns:FAIL"},
+		{Phase: "env", Target: "openai-completions:short", Status: StatusOK, Detail: "dns:ok api_key:set"},
+		{Phase: "env", Target: "openai-completions:a-much-longer-name", Status: StatusFail, Detail: "dns:FAIL"},
 		{Phase: "route", Group: "agent [openai-completions]", Target: "1. p1/m1", Status: StatusOK},
 		{Phase: "route", Group: "agent [openai-completions]", Target: "2. p2/a-longer-model-name", Status: StatusFail, Detail: "connectivity test: boom"},
 		{Phase: "route", Group: "coding [openai-completions]", Target: "1. p3/m3", Status: StatusOK},
@@ -1105,13 +1105,13 @@ func TestFormatTable_GroupedFixedWidth(t *testing.T) {
 	}
 
 	// Both env rows must align: same target-column width within the
-	// section, computed from "openai-completions/a-much-longer-name" (36 chars).
+	// section, computed from "openai-completions:a-much-longer-name" (36 chars).
 	envShort := lines[8]
 	envLong := lines[9]
-	if envShort != "  openai-completions/short               ok    dns:ok api_key:set" {
+	if envShort != "  openai-completions:short               ok    dns:ok api_key:set" {
 		t.Errorf("env short row not padded to the section's longest target: %q", envShort)
 	}
-	if envLong != "  openai-completions/a-much-longer-name  fail  dns:FAIL" {
+	if envLong != "  openai-completions:a-much-longer-name  fail  dns:FAIL" {
 		t.Errorf("env long row: %q", envLong)
 	}
 
@@ -1173,13 +1173,13 @@ models:
 	if !strings.Contains(out, "Environment: checking 1 provider(s)") {
 		t.Errorf("missing environment phase header: %q", out)
 	}
-	if !strings.Contains(out, "  Done  openai-completions/p1\n") {
+	if !strings.Contains(out, "  Done  openai-completions:p1\n") {
 		t.Errorf("a successful per-check progress line must read Done, not ok: %q", out)
 	}
 	if !strings.Contains(out, "Connectivity: probing 1 endpoint(s)") {
 		t.Errorf("missing connectivity phase header: %q", out)
 	}
-	if !strings.Contains(out, "  Done  openai-completions/p1/m\n") {
+	if !strings.Contains(out, "  Done  openai-completions:p1:m\n") {
 		t.Errorf("missing per-check connectivity progress line: %q", out)
 	}
 

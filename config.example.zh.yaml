@@ -1,4 +1,4 @@
-# Ver 2026-09-20 23:41, by Sonnet 5
+# Ver 2026-10-13 08:12, by Claude Opus 5.5
 # vmr 配置文件 —— 完整注解参考。只想先跑起来？改用 config.minimal.yaml
 # （~10 行），需要调某个旋钮时再回这里查。
 # vmr 配置文件 —— 复制为 config.yaml 后按需修改。
@@ -97,6 +97,10 @@ listen: 127.0.0.1:8800
 # analytics:                      # 用于 analyze 报表与看板的 /reports/ 静态托管（默认关闭）
 #   serve: false                 # true = 对外服务 /reports/*；false = 裸 404（与未挂载无区别）。随热重载生效
 #   serve_dir: ./reports         # 静态托管根目录；相对路径按 vmr start 工作目录解析。随热重载生效
+# direct_routing: false           # true = 客户端也可以用 "provider:model"（例如 "openrouter:z-ai/glm-5.2"）直接点名
+#                                  # 真实模型，不经虚拟模型。只有下面某个模型或 fallback_endpoints 已声明的
+#                                  # (协议, provider, 模型) 组合可达；不挂 fallback。默认关闭：它让任何客户端都能
+#                                  # 绕过虚拟模型编码的尝试顺序。随热重载生效。
 # admin:                           # 可选管理面开关（默认全部关闭）
 #   config_edit: false            # true = 启用配置在线编辑：GET/PUT /config 与 POST /config/validate，以及 /config.html 控制台页。
 #                                  # 每次保存先走与热重载完全相同的校验管线（Parse → Check → BuildSnapshot），再原子写回

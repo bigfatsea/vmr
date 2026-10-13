@@ -46,12 +46,12 @@ func TestHealthKeyStableForSameFields(t *testing.T) {
 	}
 }
 
-// TestNameOmitsAPIKey checks Name() (used in X-VMR-Endpoint and audit logs)
+// TestNameOmitsAPIKey checks Name() (used in X-VMR-Endpoint and /status)
 // never leaks the credential, unlike HealthKey which folds in a fingerprint.
 func TestNameOmitsAPIKey(t *testing.T) {
 	t.Parallel()
 	e := &Endpoint{AdapterType: "openai-completions", Provider: "acme", Model: "m", APIKey: "sk-secret"}
-	if got, want := e.Name(), "openai-completions/acme/m"; got != want {
+	if got, want := e.Name(), "openai-completions:acme:m"; got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
 	}
 }
@@ -68,7 +68,7 @@ func TestEndpointHealthKeyWithoutFreezeStillWorks(t *testing.T) {
 	if got, want := e.HealthKey(), e.computeHealthKey(); got != want {
 		t.Errorf("un-frozen HealthKey() = %q, want %q (computeHealthKey directly)", got, want)
 	}
-	if got, want := e.Name(), "anthropic-messages/minimax/MiniMax-M3"; got != want {
+	if got, want := e.Name(), "anthropic-messages:minimax:MiniMax-M3"; got != want {
 		t.Errorf("un-frozen Name() = %q, want %q", got, want)
 	}
 }

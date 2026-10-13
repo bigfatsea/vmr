@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-23 02:20, by Claude Opus 5.5 -->
+<!-- Ver 2026-10-13 17:40, by Sonnet 5.5 -->
 
 # <img src="vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — 用户指南
 
@@ -25,6 +25,7 @@
   - [条件路由](#条件路由)
   - [Sticky Model 会话亲和](#sticky-model-会话亲和)
   - [额度感知路由 Quota-Aware Routing](#额度感知路由-quota-aware-routing)
+  - [直连寻址（provider:model）](#直连寻址providermodel)
 - [内置控制台与实时遥测](#内置控制台与实时遥测)
   - [控制台页面](#控制台页面)
   - [配置在线编辑](#配置在线编辑)
@@ -68,6 +69,7 @@ listen: 127.0.0.1:8800
 # analytics:                    # 可选的 /reports/ 托管（承载 analyze 产物，默认关闭）——
 #   serve: false                # true = 对外服务 /reports/*（serve/serve_dir 随热重载生效）；serve_dir 默认 ./reports（与 analyze -o 同源），
 #   serve_dir: ./reports        # 详见「审计与报表」下的「看板骨架页」一节
+# direct_routing: false          # true = 客户端也可以用 "provider:model" 直接调用配置里已声明的真实模型（见下文「直连寻址」）
 # timeouts:                    # "等多久"——请求路径上的等待上限，Go duration 语法
 #   connect: 10s               # 连接上游
 #   response_header: 120s      # 上游首字节
@@ -513,6 +515,19 @@ providers:
 
 完整设计：`docs/VirtualModelRouter_Design_v4_Quota.md`。
 
+### 直连寻址（`provider:model`）
+
+可选功能，默认关闭：设置 `direct_routing: true`（随热重载生效）后，客户端可以不经虚拟模型、直接点名一个真实上游模型——`"model": "cliproxy:gemini-3.8-flash-high"` 或 `"model": "volc_token_plan:glm-5.3-flash"`。名字由 `providers[]` 里原样书写的 provider 名、一个 `:`、上游模型名组成，按**第一个** `:` 切分（provider 名永远不能含 `:` 或 `/`，模型名可以——`openrouter_paid:vendor/model:free` 照常可用）。
+
+- **只开放配置已声明的组合**：可寻址集合正好是某个虚拟模型的 `endpoints:` 或 `fallback_endpoints:` 展开出的 (协议, provider, 模型) 三元组；disabled 的 provider 一个都不贡献。直连永远到不了你没写进配置的上游模型，而且一对组合只在它被声明的协议上可达——只在 `openai-completions` 下声明的 `sensenova_free:deepseek-v4-flash` 不能经 `/v1/messages` 访问。想直连一个新模型，把它加进任意一个虚拟模型或 `fallback_endpoints` 即可。
+- **同一条路由管线，只有一个模型**：健康过滤、条件路由、钉住路由请求头、quota 计量和 Sticky Model 与虚拟模型完全一致；冷却中的端点不会被强行放行。直连路由**唯一**不获得的是 `fallback_endpoints` 和任何其他模型——客户端点名了一个模型，失败时返回的就是该上游自己的错误，而不是悄悄落到别处。
+- **`api_keys` 型 provider**：原样书写的名字寻址全部 key（`sensenova_free:deepseek-v4-flash`——多把 key 按配额余量排序并相互 failover）；展开后的 `<name>-<label>` 名字只寻址其中一把 key（`sensenova_free-key_1:deepseek-v4-flash`）。
+- **客户端看到什么**：响应里的 `model` 字段是客户端发来的名字（`cliproxy:gemini-3.8-flash-high`），和每个虚拟模型做的改写一样。`GET /v1/models` 把直连名与虚拟模型一起列出，`owned_by` 填 provider 名；`vmr check` 与启动摘要在 `=== Direct routes ===` 下打印它们。`/status` 拓扑与 `models.html` 仍只列虚拟模型。
+- **审计与报表**：审计记录的 `model` 就是直连名，所以 `vmr analyze` 在所有按模型切分的地方把它单列成一行；逐次 attempt 的 provider/模型、定价与 quota 都不受影响。`vmr replay` 直接从名字里解析直连记录的上游模型，无需 `-model`。
+- **重名**：开关打开时，以「provider 名 + `:`」开头的虚拟模型名是加载错误——同一个名字会同时指向两条路由。
+
+为什么默认关闭：它让任何能调用 vmr 的客户端绕过虚拟模型编码的尝试顺序（例如免费账号先于付费账号）。单人实例直接打开；共享实例请想清楚再开。
+
 ## 内置控制台与实时遥测
 
 除离线审计日志分析外，vmr 还在路由主进程内集成了零内部依赖的实时遥测引擎（`internal/livestats`），并通过统一内置控制台（CSR 架构，`//go:embed` 嵌入单二进制，零外部 CDN 依赖）提供开箱即用的实时可视化运维体验。所有控制台页面共享统一的 API Key 鉴权弹窗与 `localStorage` 凭据（`VMRAuth`）。
@@ -758,7 +773,7 @@ models:
 | `POST /v1/chat/completions` | OpenAI Chat Completions 协议入口（流式 + 非流式） |
 | `POST /v1/messages` | Anthropic Messages 协议入口（流式 + 非流式） |
 | `POST /v1/responses` | OpenAI Responses 协议入口（流式 + 非流式）；需要在 `openai-responses` key 下声明端点 |
-| `GET /v1/models` | Virtual Model 列表（两种 SDK 均可解析） |
+| `GET /v1/models` | Virtual Model 列表；开启 `direct_routing` 时附带 `provider:model` 直连名（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
 | `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime，以及 `base_urls`：各协议的客户端入口地址——都是 `<scheme>://<host>/v1/`——从请求本身回显（Host 头 + 是否 TLS）、不是从 `listen` 推导，你用什么地址问的就该用什么地址配客户端）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、每个 虚拟模型 × 协议 一条 `models`数组项，含 `capabilities`（跨端点并集；空数组 = 不限制）、`max_context_tokens`（跨端点最大值；0 = 不限制）与逐端点健康（含各端点生效的能力/上下文上限）——让把 custom model 指向 vmr 的 Agent 能直接读出上下文长度与能力——以及实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |
 | `GET /status.html` | 浏览器控制台主页（**Overview**）：vitals 指标带（并发 / 请求 / tokens / 端点健康）加一行系统状态、活动的 **进行中请求（Live Requests）** 表（首列 Seq，其后为 State / Elapsed / Caller / Model / Provider : Model / Attempts / TTFT（附带 >5s 卡顿告警）/ Tok in / Tok out，已结束请求整行置灰）、基于全局最新 300 条请求的性能分位（支持 last 10 / 30 / 100 / 300 窗口切换，按 Requests 数量倒序排列）、12h / 24h / 3d / 7d 时间窗统辖的流量与用量区（SVG 单柱四层堆叠 fresh in / cache write / cache read / tok out，含请求折线、错误标记与悬停明细，附按 Provider/Model 和按 Caller 用量表），以及页面底部默认折叠的 **近期失败（Recent Failures）** 表。整页主体按单一 5 分钟倒计时时钟刷新（点头部倒计时立即刷，标签页隐藏时暂停——暂停态可见）；Live Requests、Recent Failures 与并发 vitals 由前端自适应轮询单独驱动（有在跑或排队请求时 ~2 秒一拍，空闲退避至 15 秒，标签页隐藏停拍）。头部告警 pill 只承载可操作状态（配置问题、冷却中的端点、濒临耗尽的配额）；所有控制台页面共用同一套 API Key 流程；零外部 CDN 依赖 |
@@ -768,7 +783,7 @@ models:
 | `GET /log.html` | 浏览器控制台 **Log** 页：共享控制台骨架上的满宽终端——工具条（level 芯片、子串过滤与命中高亮、⌘P 暂停、Copy view）位于自动换行日志区上方——自行打开 `/log` 并使用共用的已存 Key，自动滚底在上翻时交给 "↓ N new" 芯片，断线时由独立横幅提供重连按钮；底部状态条显示 `N shown / M lines`。进行中请求与近期失败表在 Overview 页，不在这里 |
 | `GET /help.html`（+ `/help.zh.html`） | 浏览器配置指南：手风琴式 Agent 接入指南，Connection 卡提供可复制的各协议 base_url 与从 `/status` 实时读取的模型 × 协议对照表，支持用共用 Key 做连接检查，并提供直达 Overview 页各区块的 Troubleshooting 链接——`/help.zh.html` 是中文版，也是唯一保留翻译兄弟页的控制台页面 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
-| `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个 |
+| `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个。末尾带 `models` 参数（`./vmr.sh check models`）时改为打印精简清单而不是完整摘要：先按 provider 列出配置里引用到的模型（协议、引用它的虚拟模型及优先级，direct routing 可直连的标 `[direct]`；已禁用和未被引用的 provider 也会列出），再按虚拟模型、协议列出 try-order，每个优先级一行，fallback 单独标注。它读的就是路由器实际使用的路由表，不做任何网络 I/O——provider 下的模型列表只是配置里引用到的，不是厂商自己的模型目录 |
 | `vmr status -c config.yaml` | 渲染运行实例的身份（pid / listen / uptime / 配置绝对路径）+ 每个虚拟模型的 capabilities、最大上下文 tokens 与逐端点健康，以及并发与存储占用（审计日志与图片缓存）。`-addr host:port` 改成直接查那个端口上的实例、完全不加载 config——本机跑着多个实例、或者你手上根本没有那份 config 时用它；`-key KEY` 传递 API key；`-brief` 只打一行 Tab 分隔的摘要（`./vmr.sh ps` 就是拿它拼表） |
 | `vmr analyze [-c config.yaml] [-o dir] [-journey <id\|id前缀\|通配符>[,...] \| -compare <id1,id2> \| -benchmark] [-render-only] [-no-cache] [-render-all] [-macro-only] [-list-only] [-journey-only] [-details] [-include-partial] [-include-self-traffic] [-show-ungrouped] [-lang en\|zh] [-currency CODE] [-report-config report.yaml] [-open] [glob...]` | 唯一的分析入口：一套 flag 集合；`-journey`/`-compare`/`-benchmark` 是三个互斥的变焦选择器，都不给就是默认套件——唯一一个两个半区都跑的模式。**不带选择器** —— 默认套件 —— 先跑 journey 半区、再跑宏观报表半区，共用同一个 `-o`：输出根目录的汇总报表与机器可读切片（`macro/*.json`、`requests/*`）、列出全部候选的 `journeys/index.{json,md}`、`journeys/details/` 下每个已渲染的非噪声 journey（`heartbeat` 候选仍进索引，只是不预先渲染——见下文）、三张看板骨架页，以及最后写入、作为快照准入凭证的 `manifest.json`。**`-render-only`** 完全跳过日志解压与聚合，直接从磁盘 JSON 快照重绘全部常驻人读产物（见上文[用量与成本报表](#用量与成本报表)）；需要一个有效的 `manifest.json` 已存在；不传 `-lang` 时继承快照上次渲染的语言，传 `-lang <其他语言>` 就换语言（纯重渲染，R1）。**`-no-cache`** 绕过解析与产物两级缓存、全量重算——怀疑缓存产物不可信时常备的逃生通道。`-render-all` 把默认套件的渲染范围放宽到含 heartbeat 在内的全部候选。**`-journey`**/**`-compare`**/**`-benchmark`** 各自只变焦进单个/成对/基准统计这一种视图（各自渲染什么见上文[Agent 任务叙事重建](#agent-任务叙事重建journeys)）——只跑这一个 journey 侧视图，不跑宏观报表半区；`-journey` 接受逗号分隔的多个 id/id 前缀/shell 风格通配符（`*`/`?`/`[...]`），匹配到的全部渲染（只匹配到一个就直接渲染，多个就批处理）。`-compare id1,id2` 两侧用同样的方式解析——id、id 前缀或通配符，各取首个命中的候选。**`-macro-only`** 只跑宏观报表半区——不扫候选、完全不写 `journeys/` 产物。**`-list-only`** 只列出候选 journey、一个都不渲染（写 `journeys/index.{md,json}`，没有 `j-*.md`）。**`-journey-only`** 只跑 journey 半区、跳过宏观报表——不写 `macro/*`/`requests/*`；与 `-macro-only`/`-list-only` 不同，它能与 `-render-all` 组合使用。`-render-all` 与 `-macro-only`/`-list-only` 同传会直接报错（它们本身就是默认套件渲染范围开关的替代），但可以与 `-journey-only` 组合；`-details` 与 `-list-only` 同传同样报错（它本来就什么都不渲染，更谈不上物化）。`-llm-addr host:port -llm-model name [-llm-key KEY] [-llm-dry-run]` 可在只匹配到一个 journey 的 `-journey` 或 `-compare` 上追加可选的 LLM 解读小节（不支持 `-benchmark`、多匹配的 `-journey`、`-macro-only`、`-list-only`、`-journey-only`，也不支持默认套件——批量场景下按 journey 逐次调用 LLM 没有意义，其余模式则不会以可交互方式渲染单条 journey）。`-llm-key` 在所有路径上都会解析——它用来识别过去 `-llm-addr` 自指分析流量并将其排除出统计，与本次运行是否发起新的 LLM 调用无关。`journeys/index.md` 里的候选按类别分组（`task`/`cron`/`heartbeat`/`subagent`，判据是标题里的内容标记）——只有 `heartbeat` 默认折叠进一个 `<details>` 块（真实语料实测显示没有一条 heartbeat 候选达到过 10 个请求，而 `cron`/`subagent` 经常达到——折叠判据与默认渲染范围现在共用同一条阈值，因此首屏可见的每一行都可点）；`journeys/index.json` 仍然全量列出每个候选。若一条 journey 的全部 Step 都是非 anthropic-messages 协议（常见情形——多数部署主要走 openai-completions 形状的端点），该 journey 报告的"疑似问题"章节会带一条披露注记：少数规则检测器与决策脊柱自身的工具结果错误徽标依赖仅 anthropic-messages 协议才会填充的字段，未出现代表"测不出来"，不代表"检查过、干净"——`-benchmark` 报告在语料非 100% anthropic-messages 协议时同样携带这条披露。`-include-self-traffic` 关闭两侧默认的自指流量排除——识别规则只算一次（基于 `report.yaml` 的 `llm_key`，与 `api_keys` 认证同一种取尾变换，外加可选的 `self_traffic_client_tags` 显式列表），每种模式共用同一份结果。`-show-ungrouped` 打印前几条未能归组进任何会话的记录的来源位置。**`-open`** 在 `127.0.0.1`（随机端口、前台运行直到 Ctrl-C）上托管产物目录并在默认浏览器打开 `macro-dashboard.html`——跟在任何模式之后都能用，包括 `-render-only`（见上文[看板骨架页](#看板骨架页)）。`glob` 是可选的——完全不写就对着 `-c config.yaml` 自己的 `log_dir` 分析；`-lang`/`report.yaml` 控制输出语言，`-currency` 决定 $ 列的展示币种（见上文[成本估算与定价](#成本估算与定价)） |
 | `vmr version` | 打印本二进制的构建标识（git SHA，脏工作区加 `-dirty` 后缀，外加 commit 时间与 Go 版本）。不需要 ldflags：Go 默认把 VCS 状态压进任何仓库内构建的二进制，运行时读出来即可。运行中实例的同一个值在 `/status` 与 `./vmr.sh ps` 的 VERSION 列里，可以直接对比"那个进程跑的是不是我刚编的这版" |
@@ -781,7 +796,7 @@ models:
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |
 | `./vmr.sh <上表任一命令> [参数]` | 脚本不认识的子命令一律原样转发给二进制（`./vmr.sh check`、`./vmr.sh diagnose`、`./vmr.sh analyze …`），不是白名单——二进制新增的子命令当天就能用。转发时做两件事：**回到调用者原来的目录**（相对路径、glob、`-o` 的含义与直接跑 `vmr` 完全一致），以及**没写 `-c` 时补上脚本所在 checkout 的 `config.yaml` 绝对路径**——前提是这个子命令确实定义了 `-c`（`start`/`check`/`status`/`diagnose`/`smoke`/`replay`/`analyze`/`diff`）。前台 `vmr start` 是唯一被脚本遮蔽的命令——脚本的 `start` 是后台版，要前台就直接跑 `./vmr start -c config.yaml` |
 
-经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及请求被钉住时才出现的 `pin=`，和真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek/deepseek-v4:429, minimax/m2:500`，构建/网络失败记 `:err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
+经路由的响应带 `X-VMR-Endpoint`（实际命中端点）、`X-VMR-Attempts`（尝试次数）与 `X-VMR-Route-Reason`（为什么选中它：`pick=order|quota|sticky`、`eligible=N/M`，以及请求被钉住时才出现的 `pin=`，和真正发生过时才出现的 `cooldown=` / `conditions=` / `ctx_fallback=1`）；只要有失败过的尝试，再带一个 `X-VMR-Failover`（如 `deepseek:deepseek-v4=429, minimax:m2=500`，每项为 `provider:model=结果`，构建/网络失败记 `=err`）——**请求成功时也带**，所以"这次是第三次 failover 才成功的"在终端里直接看得见，不用事后翻审计日志。
 
 ### 钉住路由（`X-VMR-Provider` / `X-VMR-Target-Model`）
 
@@ -790,7 +805,7 @@ models:
 - `X-VMR-Provider: google`——钉到某一个 provider
 - `X-VMR-Target-Model: gemini-3.1-flash-lite`——钉到某一个上游目标模型
 
-两者都是**收窄透镜，绝不是开口**：它们只过滤请求的虚拟模型下已经配置好的端点（在健康/条件/上下文过滤之后），所以钉永远够不到模型没声明过的上游——它只是压过优先级/顺序/quota/sticky，让运维能直接探测他点名的那一个后端。钉不住任何东西时，错误信息里会带上钉的名字。这两个头被路由器消费并在转发前剥掉，永远到不了上游；`X-VMR-Route-Reason` 会报告 `pin=provider=…,model=…` 让响应自我解释。不带这两个头的请求与之前逐字节相同——钉住是按请求可选加入的。
+两者都是**收窄透镜，绝不是开口**：它们只过滤请求的虚拟模型下已经配置好的端点（在健康/条件/上下文过滤之后），所以钉永远够不到模型没声明过的上游——它只是压过优先级/顺序/quota/sticky，让运维能直接探测他点名的那一个后端。钉不住任何东西时，错误信息里会带上钉的名字。这两个头被路由器消费并在转发前剥掉，永远到不了上游；`X-VMR-Route-Reason` 会报告 `pin=provider=…,model=…` 让响应自我解释。不带这两个头的请求与之前逐字节相同——钉住是按请求可选加入的。只能改模型名、不能加自定义请求头的客户端，可以用[直连寻址](#直连寻址providermodel)（`"model": "provider:model"`）达到同样效果。
 
 ```bash
 # 怀疑配置有问题——先诊断一遍，而不是对着日志里的 401 干瞪眼。

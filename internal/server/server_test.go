@@ -27,7 +27,7 @@ func TestFailoverOn5xxAndModelRewrite(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions:p2:model-two" {
 		t.Errorf("endpoint: %s", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -80,7 +80,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s (must fail over past the relay failure, not return it to the client)", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions:p2:model-two" {
 		t.Errorf("endpoint=%s, want p2 (p1's relay failure must not stop the failover walk)", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -126,7 +126,7 @@ func TestUpstreamGatewayFailureContinuesFailover(t *testing.T) {
 			continue
 		}
 		for i, ep := range out.Models[mi].Endpoints {
-			if ep.Endpoint == "openai-completions/p1/model-one" {
+			if ep.Endpoint == "openai-completions:p1:model-one" {
 				p1 = &out.Models[mi].Endpoints[i]
 			}
 		}
@@ -157,7 +157,7 @@ func TestVendorQuirkThoughtSignatureContinuesFailover(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status=%d body=%s (must fail over past thought_signature 400 rejection)", resp.StatusCode, body)
 	}
-	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions/p2/model-two" {
+	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions:p2:model-two" {
 		t.Errorf("endpoint=%s, want p2 (p1's thought_signature 400 must failover to p2)", got)
 	}
 	if got := resp.Header.Get("X-VMR-Attempts"); got != "2" {
@@ -182,7 +182,7 @@ func TestCooldownFiltersEndpointUntilRetryAfterExpires(t *testing.T) {
 
 	// 1st request: 429 on p1 → served by p2; p1 enters cooldown.
 	resp, _ := chat(t, ts, simpleReq, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions/p2/model-two" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:model-two" {
 		t.Fatalf("first request: status=%d ep=%s", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
 	}
 	// 2nd request immediately: p1 filtered by cooldown, p2 hit directly.
@@ -489,11 +489,11 @@ func TestAdminStatus(t *testing.T) {
 	}
 	for _, ep := range eps {
 		switch ep.Endpoint {
-		case "openai-completions/p1/model-one":
+		case "openai-completions:p1:model-one":
 			if ep.Available || ep.Fails != 1 {
 				t.Errorf("p1 should be cooling down: %+v", ep)
 			}
-		case "openai-completions/p2/model-two":
+		case "openai-completions:p2:model-two":
 			if !ep.Available {
 				t.Errorf("p2 should be available: %+v", ep)
 			}

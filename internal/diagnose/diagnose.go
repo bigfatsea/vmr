@@ -259,7 +259,7 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 			ordered := route.EffectiveOrder()
 			group := fmtutil.ModelLabel(name, protocol)
 			for _, ep := range ordered {
-				target := fmt.Sprintf("- p=%d. %s/%s", ep.Priority, ep.Provider, ep.Model)
+				target := fmt.Sprintf("- p=%d. %s", ep.Priority, core.ProviderModel(ep.Provider, ep.Model))
 				status, detail := StatusOK, ""
 				if r, ok := connResults[epKey{protocol, ep.Provider, ep.Model}]; ok && r.Status != StatusOK {
 					status, detail = r.Status, "connectivity test: "+r.Detail
@@ -329,7 +329,7 @@ func collectEndpointTriples(cfg *config.Config) []epKey {
 // real request path ever asks, and would misreport a proxy-only-reachable
 // provider as broken). Also reports whether an api_key is present.
 func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p config.Provider) Result {
-	target := protocol + "/" + name
+	target := protocol + ":" + name
 	u, err := url.Parse(p.BaseURL[protocol])
 	if err != nil {
 		return Result{Phase: "env", Target: target, Status: StatusFail, Detail: "invalid base_url: " + err.Error()}
@@ -402,7 +402,7 @@ func envCheck(ctx context.Context, cfg *config.Config, protocol, name string, p 
 // probing with plain "user" — "developer" is an OpenAI-only role, no
 // Anthropic client ever sends it.
 func testEndpoint(ctx context.Context, cfg *config.Config, ep *core.Endpoint, timeout time.Duration) Result {
-	target := ep.AdapterType + "/" + ep.Provider + "/" + ep.Model
+	target := core.EndpointLabel(ep.AdapterType, ep.Provider, ep.Model)
 	ad, ok := adapter.Get(ep.AdapterType)
 	if !ok {
 		return Result{Phase: "connect", Target: target, Status: StatusFail, Detail: "unknown adapter " + ep.AdapterType}

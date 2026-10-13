@@ -1,4 +1,4 @@
-# Ver 2026-09-20 23:41, by Sonnet 5
+# Ver 2026-10-13 08:12, by Claude Opus 5.5
 # vmr config — the fully annotated reference. Just want to get running?
 # Copy config.minimal.yaml instead (~10 lines) and come back here for a knob.
 # vmr config — copy to config.yaml and adjust.
@@ -112,6 +112,11 @@ listen: 127.0.0.1:8800
 # analytics:                      # /reports/ static hosting for analyze reports and dashboard (default disabled)
 #   serve: false                 # true = serve /reports/*; false = bare 404 (same as no route). Follows hot-reload.
 #   serve_dir: ./reports         # root directory to serve; relative paths resolved against vmr start workdir. Follows hot-reload.
+# direct_routing: false           # true = a client may also name a real model as "provider:model" (e.g.
+#                                  # "openrouter:z-ai/glm-5.2") instead of a virtual model. Only (protocol, provider,
+#                                  # model) triples some model below or fallback_endpoints already declares are
+#                                  # reachable; no fallback is attached. Off by default: it lets any client bypass the
+#                                  # try-order a virtual model encodes. Follows hot-reload.
 # admin:                           # opt-in management-plane switches (all off by default)
 #   config_edit: false            # true = enable the online config editor: GET/PUT /config and POST /config/validate,
 #                                  # plus the /config.html console page. Edits run the exact hot-reload validation

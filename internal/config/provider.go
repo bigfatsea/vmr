@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:20, by Sonnet 5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 
 // Provider's type definition — split out of config.go (which was at its
 // archtest line budget) when APIKeys was added; pure move, no behavior
@@ -68,6 +68,12 @@ type Provider struct {
 	// "<base>-<label>" back out is fragile (base names may contain hyphens
 	// themselves). A stats/audit display label, never a secret.
 	KeyLabel string `yaml:"-"`
+	// Group is the provider name as written in config, before api_keys
+	// expansion renamed it to "<name>-<label>" (equal to Name for a plain
+	// api_key provider). Set by expandProviderAPIKeys; read through
+	// GroupName so a Provider built in code without Parse still resolves.
+	// Direct routing's "<group>:model" names address every key at once.
+	Group string `yaml:"-"`
 	// APIKeys is sugar for several independent accounts on the same vendor,
 	// expanded at Parse time — see apikeys.go. A plain Go map: iteration
 	// order (and so which expanded key ends up "first" when no priority/
@@ -122,6 +128,15 @@ type Provider struct {
 	// ConcurrencyQueue sets the queue-wait timeout for sticky requests when
 	// concurrency is saturated (defaults to 10s when Concurrency > 0; 0 = no wait, fast-skip).
 	ConcurrencyQueue *Duration `yaml:"concurrency_queue"`
+}
+
+// GroupName is Group, or Name when Group was never set (a Provider built
+// directly rather than through Parse).
+func (p Provider) GroupName() string {
+	if p.Group != "" {
+		return p.Group
+	}
+	return p.Name
 }
 
 // ResolvedConcurrencyQueue applies the default rule once, for every consumer

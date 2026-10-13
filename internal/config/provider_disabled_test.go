@@ -135,10 +135,15 @@ func TestDisabled_APIKeysExpansionInherits(t *testing.T) {
 			t.Errorf("expanded sub-provider %q has Disabled=false, want inherited true", name)
 		}
 	}
-	// And the reference rewrite means the check sees the expanded names.
+	// The check sees the expanded names but reports once per api_keys
+	// group, naming the disabled keys — not one repeated line per key.
+	var found []Issue
 	for _, is := range cfg.Check() {
-		if is.Field == "disabled" && is.Provider != "p_off-a" && is.Provider != "p_off-b" && is.Provider != "p_parked" {
-			t.Errorf("unexpected disabled-reference issue for %q", is.Provider)
+		if is.Field == "disabled" {
+			found = append(found, is)
 		}
+	}
+	if len(found) != 1 || found[0].Provider != "p_off" || !strings.Contains(found[0].Message, "(keys a, b)") {
+		t.Errorf("Check() disabled issues = %+v, want exactly one for group p_off naming keys a, b", found)
 	}
 }

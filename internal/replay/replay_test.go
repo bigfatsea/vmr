@@ -1,4 +1,4 @@
-// Ver 2026-07-30, by Sonnet 5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 package replay
 
 import (
@@ -506,6 +506,36 @@ models:
 	}
 	if _, err := resolveModel(cfg, "openai-completions", "vm", "ghost"); err == nil {
 		t.Error("provider not in the entry's providers list: want an error, got nil")
+	}
+}
+
+// TestResolveModel_DirectRoutingRecord: a record whose model is a
+// direct-routing name resolves to its own model part for that provider —
+// by written name or api_keys group — and only for that provider.
+func TestResolveModel_DirectRoutingRecord(t *testing.T) {
+	cfg, err := config.Parse([]byte(`
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://a.example/v1}, api_key: k}
+  - {name: pool, base_url: {openai-completions: https://b.example/v1}, api_keys: {a: ka}}
+models:
+  vm: {endpoints: {openai-completions: [{providers: [p1, pool], models: [m]}]}}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ recModel, provider, want string }{
+		{"p1:vendor/model:free", "p1", "vendor/model:free"},
+		{"pool:m", "pool-a", "m"},
+		{"pool-a:m", "pool-a", "m"},
+	} {
+		got, err := resolveModel(cfg, "openai-completions", tc.recModel, tc.provider)
+		if err != nil || got != tc.want {
+			t.Errorf("resolveModel(%q, %q) = %q, %v; want %q", tc.recModel, tc.provider, got, err, tc.want)
+		}
+	}
+	if _, err := resolveModel(cfg, "openai-completions", "p1:m", "pool-a"); err == nil {
+		t.Error("direct name for p1 replayed against pool-a: want an error, got nil")
 	}
 }
 

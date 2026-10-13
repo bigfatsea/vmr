@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-12 18:00, by pi -->
+<!-- Ver 2026-10-13 08:12, by Claude Opus 5.5 -->
 <!-- keywords: LLM 路由器, LLM 网关, AI agent 网关, agent-first, OpenAI 兼容代理, Anthropic API 代理, 故障切换, 模型路由, 负载均衡, 本地部署, 单二进制, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM 替代, 黑匣子, 审计重放, 行为剖面 -->
 
 # <img src="docs/vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — 无侵入透明路由器与 AI Agent 全生命周期黑匣子
@@ -63,6 +63,7 @@ Task 1: Search codebase and outline implementation
 - **零代码埋点接入**：只需修改 `base_url`，无需修改项目代码或 Tracing SDK。原生支持 OpenAI (`/v1/chat/completions`)、Anthropic (`/v1/messages`) 和 OpenAI Responses (`/v1/responses`) 三大协议入口。
 - **错误类感知 Failover**：智能区分限流、死 Key 与内容拦截；后台独立恢复探针，绝不用真实请求当探针，不拖累并发调用。
 - **Session-Sticky Prompt Cache 保护**：多轮对话自动钉在已预热的端点上，防止故障切换打断供应商 Prompt Cache 造成费用静默飙升。
+- **直连真实模型（可选）**：开启 `direct_routing: true` 后，可用 `provider:model`（如 `cliproxy:gemini-3.8-flash-high`）直接调用配置里已声明的任一真实模型——健康、配额、审计走同一条路径，不绕虚拟模型。见[用户指南](docs/UserGuide.zh.md#直连寻址providermodel)。
 - **字节级透传**：零中介格式翻译、零参数改写，上游新特性上线当天可用；包含 MiniMax `<think>` 剥离与软屏蔽审计追踪（`soft_block_detected`）。
 - **实测过，不是拍脑袋**：覆盖 17 种场景（包含持续慢流并发、配额水位调度、会话粘性以及按 plain / stream / image 独立成本标定），非图片场景 p95 路由开销稳定在 10ms 以内。见 [`loadtest/`](loadtest/)。
 - **实时可观测性**：零内部依赖的轻量级实时指标账本（`internal/livestats`，小时 WAL + 本地 Rollup 归档），TTFT 与产出型 Token 生成速率百分位（p50/p10），以及统一内置控制台（`/status.html`, `/models.html`, `/log.html`, `/help.html`）。
@@ -100,6 +101,7 @@ go build -o vmr ./cmd/vmr
 cp config.minimal.yaml config.yaml   # ~10 行即可起步；完整注解参考见 config.example.yaml
 export DEEPSEEK_API_KEY=sk-...        # minimal 配置引用的 ${ENV}
 ./vmr check -c config.yaml           # 校验配置并打印路由表
+./vmr check -c config.yaml models    # 精简清单：provider → 模型、虚拟模型 → 按优先级的上游
 ./vmr start -c config.yaml           # 前台运行
 
 # 或后台 dev 模式：

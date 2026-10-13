@@ -1,7 +1,10 @@
 // Ver 2026-08-13, by Opus 5
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEndpointLabel(t *testing.T) {
 	if got := EndpointLabel("openai-completions", "acct1", "gpt-5"); got != "openai-completions:acct1:gpt-5" {
@@ -60,5 +63,32 @@ func TestSplitEndpointLabel_InvalidInput(t *testing.T) {
 		if _, _, _, ok := SplitEndpointLabel(c); ok {
 			t.Errorf("SplitEndpointLabel(%q) ok=true, want false", c)
 		}
+	}
+}
+
+func TestProviderModel(t *testing.T) {
+	cases := []struct{ provider, model, want string }{
+		{"cliproxy", "gemini-3.8", "cliproxy:gemini-3.8"},
+		{"openrouter", "z-ai/glm-5.2", "openrouter:z-ai/glm-5.2"},
+		{"ollama", "qwen3:8b", "ollama:qwen3:8b"},
+	}
+	for _, c := range cases {
+		if got := ProviderModel(c.provider, c.model); got != c.want {
+			t.Errorf("ProviderModel(%q,%q) = %q, want %q", c.provider, c.model, got, c.want)
+		}
+		// The first ':' always splits it back, whatever the model holds.
+		prov, model, _ := strings.Cut(c.want, ":")
+		if prov != c.provider || model != c.model {
+			t.Errorf("Cut(%q) = (%q,%q), want (%q,%q)", c.want, prov, model, c.provider, c.model)
+		}
+	}
+}
+
+// Name() and EndpointLabel are one string: what /status and X-VMR-Endpoint
+// show is what the audit log records.
+func TestNameEqualsEndpointLabel(t *testing.T) {
+	e := &Endpoint{AdapterType: "openai-completions", Provider: "or", Model: "z-ai/glm-5.2"}
+	if e.Name() != EndpointLabel(e.AdapterType, e.Provider, e.Model) {
+		t.Errorf("Name() = %q, want it to equal EndpointLabel", e.Name())
 	}
 }

@@ -104,6 +104,24 @@ models:
 	}
 }
 
+// TestAlerts_ConfigErrorIssueIsErrorAlert: a SeverityError Check() issue (a
+// public upstream with an empty api_key) reaches the console as an error
+// alert, not a warning — the console's red badge exists for exactly this.
+func TestAlerts_ConfigErrorIssueIsErrorAlert(t *testing.T) {
+	s, rt, snap := buildAlerts(t, `
+listen: 127.0.0.1:18816
+providers:
+  - {name: p1, base_url: {openai-completions: "https://api.example.com/v1"}, api_key: ""}
+models:
+  vm:
+    endpoints: {openai-completions: [{providers: [p1], models: [m1]}]}
+`)
+	got := s.statusAlerts(snap, time.Now(), rt.QuotaStatus())
+	if len(got) != 1 || got[0].Severity != alertSeverityError || got[0].Kind != alertKindConfig {
+		t.Fatalf("alerts = %+v, want one error-severity config alert", got)
+	}
+}
+
 // TestAlerts_EndpointCooldownAndHalfOpen pins both halves of the endpoint
 // rule: an ACTIVE cooldown alerts (with the causal message), and the
 // half-open state that follows — failures on record, cooldown expired — is

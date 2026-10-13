@@ -1,4 +1,4 @@
-// Ver 2026-09-20 23:41, by Sonnet 5
+// Ver 2026-10-13 08:12, by Claude Opus 5.5
 package main
 
 import (
@@ -37,10 +37,11 @@ func padLabel(label string, width int) string {
 	return label + " "
 }
 
-// endpointKeyWidth is the fixed column an endpoint's "- p=N. provider/model:"
+// endpointKeyWidth is the fixed column an endpoint's "- p=N. provider:model"
 // label (indent included) pads out to, so capabilities=/max_context_tokens=/
 // key=EMPTY values line up the same way checkLine's key column does
-// elsewhere.
+// elsewhere. No trailing ':' terminator: a model tag (ollama's qwen3:8b)
+// would make "provider:model:" ambiguous.
 const endpointKeyWidth = 40
 
 // warn appends the ⚠️ marker used throughout `vmr check` to flag a value
@@ -89,7 +90,8 @@ func orNoneList(ss []string) string {
 // scripting-friendly form vmr.sh uses to locate its own server log without
 // keeping a second copy of the resolution logic. This absorbs the former
 // standalone `vmr dirs` subcommand; the directory values were already part
-// of check's normal summary output below.
+// of check's normal summary output below. "models" prints the compact
+// provider/virtual-model catalog (cmd_check_models.go) instead.
 func cmdCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	path := fs.String("c", "config.yaml", "path to config file")
@@ -98,19 +100,25 @@ func cmdCheck(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		if fs.NArg() > 1 {
-			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache]")
+			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache|models]")
 		}
 		cfg, err := config.Load(*path)
 		if err != nil {
 			return fmt.Errorf("load config: %w", err)
 		}
 		switch fs.Arg(0) {
+		case "models":
+			snap, err := router.BuildSnapshot(cfg)
+			if err != nil {
+				return fmt.Errorf("build routing table: %w", err)
+			}
+			printModelCatalog(os.Stdout, cfg, snap)
 		case "log":
 			fmt.Println(cfg.LogDir)
 		case "cache":
 			fmt.Println(cfg.ImageCacheDir)
 		default:
-			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache]")
+			return fmt.Errorf("usage: vmr check [-c config.yaml] [log|cache|models]")
 		}
 		return nil
 	}
@@ -380,13 +388,13 @@ func printProviderQuota(w io.Writer, cfg *config.Config, p config.Provider) {
 func providerProxyLine(p config.Provider, protocols []string, descFor map[string]providerProxyEntry) string {
 	descs := map[string]bool{}
 	for _, protocol := range protocols {
-		descs[descFor[protocol+"/"+p.Name].Proxy] = true
+		descs[descFor[proxyEntryName(protocol, p.Name)].Proxy] = true
 	}
-	out := descFor[protocols[0]+"/"+p.Name].Proxy
+	out := descFor[proxyEntryName(protocols[0], p.Name)].Proxy
 	if len(descs) > 1 {
 		parts := make([]string, len(protocols))
 		for i, protocol := range protocols {
-			parts[i] = fmt.Sprintf("%s=%s", protocol, descFor[protocol+"/"+p.Name].Proxy)
+			parts[i] = fmt.Sprintf("%s=%s", protocol, descFor[proxyEntryName(protocol, p.Name)].Proxy)
 		}
 		out = strings.Join(parts, ", ")
 	}
@@ -421,7 +429,7 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 			}
 			fmt.Fprintf(w, "  %s:\n", protocol)
 			for _, ep := range route.EffectiveOrder() {
-				key := ep.Provider + "/" + ep.Model
+				key := core.ProviderModel(ep.Provider, ep.Model)
 				var parts []string
 				// capabilities/max_context_tokens live only in model_defaults
 				// (see router.resolveModelCapabilities/resolveModelMaxContextTokens),
@@ -452,17 +460,39 @@ func printModels(w io.Writer, cfg *config.Config, snap *router.Snapshot, issues 
 				if ep.FromFallback {
 					parts = append(parts, "fallback")
 				}
-				label := fmt.Sprintf("    - p=%d. %s:", ep.Priority, key)
+				label := fmt.Sprintf("    - p=%d. %s", ep.Priority, key)
 				line := label
 				if len(parts) > 0 {
 					line = padLabel(label, endpointKeyWidth) + strings.Join(parts, "; ")
 				}
-				endpointKey := protocol + "/" + ep.Provider + "/" + ep.Model
+				endpointKey := core.EndpointLabel(protocol, ep.Provider, ep.Model)
 				if hasIssue(issues, "", name, endpointKey, "endpoint") && !strings.Contains(line, "⚠️") {
 					line = warn(line)
 				}
 				fmt.Fprintln(w, line)
 			}
+		}
+	}
+	printDirectRoutes(w, snap)
+}
+
+// printDirectRoutes lists direct routing's provider:model names per
+// protocol (nothing when direct_routing is off), with the key count when an
+// api_keys group name spans several keys.
+func printDirectRoutes(w io.Writer, snap *router.Snapshot) {
+	if len(snap.Direct) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "=== Direct routes (direct_routing: true) ===")
+	for _, protocol := range fmtutil.SortedKeys(snap.Direct) {
+		fmt.Fprintf(w, "  %s:\n", protocol)
+		for _, name := range fmtutil.SortedKeys(snap.Direct[protocol]) {
+			line := "    - " + name
+			if n := len(snap.Direct[protocol][name].Endpoints); n > 1 {
+				line += fmt.Sprintf(" (%d keys)", n)
+			}
+			fmt.Fprintln(w, line)
 		}
 	}
 }

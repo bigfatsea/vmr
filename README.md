@@ -1,4 +1,4 @@
-<!-- Ver 2026-09-12 18:00, by pi -->
+<!-- Ver 2026-10-13 08:12, by Claude Opus 5.5 -->
 <!-- keywords: LLM router, LLM gateway, AI agent gateway, agent-first, OpenAI-compatible proxy, Anthropic API proxy, LLM failover, model routing, load balancing, self-hosted, local-first, single binary, MiniMax, DeepSeek, OpenRouter, Claude Code, LiteLLM alternative, flight recorder, agent audit, request replay -->
 
 # <img src="docs/vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — Zero-Instrumentation Router & Flight Recorder for AI Agents
@@ -63,6 +63,7 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **Zero Instrumentation**: Drop-in proxy via `base_url` — zero code changes or SDK tracing required. Native OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and OpenAI Responses (`/v1/responses`) ingress.
 - **Error-Class Aware Failover**: Smartly retries across backup endpoints for rate-limits, dead keys, or content blocks; background probes handle endpoint recovery without blocking live traffic.
 - **Session-Sticky Prompt Cache Protection**: Pins multi-turn agent conversations to warm upstream prompt caches, preventing routing from inflating token costs.
+- **Direct Model Addressing (opt-in)**: With `direct_routing: true`, call any real model your config already declares as `provider:model` (e.g. `cliproxy:gemini-3.8-flash-high`) — same health, quota and audit path, no virtual-model detour. See the [User Guide](docs/UserGuide.md#direct-routing-providermodel).
 - **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes evidence-based vendor quirk repairs (MiniMax `<think>` stripping) and audit norm tracking (`soft_block_detected`).
 - **Measured, Not Assumed**: Comprehensive load testing across 17 scenarios (plain, stream, and image regimes, stressing sustained SSE concurrency, quota pacing, and sticky session affinity) with p95 router overhead remaining under 10ms. See [`loadtest/`](loadtest/).
 - **Live Observability**: Zero-dependency live telemetry (`internal/livestats`) with hourly slim WAL, local rollup archives, nearest-rank TTFT and token generation throughput percentiles (p50/p10), and unified built-in CSR console (`/status.html`, `/models.html`, `/log.html`, `/help.html`).
@@ -100,6 +101,7 @@ go build -o vmr ./cmd/vmr
 cp config.minimal.yaml config.yaml   # ~10 lines to start; config.example.yaml is the full annotated reference
 export DEEPSEEK_API_KEY=sk-...        # the ${ENV} the minimal config references
 ./vmr check -c config.yaml           # validate config, print the routing table
+./vmr check -c config.yaml models    # compact catalog: provider → models, virtual model → upstreams by priority
 ./vmr start -c config.yaml           # foreground run
 
 # Or background dev mode via vmr.sh:
