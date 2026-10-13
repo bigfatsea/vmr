@@ -217,3 +217,49 @@ models:
 		t.Errorf("direct off: status=%d body=%s, want 404 naming direct_routing", w.Code, w.Body)
 	}
 }
+
+// TestDirectTree_NestsPerKeyNames: an api_keys group name owns the per-key
+// names it expands to; plain providers stay flat roots; the "" protocol view
+// merges protocols while a protocol view only lists names reachable there.
+func TestDirectTree_NestsPerKeyNames(t *testing.T) {
+	snap := mustSnapshot(t, mustConfig(t, fmt.Sprintf(directShapeYAML, true)))
+	shape := func(ns []*DirectNode) string {
+		var b strings.Builder
+		for _, n := range ns {
+			b.WriteString(n.Name)
+			if n.Keys > 1 {
+				fmt.Fprintf(&b, "(%dk)", n.Keys)
+			}
+			if len(n.Members) > 0 {
+				b.WriteString("[")
+				for i, m := range n.Members {
+					if i > 0 {
+						b.WriteString(",")
+					}
+					b.WriteString(m.Name)
+				}
+				b.WriteString("]")
+			}
+			b.WriteString(" ")
+		}
+		return strings.TrimSpace(b.String())
+	}
+	if got, want := shape(snap.DirectTree("openai-completions")), "fb:z plain:x pool:x(2k)[pool-a:x,pool-b:x]"; got != want {
+		t.Errorf("openai-completions tree = %q, want %q", got, want)
+	}
+	if got, want := shape(snap.DirectTree("anthropic-messages")), "plain:y"; got != want {
+		t.Errorf("anthropic-messages tree = %q, want %q", got, want)
+	}
+	merged := snap.DirectTree("")
+	for _, n := range merged {
+		if n.Name == "plain:x" && len(n.Protocols) != 1 {
+			t.Errorf("plain:x protocols = %v, want only openai-completions", n.Protocols)
+		}
+	}
+	if len(merged) != 4 { // fb:z plain:x plain:y pool:x
+		t.Errorf("merged roots = %d, want 4: %s", len(merged), shape(merged))
+	}
+	if (*Snapshot)(nil).DirectTree("") != nil {
+		t.Error("nil snapshot must return nil")
+	}
+}

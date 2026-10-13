@@ -115,6 +115,72 @@ func (s *Snapshot) DirectNames() []string {
 	return fmtutil.SortedKeys(set)
 }
 
+// DirectNode is one direct-routing name in DirectTree. An api_keys group name
+// ("openrouter_free:m", Keys > 1) owns the per-key names its keys expand to
+// ("openrouter_free-abfs:m", ...) as Members, so a listing can show that they
+// are the same model reached two ways: through the group, or pinned to one key.
+type DirectNode struct {
+	Name      string
+	Provider  string // the part before the first ':'
+	Protocols []string
+	Keys      int // endpoints behind the name when more than one (a group name)
+	Members   []*DirectNode
+}
+
+// DirectTree lists the direct names reachable under protocol ("" = every
+// protocol, with Protocols recording where each is reachable), sorted by name,
+// with per-key names nested under their group name. A per-key name whose group
+// name is absent from the set stays a root. Nil-safe.
+func (s *Snapshot) DirectTree(protocol string) []*DirectNode {
+	if s == nil {
+		return nil
+	}
+	nodes := map[string]*DirectNode{}
+	for _, proto := range fmtutil.SortedKeys(s.Direct) {
+		if protocol != "" && proto != protocol {
+			continue
+		}
+		for name, route := range s.Direct[proto] {
+			n := nodes[name]
+			if n == nil {
+				prov, _, _ := strings.Cut(name, ":")
+				n = &DirectNode{Name: name, Provider: prov}
+				nodes[name] = n
+			}
+			n.Protocols = append(n.Protocols, proto)
+			if k := len(route.Endpoints); k > 1 && k > n.Keys {
+				n.Keys = k
+			}
+		}
+	}
+	var roots []*DirectNode
+	for _, name := range fmtutil.SortedKeys(nodes) {
+		n := nodes[name]
+		if parent := s.directGroupName(n.Name); parent != "" {
+			if g := nodes[parent]; g != nil {
+				g.Members = append(g.Members, n)
+				continue
+			}
+		}
+		roots = append(roots, n)
+	}
+	return roots
+}
+
+// directGroupName is the group-level direct name an expanded api_keys name
+// belongs to ("" for a name that is not a per-key expansion).
+func (s *Snapshot) directGroupName(name string) string {
+	if s.Cfg == nil {
+		return ""
+	}
+	prov, model, _ := strings.Cut(name, ":")
+	p, ok := s.Cfg.ProviderByName(prov)
+	if !ok || p.GroupName() == p.Name {
+		return ""
+	}
+	return core.ProviderModel(p.GroupName(), model)
+}
+
 // unknownModelMessage is Serve's 404 text for a name no route answers. A
 // "provider:model"-shaped name gets a reason instead of only the model
 // list: direct routing is off, or that pair isn't declared under this

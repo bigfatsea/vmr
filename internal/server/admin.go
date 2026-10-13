@@ -128,6 +128,9 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 	if len(qs) > 0 {
 		body["quota"] = qs
 	}
+	if dr := directRoutesStatus(snap); len(dr) > 0 {
+		body["direct_routes"] = dr
+	}
 	if alerts := s.statusAlerts(snap, now, qs); len(alerts) > 0 {
 		body["alerts"] = alerts
 	}
@@ -138,6 +141,32 @@ func (s *Server) adminStatus(w http.ResponseWriter, r *http.Request) {
 		body["image_cache"] = icb
 	}
 	router.WriteJSON(w, http.StatusOK, body)
+}
+
+// directRouteStatus is one direct-routing name for /status. It lives beside
+// the topology, never inside "models": a direct route is a lens over
+// endpoints the topology already lists, not a model of its own (see
+// router/direct.go). An api_keys group name nests its per-key names as members.
+type directRouteStatus struct {
+	Name      string              `json:"name"`
+	Provider  string              `json:"provider"`
+	Protocols []string            `json:"protocols"`
+	Keys      int                 `json:"keys,omitempty"` // >1 when an api_keys group name spans several keys
+	Members   []directRouteStatus `json:"members,omitempty"`
+}
+
+// directRoutesStatus lists every direct-routing name once, with the
+// protocols it is reachable under; empty while direct_routing is off.
+func directRoutesStatus(snap *router.Snapshot) []directRouteStatus {
+	var conv func(ns []*router.DirectNode) []directRouteStatus
+	conv = func(ns []*router.DirectNode) []directRouteStatus {
+		var out []directRouteStatus
+		for _, n := range ns {
+			out = append(out, directRouteStatus{Name: n.Name, Provider: n.Provider, Protocols: n.Protocols, Keys: n.Keys, Members: conv(n.Members)})
+		}
+		return out
+	}
+	return conv(snap.DirectTree(""))
 }
 
 func statusModels(snap *router.Snapshot, now time.Time, h *health.Registry, qs []router.QuotaProviderStatus) (models []modelStatus) {

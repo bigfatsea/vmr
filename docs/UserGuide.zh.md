@@ -522,7 +522,7 @@ providers:
 - **只开放配置已声明的组合**：可寻址集合正好是某个虚拟模型的 `endpoints:` 或 `fallback_endpoints:` 展开出的 (协议, provider, 模型) 三元组；disabled 的 provider 一个都不贡献。直连永远到不了你没写进配置的上游模型，而且一对组合只在它被声明的协议上可达——只在 `openai-completions` 下声明的 `sensenova_free:deepseek-v4-flash` 不能经 `/v1/messages` 访问。想直连一个新模型，把它加进任意一个虚拟模型或 `fallback_endpoints` 即可。
 - **同一条路由管线，只有一个模型**：健康过滤、条件路由、钉住路由请求头、quota 计量和 Sticky Model 与虚拟模型完全一致；冷却中的端点不会被强行放行。直连路由**唯一**不获得的是 `fallback_endpoints` 和任何其他模型——客户端点名了一个模型，失败时返回的就是该上游自己的错误，而不是悄悄落到别处。
 - **`api_keys` 型 provider**：原样书写的名字寻址全部 key（`sensenova_free:deepseek-v4-flash`——多把 key 按配额余量排序并相互 failover）；展开后的 `<name>-<label>` 名字只寻址其中一把 key（`sensenova_free-key_1:deepseek-v4-flash`）。
-- **客户端看到什么**：响应里的 `model` 字段是客户端发来的名字（`cliproxy:gemini-3.8-flash-high`），和每个虚拟模型做的改写一样。`GET /v1/models` 把直连名与虚拟模型一起列出，`owned_by` 填 provider 名；`vmr check` 与启动摘要在 `=== Direct routes ===` 下打印它们。`/status` 拓扑与 `models.html` 仍只列虚拟模型。
+- **客户端看到什么**：响应里的 `model` 字段是客户端发来的名字（`cliproxy:gemini-3.8-flash-high`），和每个虚拟模型做的改写一样。`GET /v1/models` 把直连名与虚拟模型一起列出，`owned_by` 填 provider 名；`vmr check` 与启动摘要在 `=== Direct routes ===` 下打印它们，`api_keys` 组名下的单 key 名缩进一级列在其下（help 页同样如此）。`/status` 拓扑（`models[]`）与 `models.html` 仍只列虚拟模型；直连名放在 `/status` 独立的顶层块 `direct_routes` 里，`/help.html` 读它，在模型表下方展示一个默认折叠的「直连模型」列表。
 - **审计与报表**：审计记录的 `model` 就是直连名，所以 `vmr analyze` 在所有按模型切分的地方把它单列成一行；逐次 attempt 的 provider/模型、定价与 quota 都不受影响。`vmr replay` 直接从名字里解析直连记录的上游模型，无需 `-model`。
 - **重名**：开关打开时，以「provider 名 + `:`」开头的虚拟模型名是加载错误——同一个名字会同时指向两条路由。
 

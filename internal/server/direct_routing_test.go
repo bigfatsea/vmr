@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -72,5 +73,82 @@ func TestDirectRouting_ChatThroughServer(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-VMR-Endpoint"); got != "openai-completions:p2:model-two" {
 		t.Errorf("X-VMR-Endpoint = %q", got)
+	}
+}
+
+// TestDirectRouting_StatusListsRoutes: /status carries the direct names in a
+// top-level direct_routes block (help.html reads it) — never inside the
+// "models" topology — and omits the block while direct_routing is off.
+func TestDirectRouting_StatusListsRoutes(t *testing.T) {
+	u := newUpstream(t)
+	status := func(extra string) map[string]json.RawMessage {
+		ts := newRouterServer(t, twoEndpointYAML(u.srv.URL, u.srv.URL, extra))
+		resp, err := http.Get(ts.URL + "/status")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]json.RawMessage
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	on := status("direct_routing: true")
+	var routes []struct {
+		Name      string   `json:"name"`
+		Provider  string   `json:"provider"`
+		Protocols []string `json:"protocols"`
+	}
+	if err := json.Unmarshal(on["direct_routes"], &routes); err != nil {
+		t.Fatalf("direct_routes: %v (raw %s)", err, on["direct_routes"])
+	}
+	if len(routes) != 2 || routes[0].Name != "p1:model-one" || routes[0].Provider != "p1" ||
+		routes[1].Name != "p2:model-two" || len(routes[0].Protocols) != 1 || routes[0].Protocols[0] != "openai-completions" {
+		t.Errorf("direct_routes = %+v, want p1:model-one then p2:model-two under openai-completions", routes)
+	}
+	if bytes.Contains(on["models"], []byte(`"id":"p1:model-one"`)) {
+		t.Errorf("direct names leaked into the models topology: %s", on["models"])
+	}
+	if _, ok := status("")["direct_routes"]; ok {
+		t.Error("direct_routing off: /status must omit direct_routes")
+	}
+}
+
+// An api_keys group name nests its per-key names as members in /status.
+func TestDirectRouting_StatusNestsPerKeyNames(t *testing.T) {
+	u := newUpstream(t)
+	yaml := `
+listen: 127.0.0.1:0
+direct_routing: true
+providers:
+  - {name: pool, base_url: {openai-completions: ` + u.srv.URL + `}, api_keys: {a: ka, b: kb}}
+models:
+  vm:
+    endpoints:
+      openai-completions:
+        - {providers: [pool], models: [m]}
+`
+	ts := newRouterServer(t, yaml)
+	resp, err := http.Get(ts.URL + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		DirectRoutes []struct {
+			Name    string `json:"name"`
+			Keys    int    `json:"keys"`
+			Members []struct {
+				Name string `json:"name"`
+			} `json:"members"`
+		} `json:"direct_routes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.DirectRoutes) != 1 || out.DirectRoutes[0].Name != "pool:m" || out.DirectRoutes[0].Keys != 2 ||
+		len(out.DirectRoutes[0].Members) != 2 || out.DirectRoutes[0].Members[0].Name != "pool-a:m" || out.DirectRoutes[0].Members[1].Name != "pool-b:m" {
+		t.Errorf("direct_routes = %+v, want one root pool:m (2 keys) with members pool-a:m, pool-b:m", out.DirectRoutes)
 	}
 }

@@ -1078,7 +1078,7 @@ models:
 	on := captureStdout(t, func() {
 		_ = cmdCheck([]string{"-c", writeTempFile(t, "config.yaml", fmt.Sprintf(yaml, "true"))})
 	})
-	for _, want := range []string{"=== Direct routes (direct_routing: true) ===", "    - p1:m\n", "    - pool:m (2 keys)\n", "    - pool-a:m\n"} {
+	for _, want := range []string{"=== Direct routes (direct_routing: true) ===", "    - p1:m\n", "    - pool:m (2 keys)\n", "        - pool-a:m\n", "        - pool-b:m\n"} {
 		if !strings.Contains(on, want) {
 			t.Errorf("vmr check output missing %q:\n%s", want, on)
 		}

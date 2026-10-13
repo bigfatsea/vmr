@@ -69,6 +69,9 @@ var helpStringsEN = map[string]string{
 	"trouble-5":            `<p>• <b>All requests suddenly fail over</b> → check <a href="/status.html#models">endpoint health</a> for cooldowns, and <a href="/status.html#quota">Quota Budgets</a> for a saturated gate.</p>`,
 	"trouble-6":            `<p>• <b>A request just failed and you want to know why</b> → <a href="/status.html#failures">Overview → Recent Failures</a> lists the last failures with the router's own error class; the class chips double as a filter when one class floods the buffer.</p>`,
 	"no-models":            "(no models configured)",
+	"direct-title":         "direct routes",
+	"direct-note":          `Also callable as <code>provider:model</code> (<code>direct_routing</code> is on): the real upstream model, no virtual-model try-order and no fallback. Only models the config already declares are listed.`,
+	"direct-keys":          "{0} keys, tried in quota-headroom order",
 	"unconstrained":        "unconstrained",
 	// Rephrased without the possessive so the value is safe inside a
 	// single-quoted JS string literal (the tokens live in page script).
@@ -145,6 +148,9 @@ var helpStringsZH = map[string]string{
 	"trouble-5":            `<p>• <b>所有请求突然全部故障转移</b> → 到 <a href="/status.html#models">端点健康</a> 查看 cooldown，到 <a href="/status.html#quota">Quota Budgets</a> 查看是否配额耗尽。</p>`,
 	"trouble-6":            `<p>• <b>请求刚失败，想知道为什么</b> → <a href="/status.html#failures">Overview → Recent Failures</a> 列出最近的失败及其路由错误类别；当某一类错误刷屏时，类别芯片可点击过滤。</p>`,
 	"no-models":            "（尚未配置模型）",
+	"direct-title":         "直连模型",
+	"direct-note":          `也可直接用 <code>provider:model</code> 调用（已开启 <code>direct_routing</code>）：直达真实上游模型，不走虚拟模型的尝试顺序，也不挂 fallback。仅列出配置里已声明的模型。`,
+	"direct-keys":          "{0} 把 key，按额度余量依次尝试",
 	"unconstrained":        "不限制",
 	"m-title-ctx":          "该虚拟模型所有 endpoint 中最大的 max_context_tokens",
 	"m-title-caps":         "该虚拟模型所有 endpoint 能力的并集——不代表每个 endpoint 都同时具备；实际路由会挑选真正支持该请求所需能力的 endpoint",

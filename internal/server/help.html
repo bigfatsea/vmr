@@ -35,6 +35,7 @@
 .card table.c td{white-space:normal}
 .mrow{padding:3px 0;font-size:var(--fs-sm)}
 .mrow b{font-family:var(--font-mono);color:var(--text-bright)}
+.mrow-nest{margin-left:1.6em}
 /* snippet blocks — the highlight classes the fill engine anchors on */
 pre.snippet{background:var(--well);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 14px;font-family:var(--font-mono);font-size:var(--fs-sm);line-height:1.6;overflow-x:auto;margin:10px 0 4px;white-space:pre}
 pre.snippet code{font-family:inherit}
@@ -437,6 +438,7 @@ const I18N = {
   upTime: '{{T:uptime}}',
   footerId: '{{T:footer-id}}',
   toastOk: '{{T:toast-ok}}',
+  directKeys: '{{T:direct-keys}}',
 };
 function fmtT(s, ...args) {
   args.forEach((a, i) => { s = s.split('{' + i + '}').join(a); });
@@ -519,6 +521,7 @@ function renderModels(data) {
     (m.capabilities || []).forEach(c => e.caps.add(c));
     if (m.max_context_tokens > e.ctx) e.ctx = m.max_context_tokens;
   });
+  const direct = renderDirectRoutes(data.direct_routes);
   box.innerHTML = Array.from(byName.values()).map(m => {
     const badges = Array.from(m.protocols).map(p => {
       const def = PROTO_META[p] || { badge: 'b-dim' };
@@ -533,7 +536,30 @@ function renderModels(data) {
     return '<div class="mrow"><b>' + esc(m.id) + '</b> ' + badges +
       ' <span class="t-dim">· <span title="{{T:m-title-ctx}}">' + esc(ctx) + '</span>' +
       ' · <span title="{{T:m-title-caps}}">' + esc(caps) + '</span></span></div>';
-  }).join('');
+  }).join('') + direct;
+}
+
+// Direct routes (provider:model) sit in their own collapsed block under the
+// virtual models: they are a lens over the same endpoints, not extra models,
+// and a long list must not push the connection check off the screen. The
+// block only exists while direct_routing is on (/status omits it otherwise).
+function renderDirectRoutes(routes) {
+  if (!routes || !routes.length) return '';
+  const badgesOf = r => (r.protocols || []).map(p => {
+    const def = PROTO_META[p] || { badge: 'b-dim' };
+    return '<span class="badge ' + def.badge + '">' + esc(p) + '</span>';
+  }).join(' ');
+  // An api_keys group name lists its per-key names one level under it: same
+  // model, reached through the group (every key, failover between them) or
+  // pinned to a single key.
+  const row = (r, nested) => {
+    const keys = r.keys > 1 ? ' <span class="t-dim">· ' + fmtT(I18N.directKeys, r.keys) + '</span>' : '';
+    return '<div class="mrow' + (nested ? ' mrow-nest' : '') + '"><b>' + esc(r.name) + '</b> ' + badgesOf(r) + keys + '</div>' +
+      (r.members || []).map(m => row(m, true)).join('');
+  };
+  const total = routes.reduce((n, r) => n + 1 + (r.members || []).length, 0);
+  return '<details class="mrow"><summary>{{T:direct-title}} (' + total + ')</summary>' +
+    '<div class="t-dim">{{T:direct-note}}</div>' + routes.map(r => row(r, false)).join('') + '</details>';
 }
 
 function showAuthPrompt() {

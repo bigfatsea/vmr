@@ -487,12 +487,16 @@ func printDirectRoutes(w io.Writer, snap *router.Snapshot) {
 	fmt.Fprintln(w, "=== Direct routes (direct_routing: true) ===")
 	for _, protocol := range fmtutil.SortedKeys(snap.Direct) {
 		fmt.Fprintf(w, "  %s:\n", protocol)
-		for _, name := range fmtutil.SortedKeys(snap.Direct[protocol]) {
-			line := "    - " + name
-			if n := len(snap.Direct[protocol][name].Endpoints); n > 1 {
-				line += fmt.Sprintf(" (%d keys)", n)
+		for _, n := range snap.DirectTree(protocol) {
+			line := "    - " + n.Name
+			if n.Keys > 1 {
+				line += fmt.Sprintf(" (%d keys)", n.Keys)
 			}
 			fmt.Fprintln(w, line)
+			// Per-key names sit one level under their api_keys group name.
+			for _, m := range n.Members {
+				fmt.Fprintln(w, "        - "+m.Name)
+			}
 		}
 	}
 }
