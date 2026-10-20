@@ -217,7 +217,7 @@ type Registry struct {
 	// lock/lockErr guard the advisory .vmr-quota.lock (store.go's
 	// ensureDirLock/Close): a second process pointing at the same log_dir
 	// must never read-modify-write the same vmr-quota.json — see
-	// internal/livestats' identical .vmr-stats.lock for the reasoning this
+	// internal/stats' identical stats/.lock for the reasoning this
 	// mirrors. Acquired lazily by Flush; while held (lock != nil),
 	// subsequent Flushes reuse it until Close().
 	lock    *os.File

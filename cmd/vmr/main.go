@@ -52,6 +52,8 @@ func main() {
 		err = cmdReplay(os.Args[2:])
 	case "diff":
 		err = cmdDiff(os.Args[2:])
+	case "stats":
+		err = cmdStats(os.Args[2:])
 	case "smoke":
 		err = cmdSmoke(os.Args[2:])
 	case "diagnose":
@@ -77,5 +79,6 @@ func usage() {
        vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]
        vmr replay [-c config.yaml] {-provider NAME | -print} [-line N | -ts TS | -req COORD] [flags] [audit.jsonl|.jsonl.zst|dir]   (the file argument is required for -line/-ts; optional for -req, which can search cwd/log_dir for its coordinate's basename)
        vmr diff [-c config.yaml] <coordA> <coordB>   (structural comparison between two audit records)
+       vmr stats rebuild [-c config.yaml] [-dir DIR] [-from DAY] [-to DAY] [-today] [-force] [-dry-run] [audit.jsonl|glob]...   (rebuild closed statistics days from the audit log; safe next to a running vmr — -today also rebuilds today and needs vmr stopped)
        vmr version`)
 }

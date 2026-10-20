@@ -12,8 +12,8 @@ import (
 )
 
 // lockFileName is quota's advisory-lock file inside log_dir. Separate from
-// audit's .vmr-audit.lock and livestats' .vmr-stats.lock on the same
-// rationale livestats already documents: with -audit=false the audit lock is
+// audit's .vmr-audit.lock and the statistics store's stats/.lock on the
+// same rationale internal/stats documents: with -audit=false the audit lock is
 // never taken, and "keep no request bodies but still meter quota" is a
 // first-class scenario — quota must not parasitize a lock that scenario
 // deliberately skips.
@@ -27,7 +27,7 @@ const lockFileName = ".vmr-quota.lock"
 // file must stay open for the Registry's lifetime — the lock dies with the
 // fd; there is no separate Close, since the process holding it exits (and
 // the kernel drops the flock) at the same time the lock would otherwise be
-// released. Same mechanism as internal/livestats' dir lock, kept a private
+// released. Same mechanism as internal/stats' dir lock, kept a private
 // copy for the same reason: no cross-package dependency for six lines of
 // syscall.
 func acquireDirLock(dir string) (*os.File, error) {

@@ -1,4 +1,4 @@
-<!-- Ver 2026-10-13 17:40, by Sonnet 5.5 -->
+<!-- Ver 2026-10-20 14:05, by Claude Sonnet 5.5 -->
 
 # <img src="vmr-logo.svg" alt="vmr" width="24" height="28" align="absmiddle" style="vertical-align: middle; margin-right: 4px;" /> vmr — 用户指南
 
@@ -26,10 +26,10 @@
   - [Sticky Model 会话亲和](#sticky-model-会话亲和)
   - [额度感知路由 Quota-Aware Routing](#额度感知路由-quota-aware-routing)
   - [直连寻址（provider:model）](#直连寻址providermodel)
-- [内置控制台与实时遥测](#内置控制台与实时遥测)
+- [内置控制台与请求统计](#内置控制台与请求统计)
   - [控制台页面](#控制台页面)
+  - [请求统计](#请求统计)
   - [配置在线编辑](#配置在线编辑)
-  - [实时遥测 API (GET /stats)](#实时遥测-api-get-stats)
 - [审计与报表](#审计与报表)
   - [审计日志](#审计日志)
   - [用量与成本报表](#用量与成本报表)
@@ -528,25 +528,52 @@ providers:
 
 为什么默认关闭：它让任何能调用 vmr 的客户端绕过虚拟模型编码的尝试顺序（例如免费账号先于付费账号）。单人实例直接打开；共享实例请想清楚再开。
 
-## 内置控制台与实时遥测
+## 内置控制台与请求统计
 
-除离线审计日志分析外，vmr 还在路由主进程内集成了零内部依赖的实时遥测引擎（`internal/livestats`），并通过统一内置控制台（CSR 架构，`//go:embed` 嵌入单二进制，零外部 CDN 依赖）提供开箱即用的实时可视化运维体验。所有控制台页面共享统一的 API Key 鉴权弹窗与 `localStorage` 凭据（`VMRAuth`）。
+vmr 直接从运行中的二进制提供统一的内置浏览器控制台（`//go:embed`，零外部 CDN 依赖），背后是两个进程内数据源：路由的进行中请求注册表（「现在正在发生什么」）与请求统计存储（「过去发生了什么」）。所有控制台页面共享同一个 API Key 鉴权弹窗与 `localStorage` 凭据（`VMRAuth`）。
 
 ### 控制台页面
 
-- **概览大屏 Overview (`GET /status.html`)**：核心运行大屏。顶部状态条实时展示并发度、总请求数、Token 吞吐（含 Prompt 缓存命中率）与端点健康度；**正在执行请求（Live Requests）** 实时列出活动与排队中的请求（首列为单调递增序列号 Seq，其后为 State / Elapsed / Caller / Model / Provider : Model / Attempts / TTFT / Tok in / Tok out，支持 >5s 流式卡顿告警；已结束的请求整行置灰，直至被挤出槽位）；按提供商与模型的**性能分位表**基于全局最近 300 条请求呈现实际数据（支持 last 10 / 30 / 100 / 300 窗口切换，按 Requests 数量倒序排列）；纯 SVG **流量与用量图表**将 fresh in、cache write、cache read、tok out 单柱多层堆叠呈现，支持 12h / 24h / 3d / 7d 范围无缝切换，并附带模型和调用方分组消耗；底部提供默认折叠的**近期失败明细（Recent Failures）**（24 小时内至多 100 条错误）。并发与 Live Requests 采用自适应快轮询（活跃时 ~2s，空闲时 15s，切到后台暂停）；整页随 5 分钟倒计时时钟自动刷新。
-- **模型与配额 Models (`GET /models.html`)**：拓扑与配额配置大屏。展示每条账号的 **配额预算（Quota Budgets）**（配置限额、已用进度、Headroom 比值、24h 流量占比与重置倒计时），以及按协议分表呈现的**虚拟模型与端点拓扑（Virtual Models & Endpoint Topology）**（每个协议一张独立表格，各端点展示优先级 P0/FB 区分、健康度、Headroom 与上下文窗口/能力芯片）。跟随 5 分钟倒计时刷新，不进行高频轮询。
-- **实时终端日志 Log (`GET /log.html`)**：纯宽屏实时日志终端，基于 `GET /log` 保持长连接接收服务端标准日志（相当于浏览器中的 `tail -f`）。工具栏提供日志级别芯片过滤、子串搜索高亮、⌘P 暂停/恢复、一键拷贝与平滑自动滚动交接（"↓ N new" 提示）。
-- **Agent 配置向导 Help (`GET /help.html` 与 `GET /help.zh.html`)**：针对主流 AI 编程助手与 Agent（Claude Code, Codex, OpenClaw, OpenCode, Cursor, Hermes, Pi Agent, WorkBuddy 等）的折叠式向导，包含一键复制的各协议 Base URL，以及从 `/status` 动态拉取的模型与协议矩阵，支持在线连通性测试。
-- **配置编辑器 Config (`GET /config.html`)**：配置在线编辑入口（opt-in，见下文[配置在线编辑](#配置在线编辑)）——在原始配置文件之上的文本域编辑器，提供 Validate 与 Save & apply 按钮，以及由响应头驱动的时效/重载状态徽标。
+- **概览 Overview（`GET /status.html`）**：现在怎么样，以及最近一段时间怎么样。上半部分是实时：指标带——**In flight**（运行数 / 并发上限、每个槽位一个小方块、排队数）、**Endpoints** 健康、**Live requests**（每个进行中的请求一行：调用方 → 模型、已耗时，流式响应超过 5 秒没有上游字节时出现红色 *stalled*，另有 *queued* 与故障转移标记；卡住的排最前，固定预留三行所以页面不会跳动；空闲时显示最近结束的那个请求）——加一行资源状态。完整的 **进行中请求（Live Requests）** Slot 表（序号、状态、已耗时、调用方、模型、Provider : Model、尝试次数、TTFT、token 估计；已结束的行冻结并变灰直到被挤出）收在「table」按钮后面，不会自己展开，并记住你上次是否打开。下半部分是统计仪表盘：一个时间范围（1h · 6h · 12h · today · 1d（默认）· 3d · 7d · 30d）、一组过滤条件（调用方、端点、虚拟模型——在 Breakdown 表里点名称加入，点标签上的 `=` 切换为 `≠`）与对比开关（所有范围都对比「同一范围向前一个周期」：1h 对上一个小时、7d 对上一个 7 天；today 是一个日历日，所以对比昨天到同一时刻），所有面板共用，并写进 URL：头部 4 张卡（Requests、Tokens、Latency——TTFT p50——与 Reliability，每张带趋势线），环比徽标中「量」的变化用中性灰、质量指标分绿红、噪声范围内显示「≈」；**Activity**（请求按调用方（默认）/ 端点 / 状态（ok / canceled / error）堆叠，或 token 按调用方 / 端点 / token 类型堆叠；图下 faults 轨标出有取消或失败的时间桶；token 视图默认隐藏 cache read 以便看清其他分量；点柱子列出该桶的请求）；**Composition**（token 去向，以及流式 / 带工具 / 带图片请求的请求占比与 token 占比）；**Breakdown**（调用方、端点、虚拟模型三个标签页的同一张表，`p50 / p90` 成对列，token 明细列组，相对上一周期的 Δ 请求，行尾列出该行的请求）；**Speed**（Tok/s、TTFT、耗时三个小图，粒度比计数粗一档；大数字是中位数 p50，虚线是尾部——TTFT 与耗时看 p90，表示 90% 的请求不超过它；Tok/s 看 p10，表示 90% 的请求至少达到这个速率）；**Reliability**（错误、取消、failover 救回数、失败类别、调用方取消前等了多久——取消集中在恰好 60 s / 90 s 时会提示这是调用方超时——以及失败明细）；**Usage pattern**（星期 × 小时的每小时平均请求数热力图，仅 7d / 30d）。统计不可用时，仪表盘显示原因并提供重试，上面的「此刻」部分照常渲染；转发了但没有 token 记录的请求（审计记录早于 token 盖章）不计入 token 数字，Tokens 卡片会注明条数，这些合计应当按下限来读。进行中请求与并发区按自适应节奏轮询 `/status/live`（有请求时 1 秒、空闲 15 秒、页签隐藏时暂停）；仪表盘随 5 分钟整页刷新。「Explore」把同样的范围与过滤带到统计页，处理面板回答不了的问题。
+- **统计 Stats（`GET /stats.html`）**：分析，见[请求统计](#请求统计)。
+- **模型 Models（`GET /models.html`）**：额度预算（额度、使用进度、Headroom、24 小时请求占比、重置时间）与按协议分表的虚拟模型与端点拓扑（优先级、provider:model、健康状态、Headroom、24 小时请求数及在虚拟模型内的占比、上下文窗口 / 能力）。随同一个 5 分钟时钟刷新。
+- **终端日志 Log（`GET /log.html`）**：全宽实时终端，流式显示进程日志（`GET /log`），带级别筛选、子串搜索高亮、⌘P 暂停、复制，以及「↓ N new」提示。
+- **配置向导 Help（`GET /help.html` 与 `GET /help.zh.html`）**：主流 Agent 框架的接入片段，可复制的各协议 Base URL，以及从 `/status` 实时读取的模型表。
+- **配置编辑器（`GET /config.html`）**：在线配置编辑界面（需显式开启，见下文[配置在线编辑](#配置在线编辑)）。
 
-### 实时遥测 API (GET /stats)
+### 请求统计
 
-`GET /stats` 提供受 `api_keys` 保护的 JSON 遥测接口：
-- **并发与在途状态**：实时并发槽位（`limit`/`in_flight`/`waiting`），以及进行中请求的锁无关流式里程碑打点（`sent_at`, `first_byte_at`, `last_byte_at`, `est_out`）。
-- **历史归档汇总**：按小时滚动统计（默认 48h，可通过 `?range=24h|3d|7d` 切换）与本地日历日汇总，由磁盘轻量 WAL（`vmr-stats-YYYYMMDD-HH.jsonl`，0600）与追加式 Rollup 文件（`vmr-stats-rollup.jsonl`）持久化。
-- **性能环形缓冲**：按 Provider 记录最近 10/100 次调用的最近邻分位点（TTFT p50/p90）以及 Token 产出生成速率（`toks` p50/p10，低于 50ms 的脉冲样本自动过滤），并由服务端自动计算多端点合并的 `overall` 总体分位。
-- **近期失败环**：纯内存记录最近至多 100 次失败或取消请求的终态端点与权威 `error_class` 标签。
+每个通过协议预检的请求都记为一个**事件**：到达时间、虚拟模型、协议、是否流式、调用方标签、结局、HTTP 状态码、错误类别、尝试次数、实际服务的端点（全部失败时为最后尝试的端点）、耗时、TTFT、四分量 token，以及是否带工具定义或图片。不记录任何请求或响应正文。事件存放在 `<log_dir>/stats/`，每个本地日历日一个 JSONL 文件（`YYYY-MM-DD.jsonl`，已过完的天压缩为 `.jsonl.zst`），文件 0600、目录 0700，永久保留——审计日志按保留期清理（缺省 90 天），统计不会。`-audit=false` 时统计照常工作。所有数字都在查询时从这些事件现算，所以任意时间范围、粒度、分组与过滤都可以事后再问。
+
+**统计页**（`/stats.html`）：
+- **视图**：Traffic、Tokens、Performance（只看成功请求）、Reliability、Callers——每个视图只是下面这些控件的一组预设；Custom 保留你当前的设置。
+- **范围**：1h / 6h / 12h / 1d / 3d / 7d / 30d、按天自定义起止，或「最近 10 / 30 / 100 / 300 个请求」。单次查询跨度最多 90 天；历史上任何一段 90 天都可以查。
+- **粒度**（`auto`、1m … 1d）、最多两个**分组**维度、**过滤**（任意维度的 `=` / `≠`；点击表格里的维度格子即可添加）、**指标**（多选），以及**与上一周期对比**。
+- **图表**：一个指标，每组一条线（前 8 组）。**表格**：分组 × 指标，带合计行，可排序；行尾「events」列出这一行背后的请求。
+- 全部状态都在 URL hash 里，收藏链接就是保存视图。
+
+**数字怎么算**——三类样本，绝不混算：
+- *请求类*（`req`、`ok`、`err`、`canceled`、`err_rate`、`cancel_rate`、`failover_rate`、`share_req`）：全部记录的请求。200 已经发出之后被截断的响应（错误类别 `truncated`）按错误计，尽管审计记录的 outcome 只看状态码、写的是 ok。
+- *用量类*（`tok_fresh`、`tok_cache_write`、`tok_cache_read`、`tok_out`、`tok_prompt`、`tok_total`、`cache_hit`、`share_tok`）：转发出去的请求，包括转发后被客户端取消的——这些 token 真实花掉了（与配额计量口径一致）。`tok_fresh` 是净输入；`tok_prompt` = 净输入 + 缓存写入 + 缓存读取。
+- *速度类*（`dur_*`、`ttft_*`、`toks_*`）：只算成功且转发的请求——失败请求的耗时没有意义。**TTFT 与 Tok/s 只对流式请求有定义**（JSON 响应一次性返回，没有首字）；Tok/s 是输出 token 除以首字之后的时间，短于 50 ms 的生成区间作为突发噪声剔除。分位数是精确的 nearest-rank。
+
+**统计接口**（与 `/status` 同样需要鉴权）：
+- `GET /stats/query` —— `from` / `to`（`2026-10-01`、RFC3339，或 `-30m` / `-24h` / `-7d` / `today` / `now`；缺省近 7 天）或 `last=N`；`step`（缺省 `none`，可选 `auto`、`1m` `5m` `15m` `1h` `6h` `1d`——桶太多时自动放粗，实际粒度会回显）；`group`（最多 3 个维度，逗号分隔）；可重复的 `where=dim:v1|v2` 或 `where=dim!v1|v2`；`metrics`；`top`（缺省 20，其余合并为 `(other)`）；`compare=prev`（同一范围向前平移它自身的长度）、`day` 或 `week`（同一墙钟范围提前 1 / 7 个日历日——在统计页用它们做钟点对齐的同比）。`where` 值里的字面 `|` 与 `\` 写成 `\|` 与 `\\`。`meta.tokens_unknown` 是转发了但没有 token 记录的请求数。返回 `columns`、按列位置排列的 `rows`、整个窗口的 `totals`、规范化后的 `query` 与 `meta`。示例：`curl -H "Authorization: Bearer $KEY" 'http://127.0.0.1:8800/stats/query?from=-7d&group=endpoint&metrics=req,err_rate,ttft_p90'`。
+- `GET /stats/events` —— 过滤条件背后的原始事件（`from` / `to` / `where` / `limit`），按时间倒序；给了 `from` 时只读取该范围覆盖的那几天，所以历史上任何时间点都能下钻。
+- `GET /stats/schema` —— 全部维度与指标及其说明，以及查询上限。
+
+维度：`vmodel`、`protocol`、`endpoint`（provider:model；为空表示从未路由）、`provider`、`model`、`key_label`、`client`、`stream`、`outcome`、`error_class`、`status`、`attempts`（0 / 1 / 2 / 3+）、`forwarded`、`has_tools`、`has_image`、`hour_of_day`、`weekday`。
+
+**补历史**：`vmr stats rebuild` 用与线上相同的投影，从审计日志重算已过完的天。缺省它不碰今天的文件，按天原子替换，所以可以在 vmr 运行时执行，不需要重启；事件按完成的那一天归档，与线上一致。`-today` 额外重建今天，但只能在 vmr 停止时用（它需要统计目录的锁）：停旧进程、`-today` 重建、启动新进程，升级当天不留空洞。运行中的实例在下一次查询时就会读到重建后的数据。首次部署的典型步骤：
+
+```bash
+./vmr stats rebuild -c config.yaml -dry-run   # 每天的审计记录数与将写出的事件数
+./vmr stats rebuild -c config.yaml            # 补齐所有还没有统计文件的已过完的天
+# 部署后第二天起：重写部署当天（当天的文件只有升级之后的事件）
+./vmr stats rebuild -c config.yaml -force -from 2026-10-20 -to 2026-10-20
+```
+
+能补到多早取决于审计日志的保留期。vmr 开始盖章 token 与 forwarded 标记之前写出的记录，重建后没有 token 记录（按未知算，不是 0）、forwarded 走启发式判断。旧版统计账本的文件（`log_dir` 下的 `vmr-stats-rollup.jsonl`、`vmr-stats-YYYYMMDD-HH.jsonl`、`.vmr-stats.lock`）不再读取；vmr 启动时会列出它们一次，是否删除由你决定。页面之外的临时分析可以直接读这些 JSONL 文件——用 `jq`，或者例如 `duckdb -c "select model, count(*) from read_json('<log_dir>/stats/*.jsonl*') group by 1"`。
 
 ### 配置在线编辑
 
@@ -776,11 +803,15 @@ models:
 | `GET /v1/models` | Virtual Model 列表；开启 `direct_routing` 时附带 `provider:model` 直连名（两种 SDK 均可解析） |
 | `GET /health` | 只回答存活：`{"status":"ok","time":…,"uptime_seconds":…}`。**不需要凭证，不限来源地址**——容器探针、反向代理、外部监控唯一一个不需要 API key、也不需要来自 127.0.0.1 就能访问的端点。它返回当前时间与 uptime 而不是固定的 `ok`，是为了让被缓存的 200 与真实的 200 可区分。只做 liveness、不做 readiness：所有上游全挂时它仍然返回 200，因为重启路由器修不好上游故障——需要 readiness 请读 `/status` 的健康段。这里不含任何实例信息，那是下一行的职责 |
 | `GET /status` | 进程身份与执行环境（pid/listen/版本/工作目录/可执行路径/uptime，以及 `base_urls`：各协议的客户端入口地址——都是 `<scheme>://<host>/v1/`——从请求本身回显（Host 头 + 是否 TLS）、不是从 `listen` 推导，你用什么地址问的就该用什么地址配客户端）、配置新鲜度（mtime/stale/reload/issues）、并发节流、系统资源（内存/goroutines/磁盘余量）、实时流量统计（请求/tokens/sticky）、每个 虚拟模型 × 协议 一条 `models`数组项，含 `capabilities`（跨端点并集；空数组 = 不限制）、`max_context_tokens`（跨端点最大值；0 = 不限制）与逐端点健康（含各端点生效的能力/上下文上限）——让把 custom model 指向 vmr 的 Agent 能直接读出上下文长度与能力——以及实时配额（受 `api_keys` 鉴权保护）——下文的 `vmr status` 是这份数据的 CLI 前端 |
-| `GET /status.html` | 浏览器控制台主页（**Overview**）：vitals 指标带（并发 / 请求 / tokens / 端点健康）加一行系统状态、活动的 **进行中请求（Live Requests）** 表（首列 Seq，其后为 State / Elapsed / Caller / Model / Provider : Model / Attempts / TTFT（附带 >5s 卡顿告警）/ Tok in / Tok out，已结束请求整行置灰）、基于全局最新 300 条请求的性能分位（支持 last 10 / 30 / 100 / 300 窗口切换，按 Requests 数量倒序排列）、12h / 24h / 3d / 7d 时间窗统辖的流量与用量区（SVG 单柱四层堆叠 fresh in / cache write / cache read / tok out，含请求折线、错误标记与悬停明细，附按 Provider/Model 和按 Caller 用量表），以及页面底部默认折叠的 **近期失败（Recent Failures）** 表。整页主体按单一 5 分钟倒计时时钟刷新（点头部倒计时立即刷，标签页隐藏时暂停——暂停态可见）；Live Requests、Recent Failures 与并发 vitals 由前端自适应轮询单独驱动（有在跑或排队请求时 ~2 秒一拍，空闲退避至 15 秒，标签页隐藏停拍）。头部告警 pill 只承载可操作状态（配置问题、冷却中的端点、濒临耗尽的配额）；所有控制台页面共用同一套 API Key 流程；零外部 CDN 依赖 |
+| `GET /status.html` | 浏览器控制台主页（**Overview**）：指标带（并发、端点健康、逐请求一行的进行中摘要）与一行资源状态，**进行中请求（Live Requests）** Slot 表（按需展开的抽屉），以及统计仪表盘——头部指标卡、Activity、Composition、Breakdown、Speed、Reliability、Usage pattern——共用一个写进 URL 的范围与过滤。实时部分按自适应节奏轮询 `/status/live`（活跃 1 秒、空闲 15 秒、隐藏时暂停），其余随 5 分钟时钟刷新。页头告警只列可操作状态；所有控制台页面共用同一套 API Key 流程；零外部 CDN 依赖 |
+| `GET /stats.html` | 浏览器控制台 **Stats** 页：对请求统计做任意范围（单次 ≤ 90 天）、粒度、分组、过滤与指标的分析，带图表、可排序的合计表、下钻到具体请求、与上一周期对比；状态保存在 URL hash 里。见[请求统计](#请求统计) |
 | `GET /models.html` | 浏览器控制台 **Models** 页：配额预算（额度/已用/进度/headroom/24h 份额/重置时间）与按协议分表的虚拟模型 → 端点拓扑（每个协议一张独立表格，展示优先级层级、provider:model、健康状态、账户级 headroom、24h 流量份额、上下文窗口/能力），含统一展示的 Fallback 端点。两张表都是相对静态的配置/拓扑事实，整页只跟随与 Overview 相同的 5 分钟倒计时刷新，不做自适应快轮询 |
-| `GET /stats` | 实时与历史请求统计 JSON：并发门计数（`limit`/`in_flight`/`waiting`）、进行中请求明细（排队/运行中、调用方、上游端点、流式逐块里程碑、卡死秒数）、逐小时（默认近 48h；`?range=24h\|3d\|7d` 放宽尾窗，上限 7d 是刻意的）/ 逐天历史聚合、按物理模型维度的累计指标（`by_provider_model[]`）、内存中跨端点全局不分组的最新 300 条完成请求（`recent_requests[]`，供控制台 Performance 视图按全局最新 10/30/100/300 条请求动态切片与倒序呈现）、`overall` 全局窗口块（基于全局环计算分位数与吞吐），以及最近 24 小时内（最多 100 条）失败/取消请求的 `recent_errors` 环（带路由半区盖章的 `error_class`）——按独立的 `client_key_tag` 和上游 `key_label` 维度分组（受 `api_keys` 鉴权保护）。token 的 `in` 是 **fresh input**（不含 cache_read/cache_write——`in + cache_read + cache_write` 才是上游报告的总 prompt）。并发与 in-flight 每次读实时算；历史聚合段读缓存数秒（按 range 分键），多个看板同时轮询只算一次聚合。内存 rollup 是近 7 天滑动窗口（7 个整日历天 + 当天）——更早的行留在只追加的 rollup 文件里归档，但不加载、不返回，所以 `by_*` 累计是滚动近 7 天口径，`/stats` 成本不随部署年限增长（更久的历史交给 `vmr analyze`）。`-audit=false` 下照常可用（该模式不缓冲任何请求正文） |
+| `GET /stats/query` | 请求统计查询（需鉴权）：时间范围或最近 N 条、粒度、最多 3 个分组维度、`where` 过滤、指标、Top-N、与上一周期对比。返回列、行、合计与规范化后的查询。`GET /stats` 本身重定向到 `/stats.html` |
+| `GET /stats/events` | 过滤条件背后的原始统计事件，按时间倒序（需鉴权） |
+| `GET /stats/schema` | 统计的维度与指标及说明，以及查询上限（需鉴权） |
+| `GET /status/live` | 控制台轮询的进行中状态（需鉴权）：并发门（`limit`/`in_flight`/`waiting`）、各 provider 并发、进行中请求（排队/运行中、调用方、端点、流式逐块里程碑、token 估计）与 `recently_ended` 终态快照。`-audit=false` 下照常工作 |
 | `GET /log` | 进程实时控制台日志，以永不关闭的 `text/plain` 流输出——一行日志对应一行输出，与 stderr 逐字节一致：先回放最近若干行，再持续跟随新行，等于浏览器里的 `tail -f`。与 `/status` 一样受 `api_keys` 鉴权保护。无任何查询参数；回放窗口是固定的内存环形缓冲（最近约 512 行），空闲连接每 30 秒收到一个保活空行。这是 access log 视角（路由决策、token 用量、failover），不是 audit JSONL |
-| `GET /log.html` | 浏览器控制台 **Log** 页：共享控制台骨架上的满宽终端——工具条（level 芯片、子串过滤与命中高亮、⌘P 暂停、Copy view）位于自动换行日志区上方——自行打开 `/log` 并使用共用的已存 Key，自动滚底在上翻时交给 "↓ N new" 芯片，断线时由独立横幅提供重连按钮；底部状态条显示 `N shown / M lines`。进行中请求与近期失败表在 Overview 页，不在这里 |
+| `GET /log.html` | 浏览器控制台 **Log** 页：共享控制台骨架上的满宽终端——工具条（level 芯片、子串过滤与命中高亮、⌘P 暂停、Copy view）位于自动换行日志区上方——自行打开 `/log` 并使用共用的已存 Key，自动滚底在上翻时交给 "↓ N new" 芯片，断线时由独立横幅提供重连按钮；底部状态条显示 `N shown / M lines`。进行中请求与失败明细在 Overview 页，不在这里 |
 | `GET /help.html`（+ `/help.zh.html`） | 浏览器配置指南：手风琴式 Agent 接入指南，Connection 卡提供可复制的各协议 base_url 与从 `/status` 实时读取的模型 × 协议对照表，支持用共用 Key 做连接检查，并提供直达 Overview 页各区块的 Troubleshooting 链接——`/help.zh.html` 是中文版，也是唯一保留翻译兄弟页的控制台页面 |
 | `vmr start -c config.yaml [-audit=false]` | 前台运行路由器（Ctrl-C 停止）；`-audit=false` 关闭 JSONL 审计日志（默认开启）。`./vmr.sh start` 是它的后台托管版本，也是脚本唯一接管的一条命令——前台/开发场景直接跑这条 |
 | `vmr check -c config.yaml` | 校验配置、跑一致性扫描（`api_key` 缺失、重复端点……），打印路由表、Key 状态与每个 provider 的生效代理——有问题的取值带内联 ⚠️，末尾附 `=== Failed ===` 汇总。末尾带 `log`\|`cache` 参数时改为只打印那一个生效目录（`log_dir`/`image_cache_dir` 缺省后的值）——`vmr.sh` 内部就是问这个。末尾带 `models` 参数（`./vmr.sh check models`）时改为打印精简清单而不是完整摘要：先按 provider 列出配置里引用到的模型（协议、引用它的虚拟模型及优先级，direct routing 可直连的标 `[direct]`；已禁用和未被引用的 provider 也会列出），再按虚拟模型、协议列出 try-order，每个优先级一行，fallback 单独标注。它读的就是路由器实际使用的路由表，不做任何网络 I/O——provider 下的模型列表只是配置里引用到的，不是厂商自己的模型目录 |
@@ -791,6 +822,7 @@ models:
 | `vmr smoke [-c config.yaml] [-addr host:port] [-key KEY] [-timeout D] [-parallel N] [-provider NAME] [-target-model NAME] [-model NAME] [-json]` | 对每个配置的（虚拟模型 × provider × 上游模型）组合，通过一个**正在运行的 vmr 实例**发一次真实的最小请求——和 `diagnose` 直连上游的探测不同，每条请求都走真实路由器，鉴权、健康、条件过滤、quota 计量、审计记录全部生效。每条请求都会用 `X-VMR-Provider` / `X-VMR-Target-Model` 头钉在它报告的那个后端上（见下文"钉住路由"小节），所以它报告的就是它点名的那一个后端，而不是按优先级/顺序/quota 选出来的那个——同时它会把 per-model 的 quota 桶**暖出来**：per-model 的 Limit 只有在某条请求真正计过费后，`/status` 上才会出现这一行（新配置跑一次 smoke 就能让每条 quota 行都可见）。`-provider`/`-target-model`/`-model` 过滤本次运行；`-addr`/`-key` 指向非 config 自身 `listen` 的实例；`-json` 供脚本消费；只要有检查失败就以非零退出码结束 |
 | `vmr replay -provider NAME <audit.jsonl>` | 用 vmr 自己构造请求的同一条代码路径，从一条审计记录重建并重发请求——`-dry-run` 只打印不发送，`-record path` 把这次回放的结果也写成一条独立的审计记录，`-model`/`-protocol` 可覆盖记录里原有的值，`-stream true\|false` 强制开关流式，`-max-time` 限制上游等待时长。选择要回放哪条记录：`-req basename:line`（`requests/index.json` 里 `"req"` 字段发布的坐标）、`-ts <timestamp>`（匹配 `requests/index.json` 或原始审计日志里的 `ts` 字段）、`-line N`（默认取文件里最后一条）——三者互斥。用 `-req` 时位置参数（审计文件）可以省略，直接把 `requests/index.json` 里的 `req` 字段贴进命令行就能用：省略时按坐标的 basename 在当前目录和 `-c config.yaml` 的 `log_dir` 下搜索（含 `.zst` 变体），传一个目录则只在该目录下搜索，传具体文件路径仍保留原有的一致性校验。`-ts`/`-line` 仍然要求显式给出文件——它们本身不带可用来搜索的文件名。`-print`（不带 `-provider`）完全跳过请求构造，只打印解析到的记录原始 JSON——是"真的回放"的只读版本 |
 | `vmr diff [-c config.yaml] <coordA> <coordB>` | 两条审计记录的结构化对比——头部（模型/协议/结果/实际服务端点/usage）、system prompt 哈希、工具集（工具名差异，外加从 manifest `ToolsHash` 判出的"schema 变了"标记），以及消息序列：最长公共前缀、首个分歧位置与角色、两侧各自的尾部增量、五选一的窄结构性 verdict（一致 / 扩展 / 截断前缀 / 截断重试 / 换了 system prompt），每条都盖章"结构事实，非根因"。坐标就是 `vmr replay -req` 那套 `basename:line`（来自 `requests/index.json` 的 `"req"` 字段），文件按同样方式搜索。仅英文输出，打到 stdout，不落盘、不碰缓存 |
+| `vmr stats rebuild [-c config.yaml] [-dir DIR] [-from DAY] [-to DAY] [-today] [-force] [-dry-run] [audit files...]` | 从审计日志重建已过完的统计日（缺省输入 `<log_dir>/vmr-audit-*`，输出 `<log_dir>/stats`）。已存在的天除非 `-force` 否则保留，原子写入，缺省不碰今天——可以在 vmr 运行时执行；`-today` 额外重建今天，需要先停 vmr。见[请求统计](#请求统计) |
 | `./vmr.sh start\|stop\|…` | dev 模式生命周期（自己监督） |
 | `./vmr.sh ps` | 列出本机所有 vmr 实例（不限于本 checkout）：pid、监听地址、uptime、模型数、配置文件绝对路径。三步各司其职——`pgrep` 找进程、`lsof` 找它占的端口（监听地址只写在那个进程的 config 里，命令行上没有）、再用 `vmr status -addr … -brief` 问实例自己要其余信息。缺 `lsof`、或进程不应答 `/status` 时，退化成只有 pid + 命令行上那个 `-c` 参数的行并标注原因，不会把实例整个漏掉 |
 | `./vmr.sh service install\|uninstall\|start\|…` | init 系统服务（launchd/systemd：崩溃重启、登录自启） |

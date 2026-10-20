@@ -7,7 +7,7 @@
 配套文档：
 - `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1）—— 路由核心。定义系统唯一的输入契约（`audit.Record`）。
 - `docs/VirtualModelRouter_Design_v4_Quota.md` —— 额度模型专篇。定义配额账本与额度对照口径。
-- `docs/VirtualModelRouter_Design_v4_LiveStats.md` —— 实时遥测专篇。
+- `docs/VirtualModelRouter_Design_v4_Stats.md` —— 在线请求统计专篇（与本文共享审计记录这一数据来源）。
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` —— 战略定位与竞品分析。
 
 **核心架构边界**：分析半区为纯离线、只读消费者，通过只读扫描审计日志（JSONL / zstd）运行。分析半区不参与任何在线路由决策，且绝不反向被路由核心依赖（由 `internal/archtest` 严格守卫）。

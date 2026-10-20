@@ -338,6 +338,7 @@ function mountConsole(opts) {
       </a>
       <nav class="hd-nav">
         <a class="nav-link${active === 'overview' ? ' active' : ''}" href="/status.html">Overview</a>
+        <a class="nav-link${active === 'stats' ? ' active' : ''}" href="/stats.html">Stats</a>
         <a class="nav-link${active === 'models' ? ' active' : ''}" href="/models.html">Models</a>
         <a class="nav-link${active === 'log' ? ' active' : ''}" href="/log.html">Log</a>
         <a class="nav-link${active === 'config' ? ' active' : ''}" href="/config.html">Config</a>

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VMR Console — Stats</title>
+<link rel="icon" href="/vmr-logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/stats/assets/uplot-1.6.32.min.css">
+<script src="/stats/assets/uplot-1.6.32.min.js"></script>
+<script src="/stats/assets/stats.js"></script>
+<style>
+/*{{CONSOLE_CSS}}*/
+
+/* page-private: control bar, chart card, table affordances */
+.ctl{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:10px}
+.ctl .grp{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}
+.ctl .lbl{font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono);margin-right:2px}
+.ctl select,.ctl input[type=date]{font-family:var(--font-mono);font-size:var(--fs-sm);background:var(--well);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);padding:3px 6px}
+.ctl label.chk{font-size:var(--fs-sm);color:var(--text-muted);display:inline-flex;gap:5px;align-items:center;cursor:pointer}
+.chip{font-family:var(--font-mono);font-size:var(--fs-xs);padding:2px 9px;border-radius:var(--r-pill);border:1px solid var(--border);background:var(--surface-2);color:var(--text);display:inline-flex;gap:6px;align-items:center}
+.chip button{background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:0}
+.chip button:hover{color:var(--red)}
+details.metrics{position:relative}
+details.metrics summary{list-style:none;cursor:pointer}
+details.metrics summary::-webkit-details-marker{display:none}
+details.metrics .menu{position:absolute;z-index:40;top:28px;left:0;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;min-width:260px;max-height:420px;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+details.metrics .face{font-size:var(--fs-xs);color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin:6px 0 3px}
+details.metrics label{display:flex;gap:6px;align-items:center;font-size:var(--fs-sm);padding:1px 0;cursor:pointer}
+.chart-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 14px;margin-bottom:var(--sp-4)}
+.chart-card .head{display:flex;gap:10px;align-items:center;margin-bottom:6px;font-size:var(--fs-sm);color:var(--text-muted)}
+.chart-card .head .spacer{flex:1}
+.chart{min-height:120px}
+.empty-cell{text-align:center;padding:26px}
+th.sortable{cursor:pointer;user-select:none}
+td.filterable{cursor:pointer}
+td.filterable:hover{text-decoration:underline dotted}
+.cmp-note{padding:8px 12px}
+.qmeta{font-size:var(--fs-xs);color:var(--text-muted);font-family:var(--font-mono)}
+/* uPlot on the console's dark surface */
+.uplot,.u-legend{font-family:var(--font-mono);font-size:var(--fs-xs);color:var(--text)}
+.u-legend .u-marker{border-radius:2px}
+.u-legend th{font-weight:400}
+.u-select{background:rgba(88,166,255,.12)}
+</style>
+</head>
+<body>
+
+<main class="page">
+  <div class="section-head">Statistics
+    <span class="count" id="range-label"></span>
+    <span class="spacer"></span>
+    <span class="qmeta" id="qmeta"></span>
+  </div>
+
+  <div class="ctl" id="views"></div>
+
+  <div class="ctl">
+    <span class="grp" id="ranges"><span class="lbl">range</span></span>
+    <span class="grp"><span class="lbl">from</span><input type="date" id="from-date"><span class="lbl">to</span><input type="date" id="to-date"></span>
+    <span class="grp" id="lasts"><span class="lbl">or last</span></span>
+    <span class="grp"><span class="lbl">step</span><select id="step"></select></span>
+    <label class="chk"><input type="checkbox" id="compare"> compare with previous period</label>
+  </div>
+
+  <div class="ctl">
+    <span class="grp"><span class="lbl">group by</span><select id="group1"></select><select id="group2"></select></span>
+    <span class="grp" id="filters"><span class="lbl">filters</span></span>
+    <span class="grp"><select id="f-dim"></select><select id="f-op"><option value=":">=</option><option value="!">≠</option></select><select id="f-val"></select><button class="btn sm" id="f-add">+ filter</button></span>
+    <details class="metrics" id="metrics-menu"><summary class="btn sm">metrics ▾</summary><div class="menu" id="metrics-list"></div></details>
+  </div>
+
+  <div class="chart-card" id="chart-card">
+    <div class="head"><span>chart</span><select id="chart-metric"></select><span class="spacer"></span><span id="chart-note"></span></div>
+    <div class="chart" id="chart"></div>
+  </div>
+
+  <div class="table-wrap" id="table"></div>
+
+  <div id="events-wrap" hidden>
+    <div class="section-head">Requests
+      <span class="count" id="events-label"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="events-close">close</button>
+    </div>
+    <div class="table-wrap" id="events"></div>
+  </div>
+</main>
+
+<script>
+/*{{CONSOLE_JS}}*/
+
+const consoleApi = mountConsole({ active: 'stats', rail: [], refresh: 'countdown' });
+
+// Views are presets: each is nothing but a set of control values. Picking
+// one rewrites the state; no view has rendering code of its own.
+const VIEWS = {
+  traffic:     { label: 'Traffic',     group: [],              where: [],             metrics: ['req', 'ok', 'err', 'canceled', 'err_rate', 'failover_rate'], chart: ['req', 'err'] },
+  tokens:      { label: 'Tokens',      group: ['endpoint'],    where: [],             metrics: ['tok_fresh', 'tok_cache_write', 'tok_cache_read', 'tok_out', 'tok_total', 'cache_hit', 'share_tok'], chart: ['tok_total'] },
+  performance: { label: 'Performance', group: ['endpoint'],    where: ['outcome:ok'], metrics: ['req', 'ttft_p50', 'ttft_p90', 'toks_p50', 'toks_p10', 'dur_p50', 'dur_p90'], chart: ['ttft_p90'] },
+  reliability: { label: 'Reliability', group: ['error_class'], where: ['outcome!ok'], metrics: ['req', 'share_req'], chart: ['req'] },
+  callers:     { label: 'Callers',     group: ['client'],      where: [],             metrics: ['req', 'ok', 'err', 'tok_prompt', 'cache_hit', 'tok_out', 'toks_avg', 'share_tok'], chart: ['tok_total'] },
+};
+const RANGES = ['1h', '6h', '12h', '1d', '3d', '7d', '30d'];
+const LASTS = ['10', '30', '100', '300'];
+const DEFAULT_STATE = Object.assign({ view: 'traffic', range: '7d', step: 'auto' }, viewState('traffic'));
+const TABLE_TOP = 50, CHART_TOP = 8;
+
+function viewState(name) {
+  const v = VIEWS[name];
+  return { view: name, group: v.group.slice(), where: v.where.slice(), metrics: v.metrics.slice(), chart: v.chart.slice() };
+}
+
+let state = loadState();
+let schema = null;
+let sort = null;
+let lastTable = null;
+
+function loadState() {
+  const st = Object.assign({}, DEFAULT_STATE, VMRStats.decodeState(location.hash));
+  if (st.range === '24h') st.range = '1d'; // the old spelling of the same range
+  if (!st.metrics || !st.metrics.length) st.metrics = DEFAULT_STATE.metrics.slice();
+  if (!st.chart || !st.chart.length) st.chart = [st.metrics[0]];
+  return st;
+}
+
+function setState(patch, opts) {
+  state = Object.assign({}, state, patch);
+  if (!(opts && opts.keepView)) state.view = patch.view || 'custom';
+  history.replaceState(null, '', '#' + VMRStats.encodeState(state));
+  refreshAll();
+}
+
+// rangeParams turns the range controls into query parameters.
+function rangeParams() {
+  if (state.last) return { last: state.last };
+  if (state.from) return { from: state.from, to: state.to || 'now' };
+  return { from: '-' + (state.range || '7d'), to: 'now' };
+}
+
+function rangeLabel() {
+  if (state.last) return 'last ' + state.last + ' requests';
+  if (state.from) return state.from + ' → ' + (state.to ? state.to + ' (exclusive)' : 'now');
+  return 'last ' + (state.range || '7d');
+}
+
+// ---------------- controls ----------------
+
+function renderControls() {
+  const views = Object.entries(VIEWS).map(([k, v]) =>
+    `<button class="btn sm ${state.view === k ? 'on' : ''}" data-view="${k}">${v.label}</button>`).join('');
+  document.getElementById('views').innerHTML = '<span class="lbl">view</span>' + views +
+    `<button class="btn sm ${state.view === 'custom' ? 'on' : ''}" data-view="custom" title="Your own combination — the current controls">Custom</button>`;
+
+  const rangeOn = r => !state.last && !state.from && (state.range || '7d') === r;
+  document.getElementById('ranges').innerHTML = '<span class="lbl">range</span>' +
+    RANGES.map(r => `<button class="btn sm ${rangeOn(r) ? 'on' : ''}" data-range="${r}">${r}</button>`).join('');
+  document.getElementById('lasts').innerHTML = '<span class="lbl">or last</span>' +
+    LASTS.map(n => `<button class="btn sm ${state.last === n ? 'on' : ''}" data-last="${n}">${n}</button>`).join('');
+  document.getElementById('from-date').value = state.from || '';
+  document.getElementById('to-date').value = state.to ? prevDay(state.to) : '';
+
+  const steps = ['auto'].concat((schema ? schema.steps : []).map(s => s.name));
+  document.getElementById('step').innerHTML = steps.map(s => `<option ${state.step === s ? 'selected' : ''}>${s}</option>`).join('');
+  document.getElementById('step').disabled = !!state.last;
+  document.getElementById('compare').checked = !!state.compare;
+  document.getElementById('compare').disabled = !!state.last;
+
+  const dimOpts = sel => '<option value="">—</option>' + (schema ? schema.dims : []).map(d =>
+    `<option value="${d.name}" ${sel === d.name ? 'selected' : ''} title="${VMRStats.attr(d.desc)}">${esc(d.label)}</option>`).join('');
+  document.getElementById('group1').innerHTML = dimOpts(state.group[0] || '');
+  document.getElementById('group2').innerHTML = dimOpts(state.group[1] || '');
+  document.getElementById('f-dim').innerHTML = dimOpts(document.getElementById('f-dim').value || '');
+
+  const label = d => { const x = schema && schema.dims.find(y => y.name === d); return x ? x.label : d; };
+  document.getElementById('filters').innerHTML = '<span class="lbl">filters</span>' + (state.where.length ? state.where.map((w, i) => {
+    const m = /^([a-z_]+)([:!])(.*)$/.exec(w) || [w, w, ':', ''];
+    const vals = VMRStats.splitWhere(m[3]).map(v => v === '' ? '(empty)' : v).join(' | ');
+    return `<span class="chip">${esc(label(m[1]))} ${m[2] === '!' ? '≠' : '='} ${esc(vals)}<button data-unfilter="${i}" title="Remove">×</button></span>`;
+  }).join('') : '<span class="dim">none</span>');
+
+  const faces = { request: 'Requests', usage: 'Tokens', quality: 'Speed (successful requests)' };
+  document.getElementById('metrics-list').innerHTML = Object.entries(faces).map(([f, title]) =>
+    `<div class="face">${title}</div>` + (schema ? schema.metrics : []).filter(m => m.face === f).map(m =>
+      `<label title="${VMRStats.attr(m.desc)}"><input type="checkbox" data-metric="${m.name}" ${state.metrics.includes(m.name) ? 'checked' : ''}> ${esc(m.label)}</label>`).join('')).join('');
+
+  const chartChoices = [...new Set(state.chart.concat(state.metrics))];
+  document.getElementById('chart-metric').innerHTML = chartChoices.map(m => {
+    const meta = schema && schema.metrics.find(x => x.name === m);
+    return `<option value="${m}" ${state.chart.length === 1 && state.chart[0] === m ? 'selected' : ''}>${esc(meta ? meta.label : m)}</option>`;
+  }).join('') + (state.chart.length > 1 ? `<option value="" selected>${esc(state.chart.join(' + '))}</option>` : '');
+  document.getElementById('range-label').textContent = rangeLabel();
+}
+
+function prevDay(day) {
+  const d = new Date(day + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+function nextDay(day) {
+  const d = new Date(day + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function wireControls() {
+  document.addEventListener('click', ev => {
+    const t = ev.target.closest ? ev.target.closest('[data-view],[data-range],[data-last],[data-unfilter],[data-sort],td.filterable,a.drill') : null;
+    if (!t) return;
+    if (t.dataset.view) {
+      if (t.dataset.view !== 'custom') setState(viewState(t.dataset.view), { keepView: true });
+      else setState({ view: 'custom' }, { keepView: true });
+    } else if (t.dataset.range) {
+      setState({ range: t.dataset.range, last: '', from: '', to: '' }, { keepView: true });
+    } else if (t.dataset.last) {
+      setState({ last: t.dataset.last, from: '', to: '' }, { keepView: true });
+    } else if (t.dataset.unfilter !== undefined) {
+      const w = state.where.slice(); w.splice(+t.dataset.unfilter, 1);
+      setState({ where: w });
+    } else if (t.dataset.sort !== undefined) {
+      const col = +t.dataset.sort;
+      sort = sort && sort.col === col ? { col, desc: !sort.desc } : { col, desc: true };
+      renderTable();
+    } else if (t.classList.contains('filterable')) {
+      setState({ where: state.where.concat([t.dataset.dim + ':' + VMRStats.escWhere(t.dataset.val)]) });
+    } else if (t.classList.contains('drill')) {
+      ev.preventDefault();
+      showEvents(JSON.parse(t.dataset.group || '[]'));
+    }
+  });
+  document.getElementById('step').onchange = e => setState({ step: e.target.value }, { keepView: true });
+  document.getElementById('compare').onchange = e => setState({ compare: e.target.checked }, { keepView: true });
+  const dateChange = () => {
+    const f = document.getElementById('from-date').value, t = document.getElementById('to-date').value;
+    if (!f) return;
+    setState({ from: f, to: t ? nextDay(t) : '', last: '' }, { keepView: true });
+  };
+  document.getElementById('from-date').onchange = dateChange;
+  document.getElementById('to-date').onchange = dateChange;
+  const groupChange = () => {
+    const g = [document.getElementById('group1').value, document.getElementById('group2').value].filter(Boolean);
+    setState({ group: [...new Set(g)] });
+  };
+  document.getElementById('group1').onchange = groupChange;
+  document.getElementById('group2').onchange = groupChange;
+  document.getElementById('metrics-list').onchange = () => {
+    const m = [...document.querySelectorAll('#metrics-list input:checked')].map(x => x.dataset.metric);
+    if (m.length) setState({ metrics: m });
+  };
+  document.getElementById('chart-metric').onchange = e => { if (e.target.value) setState({ chart: [e.target.value] }); };
+  document.getElementById('f-dim').onchange = loadFilterValues;
+  document.getElementById('f-add').onclick = () => {
+    const d = document.getElementById('f-dim').value, v = document.getElementById('f-val').value;
+    if (!d) return;
+    setState({ where: state.where.concat([d + document.getElementById('f-op').value + VMRStats.escWhere(v)]) });
+  };
+  document.getElementById('events-close').onclick = () => { document.getElementById('events-wrap').hidden = true; };
+  window.addEventListener('hashchange', () => { state = loadState(); refreshAll(); });
+}
+
+// loadFilterValues offers the values the chosen dimension actually takes
+// in the current range — itself just a grouped query.
+async function loadFilterValues() {
+  const d = document.getElementById('f-dim').value;
+  const sel = document.getElementById('f-val');
+  if (!d) { sel.innerHTML = ''; return; }
+  try {
+    const r = await VMRStats.api.query(Object.assign(rangeParams(), { group: [d], metrics: ['req'], top: 100 }));
+    sel.innerHTML = r.rows.filter(x => x[0] !== schema.other_group).map(x =>
+      `<option value="${VMRStats.attr(x[0])}">${esc(x[0] === '' ? '(empty)' : x[0])} · ${fmtInt(x[1])}</option>`).join('');
+  } catch (e) { toast('Filter values: ' + e.message); }
+}
+
+// ---------------- results ----------------
+
+function renderTable() {
+  if (!lastTable) return;
+  document.getElementById('table').innerHTML = VMRStats.table(lastTable, {
+    schema, sort, filterable: true, drill: true,
+    empty: 'No requests match this range and these filters.',
+  }) + compareNote(lastTable);
+}
+
+// compareNote summarizes the previous period's totals next to the table.
+function compareNote(res) {
+  if (!res.compare) return '';
+  const cols = res.columns;
+  const parts = cols.map((c, i) => {
+    if (c.kind === 'dim') return '';
+    const now = res.totals[i], prev = res.compare.totals[i];
+    let delta = '';
+    if (typeof now === 'number' && typeof prev === 'number' && prev !== 0) {
+      const pct = (now - prev) / Math.abs(prev) * 100;
+      delta = ` <span class="${pct > 0 ? 't-ok' : (pct < 0 ? 't-err' : 'dim')}">${pct > 0 ? '+' : ''}${dec2(pct)}%</span>`;
+    }
+    const meta = schema.metrics.find(m => m.name === c.name);
+    return `<span>${esc(meta ? meta.label : c.name)} ${VMRStats.value(c.kind, prev)}${delta}</span>`;
+  }).filter(Boolean);
+  return `<div class="hint cmp-note">previous period (${esc(res.compare.from.slice(0, 16).replace('T', ' '))} → ${esc(res.compare.to.slice(0, 16).replace('T', ' '))}): ${parts.join(' · ')}</div>`;
+}
+
+async function showEvents(groupVals) {
+  const where = state.where.concat(groupVals.filter(([, v]) => v !== schema.other_group).map(([d, v]) => d + ':' + VMRStats.escWhere(v)));
+  const p = { where, limit: 200 };
+  if (!state.last) {
+    const r = rangeParams();
+    p.from = r.from; p.to = r.to;
+  }
+  document.getElementById('events-wrap').hidden = false;
+  document.getElementById('events-label').textContent = groupVals.map(([d, v]) => d + ' = ' + (v === '' ? '(empty)' : v)).join(', ') || 'all';
+  try {
+    const r = await VMRStats.api.events(p);
+    document.getElementById('events').innerHTML = VMRStats.eventsTable(r.events, 'No requests match.');
+  } catch (e) { toast('Requests: ' + e.message); }
+}
+
+// refreshChrome fills the shared header/footer (uptime, alerts, identity)
+// from /status like every console page; statistics never depend on it.
+async function refreshChrome() {
+  try {
+    const headers = {};
+    const k = VMRAuth.get();
+    if (k) headers['Authorization'] = 'Bearer ' + k;
+    const r = await fetch('/status', { headers });
+    if (!r.ok) return;
+    const st = await r.json();
+    const inst = st.instance || {};
+    ConsoleAlerts.set(st.alerts || []);
+    consoleApi.setUptime('up ' + (inst.uptime || fmtDur(inst.uptime_seconds || 0)));
+    consoleApi.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
+  } catch (_) { /* chrome only */ }
+}
+
+async function refreshAll() {
+  refreshChrome();
+  try {
+    schema = await VMRStats.api.schema();
+    renderControls();
+    const base = Object.assign(rangeParams(), { group: state.group, where: state.where });
+    const tableQ = Object.assign({}, base, { metrics: state.metrics, top: TABLE_TOP, compare: !state.last && state.compare });
+    const chartOn = !state.last;
+    const chartQ = Object.assign({}, base, { metrics: state.chart, step: state.step || 'auto', top: CHART_TOP });
+    const [t, c] = await Promise.all([
+      VMRStats.api.query(tableQ),
+      chartOn ? VMRStats.api.query(chartQ) : Promise.resolve(null),
+    ]);
+    lastTable = t;
+    renderTable();
+    document.getElementById('chart-card').hidden = !chartOn;
+    if (c) {
+      document.getElementById('chart-note').textContent = 'step ' + c.query.step + (state.group.length ? ' · top ' + CHART_TOP + ' groups' : '');
+      VMRStats.chart(document.getElementById('chart'), c, { metrics: state.chart, schema, step: c.query.step });
+    }
+    document.getElementById('qmeta').textContent =
+      `${fmtInt(t.meta.rows_scanned)} rows scanned · ${t.meta.partitions} day files` + (t.meta.groups_truncated ? ` · ${t.meta.groups_truncated} more groups in "other"` : '');
+    consoleApi.setPaused(false);
+  } catch (e) {
+    consoleApi.setPaused(true);
+    toast('Stats: ' + (e.message || 'network error'));
+  }
+}
+
+wireControls();
+consoleApi.onRefresh(refreshAll);
+refreshAll();
+</script>
+</body>
+</html>

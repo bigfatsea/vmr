@@ -2,11 +2,12 @@
 
 # Virtual Model Router (vmr) — 设计方案 · 战略定位与竞品分析
 
-**这是 v4 版设计文档里唯一回答"为什么做"的一篇**，其余四篇都回答"怎么做"：
+**这是 v4 版设计文档里唯一回答"为什么做"的一篇**，其余五篇都回答"怎么做"：
 `docs/VirtualModelRouter_Design_v4_Core.md`（Part 1，路由核心）、
 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2，分析半区）、
 `docs/VirtualModelRouter_Design_v4_Quota.md`（额度感知路由专篇，下称"额度设计文档"）、
-`docs/VirtualModelRouter_Design_v4_LiveStats.md`（实时请求统计与统一控制台专篇）。
+`docs/VirtualModelRouter_Design_v4_Stats.md`（请求统计专篇）、
+`docs/VirtualModelRouter_Design_v4_LiveStats.md`（进行中请求专篇）。
 本文只记战略层面的判断与竞品坐标，**不复述任何算法细节**——算法仍在演进，
 复述一份会立刻过期的副本没有意义。
 

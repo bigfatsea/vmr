@@ -40,6 +40,21 @@ func (a *Attempt) IsForwarded() bool {
 	return a.Response != nil && a.Response.Status < 400 && a.ErrorClass == ""
 }
 
+// DeliveredInFull reports whether the forwarded response reached the client
+// whole. The relay stamps every client disconnect or upstream cut it sees
+// mid-transfer (canceled / truncated), so a forwarded attempt with no error
+// class finished writing. A client that hangs up right after the last byte
+// still cancels the request context before the completion hook runs; this
+// is what tells that apart from a real cancel.
+func (r *Record) DeliveredInFull() bool {
+	for i := range r.Attempts {
+		if r.Attempts[i].IsForwarded() {
+			return r.Attempts[i].ErrorClass == ""
+		}
+	}
+	return false
+}
+
 // ServedEndpoint returns the endpoint that served the client. It prefers the
 // last served and error-free attempt, falls back to the last served attempt,
 // and returns "" if no attempt served the client. "Served" is the served()

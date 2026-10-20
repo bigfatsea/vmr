@@ -27,12 +27,16 @@ file only orients; it does not restate them.
 - `docs/VirtualModelRouter_Design_v4_Quota.md` — token-plan quota-aware routing. A routing-half
   subsystem with its own metering/pricing/period model; its only interface to Part 1 is one
   reordering step between `strategy.Sort` and sticky pinning.
-- `docs/VirtualModelRouter_Design_v4_LiveStats.md` — in-process live request telemetry
-  (`internal/livestats`). Another routing-half subsystem monograph, hanging off Part 1's
-  request lifecycle and completion hooks; shares the audit log's token/error-class data
-  contract with Part 1 and the Quota doc.
+- `docs/VirtualModelRouter_Design_v4_Stats.md` — request statistics (`internal/stats`,
+  `internal/statsfeed`): the per-request event log, the in-process query engine, and the
+  `/stats.html` + `/stats/*` surface. A routing-half subsystem fed only by the completion
+  hook through one projection; its metric registry is the single definition of every
+  console number.
+- `docs/VirtualModelRouter_Design_v4_LiveStats.md` — in-flight requests: the router's
+  in-flight registry, `/status/live`, and the Overview's live slot table. Runtime state
+  only — never persisted, never mixed with the statistics.
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` — the "why": positioning, competitive
-  landscape, and what is deliberately out of scope. The only one of the five that isn't a "how".
+  landscape, and what is deliberately out of scope. The only one of the six that isn't a "how".
 - `KNOWN_ISSUES` — the cross-cutting index of open issues and deliberate
   non-fixes (the design docs' own tables hold the per-subsystem detail). Check it before
   reporting something as new — and **register there when you decide something too**: a
@@ -51,6 +55,7 @@ go test ./...              # add -race for anything touching health/audit/router
 ./vmr check -c config.yaml # validate config + print effective routing table (no network I/O)
 ./vmr start -c config.yaml # foreground
 ./vmr analyze              # full navigable analytics suite (macro report + task journeys)
+./vmr stats rebuild -c config.yaml   # rebuild closed statistics days from the audit log (safe next to a running vmr)
 ./vmr.sh {start|stop|restart|redeploy|status|logs}  # dev supervisor; redeploy stops+builds+starts
 ```
 
@@ -69,7 +74,7 @@ Leaf packages (zero internal dependencies, `archtest`-enforced):
 | `digest` | The system's one cache-digest construction (D8): length-prefixed ordered sha256 chain plus fixed-width scalar encoders. stdlib-only leaf; `report`'s cache-fingerprint layer is its only caller |
 | `jsonscan` | JSON byte-range scan/splice engine: low-level structural byte scanning (`TopLevelValues`, `WalkArrayElements`, `Skip*` primitives) and zero-allocation byte-splice rewrites (`RewriteModel`, `RewriteStream`, `RewriteRoles`, `RewriteInputRoles`). Fuzz-tested. Zero internal dependencies |
 | `i18n` | EN/ZH text for every analytics-half output string, one file per produced section — `i18n/report_*.go` sits next to `internal/report/viewmodel_*.go` (the ViewModel builders; `archtest` enforces the pairing), `i18n/journey_*.go` next to `internal/journey`, `i18n/reqdetail_detail.go` next to `internal/reqdetail`, so a wording change stays next to the section it renders. `Lang` zero value is `EN` |
-| `livestats` | Completed-request live telemetry ledger: zero-internal-dependency leaf owning slim WAL append, hourly lazy rollups, restart recovery with duplicate row last-wins assimilation, in-memory ring buffers with nearest-rank percentiles, and read-time `/stats` snapshot aggregation |
+| `stats` | Request statistics: per-request events as one JSONL file per local day (closed days zstd-compressed, kept forever), the in-memory day partitions, the dimension/metric registries (the one place a console formula or sample face is defined), the query engine, and the `/stats.html` + `/stats/*` handlers with their embedded front end. Data comes in only as `stats.Event` values |
 | `logtee` | In-process live console log tee: a bounded ring buffer of recent lines plus a broadcast bus for `/log` streams. Wired in `cmd/vmr` as `stampWriter{io.MultiWriter(os.Stderr, tee)}`; knows nothing about log formatting, routing, HTTP, or timing, so it stays a leaf |
 | `dashboard` | `vmr analyze`'s static skeleton dashboard pages: embeds self-contained HTML files and writes them (`WriteSkeletons`) into the report output root on every run. All rendering happens browser-side against `manifest.json`/`macro/*.json`/etc; the Go side is embed + write only, stdlib-only leaf |
 
@@ -87,7 +92,8 @@ Routing half:
 | `pricing` | Two-layer rate resolution (account override → standard table → unpriced), no external file layer. A nil rate component means *unknown*, never *free* — the whole package is built around that distinction |
 | `respnorm` | Response stream normalization: `Wrap` + the buffered/passthrough state machine, model rewrite, SSE splitting, `[DONE]` policy, and the evidence-based vendor quirk repairs. Quota usage sniffing lives here too — a documented tradeoff, see the package doc |
 | `router` | Failover loop (`Serve`/`tryOne`), in-flight requests registry (`InflightRegistry`), snapshot build/install, concurrency limiter, upstream transport, live log formatting, quota charge dispatch (`ChargeResponse`/`TokenCounters`), and the routing-half HTTP behavior it shares with `server`/`replay`: `FilterClientHeaders` (client-header blocklist) plus `WriteJSON`/`WriteError` |
-| `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, `/status` (auth-gated), unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/status`) |
+| `server` | HTTP entry, auth, `RequestFacts` extraction, audit recording, `/status` and `/status/live` (auth-gated), mounting the statistics handlers, unauthenticated `/health` (liveness only — it must never grow an instance field, or it becomes an open `/status`) |
+| `statsfeed` | The one projection from an audit record to a `stats.Event` (`FromRecord`, with the booking rules), shared by the live completion hook and `vmr stats rebuild`; plus the rebuild-only fast decode that strips payload members before decoding. Allowed deps: `audit`, `core`, `jsonscan`, `stats` |
 | `audit` | JSONL audit log (two layers per request: client↔vmr, vmr↔upstream) + zstd compression/retention |
 | `imgprep` | Inline image downscale + disk cache |
 | `diagnose`, `replay` | `vmr diagnose` / `vmr replay` — both reuse the same `Adapter.BuildRequest`/`router.NewUpstreamClient` real traffic uses, so what they show is byte-identical to what would really happen. `replay.ResolveAuditPath`/`LoadRecord` are also `vmr diff`'s one coordinate-to-record resolver — the single place a "basename:line" coordinate becomes a real file path and an `audit.Record` |
@@ -149,13 +155,14 @@ file per subcommand — and the only composition root allowed to see both halves
   path with a mutex-guarded copy-on-write *write* path. A bare copy-on-write without the mutex silently
   loses updates under concurrent writers — guard the write too, not just the atomic swap.
 - **Audit files are 0600, `reports/` output is 0600/0700.** Derived artifacts carry full
-  conversation bodies and must not loosen that.
+  conversation bodies and must not loosen that. Statistics files (`<log_dir>/stats/`) hold
+  usage profiles and keep the same 0600/0700.
 - **Timezone: one display authority.** Everything human-facing — Markdown/CLI output,
   aggregation bucketing, filenames — renders through `fmtutil.DisplayZone`; persisted records
   keep their write-time offset. A timestamp inside an LLM/tool payload is passthrough content,
   never parsed or converted. Two documented exceptions: `journey`'s `deriveID`, and
-  `internal/livestats` — a zero-dep leaf that cannot import `fmtutil`, so its hour and
-  local-calendar-day bucketing (`hour.go`, `snapshot.go`) reads `time.Local` directly, which
+  `internal/stats` — a zero-dep leaf that cannot import `fmtutil`, so its day partitions,
+  bucket alignment and `hour_of_day`/`weekday` dimensions read `time.Local` directly, which
   is `DisplayZone`'s production value anyway.
 - **`internal/report` is coupled to `audit.Record`'s shape at compile time** — changing the
   record structure means updating `report` and its tests in the same change.

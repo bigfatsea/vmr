@@ -20,11 +20,11 @@ import (
 	"vmr/internal/config"
 	"vmr/internal/fmtutil"
 	"vmr/internal/guard"
-	"vmr/internal/livestats"
 	"vmr/internal/logtee"
 	"vmr/internal/quota"
 	"vmr/internal/router"
 	"vmr/internal/server"
+	"vmr/internal/stats"
 )
 
 // vmrBanner is a fixed-width, pure-ASCII block-letter "VMR" mark (no
@@ -140,23 +140,32 @@ func setupQuotaLedger(cfg *config.Config, rt *router.Router, logger *log.Logger)
 	}
 }
 
-// setupLiveStats builds the completed-request ledger (slim WAL + rollup in
-// log_dir) and logs what startup recovery found. A nil aggregator — log_dir
-// unusable — leaves /stats serving in-flight data only; losing the dir lock
-// to another process degrades to memory-only inside the aggregator instead.
-func setupLiveStats(cfg *config.Config, logger *log.Logger) (*livestats.Aggregator, func()) {
-	agg, err := livestats.New(cfg.LogDir)
+// setupStats opens the request statistics store in <log_dir>/stats. A nil
+// store — the directory is unusable — leaves the /stats data routes
+// answering 503; losing the directory lock to another process degrades to
+// memory-only inside the store instead.
+func setupStats(cfg *config.Config, logger *log.Logger) (*stats.Store, func()) {
+	st, err := stats.Open(filepath.Join(cfg.LogDir, "stats"), logger.Printf)
 	if err != nil {
-		logger.Printf("WARN live stats: %v (live stats disabled for this run)", err)
+		logger.Printf("WARN stats: %v (statistics disabled for this run)", err)
 		return nil, func() {}
 	}
-	if agg.MemoryOnly() {
-		logger.Printf("WARN live stats: another process holds %s — counting in memory only, nothing read from or written to disk", cfg.LogDir)
+	noteLegacyStatsFiles(cfg.LogDir, logger)
+	return st, func() { st.Close() }
+}
+
+// noteLegacyStatsFiles points at the files the previous statistics ledger
+// left in log_dir. They are no longer read; deleting them is the
+// operator's call (their content cannot be rebuilt once the audit log
+// that produced it has aged out), so this only says so, once per start.
+func noteLegacyStatsFiles(logDir string, logger *log.Logger) {
+	old, _ := filepath.Glob(filepath.Join(logDir, "vmr-stats-*.jsonl"))
+	if _, err := os.Stat(filepath.Join(logDir, ".vmr-stats.lock")); err == nil {
+		old = append(old, filepath.Join(logDir, ".vmr-stats.lock"))
 	}
-	if rows, dur := agg.RecoveryInfo(); rows > 0 || dur > 50*time.Millisecond {
-		logger.Printf("live stats: rollup recovery loaded %d rows in %s", rows, dur.Round(time.Millisecond))
+	if len(old) > 0 {
+		logger.Printf("stats: %d file(s) from the previous statistics ledger are no longer used and can be deleted: %s", len(old), strings.Join(old, ", "))
 	}
-	return agg, func() { agg.Close() }
 }
 
 // setupGuard builds Agent Guard's online engine, only when cfg
@@ -249,8 +258,8 @@ func cmdStart(args []string) error {
 	// Quota registry lives on Router (surviving hot reloads).
 	defer setupQuotaLedger(cfg, rt, logger)()
 
-	liveAgg, closeLiveStats := setupLiveStats(cfg, logger)
-	defer closeLiveStats()
+	statsStore, closeStats := setupStats(cfg, logger)
+	defer closeStats()
 
 	vmrGuard, err := setupGuard(cfg)
 	if err != nil {
@@ -318,7 +327,7 @@ func cmdStart(args []string) error {
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
-		Handler: server.New(rt, auditLog).WithLogTee(tee).WithLiveStats(liveAgg).
+		Handler: server.New(rt, auditLog).WithLogTee(tee).WithStats(statsStore).
 			WithGuard(vmrGuard).WithInstance(*path, startTime).
 			WithConfigReload(func() router.ReloadState {
 				// One trigger label among fsnotify/SIGHUP, serialized by the same

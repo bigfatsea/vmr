@@ -52,14 +52,17 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 	}
 
 	// Overview page markers: Quota Budgets and Virtual Models & Endpoint
-	// Topology live on /models.html; Overview keeps vitals, Live Requests,
-	// Performance, Traffic & Usage, and Recent Failures.
+	// Topology live on /models.html; free-form queries live on /stats.html;
+	// the Overview keeps vitals, Live Requests and the statistics dashboard.
 	for _, anchor := range []string{
 		`id="vitals"`,
 		`id="live"`,
-		`id="perf"`,
-		`id="traffic"`,
-		`id="failures-head"`,
+		`id="dash-ctl"`,
+		`id="dash-breakdown"`,
+		`id="dash-rel"`,
+		`/stats/assets/stats.js`,
+		`/stats/assets/dashboard.js`,
+		`/stats/assets/dashboard.css`,
 	} {
 		if !strings.Contains(body, anchor) {
 			t.Errorf("body missing overview section anchor %q", anchor)
@@ -84,12 +87,12 @@ func TestStatusPage_ServesHTML(t *testing.T) {
 		t.Errorf("body missing injected VMRAuth from console.js")
 	}
 
-	// /stats.html must now return 404
+	// The statistics page is served (its shell is data-free).
 	reqStats := httptest.NewRequest("GET", "/stats.html", nil)
 	wStats := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(wStats, reqStats)
-	if wStats.Code != http.StatusNotFound {
-		t.Fatalf("/stats.html status = %d, want %d", wStats.Code, http.StatusNotFound)
+	if wStats.Code != http.StatusOK || !strings.Contains(wStats.Body.String(), "active: 'stats'") {
+		t.Fatalf("/stats.html status = %d, want 200 with the stats console page", wStats.Code)
 	}
 }
 
@@ -449,9 +452,8 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	}
 	body := w.Body.String()
 
-	// Adaptive poller fast and idle cadences — drives concurrency vitals,
-	// Live Requests, and Recent Failures (moved back from log.html). Fast beat
-	// is 1s (livereload design §4.3).
+	// Adaptive poller fast and idle cadences — drives concurrency vitals and
+	// Live Requests off /status/live. Fast beat is 1s.
 	for _, want := range []string{
 		"const LIVE_POLL_FAST_MS = 1000;",
 		"const LIVE_POLL_IDLE_MS = 15000;",
@@ -459,11 +461,11 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 		"async function livePollTick()",
 		"renderConcurrencyVitals(",
 		"renderLive(",
-		"renderFailures(",
-		"fetch('/stats', { headers })",
+		"renderLiveSummary(",
+		"fetch('/status/live', { headers })",
 		`id="live"`,
-		`id="failures-head"`,
-		`id="failures-body-wrap" hidden`,
+		`id="live-wrap" hidden`,
+		`id="live-toggle"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("status.html missing poller element %q", want)
@@ -490,10 +492,10 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	}
 	// Elapsed is poll-driven only — a per-row tick/setInterval mechanism is
 	// explicitly out (design §4.1). Scope the check to the live-slot code
-	// (between the STALL_S marker and the failures renderer): console.js's
-	// injected countdown clock legitimately uses setInterval.
+	// (between the STALL_S marker and the poller): console.js's injected
+	// countdown clock legitimately uses setInterval.
 	liveCodeStart := strings.Index(body, "const STALL_S = 5;")
-	liveCodeEnd := strings.Index(body, "Render Recent Failures")
+	liveCodeEnd := strings.Index(body, "Live Requests / Concurrency Adaptive Poller")
 	if liveCodeStart == -1 || liveCodeEnd == -1 || liveCodeStart >= liveCodeEnd {
 		t.Fatal("status.html live-slot code block markers not found")
 	}
@@ -515,8 +517,10 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 	}
 
 	// Poller must NOT call VMRAuth.guard or wrap with authFetch (owns no auth modal)
-	if strings.Contains(body, "authFetch('/stats')") {
-		t.Errorf("status.html poller must not call authFetch('/stats')")
+	pollStart := strings.Index(body, "async function livePollTick()")
+	pollEnd := strings.Index(body, "Whole Page Refresh")
+	if pollStart == -1 || pollEnd == -1 || strings.Contains(body[pollStart:pollEnd], "authFetch(") {
+		t.Errorf("status.html poller must not call authFetch (it owns no auth modal)")
 	}
 
 	// Tab visibility pausing: armLivePoll must drop timer when hidden
@@ -524,18 +528,17 @@ func TestStatusPage_AdaptivePollerStructure(t *testing.T) {
 		t.Errorf("status.html armLivePoll missing document.hidden check")
 	}
 
-	// Layout order: vitals -> Live Requests -> Performance -> Traffic & Usage
-	// -> Recent Failures (report §6.7's reordering, minus Quota/Models which
-	// moved to /models.html).
-	vitalsIdx := strings.Index(body, `id="vitals"`)
-	liveIdx := strings.Index(body, `id="live"`)
-	perfIdx := strings.Index(body, `id="perf"`)
-	trafficIdx := strings.Index(body, `id="traffic"`)
-	failuresIdx := strings.Index(body, `id="failures-head"`)
-	if vitalsIdx == -1 || liveIdx == -1 || perfIdx == -1 || trafficIdx == -1 || failuresIdx == -1 ||
-		!(vitalsIdx < liveIdx && liveIdx < perfIdx && perfIdx < trafficIdx && trafficIdx < failuresIdx) {
-		t.Errorf("status.html section order wrong: want vitals(%d) < live(%d) < perf(%d) < traffic(%d) < failures(%d)",
-			vitalsIdx, liveIdx, perfIdx, trafficIdx, failuresIdx)
+	// Layout order: now (vitals, Live Requests) before the statistics, and
+	// the statistics in reading order: headline -> activity -> breakdown ->
+	// speed -> reliability.
+	order := []string{`id="vitals"`, `id="live"`, `id="dash-ctl"`, `id="dash-kpis"`, `id="dash-activity"`, `id="dash-breakdown"`, `id="dash-speed"`, `id="dash-rel"`}
+	last := -1
+	for _, a := range order {
+		i := strings.Index(body, a)
+		if i <= last {
+			t.Errorf("status.html section order wrong at %s (index %d, previous %d)", a, i, last)
+		}
+		last = i
 	}
 }
 
@@ -589,7 +592,7 @@ func TestLogPage_RefreshStatusAuthHeaders(t *testing.T) {
 	}
 }
 
-func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
+func TestStatusPage_LiveRequestsAndDashboardElements(t *testing.T) {
 	body := string(overviewHTMLPage)
 
 	// Live Requests columns
@@ -607,16 +610,11 @@ func TestStatusPage_LiveRequestsAndPerformanceElements(t *testing.T) {
 		}
 	}
 
-	// Performance basis buttons: 10, 30, 100, 300
-	for _, basis := range []string{`data-basis="10"`, `data-basis="30"`, `data-basis="100"`, `data-basis="300"`} {
-		if !strings.Contains(body, basis) {
-			t.Errorf("status.html missing performance basis button %s", basis)
+	// The statistics panels are mounted from dashboard.js, not drawn here.
+	for _, want := range []string{"VMRDash.mount(", "dash.refresh()", `id="dash-events-wrap" hidden`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status.html missing dashboard element %q", want)
 		}
-	}
-
-	// Traffic range buttons: 12h, 24h, 3d, 7d
-	if !strings.Contains(body, "const RANGE_BTNS = ['12h', '24h', '3d', '7d'];") {
-		t.Errorf("status.html missing RANGE_BTNS with 12h")
 	}
 }
 

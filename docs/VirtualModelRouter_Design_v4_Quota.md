@@ -7,7 +7,7 @@
 配套文档：
 - `docs/VirtualModelRouter_Design_v4_Strategy.md` —— 战略与竞品，定义“为什么做”。
 - `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）—— 分析半区，状态文件的离线消费者，共享口径一致性纪律。
-- `docs/VirtualModelRouter_Design_v4_LiveStats.md` —— 实时请求统计与控制台，展示配额水位与 Headroom。
+- `docs/VirtualModelRouter_Design_v4_Stats.md` —— 请求统计与统计页；Token 四分量与本文扣费同源。
 
 ---
 

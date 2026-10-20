@@ -66,7 +66,7 @@ Task 1: Search codebase and outline implementation
 - **直连真实模型（可选）**：开启 `direct_routing: true` 后，可用 `provider:model`（如 `cliproxy:gemini-3.8-flash-high`）直接调用配置里已声明的任一真实模型——健康、配额、审计走同一条路径，不绕虚拟模型。见[用户指南](docs/UserGuide.zh.md#直连寻址providermodel)。
 - **字节级透传**：零中介格式翻译、零参数改写，上游新特性上线当天可用；包含 MiniMax `<think>` 剥离与软屏蔽审计追踪（`soft_block_detected`）。
 - **实测过，不是拍脑袋**：覆盖 17 种场景（包含持续慢流并发、配额水位调度、会话粘性以及按 plain / stream / image 独立成本标定），非图片场景 p95 路由开销稳定在 10ms 以内。见 [`loadtest/`](loadtest/)。
-- **实时可观测性**：零内部依赖的轻量级实时指标账本（`internal/livestats`，小时 WAL + 本地 Rollup 归档），TTFT 与产出型 Token 生成速率百分位（p50/p10），以及统一内置控制台（`/status.html`, `/models.html`, `/log.html`, `/help.html`）。
+- **请求统计与控制台**：每个请求记为一个事件，按天写入纯文本 JSONL（`<log_dir>/stats/`，永久保留，不含正文），进程内查询：任意时间范围、粒度、分组与过滤，成功请求的 TTFT / 吞吐 / 耗时精确分位数，以及按错误类别、状态码、端点的失败拆分。内置控制台（`/status.html`、`/stats.html`、`/models.html`、`/log.html`、`/help.html`）展示进行中请求与统计分析；`vmr stats rebuild` 从审计日志补齐历史。
 
 ### 柱石 B：运行后审计、叙事与重放
 - **两层真实字节记录**：无伪造记录客户端↔VMR、VMR↔上游双层原始字节，落盘不进行 HTML 转义。
@@ -150,9 +150,10 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
 
 # 探针与实时遥测 (JSON 与 Web 可视化控制台)
 curl http://127.0.0.1:8800/status
-curl http://127.0.0.1:8800/stats
-# 统一内置控制台（概览、模型拓扑、实时日志与配置向导）：
+curl -H "Authorization: Bearer sk-vmr-local-xxx" 'http://127.0.0.1:8800/stats/query?from=-24h&group=endpoint&metrics=req,err_rate,ttft_p90'
+# 统一内置控制台（概览、统计、模型拓扑、实时日志与配置向导）：
 # - 概览大屏 (Overview): http://127.0.0.1:8800/status.html
+# - 统计分析 (Stats): http://127.0.0.1:8800/stats.html
 # - 模型与配额 (Models): http://127.0.0.1:8800/models.html
 # - 实时终端日志 (Log): http://127.0.0.1:8800/log.html
 # - Agent 配置向导 (Help): http://127.0.0.1:8800/help.html
@@ -181,7 +182,7 @@ curl http://127.0.0.1:8800/stats
 ## 延伸阅读
 
 - **[用户指南](docs/UserGuide.zh.md)** —— 完整配置参考、透传与归一化细节、Failover 与健康状态、审计日志与 `vmr analyze`、完整 CLI 参考。
-- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Journey](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加三篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[实时指标与控制台](docs/VirtualModelRouter_Design_v4_LiveStats.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
+- **设计文档** —— [Part 1: 路由核心](docs/VirtualModelRouter_Design_v4_Core.md)、[Part 2: 分析与 Journey](docs/VirtualModelRouter_Design_v4_Analytics.md)，外加四篇专题：[额度感知路由](docs/VirtualModelRouter_Design_v4_Quota.md)、[请求统计](docs/VirtualModelRouter_Design_v4_Stats.md)、[进行中请求](docs/VirtualModelRouter_Design_v4_LiveStats.md)、[战略定位与竞品分析](docs/VirtualModelRouter_Design_v4_Strategy.md)。
 
 ## 开发
 

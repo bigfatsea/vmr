@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"vmr/internal/config"
-	"vmr/internal/livestats"
 	"vmr/internal/router"
+	"vmr/internal/stats"
 )
 
 // TestAdaptivePoller_E2E verifies the backend telemetry contract driving
@@ -25,8 +25,8 @@ import (
 //  3. Completion: inflight list clears instantaneously, in_flight returns to 0,
 //     and the request's terminal snapshot (state "ended", ended_at stamped)
 //     shows up in recently_ended[] while inflight[] stays live-only.
-//  4. Unauthenticated server: GET /stats returns 200 without Authorization header.
-//  5. Authenticated server: GET /stats rejects unauthenticated requests with 401.
+//  4. Unauthenticated server: GET /status/live returns 200 without Authorization header.
+//  5. Authenticated server: GET /status/live rejects unauthenticated requests with 401.
 func TestAdaptivePoller_E2E(t *testing.T) {
 	chunk1Signal := make(chan struct{})
 	chunk2Signal := make(chan struct{})
@@ -90,22 +90,22 @@ models:
 	rt.Install(snap)
 
 	statsDir := t.TempDir()
-	lstats, err := livestats.New(statsDir)
+	st, err := stats.Open(statsDir, nil)
 	if err != nil {
-		t.Fatalf("livestats.New failed: %v", err)
+		t.Fatalf("stats.Open failed: %v", err)
 	}
-	t.Cleanup(func() { _ = lstats.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 
-	srv := New(rt, nil).WithLiveStats(lstats)
+	srv := New(rt, nil).WithStats(st)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
 	client := ts.Client()
 
-	// Helper to poll /stats
-	getStats := func(t *testing.T, key string) (statsResponse, int) {
+	// Helper to poll /status/live
+	getStats := func(t *testing.T, key string) (liveResponse, int) {
 		t.Helper()
-		req, err := http.NewRequest("GET", ts.URL+"/stats", nil)
+		req, err := http.NewRequest("GET", ts.URL+"/status/live", nil)
 		if err != nil {
 			t.Fatalf("NewRequest: %v", err)
 		}
@@ -114,14 +114,14 @@ models:
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			t.Fatalf("GET /stats: %v", err)
+			t.Fatalf("GET /status/live: %v", err)
 		}
 		defer resp.Body.Close()
 
-		var stats statsResponse
+		var stats liveResponse
 		if resp.StatusCode == http.StatusOK {
 			if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
-				t.Fatalf("Decode /stats: %v", err)
+				t.Fatalf("Decode /status/live: %v", err)
 			}
 		}
 		return stats, resp.StatusCode
@@ -132,13 +132,13 @@ models:
 		// 1a. Unauthenticated request rejected with 401
 		_, status := getStats(t, "")
 		if status != http.StatusUnauthorized {
-			t.Fatalf("initial unauthenticated GET /stats status = %d, want 401", status)
+			t.Fatalf("initial unauthenticated GET /status/live status = %d, want 401", status)
 		}
 
 		// 1b. Authenticated request succeeds, idle
 		stats, status := getStats(t, testKey)
 		if status != http.StatusOK {
-			t.Fatalf("initial authenticated GET /stats status = %d, want 200", status)
+			t.Fatalf("initial authenticated GET /status/live status = %d, want 200", status)
 		}
 		if stats.Concurrency.InFlight != 0 {
 			t.Errorf("initial in_flight = %d, want 0", stats.Concurrency.InFlight)
@@ -180,7 +180,7 @@ models:
 	}()
 
 	// Wait for request to enter in-flight before chunk 1 is released
-	var inflightBeforeChunk1 statsResponse
+	var inflightBeforeChunk1 liveResponse
 	for i := 0; i < 50; i++ {
 		time.Sleep(10 * time.Millisecond)
 		st, code := getStats(t, testKey)
@@ -214,7 +214,7 @@ models:
 	// Step 3: Release Chunk 1 and observe first_byte_at and est_out
 	close(chunk1Signal)
 
-	var inflightAfterChunk1 statsResponse
+	var inflightAfterChunk1 liveResponse
 	for i := 0; i < 50; i++ {
 		time.Sleep(10 * time.Millisecond)
 		st, code := getStats(t, testKey)
@@ -240,7 +240,7 @@ models:
 	// Step 4: Release Chunk 2 and observe last_byte_at and est_out increase
 	close(chunk2Signal)
 
-	var inflightAfterChunk2 statsResponse
+	var inflightAfterChunk2 liveResponse
 	for i := 0; i < 50; i++ {
 		time.Sleep(10 * time.Millisecond)
 		st, code := getStats(t, testKey)
@@ -282,7 +282,7 @@ models:
 	// Instantaneous inflight clearing check
 	statsDone, code := getStats(t, testKey)
 	if code != http.StatusOK {
-		t.Fatalf("GET /stats after completion status=%d", code)
+		t.Fatalf("GET /status/live after completion status=%d", code)
 	}
 	if statsDone.Concurrency.InFlight != 0 {
 		t.Errorf("statsDone.Concurrency.InFlight = %d, want 0", statsDone.Concurrency.InFlight)
@@ -317,10 +317,19 @@ models:
 		t.Errorf("ended identity = %s/%s/%s, want chat/p-test-primary/gpt-test",
 			endedEntry.VModel, endedEntry.Provider, endedEntry.Model)
 	}
+
+	// The completion hook booked the same request as one statistics event.
+	evs := st.Events(stats.EventsQuery{Limit: 10})
+	if len(evs) != 1 {
+		t.Fatalf("stats events = %d, want 1", len(evs))
+	}
+	if e := evs[0]; e.VModel != "chat" || e.Provider != "p-test-primary" || e.Outcome != stats.OutcomeOK || !e.Stream || !e.Forwarded {
+		t.Errorf("booked event = %+v, want an ok streamed forwarded chat request on p-test-primary", e)
+	}
 }
 
 // TestAdaptivePoller_UnauthenticatedServer verifies that an unauthenticated VMR instance
-// (no api_keys configured) successfully responds to GET /stats without an Authorization header,
+// (no api_keys configured) successfully responds to GET /status/live without an Authorization header,
 // ensuring status.html's adaptive poller functions out of the box in keyless mode.
 func TestAdaptivePoller_UnauthenticatedServer(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -355,21 +364,21 @@ models:
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	// GET /stats without auth header must return 200 OK
-	req, _ := http.NewRequest("GET", ts.URL+"/stats", nil)
+	// GET /status/live without auth header must return 200 OK
+	req, _ := http.NewRequest("GET", ts.URL+"/status/live", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("GET /stats: %v", err)
+		t.Fatalf("GET /status/live: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /stats on unauthenticated instance returned status %d, want 200", resp.StatusCode)
+		t.Fatalf("GET /status/live on unauthenticated instance returned status %d, want 200", resp.StatusCode)
 	}
 
-	var stats statsResponse
+	var stats liveResponse
 	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
-		t.Fatalf("Decode statsResponse: %v", err)
+		t.Fatalf("Decode liveResponse: %v", err)
 	}
 
 	if stats.Inflight == nil {

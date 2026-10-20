@@ -1,31 +1,72 @@
-// Ver 2026-09-23 03:30, by Claude Opus 5.5
-
-// The live stats HTTP and collection surface: /stats (JSON API, auth-gated).
+// Statistics mount points and the live in-flight view.
 //
-// Ownership split (the LiveStats design doc): livestats.Aggregator owns the
-// completed-request ledger (slim WAL, hourly rollups, ring percentiles);
-// router.InflightRegistry owns the in-flight per-request live entries.
-// GET /stats merges both into one JSON payload at read time.
+// Ownership split: internal/stats owns everything under /stats (the event
+// log, the query engine, the statistics page and its assets) and knows
+// nothing about this server beyond the Event values the completion hook
+// hands it; internal/statsfeed is the one projection from an audit record
+// to an Event. This file only mounts those handlers behind s.auth and keeps
+// /status/live — router runtime state (concurrency gates, in-flight
+// requests), which is not statistics and never touches the event log.
 package server
 
 import (
-	"encoding/json"
 	"net/http"
+	"sync"
 
 	"vmr/internal/audit"
-	"vmr/internal/livestats"
 	"vmr/internal/router"
+	"vmr/internal/stats"
+	"vmr/internal/statsfeed"
 )
 
-// WithLiveStats wires the completed-request aggregator into the server.
-// nil-safe: absent stats leaves /stats serving only in-flight + concurrency.
-func (s *Server) WithLiveStats(l *livestats.Aggregator) *Server {
-	s.liveStats = l
+// WithStats wires the statistics store into the server. nil-safe: without
+// a store the /stats data routes answer 503 and nothing is booked.
+func (s *Server) WithStats(st *stats.Store) *Server {
+	s.stats = st
 	return s
 }
 
-// statsResponse is the JSON wire contract for GET /stats.
-type statsResponse struct {
+// bookStats hands one completed request to the statistics store.
+func (s *Server) bookStats(rec *audit.Record) {
+	if s.stats == nil {
+		return
+	}
+	if e, ok := statsfeed.FromRecord(rec); ok {
+		s.stats.Record(e)
+	}
+}
+
+var (
+	assembledStatsPage []byte
+	assembleStatsOnce  sync.Once
+)
+
+// mountStats registers the statistics module's routes. The page shell and
+// static assets are unauthenticated (no data in them, same as every console
+// page); the data routes go through s.auth. The bare /stats was the old
+// JSON endpoint and is now only a redirect for anyone who typed it.
+func (s *Server) mountStats(mux *http.ServeMux) {
+	h := stats.NewHandler(s.stats)
+	mux.HandleFunc("GET /stats.html", func(w http.ResponseWriter, r *http.Request) {
+		assembleStatsOnce.Do(func() { assembledStatsPage = assembleConsolePage(stats.PageHTML()) })
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		_, _ = w.Write(assembledStatsPage)
+	})
+	mux.HandleFunc("GET /stats/assets/", stats.Asset)
+	mux.HandleFunc("GET /stats/schema", s.auth(h.Schema))
+	mux.HandleFunc("GET /stats/query", s.auth(h.Query))
+	mux.HandleFunc("GET /stats/events", s.auth(h.Events))
+	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/stats.html", http.StatusFound)
+	})
+	mux.HandleFunc("GET /status/live", s.auth(s.adminLive))
+}
+
+// liveResponse is the GET /status/live contract: the in-flight half of the
+// console, polled every second while requests are running, so it carries
+// nothing but router runtime state.
+type liveResponse struct {
 	Concurrency struct {
 		Limit    int   `json:"limit"`
 		InFlight int64 `json:"in_flight"`
@@ -34,177 +75,23 @@ type statsResponse struct {
 	ProvidersConcurrency map[string]router.ProviderConcurrencyStats `json:"providers_concurrency,omitempty"`
 	Inflight             []router.InflightEntry                     `json:"inflight"`
 	RecentlyEnded        []router.InflightEntry                     `json:"recently_ended"`
-	Hourly               []livestats.HourlyRow                      `json:"hourly"`
-	Daily                []livestats.HourlyRow                      `json:"daily"`
-	Overall              *livestats.WindowBlock                     `json:"overall,omitempty"`
-	RecentRequests       []livestats.RecentRequestEntry             `json:"recent_requests"`
-	RecentErrors         []livestats.RecentErrorRow                 `json:"recent_errors"`
-	ByProviderModel      []livestats.ProviderRow                    `json:"by_provider_model"`
-	ByClientKeyTag       []livestats.DimensionRow                   `json:"by_client_key_tag"`
-	ByKeyLabel           []livestats.DimensionRow                   `json:"by_key_label"`
 }
 
-// parseRangeTail resolves ?range= to the hourly tail it selects
-// (the console's /stats contract): 12h|24h|3d|7d →
-// 12/24/72/168 hours; absent or unrecognized
-// values fall back to the 48h default. 7d is the cap because the in-memory
-// rollup only holds ~7 days — it is also the widest window the console offers.
-func parseRangeTail(q string) int {
-	switch q {
-	case "12h":
-		return 12
-	case "24h":
-		return 24
-	case "3d":
-		return 72
-	case "7d":
-		return 168
-	default:
-		return livestats.HourlyTailDefault
-	}
-}
-
-// adminStats serves GET /stats: merges router in-flight + concurrency with
-// livestats ledger snapshot.
-func (s *Server) adminStats(w http.ResponseWriter, r *http.Request) {
-	var resp statsResponse
-
-	// 1. Router live concurrency + in-flight entries snapshot. Computed fresh
-	// on every read — never cached — so the Overview poller sees in-flight
-	// activity at its own cadence, independent of the ledger cache below.
+func (s *Server) adminLive(w http.ResponseWriter, r *http.Request) {
+	resp := liveResponse{Inflight: []router.InflightEntry{}, RecentlyEnded: []router.InflightEntry{}}
 	if s.rt != nil {
 		lim, inf, wait := s.rt.Concurrency()
-		resp.Concurrency.Limit = lim
-		resp.Concurrency.InFlight = inf
-		resp.Concurrency.Waiting = wait
+		resp.Concurrency.Limit, resp.Concurrency.InFlight, resp.Concurrency.Waiting = lim, inf, wait
 		if s.rt.ProviderLimiters != nil {
 			resp.ProvidersConcurrency = s.rt.ProviderLimiters.Snapshot()
 		}
-		resp.Inflight = s.rt.Inflight.Snapshot()
-		resp.RecentlyEnded = s.rt.Inflight.Ended()
-	}
-	if resp.Inflight == nil {
-		resp.Inflight = []router.InflightEntry{}
-	}
-	if resp.RecentlyEnded == nil {
-		resp.RecentlyEnded = []router.InflightEntry{}
-	}
-
-	// 2. Livestats completed ledger snapshot (read-cached, snapCacheTTL: a
-	// burst of polls costs one fold, not one each — the TTL sits above the
-	// Overview poller's cadence on purpose). The cache is keyed by the
-	// resolved range tail so ?range= variants don't thrash each other's
-	// entries.
-	if s.liveStats != nil {
-		snap := s.liveStats.CachedSnapshot(parseRangeTail(r.URL.Query().Get("range")))
-		resp.Hourly = snap.Hourly
-		resp.Daily = snap.Daily
-		resp.Overall = snap.Overall
-		resp.RecentRequests = snap.RecentRequests
-		resp.RecentErrors = snap.RecentErrors
-		resp.ByProviderModel = snap.ByProviderModel
-		resp.ByClientKeyTag = snap.ByClientKeyTag
-		resp.ByKeyLabel = snap.ByKeyLabel
-	}
-	if resp.Hourly == nil {
-		resp.Hourly = []livestats.HourlyRow{}
-	}
-	if resp.Daily == nil {
-		resp.Daily = []livestats.HourlyRow{}
-	}
-	if resp.RecentErrors == nil {
-		resp.RecentErrors = []livestats.RecentErrorRow{}
-	}
-	if resp.RecentRequests == nil {
-		resp.RecentRequests = []livestats.RecentRequestEntry{}
-	}
-	if resp.ByProviderModel == nil {
-		resp.ByProviderModel = []livestats.ProviderRow{}
-	}
-	if resp.ByClientKeyTag == nil {
-		resp.ByClientKeyTag = []livestats.DimensionRow{}
-	}
-	if resp.ByKeyLabel == nil {
-		resp.ByKeyLabel = []livestats.DimensionRow{}
-	}
-
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
-	_ = json.NewEncoder(w).Encode(resp)
-}
-
-// sampleFromRecord maps a completed audit.Record into a livestats.Sample
-// according to the design's attribution rules. Provider/Model/KeyLabel
-// are the terminal attempt's service identity — the winning one when the
-// request forwarded, else the last attempt tried — whenever at least one
-// attempt was made: a failed request still names the upstream endpoint that
-// actually failed, instead of collapsing into an anonymous bucket. Forwarded
-// is the separate, authoritative gate livestats uses to decide whether
-// tokens/dur/ttft may be counted as service-quality signal —
-// only the winning attempt's data ever populates s.Tokens. ErrorClass/
-// Status/Attempt feed only the recent_errors ring
-// (the console's /stats contract): class
-// and status quote the terminal attempt verbatim, never re-classified;
-// Attempt is the 1-based ordinal of the attempt that ended the request
-// (0 when there were none). When no attempt was built at all (every
-// candidate cooling down → vmr_no_candidates, or a pre-dispatch build
-// error), there is no upstream to name at all — Provider/Model/KeyLabel
-// stay empty, Status falls back to the client-facing response code — the
-// only terminal fact that exists — and ErrorClass synthesizes
-// "no_candidate" for error outcomes.
-func sampleFromRecord(rec *audit.Record) livestats.Sample {
-	if rec == nil {
-		return livestats.Sample{}
-	}
-	s := livestats.Sample{
-		TS:           rec.TS,
-		VModel:       rec.Model,
-		Protocol:     rec.Protocol,
-		Stream:       rec.Stream,
-		Outcome:      rec.Outcome,
-		ClientKeyTag: rec.ClientKeyTag,
-		DurMS:        rec.DurMS,
-		TTFTMS:       rec.TTFTMS,
-		Attempt:      len(rec.Attempts),
-	}
-	win := -1
-	for i := range rec.Attempts {
-		if rec.Attempts[i].IsForwarded() {
-			win = i
-			break
+		if e := s.rt.Inflight.Snapshot(); e != nil {
+			resp.Inflight = e
+		}
+		if e := s.rt.Inflight.Ended(); e != nil {
+			resp.RecentlyEnded = e
 		}
 	}
-	if len(rec.Attempts) > 0 {
-		final := &rec.Attempts[len(rec.Attempts)-1]
-		if win >= 0 {
-			final = &rec.Attempts[win]
-		}
-		// Identity attaches from the terminal attempt regardless of outcome —
-		// see doc comment. Tokens only ever come from a genuinely forwarded
-		// attempt (win>=0); a failed terminal attempt has no usage to report.
-		s.Provider = final.Provider
-		s.Model = final.Model
-		s.KeyLabel = final.KeyLabel
-		s.Forwarded = win >= 0
-		if win >= 0 && final.Tokens != nil {
-			s.Tokens = livestats.TokenCounts{
-				In:         final.Tokens.In,
-				Out:        final.Tokens.Out,
-				CacheRead:  final.Tokens.CacheRead,
-				CacheWrite: final.Tokens.CacheWrite,
-			}
-		}
-		s.ErrorClass = final.ErrorClass
-		if final.Response != nil {
-			s.Status = final.Response.Status
-		}
-	} else {
-		if rec.Client.Response != nil {
-			s.Status = rec.Client.Response.Status
-		}
-		if rec.Outcome == "error" {
-			s.ErrorClass = "no_candidate"
-		}
-	}
-	return s
+	w.Header().Set("Cache-Control", "no-store")
+	router.WriteJSON(w, http.StatusOK, resp)
 }

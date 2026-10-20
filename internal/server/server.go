@@ -21,9 +21,9 @@ import (
 	"vmr/internal/fmtutil"
 	"vmr/internal/guard"
 	"vmr/internal/imgprep"
-	"vmr/internal/livestats"
 	"vmr/internal/logtee"
 	"vmr/internal/router"
+	"vmr/internal/stats"
 )
 
 // defaultBodyReadTimeout bounds the time allowed to read the full incoming
@@ -37,9 +37,9 @@ type Server struct {
 	audit  *audit.Logger // nil = auditing disabled
 	inst   instance      // zero value outside `vmr start` (tests, embedding)
 	logTee *logtee.Tee   // nil = live-log streaming unavailable (/log answers 503)
-	// liveStats holds the completed-request aggregator (nil = live stats
-	// persistence disabled, e.g. lightweight tests).
-	liveStats *livestats.Aggregator
+	// stats is the request statistics store (nil = statistics disabled,
+	// e.g. lightweight tests or an unusable log_dir).
+	stats *stats.Store
 	// guard is Agent Guard's online engine, built once at
 	// startup — nil in every test and embedding that doesn't opt in via
 	// WithGuard, which is the same as guard: being entirely absent from
@@ -78,7 +78,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
 	mux.HandleFunc("GET /status.html", s.statusPage)
 	mux.HandleFunc("GET /models.html", s.modelsPage)
-	mux.HandleFunc("GET /stats", s.auth(s.adminStats))
 	mux.HandleFunc("GET /help", s.helpPageEN)
 	mux.HandleFunc("GET /help.html", s.helpPageEN)
 	mux.HandleFunc("GET /help.zh", s.helpPageZH)
@@ -93,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /vmr-logo.svg", s.logoIcon)
 	mux.HandleFunc("GET /assets/vmr-logo.svg", s.logoIcon)
 	s.mountReports(mux)
+	s.mountStats(mux)
 	return mux
 }
 
@@ -350,14 +350,14 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 
 // beginAudit creates the audit record and recorder for one chat request.
 // rec and done are always non-nil: the completion hook runs even with
-// -audit=false, where it feeds the live-stats ledger instead of writing the
+// -audit=false, where it still feeds the statistics instead of writing the
 // audit log. The returned http.ResponseWriter wraps the original with a
 // recorder that captures response status and TTFT always, and the response
 // body only when auditing is on (recorder.captureBody).
 func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Request, snap *router.Snapshot) (rec *audit.Record, ww http.ResponseWriter, done func()) {
 	reqMsg := audit.Message{Method: r.Method, Path: r.URL.Path}
 	// Redact the request headers only when they'll actually be written: with
-	// -audit=false the completion hook feeds live stats, and sampleFromRecord
+	// -audit=false the completion hook feeds the statistics, and statsfeed
 	// never reads Client.Request.Headers — the redact (a full header-map copy
 	// per request) would be pure waste, the same reason the recorder skips
 	// captureBody in that mode.
@@ -373,7 +373,7 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 		},
 	}
 	// captureBody only when auditing: with -audit=false the completion hook
-	// feeds live stats, which needs status + ttftMS but not the response body
+	// feeds the statistics, which need status + ttftMS but not the response body
 	// or a header redact.
 	rw := newRecorder(w, rec.TS, s.audit != nil)
 	return rec, rw, func() {
@@ -405,22 +405,17 @@ func (s *Server) beginAudit(w http.ResponseWriter, protocol string, r *http.Requ
 		if rec.Client.Response == nil && rw.status != 0 {
 			rec.Client.Response = &audit.Message{Status: rw.status}
 		}
-		canceled := r.Context().Err() != nil
+		canceled := r.Context().Err() != nil && !rec.DeliveredInFull()
 		rec.Outcome = audit.OutcomeFor(rw.status, canceled)
 		if s.audit != nil {
 			if err := s.audit.Write(rec); err != nil {
 				s.rt.Logf("audit: %v", err)
 			}
 		}
-		// Only book requests that got past the probe (rec.Model set). A
-		// pre-probe failure (401, unreadable body, invalid JSON, missing
-		// model) has no virtual model to attribute — booking it sprays
-		// empty-dims rows into slim/rollup (port scanners' 401s especially).
-		// Same shape as "probe traffic isn't audited, so it isn't counted";
-		// post-probe failures (404, all-failover, upstream error) still count.
-		if s.liveStats != nil && rec.Model != "" {
-			s.liveStats.Record(sampleFromRecord(rec))
-		}
+		// Booked whether or not auditing is on: the record exists in memory
+		// either way. statsfeed decides what counts (pre-probe rejections
+		// and replays do not).
+		s.bookStats(rec)
 	}
 }
 

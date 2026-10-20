@@ -66,7 +66,7 @@ Comparing two runs of the same task (e.g. OpenClaw vs Lobster, or DeepSeek vs Cl
 - **Direct Model Addressing (opt-in)**: With `direct_routing: true`, call any real model your config already declares as `provider:model` (e.g. `cliproxy:gemini-3.8-flash-high`) — same health, quota and audit path, no virtual-model detour. See the [User Guide](docs/UserGuide.md#direct-routing-providermodel).
 - **Byte-Faithful Passthrough**: Zero protocol translation or parameter tampering. Upstream vendor features work on day one. Includes evidence-based vendor quirk repairs (MiniMax `<think>` stripping) and audit norm tracking (`soft_block_detected`).
 - **Measured, Not Assumed**: Comprehensive load testing across 17 scenarios (plain, stream, and image regimes, stressing sustained SSE concurrency, quota pacing, and sticky session affinity) with p95 router overhead remaining under 10ms. See [`loadtest/`](loadtest/).
-- **Live Observability**: Zero-dependency live telemetry (`internal/livestats`) with hourly slim WAL, local rollup archives, nearest-rank TTFT and token generation throughput percentiles (p50/p10), and unified built-in CSR console (`/status.html`, `/models.html`, `/log.html`, `/help.html`).
+- **Request Statistics & Console**: Every request is recorded as one event in plain per-day JSONL files (`<log_dir>/stats/`, kept forever, no bodies), queried in-process: any time range, step, grouping and filter, with exact TTFT / throughput / duration percentiles over successful requests and error breakdowns by class, status and endpoint. A built-in console (`/status.html`, `/stats.html`, `/models.html`, `/log.html`, `/help.html`) shows live in-flight requests and the analysis; `vmr stats rebuild` backfills history from the audit log.
 
 ### Pillar B: Post-Flight Audit, Journeys & Forensic Replay
 - **Two-Layer Raw Byte Audit**: Log client-side and upstream-side payloads verbatim for complete transparency without HTML escaping.
@@ -150,9 +150,10 @@ curl http://127.0.0.1:8800/v1/responses -H "Content-Type: application/json" \
 
 # Status & Health (JSON & Web Console)
 curl http://127.0.0.1:8800/status
-curl http://127.0.0.1:8800/stats
-# Unified Built-in Console (Overview, Models, Live Terminal Log & Agent Guides):
+curl -H "Authorization: Bearer sk-vmr-local-xxx" 'http://127.0.0.1:8800/stats/query?from=-24h&group=endpoint&metrics=req,err_rate,ttft_p90'
+# Unified Built-in Console (Overview, Stats, Models, Live Terminal Log & Agent Guides):
 # - Overview: http://127.0.0.1:8800/status.html
+# - Stats: http://127.0.0.1:8800/stats.html
 # - Models & Quotas: http://127.0.0.1:8800/models.html
 # - Live Terminal Log: http://127.0.0.1:8800/log.html
 # - Agent Configuration Guide: http://127.0.0.1:8800/help.html
@@ -181,7 +182,7 @@ Everything past this point lives in the **[User Guide](docs/UserGuide.md)**.
 ## Learn More
 
 - **[User Guide](docs/UserGuide.md)** — full configuration reference, passthrough/normalization behavior, failover & health details, audit log & `vmr analyze`, complete CLI reference.
-- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Journeys](docs/VirtualModelRouter_Design_v4_Analytics.md), plus three topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md), [Live Stats & Telemetry](docs/VirtualModelRouter_Design_v4_LiveStats.md), and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
+- **Design Docs** (Chinese) — [Part 1: Routing Core](docs/VirtualModelRouter_Design_v4_Core.md) and [Part 2: Analytics & Journeys](docs/VirtualModelRouter_Design_v4_Analytics.md), plus four topic pieces: [Quota-Aware Routing](docs/VirtualModelRouter_Design_v4_Quota.md), [Request Statistics](docs/VirtualModelRouter_Design_v4_Stats.md), [In-flight Requests](docs/VirtualModelRouter_Design_v4_LiveStats.md), and [Strategy & Competitive Landscape](docs/VirtualModelRouter_Design_v4_Strategy.md).
 
 ## Development
 

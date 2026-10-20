@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VMR Console — Models</title>
 <link rel="icon" href="/vmr-logo.svg" type="image/svg+xml">
+<script src="/stats/assets/stats.js"></script>
 <style>
 /*{{CONSOLE_CSS}}*/
 
@@ -26,7 +27,7 @@
     <table class="c">
       <thead><tr>
         <th>Provider</th><th>Limit</th><th>Models</th><th class="num">Amount</th><th class="num">Used</th>
-        <th class="col-progress">Progress</th><th class="num">Headroom</th><th class="num" title="Requests routed within this account's quota over the last 24h, and their share of all forwarded requests">Req 24h</th><th>Resets</th>
+        <th class="col-progress">Progress</th><th class="num">Headroom</th><th class="num" title="Requests over the last 24h whose serving (or last tried) endpoint belongs to this account, and their share of all requests booked">Req 24h</th><th>Resets</th>
       </tr></thead>
       <tbody id="quota-body"></tbody>
     </table>
@@ -145,7 +146,7 @@ function headroomTitle(v) {
 }
 
 // ============ Render Quota Budgets ============
-function renderQuota(quotaList, models, statsData) {
+function renderQuota(quotaList, models, byProviderModel) {
   const tbody = document.getElementById('quota-body');
   const countBadge = document.getElementById('quota-count-badge');
   const list = quotaList || [];
@@ -171,31 +172,16 @@ function renderQuota(quotaList, models, statsData) {
     });
   });
 
-  // Calculate 24h request counts for quota share
-  const now = Date.now();
-  const h24Ago = now - 24 * 3600 * 1000;
-  let totalAllReqs24h = 0;
+  // 24h request counts for quota share: one stats query grouped by
+  // provider × model (rows [provider, model, req]; totals = all requests).
+  const totalAllReqs24h = (byProviderModel && byProviderModel.totals && byProviderModel.totals[2]) || 0;
   const provReqs24h = new Map();
   const provModelReqs24h = new Map();
-
-  (statsData && statsData.hourly || []).forEach(row => {
-    const rowTime = new Date(row.hour).getTime();
-    if (rowTime < h24Ago) return;
-    const c = row.counters || {};
-    const reqs = (c.ok || 0) + (c.error || 0) + (c.canceled || 0);
-    if (reqs <= 0) return;
-    totalAllReqs24h += reqs;
-
-    const d = row.dims || {};
-    if (d.provider) {
-      provReqs24h.set(d.provider, (provReqs24h.get(d.provider) || 0) + reqs);
-      if (d.model) {
-        const pmKey = d.provider + '\x00' + d.model;
-        provModelReqs24h.set(pmKey, (provModelReqs24h.get(pmKey) || 0) + reqs);
-      }
-    }
+  ((byProviderModel && byProviderModel.rows) || []).forEach(([prov, model, reqs]) => {
+    if (!prov || !reqs) return;
+    provReqs24h.set(prov, (provReqs24h.get(prov) || 0) + reqs);
+    if (model) provModelReqs24h.set(prov + '\x00' + model, (provModelReqs24h.get(prov + '\x00' + model) || 0) + reqs);
   });
-
   tbody.innerHTML = list.map(q => {
     let pName = q.provider;
     if (providerKeyMap[q.provider]) {
@@ -284,35 +270,21 @@ function protocolTitle(proto) {
 }
 
 // ============ Render Virtual Models & Endpoint Topology ============
-function renderModels(modelsList, statsData) {
+function renderModels(modelsList, byVModelEndpoint) {
   const container = document.getElementById('models-body');
   const modelsBadge = document.getElementById('models-count-badge');
   const list = modelsList || [];
 
-  // Calculate 24h per-virtual-model request totals and per-endpoint request counts
-  const now = Date.now();
-  const h24Ago = now - 24 * 3600 * 1000;
+  // 24h per-virtual-model totals and per-endpoint counts, from one stats
+  // query grouped by protocol × vmodel × endpoint (endpoint = provider:model).
   const vmTotalReqs24h = new Map();
   const vmEpReqs24h = new Map();
-
-  (statsData && statsData.hourly || []).forEach(row => {
-    const rowTime = new Date(row.hour).getTime();
-    if (rowTime < h24Ago) return;
-    const d = row.dims;
-    if (!d || !d.vmodel || !d.protocol) return;
-    const c = row.counters || {};
-    const reqs = (c.ok || 0) + (c.error || 0) + (c.canceled || 0);
-    if (reqs <= 0) return;
-
-    const vmKey = `${d.protocol}:${d.vmodel}`;
+  ((byVModelEndpoint && byVModelEndpoint.rows) || []).forEach(([protocol, vmodel, endpoint, reqs]) => {
+    if (!protocol || !vmodel || !reqs) return;
+    const vmKey = `${protocol}:${vmodel}`;
     vmTotalReqs24h.set(vmKey, (vmTotalReqs24h.get(vmKey) || 0) + reqs);
-
-    if (d.provider && d.model) {
-      const epKey = `${vmKey}\x00${d.provider}\x00${d.model}`;
-      vmEpReqs24h.set(epKey, (vmEpReqs24h.get(epKey) || 0) + reqs);
-    }
+    if (endpoint) vmEpReqs24h.set(`${vmKey}\x00${endpoint}`, (vmEpReqs24h.get(`${vmKey}\x00${endpoint}`) || 0) + reqs);
   });
-
   let totalEpCount = 0;
   const protoGroups = new Map();
   list.forEach(m => {
@@ -378,7 +350,7 @@ function renderModels(modelsList, statsData) {
 
       const vmKey = `${m.protocol}:${m.id}`;
       const vmTotal = vmTotalReqs24h.get(vmKey) || 0;
-      const epCount = vmEpReqs24h.get(`${vmKey}\x00${ep.provider}\x00${ep.model}`) || 0;
+      const epCount = vmEpReqs24h.get(`${vmKey}\x00${ep.provider}:${ep.model}`) || 0;
       const sharePct = vmTotal > 0 ? (epCount / vmTotal * 100) : 0;
       const shareCell = vmTotal > 0
         ? `${fmtInt(epCount)} · ${fmtPct(sharePct)}`
@@ -459,9 +431,10 @@ async function refreshAll() {
     if (!statusResp.ok) throw new Error('HTTP ' + statusResp.status + ' from /status');
     const statusData = await statusResp.json();
 
-    const statsResp = await authFetch('/stats');
-    if (!statsResp.ok) throw new Error('HTTP ' + statsResp.status + ' from /stats');
-    const statsData = await statsResp.json();
+    const [byProviderModel, byVModelEndpoint] = await Promise.all([
+      VMRStats.api.query({ from: '-24h', group: ['provider', 'model'], metrics: ['req'], top: 1000 }),
+      VMRStats.api.query({ from: '-24h', group: ['protocol', 'vmodel', 'endpoint'], metrics: ['req'], top: 1000 }),
+    ]);
 
     consoleApi.setPaused(false);
 
@@ -474,8 +447,8 @@ async function refreshAll() {
     consoleApi.setFooterIdentity(`Virtual Model Router (VMR) · ${inst.version || '—'} · pid ${inst.pid || '—'} · ${inst.go_version || ''} · ${inst.os_arch || ''} · listen ${inst.listen || ''}`);
 
     // Render sections
-    renderQuota(statusData.quota || [], statusData.models || [], statsData);
-    renderModels(statusData.models || [], statsData);
+    renderQuota(statusData.quota || [], statusData.models || [], byProviderModel);
+    renderModels(statusData.models || [], byVModelEndpoint);
 
   } catch (err) {
     consoleApi.setPaused(true);

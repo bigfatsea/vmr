@@ -1,4 +1,4 @@
-<!-- Ver 2026-10-13 22:31, by Sonnet 5.5 -->
+<!-- Ver 2026-10-20 14:05, by Claude Sonnet 5.5 -->
 
 # vmr — Known Issues（已知问题与架构取舍清单）
 
@@ -41,7 +41,9 @@
 
 ### 1.0 永久不做（架构红线）
 
-语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上——**限定**：指不代理 MCP 协议、不介入客户端的工具执行路径；对标准 LLM API 响应体内 `tool_use.input` / `tool_calls.arguments` 等字段做内容审查不在此列，因为那 100% 发生在标准 LLM API 线路上，和 `respnorm` 检查 `usage` 字段属于同一类动作——`internal/guard` 的内容扫描正是在这条限定下立项的）｜Web UI / 内嵌 DB / RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / benchmark 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外——`macro/guard.json` 的理由是它的数据源是新产生的审计字段 `audit.Record.Guard`，不是对既有数据的再切分）。
+语义缓存（对确定性编程/Agent 任务是正确性隐患）｜MCP 网关与工具执行拦截（不在标准 LLM API 线路上——**限定**：指不代理 MCP 协议、不介入客户端的工具执行路径；对标准 LLM API 响应体内 `tool_use.input` / `tool_calls.arguments` 等字段做内容审查不在此列，因为那 100% 发生在标准 LLM API 线路上，和 `respnorm` 检查 `usage` 字段属于同一类动作——`internal/guard` 的内容扫描正是在这条限定下立项的）｜Web UI（指 RBAC / 多租户后台一类管理控制台）/ RBAC / 分布式 / 跨实例 quota｜协议互译 / bypass 模式｜`.so` 运行时插件（坚持编译期 blank-import 注册）｜让价目表进实时路由热路径｜通用 HTTP provider（映射 DSL）｜更多 LLM 检测器 / 对比维度 / benchmark 维度（分析半区标 v1-complete，新增维度从默认冲动改为需理由的例外——`macro/guard.json` 的理由是它的数据源是新产生的审计字段 `audit.Record.Guard`，不是对既有数据的再切分）。
+
+- **「内嵌 DB」从永久不做清单移出，改为逐场景评估的准则**：这条红线背后真正的理由是「不引入外部服务、单文件分发、状态对人透明、依赖轻」。纯 Go 的嵌入式数据库（如 modernc / ncruces 的 SQLite 驱动）不违反单二进制，也不需要外部服务，一刀切禁止并不成立。今后是否用数据库，按**依赖重量、二进制体积、数据透明性、运维复杂度**四条逐场景评估。按这四条评估，现有全部持久化场景（审计日志、quota 账本、请求统计）文件方案都胜出；请求统计的完整比较与实测见 Stats 设计文档的决策表与附录。**适用于**：任何「为某个新功能引入数据库」的提议——给出四条的比较，而不是引用红线。
 
 ### 1.1 运行时与并发
 
@@ -78,7 +80,7 @@
 **审计、账本与进程级锁**
 
 - **后台探针按 requests 口径计 1，对 token 限额计 0**：探针消耗真实上游额度，`metric: requests` 的账号侧一定计数，本地账本不计就是系统性欠记。token 侧不解析探针 usage（响应体有 `probeBodyCap` 封顶），计 0 是诚实下界而非精确值。
-- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）是 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：没有 flock，`acquireDirLock` 是 no-op——归档不会被交错写坏，但双进程的其余后果依然可能发生。pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/livestats` 自带**独立**的同机制 flock（`.vmr-stats.lock`）：`-audit=false` 时 audit 锁根本不存在，而「不留正文仍要监控」是一等场景，第二个实例拿不到锁就降级纯内存（不写 slim/rollup）。`internal/quota` 同理自带 `.vmr-quota.lock`，由 `Flush` 惰性获取；只读加载 `Load()` 不受锁阻碍（`vmr replay` 可在线读取账本），拿不到锁时 `Flush` 直接返回该错误（`dirty` 保持置位，`StartFlusher` 去重日志照常报出），Charge/Used 仍纯内存工作。三把锁各自独立生效，互不代理。
+- **`log_dir` 在 Unix 上被 `flock` 独占，第二个指向同目录的实例拒绝启动**：两个进程对同一 JSONL 做 housekeeping 会把两股 zstd 流交错写进同一归档，`rename` 之后**不可恢复**；同根还有双进程 O_APPEND 行交错与 quota 双写覆盖。锁文件 `.vmr-audit.lock`（0600）是 `log_dir` 的常驻文件，不参与压缩与保留。**不适用于 Windows**：没有 flock，`acquireDirLock` 是 no-op——归档不会被交错写坏，但双进程的其余后果依然可能发生。pidfile 替代会因崩溃残留把启动永久卡死，比问题本身更糟。`internal/stats` 在统计目录里自带**独立**的同机制 flock（`<log_dir>/stats/.lock`）：`-audit=false` 时 audit 锁根本不存在，而「不留正文仍要统计」是一等场景，第二个实例拿不到锁就降级纯内存（只统计今天，不读写统计文件）。`internal/quota` 同理自带 `.vmr-quota.lock`，由 `Flush` 惰性获取；只读加载 `Load()` 不受锁阻碍（`vmr replay` 可在线读取账本），拿不到锁时 `Flush` 直接返回该错误（`dirty` 保持置位，`StartFlusher` 去重日志照常报出），Charge/Used 仍纯内存工作。三把锁各自独立生效，互不代理。
 - **审计响应方向不单独落盘上游原始 Body**：避免为每请求存两份几乎相同的全量响应体。`audit.Attempt` 响应方向 `Body` 为空，交付给客户端的响应体由 `Client.Response.Body` 统一记录；上游与客户端之间的全部改动由 `Attempt` 的 `Norm`（改写步骤列表）、`RawPreStrip`（剥离前的原始片段）与 `ObservedModel`（上游实际返回的模型名）精确记录，足以复现与审计上游真实响应。
 
 ### 1.2 配置与协议
@@ -105,7 +107,7 @@
 
 **路由寻址与多 Key**
 
-- **直连寻址（`direct_routing`）只开放已声明的三元组、默认关闭、不挂 fallback、不越过冷却**（`internal/router/direct.go`）：① **可寻址集合 = 某个虚拟模型或 `fallback_endpoints` 已展开出的 (协议, provider, 模型)**，与 pin 头同为「只收窄不开口」——放开任意模型会产生请求期临时 Endpoint（其 HealthKey 不在快照集合里，热重载被 `Health.Prune` 清掉、`/status` 看不见）、让按模型分桶的 quota 被客户端随意写的名字撑大，还让任何持 vmr key 的客户端调用付费账号上的任意模型。想直连新模型 = 把它写进任一虚拟模型或 fallback。同理不按 provider 的 `base_url` 把一对组合自动扩到它没被声明的协议上。② **默认关闭**：直连让客户端绕过虚拟模型编码的优先级策略（免费先于付费）。③ **不注入 fallback、单层优先级**：客户端点名一个模型，静默落到别的模型违背本意；同一 `api_keys` 组的多把 key 之间照常额度重排与 failover。④ **健康过滤/条件准入/pin/sticky 原样生效，冷却不强行放行**（只沿用既有的半开 last-resort 释放）：冷却代表真实的近期 429/5xx，点名并不改变上游状态。⑤ **响应 `model` 改写为客户端发来的 `provider:model`**（respnorm 既有规则），保持请求名 = 响应名。⑥ **sticky 键与模型名无关**，直连成功会移动该会话的粘性指针——是缓存连续性的正确结果，不是串扰。⑦ **直连名不进 `/status` 拓扑（`models[]`）与 models.html**（`Snapshot.Direct` 与 `Models` 分开存放），只在 `/v1/models`、`vmr check`、`/status` 的独立顶层块 `direct_routes`（供 `/help.html` 展示直连模型列表）中列出；控制台按 vmodel 的 livestats 行会出现直连名，受配置约束不会无界。**适用于**：「放开任意 provider:任意模型」「直连自动挂 fallback」「直连跳过冷却」「直连名进拓扑表」的提议——先推翻上面对应的理由。
+- **直连寻址（`direct_routing`）只开放已声明的三元组、默认关闭、不挂 fallback、不越过冷却**（`internal/router/direct.go`）：① **可寻址集合 = 某个虚拟模型或 `fallback_endpoints` 已展开出的 (协议, provider, 模型)**，与 pin 头同为「只收窄不开口」——放开任意模型会产生请求期临时 Endpoint（其 HealthKey 不在快照集合里，热重载被 `Health.Prune` 清掉、`/status` 看不见）、让按模型分桶的 quota 被客户端随意写的名字撑大，还让任何持 vmr key 的客户端调用付费账号上的任意模型。想直连新模型 = 把它写进任一虚拟模型或 fallback。同理不按 provider 的 `base_url` 把一对组合自动扩到它没被声明的协议上。② **默认关闭**：直连让客户端绕过虚拟模型编码的优先级策略（免费先于付费）。③ **不注入 fallback、单层优先级**：客户端点名一个模型，静默落到别的模型违背本意；同一 `api_keys` 组的多把 key 之间照常额度重排与 failover。④ **健康过滤/条件准入/pin/sticky 原样生效，冷却不强行放行**（只沿用既有的半开 last-resort 释放）：冷却代表真实的近期 429/5xx，点名并不改变上游状态。⑤ **响应 `model` 改写为客户端发来的 `provider:model`**（respnorm 既有规则），保持请求名 = 响应名。⑥ **sticky 键与模型名无关**，直连成功会移动该会话的粘性指针——是缓存连续性的正确结果，不是串扰。⑦ **直连名不进 `/status` 拓扑（`models[]`）与 models.html**（`Snapshot.Direct` 与 `Models` 分开存放），只在 `/v1/models`、`vmr check`、`/status` 的独立顶层块 `direct_routes`（供 `/help.html` 展示直连模型列表）中列出；统计按 vmodel 分组时会出现直连名，受配置约束不会无界。**适用于**：「放开任意 provider:任意模型」「直连自动挂 fallback」「直连跳过冷却」「直连名进拓扑表」的提议——先推翻上面对应的理由。
 - **provider 与 model 的组合标识统一用 `:`，不用 `/`、`@` 等**（`core.ProviderModel` / `core.EndpointLabel`，`Endpoint.Name()` 即后者）：直连名 `provider:model`、三段审计标签 `protocol:provider:model`、`/status` 的 `endpoint` 字段、`X-VMR-Endpoint` 头、实时日志、`vmr check` / `vmr diagnose` 输出全部同一拼法。理由：① 模型名自己可能含 `/`（OpenRouter 的 `z-ai/glm-5.2`、Fireworks 的 `accounts/.../x`）或 `:`（Ollama 的 `qwen3:8b`、Bedrock 的 `...-v2:0`），可解析性靠「provider 名禁止含 `:` 与 `/`（`validateIdentSegment`）+ 按第一个（三段为前两个）`:` 拆、尾部原样保留」保证，与分隔符选哪个无关；② 真正的区别是可读性——模型里的 `/` 是上游自己的厂商命名空间（模型厂商 ≠ vmr 的 provider：同一个 DeepSeek 模型可跑在多个自建渠道上），用不同标点区分两个维度，`openrouter:z-ai/glm-5.2` 才看得出边界，`openrouter/z-ai/glm-5.2` 会把 `z-ai` 误读成 provider；③ 审计日志的冒号格式是磁盘契约，历史记录已固化（`SplitEndpointLabel` 兼容更早的斜杠格式），统一向它靠拢不改任何已落盘数据；④ `@` 被 Vertex 模型名占用（`claude-3-5-sonnet@20240620`），`|`、`>`、`::` 对 shell/URL 不友好且无收益。**对应的格式约束**：`vmr check` 的端点行不带结尾 `:`（`ollama:qwen3:8b:` 有歧义），靠固定宽度对齐；`X-VMR-Failover` 条目为 `provider:model=outcome`（outcome 在最后一个 `=` 之后），因为 `:` 已被模型 tag 占用。**不适用于**价格表键 `provider/model`（litellm 表自己的命名空间）、`HealthKey`（含 key 指纹的内部键）、`quota` 的 `metric/every`。
 - **ProviderGroup 的多 Key（`api_keys:`）已实现，运行时均衡与分级 Failover 仍不做**：运行时 KeyPool（请求期在池内随机选 Key）会违反 `core.Endpoint`「构造后不可变、`HealthKey()` 只算一次」这条贯穿 health/sticky/quota 的不变式。实际落地是「配置期展开成多个独立 `core.Endpoint`」：`Provider.APIKeys`（`{label: key}`）在 `config.Parse` 里展开成 `<name>-<label>` 命名的独立 `Provider` 并就地重写引用，下游全部按 `Provider.Name` 字符串解析、零改动（唯一保留展开前原名的是 `Provider.Group`，只供直连寻址的 `<原名>:model` 一次寻址全部 key）。这个形状架构性地绕开了均衡（谁排第一不可预先指定，只能读 `vmr check` 的实际展开结果）与配额聚合（每把 key 独立 Provider 名、独立 quota 池）两个难题；分级 Failover（402 跳 Key / 5xx 跳 Provider）留到看到真实需求。
 
@@ -136,7 +138,7 @@
 - **`i18n` 的一批微文件不合并**：与 `internal/report/viewmodel_*.go` 的「一节一文件」硬规则一一配对（`archtest` 强制），合并击穿全局行预算，且改一节文案从打开小文件变成在大文件里找。
 - **`i18n` 里不含插值字段的 `type XxxText` + `if lang == ZH` 样板不改写**（`report_client_endpoint.go`/`report_compaction.go`/`report_toolwaste.go` 三个文件）：改写只消掉每文件 2 行分支，占体量的 struct 定义与两份字段赋值一行都省不掉。**含插值字段（闭包）的文件不适用这条判据**——所有含插值字段的 i18n 文件均采用 `Table[T]`（`internal/i18n/table.go`）+ 一次成型的 accessor（由 `TestArchitecture_I18nTableAdoption` 机械守卫），两者是不同的改法，判据不冲突。
 - **不把分析半区拆成独立二进制**：坚持「单二进制单文件分发」。
-- **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖。
+- **不引入 DuckDB / cgo 做数据聚合**：保持纯 Go、跨平台零 C 依赖——cgo 会破坏在开发机上交叉编译服务器二进制的工作流。**不在此列**：用 DuckDB 等外部 CLI 直接读 `<log_dir>/stats/` 的 JSONL 做临时分析，那不是项目依赖。
 - **`go.mod` 保持裸模块名 `vmr`**：改名要动全项目 import 路径，无实质收益。
 
 ### 1.5 分析半区的产出与渲染
@@ -235,15 +237,29 @@
 
 **实时遥测、in-flight 与告警**
 
-- **`/status` 端点项刻意不加端点级累计计数器（requests / ok / failed / tokens）**：`consecutive_failures` 出现在 `/status` 因为它是**当前健康状态**读数（liveness 视图）。端点级累计账是**分析半区**职责——`internal/report` 的 `EndpointRow` 已完整产出，数据源可持久化、可按时间切片。塞一份进程内、重启即失的实时副本会造双账本（正是「一个分析数字复现一个路由数字必须差分测试锁定」要防的负担），还得给 router.Telemetry 加一张按端点的动态 map，破坏它「全固定原子、热路径零 map 零锁」的设计。
-- **控制台首屏的 Requests 与 Tokens 只读持久化账本（`/stats` 的 `daily[]`）**：`/status` 不输出进程内流量计数（原先的进程内计数器已删除——它与 livestats 是同一批事实的两本账，口径还刻意不一致）。livestats 启动时恢复当日 rollup 与 slim WAL，重启后数字连续；账本为空（新装、log_dir 不可用）时首屏显示 0，右侧总量固定为滚动 7 天窗口。
-- **in-flight 请求注册表（`router/inflight.go`）归属路由运行态，永不落盘、不结算进完成时账本**：排队、逐 attempt 发出、流式逐块盖章等事件发生在 router 内部，早于任何 audit record 产生；完成时钩子（`server.done`）对每个请求恰好记账一次，两条路径互不写对方的数据。
+- **`/status` 端点项刻意不加端点级累计计数器（requests / ok / failed / tokens）**：`consecutive_failures` 出现在 `/status` 因为它是**当前健康状态**读数（liveness 视图）。端点级累计账由**统计模块**提供（`/stats/query?group=endpoint`），持久、可按任意时间范围切片；离线的端点报表由 `internal/report` 的 `EndpointRow` 产出。塞一份进程内、重启即失的实时副本会造双账本（正是「一个分析数字复现一个路由数字必须差分测试锁定」要防的负担），还得给 router.Telemetry 加一张按端点的动态 map，破坏它「全固定原子、热路径零 map 零锁」的设计。
+- **控制台首屏的统计部分只读统计模块，统计不可用时只影响仪表盘区域**：`/status` 不输出进程内流量计数——进程内计数器与统计事件是同一批事实的两本账。统计启动时重载今天的事件文件，重启后数字连续。统计不可用（新装、`log_dir` 不可用、某条查询报错）时，仪表盘显示原因与重试按钮，Overview 的「此刻」部分（并发、端点健康、告警、系统行、Live Requests）照常渲染。
+- **in-flight 请求注册表（`router/inflight.go`）归属路由运行态，永不落盘、不进统计**：排队、逐 attempt 发出、流式逐块盖章等事件发生在 router 内部，早于任何 audit record 产生；完成时钩子（`server.done`）对每个请求恰好记账一次，两条路径互不写对方的数据。
 - **`last_byte_at` 与 `est_out` 逐块盖章、刻意不节流**：`last_byte_at` 的语义是"上游最后一块数据真实到达的时刻"，用于卡死检测；攒批节流会让盖章时间滞后于真实末块到达时间，让已卡死的流显得"更新鲜"，方向恰好做反。成本上每块只有一次 `OutTokens()` + 几次 per-entry 原子写，千块/秒极端流下也远低于协议开销。
 - **body 上传与 probe 阶段对 in-flight 注册表不可见**：注册点设在 `TopLevelProbe` + `authenticate` 之后、`AcquireSlot` 之前——未获得协议与虚拟模型名前的请求无法归属维度，且慢速 body 上传并不占用并发槽。
-- **livestats rollup 文件只追加、永不删；内存只是它近 7 天的滑动窗口**：唯一消费者是 `/stats`，`vmr analyze` 读的是 audit log。内存 `a.rollup` 启动按窗口过滤加载、运行中日切逐出掉队的一天，读时 fold 是**不随部署年限增长的常数**，`by_*` 累计口径因此是"滚动近 7 天"而非"自启动以来"。窗口按**日历日**对齐。文件的启动解析成本仍是 O(全历史)——`vmr start` 打一行"恢复行数 + 耗时"日志盯着，真到几百 ms 再上按天分文件。取 7 天不取 30：实测每 `(hour,dims)` 行 ~450B，7 天在小团队规模是 1–3 MB，正好是控制台最宽档能显示的量。理由与取舍见 LiveStats 设计文档的内存态一节与决策表。
+- **请求统计记每请求一个事件、查询时聚合，取代原「小时 × 维度」预聚合账本（推翻原「rollup 只追加、内存只留近 7 天」一条）**：预聚合在写入时就丢掉了明细——时间粒度固定为小时、可分组维度与过滤写死、分位数只能从 300 条采样环算（没有时间语义）、失败类别与状态码不入账、内存窗口只有 7 天。本项目规模下明细全量查询是毫秒到百毫秒级（100 万行 90 天带分位数约 117 ms），预聚合换来的性能用不上。事件按本地日历日分文件、已关闭的天 zstd 压缩、永久保留；内存只缓存按需载入的分区（上限 120 天，LRU）。设计与实测见 Stats 设计文档。
+- **请求统计不用 SQLite（含纯 Go 驱动）**：按「内嵌 DB」评估准则比较，SQLite 只替我们省掉分组、排序、百分位约 150–200 行；界面参数白名单、指标口径、本地时区分桶、写入批处理仍要自己写；多 4.5–5.5 MB 二进制与一个外部依赖；modernc 驱动未编入百分位函数；实测查询慢一到两个数量级。**重开条件**：查询形状不再是「过滤 → 分桶 → 分组 → 指标」这一种（需要多表关联或任意表达式），或需要多进程并发写入。
+- **统计单次查询跨度 ≤ 90 天，可查的历史不设限**：上限约束的是单次查询成本，不是可查范围——按天分区让「查一年前的一周」与「查最近一周」成本相同。显式粒度产生的桶数超过 500 时自动放粗并回显，不报错。**重开条件**：出现稳定的季度对比需求。
+- **统计的三个样本面**：请求面（全部事件）回答「多少、为什么失败、在哪里失败」；用量面（转发了的事件，含转发后被取消的）回答「花了多少 token」——已转发就有真实消耗，与 quota 计量一致；质量面（成功且转发）回答「成功的请求有多快」——失败与取消的耗时没有意义，混入会污染分位数。**TTFT 与吞吐只对流式请求有定义**：JSON 响应一次性返回，没有首字的概念，它的快慢由 `dur_*` 表达。这比旧账本更严格（旧账本的均值耗时含转发后中断的请求、TTFT 混入非流式请求），新旧数字因此不可直接对比。
+- **控制台实时部分保留自适应短轮询，不用 SSE / WebSocket**：浏览器的 `EventSource` 与 WebSocket 都不能携带 `Authorization` 请求头，要么 key 进 URL（违反「key 不进 URL、不进服务端日志」），要么新建一套会话机制；进行中请求是状态快照而不是事件流，全量轮询天然自愈。live 轮询只打 `/status/live`（只含运行时状态），统计数据跟随整页 5 分钟刷新。
+- **`vmr stats rebuild` 缺省在线执行、不取锁；`-today` 需要停机**：缺省只写已关闭的天（原子 rename），运行中的进程只写今天的文件，并在每次查询时 `stat` 已关闭分区、文件被替换即重新载入，所以生产服务器不必停机。`-today` 额外重建今天，必须没有 vmr 持有统计目录的锁（部署窗口：停旧进程、重建、启动新进程），拿不到锁就拒绝，不与线上写入赛跑。事件按完成日归档（与线上一致），跨午夜的请求不会因为相邻两天一边线上写、一边重建而重复或丢失。精度边界：审计保留期之外与 `-audit=false` 期间的日子无法重建；`Attempt.tokens` 盖章出现之前的记录没有 token 记录（按「未知」处理）、`forwarded` 盖章出现之前的记录走 `Attempt.IsForwarded` 的启发式兜底。
+- **旧统计账本的文件不迁移、不自动删除**：`<log_dir>/vmr-stats-rollup.jsonl`、残留的 `vmr-stats-YYYYMMDD-HH.jsonl` 与 `.vmr-stats.lock` 不再读取；删除不可逆，而它们的内容在审计保留期之外已无法重建，所以只在启动时打一行提示，由运维决定。
+- **统计不做查询结果缓存**：7 天查询是毫秒级、90 天约百毫秒，统计取数是分钟级刷新；结果缓存只带来失效逻辑。**重开条件**：真实部署中统计查询出现可感知的延迟。
+- **Overview 是预制仪表盘，自由组合查询在统计页**：Overview 的统计部分是固定面板（头部 4 卡、Activity、Composition、Breakdown、Speed、Reliability、Usage pattern），共用一个时间范围与三维过滤（调用方、端点、虚拟模型；上游 key 只在统计页分组与过滤）；「最近 N 条」、自定义起止、3 维分组、任意过滤维度只在统计页。仪表盘图表手写 SVG、没有框选缩放（范围由控制条切换）；取消耗时分布取最近 1000 条取消事件在前端计算，不新增维度——超过 1000 条时只代表最新的部分，界面会标注。
+- **仪表盘的对比语义对所有范围统一：对比同一范围向前一个周期**：范围的周期就是它自己的长度（1h 对上一个小时，7d 对上一个 7 天，30d 对上一个 30 天），页面一律请求 `compare=prev`；只有 today 的周期是一个日历日，它请求 `compare=day`——昨天到同一时刻，而不是今天零点之前的那一段。图上的虚线与头部环比用同一个窗口。**已知代价**：1h–12h 这类短范围对比紧挨着的前一段，会受钟点起伏影响（夜里对白天）；这是接受的，同比（昨天同时段、上周同时段）用统计页的 `compare=day` / `week`。**重开条件**：运维反馈短范围的环比经常误导。
+- **token 的「未知」不是 0**：转发了、但没有 token 记录（审计记录早于盖章，或盖章四项全零）的事件，token 类指标不累加，`meta.tokens_unknown` 报条数，界面标注下限并隐藏 token 环比。判定集中在行转换一处。**已知代价**：一个真实的、四项全零的转发响应也会被算作未知（它对 token 和没有影响，只影响提示里的条数）；盖章之前的历史 token 无法补回——补回要解析响应体，会越过 `statsfeed` 的依赖白名单。
+- **转发之后被截断的响应，统计记 `error`，审计记录与 `vmr analyze` 仍按状态码记 `ok`**：审计的 `outcome` 只看状态码，200 已发出后上游中途断流（类别 `truncated`）仍是 `ok`；`statsfeed.FromRecord` 把「`outcome` 为 `ok` 而终态 attempt 带错误类别」的记录归为 `error`，让它进入失败视图、不污染成功请求的分位数。`vmr analyze` 不做同样的归正，理由同取消的归正：明细文件名与失败列表以记录的 `outcome` 为键。**重开条件**：同取消的归正。
+- **统计的维度字典有容量上限（65,536 项），之后的新值记为 `(overflow)`；未知模型名不归一为固定值**：模型名由客户端决定，字典只追加、编号不复用，没有上限就是随时间增长的内存口子。404 的未知模型名本身是排障线索（拼错的名字、用错的协议），归一成 `(unknown)` 会把它抹掉，所以只设上限。过滤值里的 `|` 与 `\` 在 `where` 里用反斜杠转义。
+- **有夏令时的时区里，亚日粒度的桶在时钟回拨后沿用回拨前的分钟偏移，环比的绝对平移前后差一小时**：桶序列按绝对时长累加。目标部署时区没有夏令时；没有为此引入按日重新对齐。**重开条件**：出现在有夏令时的时区里部署的需求。
+- **Overview 不提供「最近 N 条请求」的性能视图（旧版 Performance by Provider & Model 的 last 10 / 30 / 100 / 300）**：新版用时间范围代替条数窗口——1h 范围在这个流量规模下大体不到 100 条，最近一小时就是「最近这批请求」，不需要再并排一套条数窗口。统计页的 `last=N` 仍然可用。**重开条件**：出现一个小时内样本量远超或远不足以代表「最近」的部署。
 - **Overview 头部告警 pill 的端点告警只在 cooldown 期间在列**（`server/alerts.go`）：cooldown = 该端点此刻被排除在路由外，是「需要动手的状态」；`consecutive_failures>0` 但未冷却的降级态由拓扑表 Health 列承载——无流量时残留失败计数不消零，进告警会把徽章永久钉在非零，违反告警收敛纪律。
-- **`/stats.overall` 合并窗口块目前无内置消费者，作为 JSON 契约保留**：分位数不可跨 ring 合并，只能服务端在读时对样本并集算；该 vitals 段已从首屏移除，`overall` 随之空转。删掉它是纯粹的契约收缩且要改测试，收益为零。无 ring 样本时为 `null`。见 LiveStats 设计文档 `/stats` 契约段。
-- **零 attempt 失败（全端点冷却等）的错误类别由 `sampleFromRecord` 合成为 `no_candidate`，audit.Record 不扩充顶层字段**：所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，`audit.Record.Attempts` 为空。`server.sampleFromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为 `livestats.Sample` 合成 `error_class="no_candidate"`，使控制台 Recent Failures 能够区分最常见的级联冷却失败，而无需为展示层需求扩充审计日志顶层 schema。
+- **零 attempt 失败（全端点冷却等）的错误类别由统计投影合成为 `no_candidate`，audit.Record 不扩充顶层字段**：所有候选端点进入 cooldown 后的请求是 0 attempt 的即时快速失败，`audit.Record.Attempts` 为空。`statsfeed.FromRecord` 在 `len(Attempts)==0` 且 `Outcome=="error"` 时为统计事件合成 `error_class="no_candidate"`，使控制台 Reliability 面板能够区分最常见的级联冷却失败，而无需为展示层需求扩充审计日志顶层 schema。
+- **服务端修正 `outcome` 判定之前写出的审计记录，统计按 `ok` 记账，`vmr analyze` 照原样读 `canceled`**：客户端收完最后一个字节就断开时，请求上下文早于收尾钩子被取消，旧判定把这种完整送达的请求记为 `canceled`（生产历史里约占全部取消的三分之一，集中在流式 Agent 客户端）。现在由 `audit.Record.DeliveredInFull` 判定，新记录不再出现；`statsfeed.FromRecord` 用同一判定把旧记录归正，否则重建出的统计会把这些请求排除在质量面之外、虚增取消率。`vmr analyze` 不做同样的归正：明细文件名与失败列表都以记录的 `outcome` 为键，归正会让同一份审计日志的产物在升级前后改名、改归类。**重开条件**：`vmr analyze` 的失败请求列表因这类旧记录被报告为噪声。
 - **Log 页 level 芯片是前端启发式分类，后端 `/log` 流不带结构化 level**：`/log` 是与 stderr 逐字节一致的纯文本流；芯片只影响终端着色与过滤（`classifyLevel`），纯属展示层。
 
 **其他**
@@ -334,12 +350,12 @@
 
 ### B. 分析半区 · 指标与口径正确性
 
-#### 2.100 [中，待做] `internal/report` 未消费 `Attempt.tokens` 盖章值，与 `/stats` 的 token 走两条路径
+#### 2.100 [中，待做] `internal/report` 未消费 `Attempt.tokens` 盖章值，与请求统计的 token 走两条路径
 
-- **现状**：每个 forwarded attempt 的 raw 四分量 token 已盖到 `audit.Attempt.tokens`（`internal/router/quota.go` 的 `tokenStamp`，与 quota 扣费同源）。`internal/livestats` 的 `/stats` 已消费它；但 `internal/report`（`session.go` 的 `chatmsg.ExtractUsageSides(resp.Body, …)`）**仍从响应体反解析**。字段是加性的，report 不改也编译。
-- **双路径分叉风险**：同一条 audit record，`/stats` 的 token 走 `Attempt.tokens`（quota 的 exact/degraded fold），`vmr analyze` 的按端点 token 走 body 反解析——① degraded 场景两侧估算口径不同；② `Attempt.tokens.in` 是 fresh（净 cache），`chatmsg.Usage.In` 是 gross。运维对不上账。
-- **可能方案**：`report` 改为优先读 `Attempt.tokens`（缺失时 fallback 到 `ExtractUsageSides`，仿 `Attempt.IsForwarded` 的 stamped-优先-heuristic-兜底），并补 livestats-token vs report-token 的差分测试。
-- **触发条件**：有分析半区改动窗口时一起做；或运维实际报出 `/stats` 与 `vmr analyze` 的 token 对不上。
+- **现状**：每个 forwarded attempt 的 raw 四分量 token 已盖到 `audit.Attempt.tokens`（`internal/router/quota.go` 的 `tokenStamp`，与 quota 扣费同源）。请求统计（`statsfeed.FromRecord` → `internal/stats`）已消费它；但 `internal/report`（`session.go` 的 `chatmsg.ExtractUsageSides(resp.Body, …)`）**仍从响应体反解析**。字段是加性的，report 不改也编译。
+- **双路径分叉风险**：同一条 audit record，请求统计的 token 走 `Attempt.tokens`（quota 的 exact/degraded fold），`vmr analyze` 的按端点 token 走 body 反解析——① degraded 场景两侧估算口径不同；② `Attempt.tokens.in` 是 fresh（净 cache），`chatmsg.Usage.In` 是 gross。运维对不上账。
+- **可能方案**：`report` 改为优先读 `Attempt.tokens`（缺失时 fallback 到 `ExtractUsageSides`，仿 `Attempt.IsForwarded` 的 stamped-优先-heuristic-兜底），并补统计 token 与 report token 的差分测试。
+- **触发条件**：有分析半区改动窗口时一起做；或运维实际报出统计页与 `vmr analyze` 的 token 对不上。
 
 #### 2.128 [中，已触发] journey 与 report 对同一请求的 ErrorClass 取值口径不一致
 
@@ -531,7 +547,7 @@ Markdown 口径提示脚注已闭环，`EndpointRow` 已带 `cost_estimate_est`�
 
 - **现状**：`ProviderLimiterRegistry.Install`（`internal/router/provider_limiter.go`）发现某 provider 的 `concurrency` / `concurrency_queue` 与已安装的旧 `ProviderLimiter` 不一致时，直接换一个全新对象。旧对象上仍在途的请求持有的 release 闭包只绑定旧信号量；热重载后过渡期内，该 provider 的真实上游并发 = 旧信号量残留 in-flight + 新信号量已接纳 in-flight，可能短暂超过刚调低的新 cap。
 - **为什么待定**：触发面窄——需要在该 provider 有大量长耗时请求在途时手动调低并发上限；过渡期随旧请求自然结束自愈。根治需要新旧信号量共享计数/排空的额外机制，复杂度和当前风险不成比例。
-- **可能方案（触发时）**：让容量收紧时的旧 `ProviderLimiter` 转入只减不增的 "draining" 状态；或至少把新旧对象的 `inFlight` 汇总进 `/stats`。
+- **可能方案（触发时）**：让容量收紧时的旧 `ProviderLimiter` 转入只减不增的 "draining" 状态；或至少把新旧对象的 `inFlight` 汇总进 `/status/live`。
 - **触发条件**：真实运维报告在调低并发上限后短时间内观察到该上游侧限流/429 明显增多。
 
 #### 2.178 [低，待触发] `failoverTrail.allBusy()` 无法区分「并发闸门 busy」与「health 单飞竞争跳过」，503 消息可能误导
@@ -572,15 +588,9 @@ Markdown 口径提示脚注已闭环，`EndpointRow` 已带 `cost_estimate_est`�
 
 quota 告警阈值写死在 `server/alerts.go`（used ≥ 100% → error；≥ 90% → warning），是实施轮拍板值。阈值本身没有权威来源（quota 评分曲线只有 headroom=1 一个语义分界），90% 是否过吵取决于真实用量曲线；先跑真实流量再定，不预调。**触发条件**：告警 pill 长期非零但无实际可操作事项（噪音），或濒临耗尽从未提前告警（漏报）。
 
-#### 2.102 [低，观察] recent_errors 与 Log 页之间无进程内请求号关联
+#### 2.102 [低，观察] 失败明细与 Log 页之间无进程内请求号关联
 
-曾提出过 Recent Failures 条目保留进程内请求号、与 Log 页每行同号互跳的设计；但 audit.Record 与 `/log` 行目前都不携带任何请求号（加号牵动 audit 格式与日志消费者）。可能方案：给 Record 加进程级 seq 并在 logfmt 前缀携带；或接受无关联（Log 页有子串过滤可按时间窗人工对齐）。关联的实际排障收益未经验证，而格式变更成本确定。
-
-#### 2.132 [低，待做] livestats 崩溃恢复的 catch-up 重滚存在旧数据反向覆盖，根因是 `deleteSlim` 失败被静默吞掉
-
-- **现状**：`internal/livestats/aggregator.go` 的 `deleteSlim(a.dir, name)` 返回值被直接丢弃（两处调用点）。真实触发需要两个条件同时成立：① 某小时 slim 文件已卷入 rollup 但 `deleteSlim` 失败（文件永久滞留、无任何告警）；② 之后又发生跨小时边界的迟到样本追加。此时重启会用遗留 slim 重新生成一条更旧更小的聚合行，last-wins 语义下覆盖更新的累计值。
-- **可能方案**：先给 `deleteSlim` 失败补一条 WARN（当前完全不可观测）；完整修复需要更谨慎的设计——livestats 是零依赖叶子包，加 WARN 需先决定要不要引入可选 logger 字段，不是一行改动。
-- **触发条件**：作为 `/stats` 展示准确性专项排期；影响面仅限统计展示，不触达计费/路由。
+曾提出过 Overview 失败明细条目保留进程内请求号、与 Log 页每行同号互跳的设计；但 audit.Record 与 `/log` 行目前都不携带任何请求号（加号牵动 audit 格式与日志消费者）。可能方案：给 Record 加进程级 seq 并在 logfmt 前缀携带；或接受无关联（Log 页有子串过滤可按时间窗人工对齐）。关联的实际排障收益未经验证，而格式变更成本确定。
 
 #### 2.139 [低，待触发] `replay -record` 写入绕过 audit log_dir 的 flock 独占写约定
 
@@ -665,7 +675,7 @@ quota 告警阈值写死在 `server/alerts.go`（used ≥ 100% → error；≥ 9
 
 - **全局结论**：待办里没有「价值高、成本低、却一直没做」的异常。值得优先投入的集中在三类：已触发的口径/锚点修复（批次 1）、LLM 解读层校准（2.18，成本在人工标注）、大语料规模（2.2 看触发）。分析半区的产品路线（新视图 / 导出 / 达成信号 / 成本口径）在 `ROADMAP`，不在此清单排期。
 - **批次 1（已触发，建议尽快）**：2.127（quota 裸时钟锚点持久化，需先设计）、2.128（journey/report ErrorClass 口径统一）、2.129（自流量排除说明前移）、2.58(d)（客户端成本表补 `(no client_key)` 行）。
-- **批次 2（登记待做，有改动窗口即做）**：2.100（report 消费 `Attempt.tokens`）；看板体验专项一批（2.94 / 2.95 / 2.130 / 2.151 / 2.152，配合 2.148–2.150 的索引改造）；2.57（时间归因上限 + `ModelToToolRatio` clamp + 挂机旗帜）；2.141–2.144（口径与呈现随手修）；2.136（ttft 哨兵，3 行）；2.132（livestats `deleteSlim` 告警）；2.105 / 2.180（告警端点标识）；Agent Guard 校准批次（2.166 / 2.170 / 2.172 / 2.175，先校准再改）。
+- **批次 2（登记待做，有改动窗口即做）**：2.100（report 消费 `Attempt.tokens`）；看板体验专项一批（2.94 / 2.95 / 2.130 / 2.151 / 2.152，配合 2.148–2.150 的索引改造）；2.57（时间归因上限 + `ModelToToolRatio` clamp + 挂机旗帜）；2.141–2.144（口径与呈现随手修）；2.136（ttft 哨兵，3 行）；2.105 / 2.180（告警端点标识）；Agent Guard 校准批次（2.166 / 2.170 / 2.172 / 2.175，先校准再改）。
 - **与 2.18 同批做（LLM 解读层）**：2.145 / 2.146 / 2.147——真实语料复现的样本即现成负例。
 - **触发即做**（成本主要等触发，触发条件写在条目里）：2.2（上限约 3 万条 / RSS 4GB，留两成提前量即约 2.5 万条 / 3.3GB 起排期）、2.55（语料再涨约 5 倍）、2.56（时间成首要痛点）、2.48（词表互相干扰 / sticky 往返可观测）、2.99（灰区振荡在 5s 首档下仍规律复现）、2.125（真实流量出现 pretty-printed 附件）、2.68（语料出现真实 compaction 记录）、2.153（CI 出现 ctxgraph 超时）。
 - **需要先设计**（价值高、易做错，禁止仓促）：2.86 保活帧旁路、2.127 锚点持久化。

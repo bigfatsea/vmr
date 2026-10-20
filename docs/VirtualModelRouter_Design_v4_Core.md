@@ -1,4 +1,4 @@
-<!-- Ver 2026-10-13 08:12, by Claude Opus 5.5 -->
+<!-- Ver 2026-10-19 22:50, by Claude Opus 5.5 -->
 
 # Virtual Model Router (vmr) — 设计方案 · Part 1：路由核心
 
@@ -7,7 +7,7 @@
 **这是 v4 版设计文档的 Part 1**：
 * 审计日志离线消费方（`vmr analyze`）独立成篇，见 `docs/VirtualModelRouter_Design_v4_Analytics.md`（Part 2）；
 * Token-Plan 额度感知路由独立成篇，见 `docs/VirtualModelRouter_Design_v4_Quota.md`；
-* 实时请求统计与控制台独立成篇，见 `docs/VirtualModelRouter_Design_v4_LiveStats.md`；
+* 请求统计（明细存储、查询引擎、统计页）独立成篇，见 `docs/VirtualModelRouter_Design_v4_Stats.md`；进行中请求的实时视图见 `docs/VirtualModelRouter_Design_v4_LiveStats.md`；
 * 战略定位与竞品分析见 `docs/VirtualModelRouter_Design_v4_Strategy.md`。
 
 ---
@@ -109,26 +109,27 @@ Upstream   ├─ 2xx 成功 ──► 响应流归一化 ──► 客户端转
 | `internal/imgprep` | 内联图片特征识别、解码缩放与本地磁盘缓存。 |
 | `internal/guard` | Agent Guard 双向安全护栏：锚定规则检测核心、出向干预与入向隐写净化挂载点（详见 Agent Guard 一节）。 |
 | `internal/quota` | 额度感知路由记账、周期时间数学与 Headroom 配速打分。 |
-| `internal/livestats` | 瞬态小时 WAL、轻量 Rollup 账本与遥测聚合（零内部依赖）。 |
+| `internal/stats` | 请求统计：每请求事件按天落盘（JSONL）、查询引擎与 `/stats/*` 接口（零内部依赖）。 |
+| `internal/statsfeed` | 审计记录到统计事件的唯一投影，线上收尾钩子与 `vmr stats rebuild` 共用。 |
 
 ### 4.4 核心 HTTP 端点
 * **协议入口**：`POST /v1/chat/completions`、`POST /v1/messages`、`POST /v1/responses`。
 * **模型发现**：`GET /v1/models`（聚合全部虚拟模型，输出协议兼容列表；开启直连寻址时附带 `provider:model` 直连名，`owned_by` 为 provider）。
 * **基础健康检查**：`GET /health`（免鉴权，仅应答进程存活与运行时间，不泄露拓扑信息）。
 * **运维与状态**：`GET /status`（受鉴权保护，暴露进程元数据、配置时效、并发及配额快照）。
-* **实时遥测与日志**：`GET /stats`（指标聚合与活跃请求）、`GET /log`（实时控制台日志流）。
+* **统计、实时与日志**：`GET /stats/query`、`GET /stats/events`、`GET /stats/schema`（请求统计，见 Stats 设计文档）、`GET /status/live`（并发闸与进行中请求，见 LiveStats 设计文档）、`GET /log`（实时控制台日志流）。
 * **配置在线编辑（opt-in）**：`GET /config`（返回磁盘上的配置文件原文 + `ETag`/mtime/时效/重载状态响应头）、`POST /config/validate`（只校验不落盘）、`PUT /config`（校验 → 原子写回 → 触发 trigger=`api` 的热重载）。默认关闭（`admin.config_edit`，随热重载生效）；鉴权与 `/status` 同策略（配 `api_keys` 要凭证，未配则开放）。设计红线：**配置文件始终是唯一事实源**——写入口只是「另一支笔」，绝不引入进程内配置状态；校验走与热重载逐字相同的管线，被拒候选永不落盘。
-* **统一控制台**：`GET /status.html`（系统全景监控）、`GET /models.html`（模型与配额拓扑）、`GET /log.html`（日志终端）、`GET /config.html`（配置编辑器）、`GET /help.html`（Agent 配置向导）。
+* **统一控制台**：`GET /status.html`（系统全景监控）、`GET /stats.html`（统计分析）、`GET /models.html`（模型与配额拓扑）、`GET /log.html`（日志终端）、`GET /config.html`（配置编辑器）、`GET /help.html`（Agent 配置向导）。
 * **静态分析报告托管**：`GET /reports/*`（可选，只读托管本地生成的分析报告，受鉴权保护）。
 
 ### 4.5 统一控制台契约
-五个控制台页面共享一套内嵌运行时与一组数据契约：
+六个控制台页面共享一套内嵌运行时与一组数据契约：
 
 * **共享运行时**：`console.css`/`console.js` 单一来源（`go:embed`），每页在首次服务时经注入标记内联一次，无标记的页面原样返回。公共面：`mountConsole`（页头、导航栏、页脚、鉴权弹窗；`refresh` 三态 `countdown`/`stream`/`static`）、`VMRAuth`（401 → 密钥弹窗 → 重试一次的统一流程，`localStorage` 单键跨页共享）、共享数字格式化（两位小数、整体去尾零、千分位——页面禁止各自手搓）与共享弹窗机制（Esc、点击外部、焦点管理）。
-* **刷新纪律**：Overview 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests/Recent Failures/并发区附加自适应轮询（活跃 ~1s、空闲 15s）；Log 页由流状态驱动；Help 静态。
+* **刷新纪律**：Overview、Stats、Models 整页统一 5 分钟时钟（点击即刷、页签隐藏时可见地暂停）；Live Requests 与并发区附加自适应轮询（活跃 ~1s、空闲 15s，只打 `/status/live`）；Log 页由流状态驱动；Help 静态。
 * **`/status` `alerts[]` 纪律**：只放**可操作状态**，滚动统计量绝不进——config 校验问题各一条（`kind: config`，严重度随问题走：error 级问题如缺失 api_key 是 error，其余 warning；同类问题在 `Config.Check` 源头合并成一条——如同一 capability 声明在多个模型上、同一 `api_keys` 组被禁用——所有消费者共享同一份收敛后的文案）；端点仅在 cooldown 期间在列（`consecutive_failures > 0` 但未冷却的降级态由拓扑表 Health 列承载，否则无流量时残留失败计数不消零，会把徽章永久钉在非零，违反告警收敛纪律）；quota `used_frac ≥ 1` 为 error、`≥ 0.9` 为 warning，阈值刻意写死不作配置项。排序：error 优先，再按 `kind`+`ref` 稳定排序；同一账号多限额触发合并为一条。
 * **`/status` 端点行契约**：`provider`/`key_label`/`model` 取自 `core.Endpoint`；`from_fallback` 恒出现（含 `false` 零值，供前端切分）；`headroom` 从路由半区既有的配额导出读取（禁止第二套公式重推，与配额差分测试纪律一致），未配额端点省略该字段。
-* **流量计数只有一个来源**：`/status` 的 `traffic` 块只保留 sticky 注册表规模；请求数、结果分布与 token 用量一律由 livestats 账本（`/stats`）提供，重启后可恢复。进程内不再维护第二本计数器。
+* **流量计数只有一个来源**：`/status` 的 `traffic` 块只保留 sticky 注册表规模；请求数、结果分布与 token 用量一律由统计模块（`/stats/query`）提供，重启后不丢。进程内不维护第二本计数器。
 
 ---
 
@@ -212,7 +213,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 
 ### 6.6 直连寻址（Direct Routing）
 可选、默认关闭（`direct_routing: true`，随热重载生效）。开启后客户端可在 `model` 字段写 `provider:model`（如 `cliproxy:gemini-3.8-flash-high`）跳过虚拟模型、直达某个真实模型。本质是把钉住路由（`X-VMR-Provider`/`X-VMR-Target-Model`）从请求头搬进模型名——只能改模型名、不能加自定义头的客户端（多数 Agent CLI/IDE）因此也能点名后端。
-* **可寻址集合 = 已声明的三元组**：快照构建时从全部虚拟模型路由（含 fallback，已滤掉 disabled provider）派生 `Snapshot.Direct[protocol]["provider:model"]`，与 pin 同为「只收窄不开口」——不产生新 HealthKey，quota 分桶与 livestats 维度受配置约束，客户端无法借此调用配置里没写的模型；一对组合只在其被声明的协议上可达，不按 provider 的 `base_url` 扩到别的协议。
+* **可寻址集合 = 已声明的三元组**：快照构建时从全部虚拟模型路由（含 fallback，已滤掉 disabled provider）派生 `Snapshot.Direct[protocol]["provider:model"]`，与 pin 同为「只收窄不开口」——不产生新 HealthKey，quota 分桶与统计维度受配置约束，客户端无法借此调用配置里没写的模型；一对组合只在其被声明的协议上可达，不按 provider 的 `base_url` 扩到别的协议。
 * **共享身份**：直连 Endpoint 是原 Endpoint 的副本（`Priority` 归零、`FromFallback` 清除），`HealthKey` = 协议/provider/模型/key 哈希不变，健康状态、sticky 指针、quota 指针、provider 并发闸与原 Endpoint 天然同一份。
 * **管线不变、不挂 fallback**：健康过滤、条件准入、pin、排序、额度重排、会话亲和原样生效，冷却端点不强行放行；直连路由不注入 `fallback_endpoints`——客户端点名一个模型，失败返回该上游自己的错误。会话亲和键（客户端标签 + System 哈希 + 首条消息哈希）与模型名无关，直连成功同样移动该会话的粘性指针，同会话随后改走虚拟模型时若候选含该端点会回流过去，这是缓存连续性的正确结果。
 * **命名**：provider 名禁止含 `:`/`/`，按第一个 `:` 切分无歧义，模型名可含 `:`/`/`。`api_keys` 型 provider 的原名寻址全部 key（key 间照常额度重排与 failover），展开名 `<name>-<label>` 只寻址一把 key（原名由 `config.Provider.Group` 保留）。开启时以「provider 名 + `:`」开头的虚拟模型名是加载错误。
@@ -253,7 +254,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
   * **临时逃逸不污染指针**：Sticky 请求排队超时逃逸至备用 Provider 成功返回时，**不改写** Sticky 内存指针，后续请求依然优先回流原端点续用缓存。
 * **全候选满载诊断**：当某模型的所有可用候选端点均因并发打满而被跳过时，返回明确的 503 `vmr_no_candidates` 诊断信息（`all candidate endpoints for model <name> are busy (provider concurrency limit reached)`），避免误导为条件过滤拒绝。
 * **热重载平滑复用**：配置热重载时，参数未变更的 Provider 保持活体信号量实例，在途请求平滑排水。
-* **可观测性**：响应头 `X-VMR-Route-Reason` 记录排队耗时（`conc_waited=...`），`X-VMR-Failover` 记录并发饱和跳过（`busy` / `busy_timeout`），`/stats` 实时暴露 `providers_concurrency` 水位。
+* **可观测性**：响应头 `X-VMR-Route-Reason` 记录排队耗时（`conc_waited=...`），`X-VMR-Failover` 记录并发饱和跳过（`busy` / `busy_timeout`），`/status/live` 实时暴露 `providers_concurrency` 水位。
 
 ---
 
@@ -334,7 +335,7 @@ $$\text{全部端点} \xrightarrow{\text{健康过滤}} \text{可用集} \xright
 1. **成功响应体单存去重**：上游成功 Attempt 不重复存储 Body（透传恒等，与 `client.response.body` 字节完全一致），两者的字节差异完整由 `norm` 列表解释（`model_rewrite`, `think_strip`, `done_appended` 等）；纯观测标记（如 `soft_block_detected`, `crlf_framing_suspected`, `truncated_withheld`）仅记录不改变转发字节。失败 Attempt 的错误体设 128KB 截断保护。
 2. **容量与截断口径**：入站请求体不设记录截断上限（只要 vmr 接受即完整记录）；出站响应体审计副本设 16MiB 上限（`server.recorderBodyCap`，超出追加截断标记，但客户端转发链路始终完整无损）。
 3. **严格凭据脱敏**：敏感认证头（`Authorization`、`x-api-key`、`Cookie` 等）在审计中仅保留末 4 字符掩码；`audit.IsCredentialHeader` 与路由转发黑名单解耦，`vmr replay` 重建请求时依此彻底剔除脱敏占位符。
-4. **错误分类与转发权威标（`forwarded`）**：`error_class` 包含 7 种 HTTP 错误与 4 种非 HTTP 故障（`build`/`network`/`canceled`/`truncated`）；**`attempts[].forwarded` 由路由半区在 `forwardSuccess` 唯一置位**（软拦截 2xx 不置位，流式截断仍置位）。分析侧直接通过 `audit.Attempt.IsForwarded()` 消费该权威事实，严禁自行根据状态码反推。
+4. **错误分类与转发权威标（`forwarded`）**：`error_class` 包含 7 种 HTTP 错误与 4 种非 HTTP 故障（`build`/`network`/`canceled`/`truncated`）；**`attempts[].forwarded` 由路由半区在 `forwardSuccess` 唯一置位**（软拦截 2xx 不置位，流式截断仍置位）。分析侧直接通过 `audit.Attempt.IsForwarded()` 消费该权威事实，严禁自行根据状态码反推。记录级 `outcome` 的 `canceled` 只表示客户端在响应完整送达之前断开：客户端收完最后一个字节就关连接时，请求上下文会早于收尾钩子被取消，此时转发 attempt 没有错误类别（relay 对传输中途看到的每一次断开或截断都会盖章），记为 `ok`——判定只在 `audit.Record.DeliveredInFull` 一处。
 5. **图片元数据采集**：仅在请求侧对内联图片通过 `DecodeConfig` 提取宽高与格式，与模型是否开启降采样解耦；响应侧与远程图片不采集。
 6. **特征原样落盘（`facts`）**：`core.RequestFacts` 在入口一次性计算后原样存入 `rec.Facts`，离线分析与重放直接读取，严禁事后重新解析反推。
 

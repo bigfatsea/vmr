@@ -243,12 +243,15 @@ var allowedDepPackages = map[string][]string{
 	"vmr/internal/fmtutil":   nil,
 	"vmr/internal/i18n":      nil,
 	"vmr/internal/jsonscan":  nil,
-	"vmr/internal/livestats": nil,
+	"vmr/internal/stats":     nil,
 	"vmr/internal/logtee":    nil,
 	"vmr/internal/rundir":    nil,
 	"vmr/internal/sysinfo":   nil,
 	"vmr/internal/tokenutil": nil,
 	"vmr/internal/guard":     {"vmr/internal/jsonscan"},
+	// statsfeed is the one audit-record → stats-event projection; it may see
+	// exactly the two shapes it maps between (plus their own leaves).
+	"vmr/internal/statsfeed": {"vmr/internal/audit", "vmr/internal/core", "vmr/internal/jsonscan", "vmr/internal/stats"},
 }
 
 // loadtestNoInternalDeps pins the boundary stated in the design doc's

@@ -351,3 +351,31 @@ func TestAuditRecordsStreamingClientCanceled(t *testing.T) {
 		t.Errorf("attempt error = (%q, %q), want error_class \"canceled\"", r.Attempts[0].ErrorClass, r.Attempts[0].Error)
 	}
 }
+
+// TestCompletionHookHangUpAfterDelivery: a client that closes the connection
+// right after the last byte cancels the request context before the
+// completion hook runs. A response the relay delivered whole is "ok"; one
+// the relay saw cut short stays "canceled".
+func TestCompletionHookHangUpAfterDelivery(t *testing.T) {
+	s := New(router.New(nil), nil)
+	for _, c := range []struct {
+		name string
+		att  audit.Attempt
+		want string
+	}{
+		{"delivered in full", audit.Attempt{Forwarded: true, Response: &audit.Message{Status: 200}}, "ok"},
+		{"cut mid-transfer", audit.Attempt{Forwarded: true, Response: &audit.Message{Status: 200}, ErrorClass: "canceled"}, "canceled"},
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		r := httptest.NewRequest("POST", "/v1/chat/completions", nil).WithContext(ctx)
+		rec, w, done := s.beginAudit(httptest.NewRecorder(), "openai-completions", r, nil)
+		rec.Model = "vm"
+		rec.Attempts = []audit.Attempt{c.att}
+		w.WriteHeader(http.StatusOK)
+		cancel()
+		done()
+		if rec.Outcome != c.want {
+			t.Errorf("%s: outcome = %q, want %q", c.name, rec.Outcome, c.want)
+		}
+	}
+}
