@@ -535,9 +535,11 @@ models:
   coding:
     meta:
       display_name: Coding
-      description: Main coding model
+      description: "Position: everyday main coding model; good for: multi-file edits, tool calls; not for: very long log analysis"
       roles: [default]    # default / reasoning / fast / subagent / review
 ```
+
+**Writing `description`.** It is free text for people (and for any LLM-based router a client puts in front of the catalog) and is never interpreted by a machine, so there is no schema: one line saying what the model is for, what it is good at and what it is not, is enough. The tier of a model is stated by `roles`, not by its name or its `description` — a client that wants "the cheap one" looks for `fast`, never parses prose. Facts that have no role or capability field (local-only, data residency, privacy) belong in `description` too.
 
 Two models claiming the same role on one protocol is a config load error (the manifest is an external contract and a client cannot choose between them): startup refuses the file, a hot reload keeps the previous config. `vmr check` warns when a served protocol has no `default` role. A protocol whose providers are all disabled is not published, nor listed on its models.
 

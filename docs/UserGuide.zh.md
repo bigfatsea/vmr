@@ -528,9 +528,11 @@ models:
   coding:
     meta:
       display_name: Coding
-      description: Main coding model
+      description: "定位：日常主力编码；适合：多文件改动、工具调用；不适合：超长日志分析"
       roles: [default]    # default / reasoning / fast / subagent / review
 ```
+
+**`description` 的写法。** 它是写给人看的自由文本（也可以给客户端放在清单前面的 LLM 路由器看），机器从不解析，所以没有固定格式：一行说明这个模型用来做什么、擅长什么、不适合什么就够了。模型的档次由 `roles` 表达，不要靠模型名或 `description` 表达——客户端想要「便宜的那个」就找 `fast`，而不是去解析文字。没有对应 role 或能力字段的事实（仅限本地、数据驻留、隐私等）同样写进 `description`。
 
 同一协议上两个模型声明同一个 role 是配置加载错误（清单是对外契约，客户端无法在两者之间选择）：启动时直接拒绝，热重载时保留旧配置。已服务的协议没有 `default` role 时 `vmr check` 给出告警。某协议下的 provider 全部被禁用时，该协议不会发布，也不会出现在模型的协议列表里。
 

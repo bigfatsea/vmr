@@ -421,8 +421,8 @@ models:
     # by one model per protocol (a conflict is a config load error).
     # meta:
     #   display_name: Coding
-    #   description: Main coding model
-    #   roles: [default]
+    #   description: "Position: everyday main coding model; good for: multi-file edits; not for: very long log analysis"
+    #   roles: [default]      # the tier lives in roles, not in the name or the description
     # Endpoints try in priority order; there's no config knob to change
     # ordering beyond that (see docs/UserGuide.md's "Endpoint try-order").
     # Endpoints below have no explicit priority — ties (everyone defaults

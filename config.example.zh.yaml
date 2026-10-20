@@ -354,8 +354,8 @@ models:
     # subagent / review。同一协议上每个 role 只能由一个模型声明（冲突是配置加载错误）。
     # meta:
     #   display_name: Coding
-    #   description: Main coding model
-    #   roles: [default]
+    #   description: "定位：日常主力编码；适合：多文件改动；不适合：超长日志分析"
+    #   roles: [default]      # 档次由 roles 表达，不靠模型名或 description
     # 端点按 priority 顺序尝试；除此之外没有别的配置旋钮能改排序方式
     # （见 docs/UserGuide.zh.md"端点尝试顺序 priority"一节）。
     # 下面这些端点都没有显式写 priority——都缺省是 0，打平的情况下按本文件里
