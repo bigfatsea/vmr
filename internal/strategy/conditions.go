@@ -25,14 +25,14 @@ func (c capabilityCondition) Eligible(ep *core.Endpoint, facts core.RequestFacts
 }
 
 // conditions is the complete, static Condition set — a fixed compile-time
-// slice, not a registry: there was never a runtime registrant beyond these
-// two, so the atomic/mutex machinery only obscured what the set actually is.
-// Config may still accept capability words with no Condition behind them
-// ("audio"/"video"/"thinking" — see config's validCapabilities and Check()'s
-// warning): a "thinking" Condition in particular stays unregistered until
-// the request-side detection logic exists across the Anthropic/OpenAI/MiniMax
-// protocol shapes — registering it now would be a no-op that looks
-// implemented but never fires, which is worse than leaving it out.
+// slice, not a registry. Config may still accept capability words with no
+// Condition behind them ("audio"/"video" — see config's validCapabilities
+// and Check()'s warning) until some client sends such input.
+//
+// thinking is hard like the other two, by decision: a virtual model whose
+// requests turn reasoning on must have a candidate that declares it, and
+// refusing names the misconfiguration instead of silently stripping the
+// client's parameters or sending them where they fail.
 var conditions = []Condition{
 	capabilityCondition{
 		name: "image", required: "image",
@@ -41,5 +41,9 @@ var conditions = []Condition{
 	capabilityCondition{
 		name: "tools", required: "tools",
 		needed: func(f core.RequestFacts) bool { return f.HasTools },
+	},
+	capabilityCondition{
+		name: "thinking", required: "thinking",
+		needed: func(f core.RequestFacts) bool { return f.WantsThinking },
 	},
 }

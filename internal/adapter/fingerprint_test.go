@@ -239,7 +239,8 @@ func TestTopLevelProbe_MatchesStructUnmarshalSemantics(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			model, stream, hasTools, ok := TopLevelProbe(json.RawMessage(c.body))
+			p, ok := TopLevelProbe(json.RawMessage(c.body))
+			model, stream, hasTools := p.Model, p.Stream, p.HasTools
 			if ok != c.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, c.wantOK)
 			}
@@ -279,12 +280,58 @@ func TestTopLevelProbe_AgreesWithStructUnmarshal(t *testing.T) {
 			}
 			wantErr := json.Unmarshal([]byte(body), &probe) != nil
 
-			model, stream, _, ok := TopLevelProbe(json.RawMessage(body))
+			p, ok := TopLevelProbe(json.RawMessage(body))
+			model, stream := p.Model, p.Stream
 			if ok == wantErr {
 				t.Fatalf("ok=%v but json.Unmarshal error=%v (wantErr=%v) disagree for %q", ok, !wantErr, wantErr, body)
 			}
 			if ok && (model != probe.Model || stream != probe.Stream) {
 				t.Errorf("TopLevelProbe=(%q,%v), json.Unmarshal=(%q,%v) disagree for %q", model, stream, probe.Model, probe.Stream, body)
+			}
+		})
+	}
+}
+
+// TestTopLevelProbe_WantsThinking pins which top-level switches count as a
+// request for reasoning. Only explicit "on" values do: WantsThinking feeds a
+// hard routing Condition, so a false positive would empty the candidate set.
+func TestTopLevelProbe_WantsThinking(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		body string
+		want bool
+	}{
+		// anthropic-messages (Claude Code sends adaptive on every request)
+		{`{"model":"m","thinking":{"type":"adaptive","display":"omitted"}}`, true},
+		{`{"model":"m","thinking":{"type":"enabled","budget_tokens":4096}}`, true},
+		{`{"model":"m","thinking":{"type":"disabled"}}`, false},
+		// openai-responses (Codex)
+		{`{"model":"m","reasoning":{"effort":"medium","summary":"auto"}}`, true},
+		{`{"model":"m","reasoning":{"effort":"none"}}`, false},
+		{`{"model":"m","reasoning":{"summary":"auto"}}`, false},
+		// openai-completions (Pi) and vendor variants
+		{`{"model":"m","reasoning_effort":"minimal"}`, true},
+		{`{"model":"m","reasoning_effort":"none"}`, false},
+		{`{"model":"m","reasoning":{"enabled":true}}`, true},
+		{`{"model":"m","enable_thinking":true}`, true},
+		{`{"model":"m","enable_thinking":false}`, false},
+		// shapes that must not count
+		{`{"model":"m"}`, false},
+		{`{"model":"m","thinking":"yes","reasoning_effort":7}`, false},
+		{`{"model":"m","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"x"}]}]}`, false},
+		{`{"model":"m","metadata":{"thinking":{"type":"enabled"}}}`, false},
+		// duplicate keys: last write wins per key, any key that is on counts
+		{`{"model":"m","thinking":{"type":"enabled"},"thinking":{"type":"disabled"}}`, false},
+		{`{"model":"m","thinking":{"type":"disabled"},"reasoning_effort":"high"}`, true},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			p, ok := TopLevelProbe(json.RawMessage(c.body))
+			if !ok {
+				t.Fatalf("probe failed for %s", c.body)
+			}
+			if p.WantsThinking != c.want {
+				t.Errorf("WantsThinking = %v, want %v", p.WantsThinking, c.want)
 			}
 		})
 	}

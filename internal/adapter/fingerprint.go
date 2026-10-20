@@ -183,63 +183,89 @@ func leadingSystemAndFirstOtherResponses(raw []byte, arrStart, arrEnd int) (sysB
 	return sys, firstOther, true
 }
 
-var toolsKeyLiteral = []byte(`"tools"`)
+var (
+	toolsKeyLiteral           = []byte(`"tools"`)
+	thinkingKeyLiteral        = []byte(`"thinking"`)
+	reasoningKeyLiteral       = []byte(`"reasoning"`)
+	reasoningEffortKeyLiteral = []byte(`"reasoning_effort"`)
+	enableThinkingKeyLiteral  = []byte(`"enable_thinking"`)
+)
 
-// TopLevelProbe extracts the three top-level fields server.go's ingress path
-// needs before routing — model, stream, and whether "tools" is a non-empty
-// array — in one structural scan over raw, replacing what used to be a
-// reflective json.Unmarshal into a 2-field struct (for model/stream) plus a
-// second, independent top-level array-non-empty scan (for tools).
+// Probe is what server.go's ingress path needs from the top level of a
+// request body before routing.
+type Probe struct {
+	Model  string
+	Stream bool
+	// HasTools: "tools" is a non-empty array.
+	HasTools bool
+	// WantsThinking: the request turns reasoning on through one of the
+	// top-level switches clients actually send — anthropic-messages
+	// thinking.type enabled/adaptive, openai-responses reasoning.effort,
+	// openai-completions reasoning_effort, plus the vendor variants
+	// reasoning.enabled (OpenRouter), thinking.type enabled (DeepSeek/GLM)
+	// and enable_thinking (Qwen). Only explicit "on" values count, because
+	// this feeds a hard Condition: a false positive could empty the
+	// candidate set. A conversation history carrying earlier thinking
+	// blocks does not count — that is a vendor-quirk concern (ErrQuirk),
+	// not a request for reasoning.
+	WantsThinking bool
+}
+
+// TopLevelProbe extracts the top-level fields of Probe in one structural
+// scan over raw, replacing what used to be a reflective json.Unmarshal into
+// a 2-field struct (for model/stream) plus a second, independent top-level
+// array-non-empty scan (for tools).
 //
 // ok=false exactly where json.Unmarshal(raw, &struct{Model string; Stream
 // bool}{}) would have errored: raw isn't a JSON object, is malformed, or
 // either field is present with a value that isn't its expected JSON type
 // (mirroring encoding/json's behavior, a JSON null for either field is a
 // no-op, not an error — same as unmarshaling null into a string/bool
-// struct field leaves it at its zero value). Unrecognized top-level keys
-// (including a malformed "tools" value only matters if it makes the whole
-// document unparsable, in which case ok=false here exactly as the old
-// whole-body json.Unmarshal would have failed too) are skipped, matching
+// struct field leaves it at its zero value). Unrecognized top-level keys,
+// and a tools/thinking/reasoning value of an unexpected shape, are skipped
+// (only a document that is unparsable as a whole gives ok=false), matching
 // encoding/json's default "ignore unknown fields" behavior. Duplicate
 // top-level keys resolve last-write-wins, same as encoding/json.
-func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools bool, ok bool) {
+func TopLevelProbe(raw json.RawMessage) (p Probe, ok bool) {
+	var thinking, reasoning, effort, enable bool // one per key, so a duplicate key overrides only itself
 	i := jsonscan.SkipJSONWS(raw, 0)
 	if i >= len(raw) || raw[i] != '{' {
-		return "", false, false, false
+		return Probe{}, false
 	}
 	i++
 	for {
 		i = jsonscan.SkipJSONWS(raw, i)
 		if i >= len(raw) {
-			return "", false, false, false
+			return Probe{}, false
 		}
 		switch raw[i] {
 		case '}':
-			return model, stream, hasTools, true
+			p.WantsThinking = thinking || reasoning || effort || enable
+			return p, true
 		case ',':
 			i++
 			continue
 		case '"':
 			// key follows
 		default:
-			return "", false, false, false
+			return Probe{}, false
 		}
 		keyStart := i
 		var kok bool
 		i, kok = jsonscan.SkipJSONString(raw, i)
 		if !kok {
-			return "", false, false, false
+			return Probe{}, false
 		}
 		key := raw[keyStart:i]
 		i = jsonscan.SkipJSONWS(raw, i)
 		if i >= len(raw) || raw[i] != ':' {
-			return "", false, false, false
+			return Probe{}, false
 		}
 		i = jsonscan.SkipJSONWS(raw, i+1)
 		valStart := i
 		i, kok = jsonscan.SkipJSONValue(raw, i)
 		if !kok {
-			return "", false, false, false
+			return Probe{}, false
 		}
 		val := raw[valStart:i]
 		switch {
@@ -247,30 +273,50 @@ func TopLevelProbe(raw json.RawMessage) (model string, stream bool, hasTools boo
 			if bytes.Equal(val, nullLiteral) {
 				continue // JSON null: no-op, same as unmarshaling null into a string field
 			}
-			if err := json.Unmarshal(val, &model); err != nil {
-				return "", false, false, false
+			if err := json.Unmarshal(val, &p.Model); err != nil {
+				return Probe{}, false
 			}
 		case bytes.Equal(key, streamKeyLiteral):
 			switch {
 			case bytes.Equal(val, nullLiteral):
 				// no-op, same as unmarshaling null into a bool field
 			case bytes.Equal(val, trueLiteral):
-				stream = true
+				p.Stream = true
 			case bytes.Equal(val, falseLiteral):
-				stream = false
+				p.Stream = false
 			default:
-				return "", false, false, false
+				return Probe{}, false
 			}
 		case bytes.Equal(key, toolsKeyLiteral):
 			vi := jsonscan.SkipJSONWS(val, 0)
-			hasTools = vi < len(val) && val[vi] == '['
-			if hasTools {
+			p.HasTools = vi < len(val) && val[vi] == '['
+			if p.HasTools {
 				vi = jsonscan.SkipJSONWS(val, vi+1)
-				hasTools = vi < len(val) && val[vi] != ']'
+				p.HasTools = vi < len(val) && val[vi] != ']'
 			}
+		case bytes.Equal(key, thinkingKeyLiteral):
+			var t struct {
+				Type string `json:"type"`
+			}
+			thinking = json.Unmarshal(val, &t) == nil && (t.Type == "enabled" || t.Type == "adaptive")
+		case bytes.Equal(key, reasoningKeyLiteral):
+			var r struct {
+				Effort  string `json:"effort"`
+				Enabled bool   `json:"enabled"`
+			}
+			reasoning = json.Unmarshal(val, &r) == nil && (effortOn(r.Effort) || r.Enabled)
+		case bytes.Equal(key, reasoningEffortKeyLiteral):
+			var e string
+			effort = json.Unmarshal(val, &e) == nil && effortOn(e)
+		case bytes.Equal(key, enableThinkingKeyLiteral):
+			enable = bytes.Equal(val, trueLiteral)
 		}
 	}
 }
+
+// effortOn: any effort level except "none" asks for reasoning ("minimal"
+// still does on the models that accept it).
+func effortOn(e string) bool { return e != "" && e != "none" }
 
 var (
 	nullLiteral  = []byte("null")

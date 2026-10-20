@@ -28,6 +28,7 @@ import (
 	"bytes"
 	"slices"
 
+	"vmr/internal/adapter"
 	"vmr/internal/core"
 	"vmr/internal/jsonscan"
 	"vmr/internal/tokenutil"
@@ -50,10 +51,10 @@ const (
 // any shape it doesn't recognize, matching the fail-open posture of the
 // scanner it's built from.
 //
-// hasTools is NOT derived here from a second body scan — it comes from the
-// same adapter.TopLevelProbe call server.go already made to extract
-// model/stream, folded into that single structural pass instead of a
-// second, independent top-level "tools" array scan.
+// HasTools and WantsThinking are NOT derived here from a second body scan —
+// they come from the same adapter.TopLevelProbe call server.go already made
+// to extract model/stream, folded into that single structural pass instead
+// of independent top-level scans.
 //
 // imageCount is NOT derived here from a body scan — it comes from the
 // caller's single imgprep.Downscale call (server.go), which walks the
@@ -73,7 +74,7 @@ const (
 // 2. Cost: reusing the count means a no-image request pays for exactly one
 // presence check across the whole request (imgprep.HasImageMarker, inside
 // Downscale), not that plus a second marker scan for the token estimate.
-func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.RequestFacts {
+func computeRequestFacts(body []byte, imageCount int, probe adapter.Probe) core.RequestFacts {
 	// One attachment-span scan feeds both the text estimate (which must
 	// EXCLUDE these ranges — their bytes are base64 payload, not message
 	// text, and are accounted separately below) and estimateDocumentTokens
@@ -82,7 +83,8 @@ func computeRequestFacts(body []byte, imageCount int, hasTools bool) core.Reques
 	spans := attachmentSpans(body)
 	return core.RequestFacts{
 		HasImage:        imageCount > 0,
-		HasTools:        hasTools,
+		HasTools:        probe.HasTools,
+		WantsThinking:   probe.WantsThinking,
 		EstimatedTokens: estimateTextTokens(body, spans) + int64(imageCount)*imageTokenEstimate + estimateDocumentTokens(body, spans),
 	}
 }

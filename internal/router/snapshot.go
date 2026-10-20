@@ -246,7 +246,7 @@ func buildEndpoints(cfg *config.Config, quotaSpecs map[string]*core.QuotaSpec, e
 			if !ok { // defensive; config.validate already checked this
 				return nil, fmt.Errorf("provider %q has no base_url for protocol %q", providerName, protocol)
 			}
-			effCapabilities := resolveModelCapabilities(cfg.ModelDefaults, providerName, upstreamModel)
+			effCapabilities := cfg.ResolveModelCapabilities(providerName, upstreamModel)
 			effMaxContextTokens := resolveModelMaxContextTokens(cfg.ModelDefaults, providerName, upstreamModel)
 			queueWait := p.ResolvedConcurrencyQueue()
 			ep := &core.Endpoint{
@@ -332,21 +332,6 @@ func enabledProviders(providers []config.Provider) map[string]bool {
 		}
 	}
 	return out
-}
-
-// resolveModelCapabilities resolves capabilities for a (provider, model) by
-// consulting:
-// 1. model_defaults[model] exact match (if provider matches and non-empty)
-// 2. model_defaults["*"] wildcard fallback (if provider matches and non-empty)
-// 3. nil (unconstrained)
-func resolveModelCapabilities(defaults map[string]config.ModelDefaultEntry, provider, model string) []string {
-	if entry, ok := defaults[model]; ok && providerMatches(entry.Providers, provider) && len(entry.Capabilities) > 0 {
-		return entry.Capabilities
-	}
-	if wildcard, ok := defaults["*"]; ok && providerMatches(wildcard.Providers, provider) && len(wildcard.Capabilities) > 0 {
-		return wildcard.Capabilities
-	}
-	return nil
 }
 
 // resolveModelMaxContextTokens resolves context window ceiling for a

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -557,6 +558,21 @@ func (c *Config) validate() error {
 // parallel index, and nothing on the request hot path calls this:
 // BuildSnapshot resolves every reference once at startup/reload, and
 // everything downstream reads the resolved core.Endpoint instead.
+// ResolveModelCapabilities is the effective capability set of a (provider,
+// model) endpoint — the one resolution both BuildSnapshot (condition
+// routing) and Check() (coverage warnings) use: model_defaults[model] if it
+// applies to provider and is non-empty, else model_defaults["*"] under the
+// same rule, else nil (unconstrained).
+func (c *Config) ResolveModelCapabilities(provider, model string) []string {
+	for _, key := range []string{model, "*"} {
+		if entry, ok := c.ModelDefaults[key]; ok && len(entry.Capabilities) > 0 &&
+			(len(entry.Providers) == 0 || slices.Contains(entry.Providers, provider)) {
+			return entry.Capabilities
+		}
+	}
+	return nil
+}
+
 func (c *Config) ProviderByName(name string) (Provider, bool) {
 	for _, p := range c.Providers {
 		if p.Name == name {

@@ -260,6 +260,9 @@ func renderFactsLine(b *strings.Builder, rec *audit.Record, t i18n.DetailText) {
 	if f.HasTools {
 		caps = append(caps, "`tools`")
 	}
+	if f.WantsThinking {
+		caps = append(caps, "`thinking`")
+	}
 	capsText := t.FactsCapsNone
 	if len(caps) > 0 {
 		capsText = strings.Join(caps, t.ListSep)

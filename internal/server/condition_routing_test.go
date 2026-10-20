@@ -96,6 +96,51 @@ func TestCondition_AllRejectedGivesDiagnosticMessage(t *testing.T) {
 	}
 }
 
+const thinkingReq = `{"model":"vm","reasoning_effort":"high","messages":[{"role":"user","content":"hi"}]}`
+
+func TestCondition_ThinkingRoutesAwayFromNonCapable(t *testing.T) {
+	u1, u2 := newUpstream(t), newUpstream(t)
+	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
+		"\n          capabilities: [text, tools]",
+		"\n          capabilities: [text, tools, thinking]"))
+
+	resp, _ := chat(t, ts, thinkingReq, nil)
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:model-two" {
+		t.Fatalf("thinking request: status=%d ep=%s, want p2 (only thinking-capable endpoint)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
+	}
+	if u1.hits.Load() != 0 {
+		t.Errorf("p1 (not thinking-capable) should never have been tried, hits=%d", u1.hits.Load())
+	}
+	// The same virtual model without reasoning switched on keeps plain priority.
+	resp, _ = chat(t, ts, simpleReq, nil)
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p1:model-one" {
+		t.Fatalf("plain request: status=%d ep=%s, want p1", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
+	}
+}
+
+func TestCondition_ThinkingWithNoCapableCandidateIsRefused(t *testing.T) {
+	u1, u2 := newUpstream(t), newUpstream(t)
+	// Declared capabilities without thinking on every candidate: the request is
+	// refused (naming the condition), never stripped of its reasoning switch.
+	ts := newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL,
+		"\n          capabilities: [text, tools]",
+		"\n          capabilities: [text, tools]"))
+
+	resp, body := chat(t, ts, thinkingReq, nil)
+	if resp.StatusCode != 503 || !strings.Contains(body, "thinking") {
+		t.Fatalf("status=%d body=%s, want 503 naming the thinking condition", resp.StatusCode, body)
+	}
+	if u1.hits.Load() != 0 || u2.hits.Load() != 0 {
+		t.Errorf("neither endpoint should have been tried: p1 hits=%d p2 hits=%d", u1.hits.Load(), u2.hits.Load())
+	}
+	// An undeclared (unconstrained) candidate still serves it.
+	ts = newRouterServer(t, capabilityYAML(u1.srv.URL, u2.srv.URL, "\n          capabilities: [text, tools]", ""))
+	resp, _ = chat(t, ts, thinkingReq, nil)
+	if resp.StatusCode != 200 || resp.Header.Get("X-VMR-Endpoint") != "openai-completions:p2:model-two" {
+		t.Fatalf("status=%d ep=%s, want p2 (undeclared = unconstrained)", resp.StatusCode, resp.Header.Get("X-VMR-Endpoint"))
+	}
+}
+
 // bigReq is long enough that its estimated token count comfortably clears
 // a max_context_tokens: 50 ceiling (asciiBytes/4 — a few thousand ASCII
 // bytes estimates well past 50 tokens) but stays under a generous ceiling.

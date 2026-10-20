@@ -3,6 +3,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -298,22 +299,22 @@ listen: 127.0.0.1:0
 providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
 model_defaults:
-  a: {capabilities: [text, thinking]}
-  b: {capabilities: [thinking, video]}
+  a: {capabilities: [text, audio]}
+  b: {capabilities: [audio, video]}
 models:
   m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
 	if len(issues) != 2 {
-		t.Fatalf("Check() = %+v, want one warning per capability (thinking, video)", issues)
+		t.Fatalf("Check() = %+v, want one warning per capability (audio, video)", issues)
 	}
-	if m := issues[0].Message; !strings.Contains(m, `"thinking"`) || !strings.Contains(m, `"a", "b"`) {
-		t.Errorf("thinking warning = %q, want it to name both model_defaults keys", m)
+	if m := issues[0].Message; !strings.Contains(m, `"audio"`) || !strings.Contains(m, `"a", "b"`) {
+		t.Errorf("audio warning = %q, want it to name both model_defaults keys", m)
 	}
 }
 
 // TestCheckFlagsUnenforcedCapabilities covers the forward-declared
-// capability words ("audio"/"video"/"thinking"): validate() accepts them,
+// capability words ("audio"/"video"): validate() accepts them,
 // but Check() must surface one SeverityWarning per declared word so a
 // no-op capability declaration can't stay invisible.
 func TestCheckFlagsUnenforcedCapabilities(t *testing.T) {
@@ -328,8 +329,8 @@ models:
   m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
 	issues := cfg.Check()
-	if len(issues) != 3 {
-		t.Fatalf("Check() = %+v, want exactly three capability warnings", issues)
+	if len(issues) != 2 {
+		t.Fatalf("Check() = %+v, want exactly two capability warnings (audio, video; thinking is enforced)", issues)
 	}
 	for _, is := range issues {
 		if is.Severity != SeverityWarning || is.Field != "capabilities" || !strings.Contains(is.Message, `"MiniMax-M3"`) {
@@ -343,7 +344,7 @@ models:
 		t.Errorf("HasErrors must be false for a warning-only issue set, got true from %+v", issues)
 	}
 
-	// The words "text" and "image" (both with enforcing Conditions) must
+	// The words "text", "image" and "thinking" (enforced or baseline) must
 	// stay warning-free.
 	clean := mustParse(t, `
 listen: 127.0.0.1:0
@@ -351,7 +352,7 @@ providers:
   - {name: p1, base_url: {openai-completions: https://example.com}, api_key: k}
 model_defaults:
   MiniMax-M3:
-    capabilities: [text, image]
+    capabilities: [text, image, thinking]
 models:
   m: {endpoints: {openai-completions: [{providers: [p1], models: [x]}]}}
 `)
@@ -380,5 +381,59 @@ func TestCheckIssueJSON(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"severity":"warning"`) {
 		t.Errorf("json %s does not contain severity string 'warning'", string(data))
+	}
+}
+
+// TestCheckCapabilityCoverage pins the load-time warning for a virtual model
+// whose candidates all declare capabilities but none declares one its
+// clients certainly request: tools anywhere, thinking on anthropic-messages.
+func TestCheckCapabilityCoverage(t *testing.T) {
+	base := `
+listen: 127.0.0.1:0
+providers:
+  - {name: p1, base_url: {openai-completions: https://example.com/v1, anthropic-messages: https://example.com}, api_key: k}
+  - {name: off, base_url: {anthropic-messages: https://example.com}, api_key: k, disabled: true}
+model_defaults:
+  plain: {capabilities: [text]}
+  agentic: {capabilities: [text, tools]}
+  deep: {capabilities: [text, tools, thinking]}
+models:
+%s
+`
+	cov := func(t *testing.T, models string) []string {
+		t.Helper()
+		var msgs []string
+		for _, is := range mustParse(t, fmt.Sprintf(base, models)).Check() {
+			if is.Field == "capabilities" {
+				if is.Severity != SeverityWarning {
+					t.Errorf("coverage issue must be a warning: %+v", is)
+				}
+				msgs = append(msgs, is.Message)
+			}
+		}
+		return msgs
+	}
+	if got := cov(t, `  m: {endpoints: {openai-completions: [{providers: [p1], models: [plain]}]}}`); len(got) != 1 || !strings.Contains(got[0], `no candidate declares "tools"`) {
+		t.Errorf("tools coverage = %q", got)
+	}
+	got := cov(t, `  m: {endpoints: {anthropic-messages: [{providers: [p1], models: [agentic]}]}}`)
+	if len(got) != 1 || !strings.Contains(got[0], `no candidate declares "thinking"`) || !strings.Contains(got[0], "anthropic-messages") {
+		t.Errorf("thinking coverage = %q", got)
+	}
+	// thinking is only certain on anthropic-messages: elsewhere clients ask for it per model
+	if got := cov(t, `  m: {endpoints: {openai-completions: [{providers: [p1], models: [agentic]}]}}`); len(got) != 0 {
+		t.Errorf("openai-completions without thinking must stay quiet: %q", got)
+	}
+	// one capable candidate is enough
+	if got := cov(t, `  m: {endpoints: {anthropic-messages: [{providers: [p1], models: [agentic, deep]}]}}`); len(got) != 0 {
+		t.Errorf("a thinking candidate covers the model: %q", got)
+	}
+	// an undeclared (unconstrained) candidate accepts everything
+	if got := cov(t, `  m: {endpoints: {anthropic-messages: [{providers: [p1], models: [plain, unknown-model]}]}}`); len(got) != 0 {
+		t.Errorf("an unconstrained candidate covers the model: %q", got)
+	}
+	// a disabled provider's endpoint does not count
+	if got := cov(t, `  m: {endpoints: {anthropic-messages: [{providers: [p1], models: [agentic]}, {providers: [off], models: [deep]}]}}`); len(got) != 1 {
+		t.Errorf("a disabled provider must not cover the model: %q", got)
 	}
 }

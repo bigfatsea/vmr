@@ -5,12 +5,13 @@ package server
 import (
 	"testing"
 
+	"vmr/internal/adapter"
 	"vmr/internal/tokenutil"
 )
 
 func TestComputeRequestFacts_PlainText(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":"hello there"}]}`)
-	facts := computeRequestFacts(body, 0, false)
+	facts := computeRequestFacts(body, 0, adapter.Probe{})
 	if facts.HasImage {
 		t.Errorf("plain text request must not report HasImage")
 	}
@@ -26,8 +27,8 @@ func TestComputeRequestFacts_ChineseCostsMoreThanEnglishPerChar(t *testing.T) {
 	// For equal character count, Chinese estimates more tokens than English letters (0.507 vs 0.206).
 	en := []byte(`{"model":"agent","messages":[{"role":"user","content":"aaaaaaaaaa"}]}`)
 	zh := []byte(`{"model":"agent","messages":[{"role":"user","content":"我我我我我我我我我我"}]}`)
-	enFacts := computeRequestFacts(en, 0, false)
-	zhFacts := computeRequestFacts(zh, 0, false)
+	enFacts := computeRequestFacts(en, 0, adapter.Probe{})
+	zhFacts := computeRequestFacts(zh, 0, adapter.Probe{})
 	if zhFacts.EstimatedTokens <= enFacts.EstimatedTokens {
 		t.Errorf("expected Chinese text to estimate more tokens per character than English: en=%d zh=%d", enFacts.EstimatedTokens, zhFacts.EstimatedTokens)
 	}
@@ -44,10 +45,10 @@ func TestComputeRequestFacts_ChineseCostsMoreThanEnglishPerChar(t *testing.T) {
 func TestComputeRequestFacts_Tools(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[]}`)
 
-	if !computeRequestFacts(body, 0, true).HasTools {
+	if !computeRequestFacts(body, 0, adapter.Probe{HasTools: true}).HasTools {
 		t.Errorf("hasTools=true must set facts.HasTools")
 	}
-	if computeRequestFacts(body, 0, false).HasTools {
+	if computeRequestFacts(body, 0, adapter.Probe{}).HasTools {
 		t.Errorf("hasTools=false must not set facts.HasTools")
 	}
 }
@@ -65,21 +66,21 @@ func TestComputeRequestFacts_Tools(t *testing.T) {
 func TestComputeRequestFacts_Image(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":"hello"}]}`)
 
-	if computeRequestFacts(body, 0, false).HasImage {
+	if computeRequestFacts(body, 0, adapter.Probe{}).HasImage {
 		t.Errorf("imageCount=0 must report HasImage=false")
 	}
-	if !computeRequestFacts(body, 1, false).HasImage {
+	if !computeRequestFacts(body, 1, adapter.Probe{}).HasImage {
 		t.Errorf("imageCount=1 must report HasImage=true")
 	}
 
 	// Two images must estimate more tokens than one, scaling linearly with
 	// imageCount — same body both times, only the count differs.
-	oneImg := computeRequestFacts(body, 1, false).EstimatedTokens
-	twoImg := computeRequestFacts(body, 2, false).EstimatedTokens
+	oneImg := computeRequestFacts(body, 1, adapter.Probe{}).EstimatedTokens
+	twoImg := computeRequestFacts(body, 2, adapter.Probe{}).EstimatedTokens
 	if twoImg <= oneImg {
 		t.Errorf("two images should estimate more tokens than one: one=%d two=%d", oneImg, twoImg)
 	}
-	if got, want := twoImg-oneImg, oneImg-computeRequestFacts(body, 0, false).EstimatedTokens; got != want {
+	if got, want := twoImg-oneImg, oneImg-computeRequestFacts(body, 0, adapter.Probe{}).EstimatedTokens; got != want {
 		t.Errorf("each additional image should add a constant token amount: (2img-1img)=%d, (1img-0img)=%d", got, want)
 	}
 }
@@ -89,7 +90,7 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 	// must NOT trigger the document estimate (avoids false positives on
 	// arbitrary large string fields).
 	noMarker := []byte(`{"model":"agent","messages":[{"role":"user","content":"data:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}`)
-	base := computeRequestFacts(noMarker, 0, false).EstimatedTokens
+	base := computeRequestFacts(noMarker, 0, adapter.Probe{}).EstimatedTokens
 
 	withDoc := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` +
 		string(make([]byte, 400)) + `"}}]}]}`)
@@ -100,7 +101,7 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 			withDoc[i] = 'A'
 		}
 	}
-	docFacts := computeRequestFacts(withDoc, 0, false)
+	docFacts := computeRequestFacts(withDoc, 0, adapter.Probe{})
 	if docFacts.EstimatedTokens <= base {
 		t.Errorf("a request with a document marker + large data field should estimate more tokens than one without any marker: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
 	}
@@ -114,7 +115,7 @@ func TestComputeRequestFacts_DocumentEstimateOnlyWhenMarkerPresent(t *testing.T)
 // for it or this silently undercounts to zero.
 func TestComputeRequestFacts_ResponsesInputFile(t *testing.T) {
 	noMarker := []byte(`{"model":"agent","input":[{"role":"user","content":"hello there"}]}`)
-	base := computeRequestFacts(noMarker, 0, false).EstimatedTokens
+	base := computeRequestFacts(noMarker, 0, adapter.Probe{}).EstimatedTokens
 
 	withDoc := []byte(`{"model":"agent","input":[{"role":"user","content":[{"type":"input_file","filename":"a.pdf","file_data":"` +
 		string(make([]byte, 400)) + `"}]}]}`)
@@ -123,7 +124,7 @@ func TestComputeRequestFacts_ResponsesInputFile(t *testing.T) {
 			withDoc[i] = 'A'
 		}
 	}
-	docFacts := computeRequestFacts(withDoc, 0, false)
+	docFacts := computeRequestFacts(withDoc, 0, adapter.Probe{})
 	if docFacts.EstimatedTokens <= base {
 		t.Errorf("a Responses input_file block's file_data payload should raise the token estimate: base=%d withDoc=%d", base, docFacts.EstimatedTokens)
 	}
@@ -157,8 +158,8 @@ func TestComputeRequestFacts_ImageBase64NotCountedAsText(t *testing.T) {
 		"openai":    openAIImg,
 		"responses": responsesImg,
 	} {
-		withImg := computeRequestFacts(body, 1, false)
-		textOnly := computeRequestFacts(body, 0, false)
+		withImg := computeRequestFacts(body, 1, adapter.Probe{})
+		textOnly := computeRequestFacts(body, 0, adapter.Probe{})
 		diff := withImg.EstimatedTokens - textOnly.EstimatedTokens
 		// The delta must be the flat per-image estimate (plus rounding
 		// noise from excluding the payload bytes), NOT the ~100K-token
@@ -176,10 +177,10 @@ func TestComputeRequestFacts_ImageBase64NotCountedAsText(t *testing.T) {
 func TestComputeRequestFacts_PDFBase64NotCountedAsText(t *testing.T) {
 	payload := b64Payload(300_000)
 	withDoc := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(payload) + `"}}]}]}`)
-	facts := computeRequestFacts(withDoc, 0, false)
+	facts := computeRequestFacts(withDoc, 0, adapter.Probe{})
 
 	wantDoc := int64(300_000 / documentBytesPerToken) // 15000
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"Summarize this document."}]}`), 0, false)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"Summarize this document."}]}`), 0, adapter.Probe{})
 	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
 	if diff < wantDoc/2 || diff > 2*wantDoc {
 		t.Errorf("document delta = %d, want within [%d, %d] — outside means the payload bytes leaked into (or vanished from) the estimate", diff, wantDoc/2, 2*wantDoc)
@@ -192,7 +193,7 @@ func TestComputeRequestFacts_PDFBase64NotCountedAsText(t *testing.T) {
 func TestComputeRequestFacts_UnterminatedPayloadNotCountedAsText(t *testing.T) {
 	payload := b64Payload(100_000)
 	truncated := []byte(`{"model":"agent","messages":[{"role":"user","content":[{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(payload))
-	facts := computeRequestFacts(truncated, 0, false)
+	facts := computeRequestFacts(truncated, 0, adapter.Probe{})
 	if facts.EstimatedTokens > 4*int64(100_000/documentBytesPerToken) {
 		t.Errorf("truncated payload estimate = %d, want at the document-token scale (~%d), not the ~%d text-token scale of the raw bytes",
 			facts.EstimatedTokens, 100_000/documentBytesPerToken, tokenutil.Estimate(truncated))
@@ -212,9 +213,9 @@ func TestComputeRequestFacts_ImageSpanNotChargedAsDocument(t *testing.T) {
 	anthropicImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
 		`{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + string(img) + `"}},` +
 		`{"type":"text","text":"now also read the attached PDF: application/pdf"}]}]}`)
-	facts := computeRequestFacts(anthropicImg, 1, false)
+	facts := computeRequestFacts(anthropicImg, 1, adapter.Probe{})
 
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"now also read the attached PDF: application/pdf"}]}`), 0, false)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"now also read the attached PDF: application/pdf"}]}`), 0, adapter.Probe{})
 	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
 	// The delta must sit at the flat per-image scale. At the old behavior
 	// the 400KB payload would add 400_000/20 = 20K phantom document tokens
@@ -234,9 +235,9 @@ func TestComputeRequestFacts_DocumentMarkerInTextDoesNotChargeImages(t *testing.
 	openAIImg := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
 		`{"type":"text","text":"convert this screenshot to PDF, output format application/pdf"},` +
 		`{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` + string(img) + `"}}]}]}`)
-	facts := computeRequestFacts(openAIImg, 1, false)
+	facts := computeRequestFacts(openAIImg, 1, adapter.Probe{})
 
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"convert this screenshot to PDF, output format application/pdf"}]}`), 0, false)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"convert this screenshot to PDF, output format application/pdf"}]}`), 0, adapter.Probe{})
 	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
 	if diff <= 0 || diff > 2*imageTokenEstimate {
 		t.Errorf("image delta when text mentions PDF = %d, want within (0, %d] — larger means the text-level document marker opened the gate for image bytes", diff, 2*imageTokenEstimate)
@@ -252,13 +253,13 @@ func TestComputeRequestFacts_AnthropicDocumentStillCounted(t *testing.T) {
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
 		`{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":"` + string(b64Payload(1000)) + `"}},` +
 		`{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"` + string(doc) + `"}}]}]}`)
-	facts := computeRequestFacts(body, 1, false)
+	facts := computeRequestFacts(body, 1, adapter.Probe{})
 
 	// Expected: 1 flat image estimate + 300_000/20 document tokens, plus
 	// small text-estimate noise. A value far below the document scale means
 	// the sniff mis-typed the document span as an image (under-count).
 	wantDoc := int64(300_000 / documentBytesPerToken)
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"x"}]}`), 0, false)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"x"}]}`), 0, adapter.Probe{})
 	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
 	if diff < wantDoc/2 {
 		t.Errorf("mixed image+document delta = %d, want >= %d (the document scale) — the document span was mis-classified as an image", diff, wantDoc/2)
@@ -275,10 +276,10 @@ func TestComputeRequestFacts_AmbiguousDataWithoutMediaTypeFailsOpenToDocument(t 
 	body := []byte(`{"model":"agent","messages":[{"role":"user","content":[` +
 		`{"type":"input_audio","data":"` + string(audio) + `","format":"wav"},` +
 		`{"type":"text","text":"see the attached application/pdf"}]}]}`)
-	facts := computeRequestFacts(body, 0, false)
+	facts := computeRequestFacts(body, 0, adapter.Probe{})
 
 	wantDoc := int64(300_000 / documentBytesPerToken)
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"see the attached application/pdf"}]}`), 0, false)
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"see the attached application/pdf"}]}`), 0, adapter.Probe{})
 	diff := facts.EstimatedTokens - textOnly.EstimatedTokens
 	if diff < wantDoc/2 {
 		t.Errorf("audio-payload delta = %d, want >= %d (the document scale) — the sniff's fail-open default to document was lost", diff, wantDoc/2)

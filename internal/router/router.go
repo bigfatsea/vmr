@@ -237,11 +237,16 @@ func (rt *Router) handleAllFailed(w http.ResponseWriter, r *http.Request, creq *
 		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
 		w.WriteHeader(last.status)
 		w.Write(last.body)
-	} else {
-		w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
-		WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", noCandidatesMessage(r.Context().Err(), creq, cs.reason, attempts, cs.healthOK, trail))
+		rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
+		return
 	}
-	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx)", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts)
+	// No upstream answered: the client's 503 message is the only explanation,
+	// so the operator's log line carries it too (a capability refusal would
+	// otherwise read as a bare "ALL_FAILED(0s, 0x)").
+	msg := noCandidatesMessage(r.Context().Err(), creq, cs.reason, attempts, cs.healthOK, trail)
+	w.Header().Set("X-VMR-Attempts", strconv.Itoa(attempts))
+	WriteError(w, http.StatusServiceUnavailable, "vmr_no_candidates", msg)
+	rt.logf("%s %s, %s, ALL_FAILED(%s, %dx): %s", clientTag(rec), creq.Model, estTokenField(creq), fmtDur(time.Since(start)), attempts, msg)
 }
 
 // rejectIfAllKeyless (with its host-shape helper) lives in keyless.go.

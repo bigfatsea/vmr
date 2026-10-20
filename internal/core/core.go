@@ -58,6 +58,7 @@ type CanonicalRequest struct {
 type RequestFacts struct {
 	HasImage        bool  `json:"has_image,omitempty"`
 	HasTools        bool  `json:"has_tools,omitempty"`
+	WantsThinking   bool  `json:"wants_thinking,omitempty"`
 	EstimatedTokens int64 `json:"estimated_tokens"`
 }
 

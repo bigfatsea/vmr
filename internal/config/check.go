@@ -88,11 +88,12 @@ func (c *Config) Check() []Issue {
 	issues = append(issues, c.checkFallbackReachability()...)
 	issues = append(issues, c.checkModelDefaultsCapabilities()...)
 	issues = append(issues, c.checkManifestRoles()...)
+	issues = append(issues, c.checkCapabilityCoverage()...)
 	return issues
 }
 
 // checkModelDefaultsCapabilities warns about model_defaults entries declaring
-// a capability no routing Condition enforces ("audio"/"video"/"thinking"):
+// a capability no routing Condition enforces ("audio"/"video"):
 // validate() accepts them so existing configs keep loading, but the words
 // have no effect on routing yet — an operator listing "thinking" here and
 // assuming it gates models onto thinking-capable endpoints would be silently
@@ -104,7 +105,7 @@ func (c *Config) checkModelDefaultsCapabilities() []Issue {
 	for _, key := range fmtutil.SortedKeys(c.ModelDefaults) {
 		for _, cap := range c.ModelDefaults[key].Capabilities {
 			switch cap {
-			case "audio", "video", "thinking":
+			case "audio", "video":
 				byCap[cap] = append(byCap[cap], strconv.Quote(key))
 			}
 		}
@@ -113,7 +114,7 @@ func (c *Config) checkModelDefaultsCapabilities() []Issue {
 	for _, cap := range fmtutil.SortedKeys(byCap) {
 		issues = append(issues, Issue{
 			Field: "capabilities",
-			Message: fmt.Sprintf("model_defaults: capability %q is accepted but not enforced by routing yet — it changes nothing today (only image and tools gate routing); declared for %s",
+			Message: fmt.Sprintf("model_defaults: capability %q is accepted but not enforced by routing yet — it changes nothing today (only image, tools and thinking gate routing); declared for %s",
 				cap, strings.Join(byCap[cap], ", ")),
 			Severity: SeverityWarning,
 		})
@@ -451,6 +452,58 @@ func (c *Config) checkManifestRoles() []Issue {
 		if !claimed[protocol]["default"] {
 			issues = append(issues, Issue{Field: "meta", Severity: SeverityWarning, Message: fmt.Sprintf(
 				"no model has manifest role \"default\" on %s — agents that speak %s cannot pick a main model from GET /manifest", protocol, protocol)})
+		}
+	}
+	return issues
+}
+
+// checkCapabilityCoverage warns about a virtual model whose candidates on one
+// protocol all declare capabilities (so none is unconstrained) yet none
+// declares a capability its clients are certain to request: "tools" — every
+// coding-agent turn carries tools — and, on anthropic-messages, "thinking",
+// which Claude Code turns on for every request, background ones included.
+// Those requests are refused by the hard Conditions; saying so at load time
+// names the misconfiguration before a client meets a 503. Enabled endpoints
+// only, fallback endpoints included, mirroring BuildSnapshot.
+func (c *Config) checkCapabilityCoverage() []Issue {
+	var issues []Issue
+	for _, name := range fmtutil.SortedKeys(c.Models) {
+		m := c.Models[name]
+		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+			groups := m.Endpoints[protocol]
+			if m.Fallback == nil || *m.Fallback {
+				groups = append(slices.Clone(groups), c.FallbackEndpoints[protocol]...)
+			}
+			candidates, unconstrained := 0, false
+			has := map[string]bool{}
+			for _, eg := range groups {
+				for _, pn := range eg.Providers {
+					if p, ok := c.ProviderByName(pn); !ok || p.Disabled {
+						continue
+					}
+					for _, mn := range eg.Models {
+						candidates++
+						caps := c.ResolveModelCapabilities(pn, mn)
+						if len(caps) == 0 {
+							unconstrained = true
+						}
+						for _, cp := range caps {
+							has[cp] = true
+						}
+					}
+				}
+			}
+			if candidates == 0 || unconstrained {
+				continue
+			}
+			if !has["tools"] {
+				issues = append(issues, Issue{Model: name, Field: "capabilities", Severity: SeverityWarning, Message: fmt.Sprintf(
+					"model %q on %s: no candidate declares \"tools\" — requests that carry tools (every coding-agent turn does) will be refused", name, protocol)})
+			}
+			if protocol == core.ProtocolAnthropicMessages && !has["thinking"] {
+				issues = append(issues, Issue{Model: name, Field: "capabilities", Severity: SeverityWarning, Message: fmt.Sprintf(
+					"model %q on %s: no candidate declares \"thinking\" — requests that turn thinking on (Claude Code does on every request) will be refused", name, protocol)})
+			}
 		}
 	}
 	return issues

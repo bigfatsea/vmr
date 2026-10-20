@@ -269,10 +269,11 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// downscaling images: both of the latter are per-model (image
 		// downscale can be overridden per virtual model) and cheap JSON
 		// parsing shouldn't wait behind either. One structural scan yields
-		// model/stream/hasTools together (adapter.TopLevelProbe) instead of
-		// a reflective json.Unmarshal for model/stream plus a second,
-		// independent top-level scan for tools later in computeRequestFacts.
-		probeModel, probeStream, probeHasTools, probeOK := adapter.TopLevelProbe(body)
+		// model/stream/tools/thinking together (adapter.TopLevelProbe) instead
+		// of a reflective json.Unmarshal for model/stream plus independent
+		// top-level scans later in computeRequestFacts.
+		probe, probeOK := adapter.TopLevelProbe(body)
+		probeModel, probeStream := probe.Model, probe.Stream
 		if !probeOK {
 			router.WriteError(w, http.StatusBadRequest, "invalid_request_error", "request body is not valid JSON")
 			return
@@ -344,7 +345,7 @@ func (s *Server) chatHandler(protocol string) http.HandlerFunc {
 		// a sibling of Client.Request rather than folded into it.
 		// (The in-flight entry's est-in stamp is router.Serve's job — one
 		// setter, not two.)
-		facts := computeRequestFacts(body, len(images), probeHasTools)
+		facts := computeRequestFacts(body, len(images), probe)
 		rec.Facts = &facts
 
 		s.rt.Serve(w, r, &core.CanonicalRequest{

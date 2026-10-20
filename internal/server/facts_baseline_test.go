@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"vmr/internal/adapter"
 )
 
 // Absolute magnitude baselines (R105).
@@ -67,7 +69,7 @@ func TestBaseline_PlainTextRequest(t *testing.T) {
 		t.Fatalf("label drift: text length = %d, want 4400", len(text))
 	}
 	body := baselineFixture(t, "baseline_plaintext.json", "__TEXT__", text)
-	facts := computeRequestFacts(body, 0, false)
+	facts := computeRequestFacts(body, 0, adapter.Probe{})
 	if facts.EstimatedTokens < 550 || facts.EstimatedTokens > 2200 {
 		t.Errorf("plaintext estimate = %d, want within [550, 2200] (~4400 chars at ~4 chars/token).\n"+
 			"Outside the band means the text basis is wrong: near-zero suggests content is not being extracted; "+
@@ -90,13 +92,13 @@ func TestBaseline_ImageRequestEstimateIsImageScale(t *testing.T) {
 		{"openai", "baseline_image_openai.json"},
 	} {
 		body := baselineFixture(t, tc.fixture, "__B64__", b64Of(payloadBytes))
-		withImg := computeRequestFacts(body, 1, false)
+		withImg := computeRequestFacts(body, 1, adapter.Probe{})
 		// The baseline must be a genuinely image-free body — computing it from
 		// the same body with imageCount=0 would cancel the shared error (the
 		// payload bytes counted as text appear in BOTH terms), recreating
 		// inside this test the very both-sides-wrong-together blindness the
 		// absolute baselines exist to break.
-		textOnly := computeRequestFacts(baselineFixture(t, tc.fixture, "__B64__", ""), 0, false)
+		textOnly := computeRequestFacts(baselineFixture(t, tc.fixture, "__B64__", ""), 0, adapter.Probe{})
 		diff := withImg.EstimatedTokens - textOnly.EstimatedTokens
 		// Label: one image ≈ imageTokenEstimate (flat, per-image); allow
 		// 2x for calibration movement. The base64 payload counted as text
@@ -117,8 +119,8 @@ func TestBaseline_ImageRequestEstimateIsImageScale(t *testing.T) {
 func TestBaseline_DocumentRequestEstimateIsDocumentScale(t *testing.T) {
 	const payloadBytes = 300_000
 	body := baselineFixture(t, "baseline_document_pdf.json", "__B64__", b64Of(payloadBytes))
-	withDoc := computeRequestFacts(body, 0, false)
-	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"Summarize this document."}]}`), 0, false)
+	withDoc := computeRequestFacts(body, 0, adapter.Probe{})
+	textOnly := computeRequestFacts([]byte(`{"model":"agent","messages":[{"role":"user","content":"Summarize this document."}]}`), 0, adapter.Probe{})
 	diff := withDoc.EstimatedTokens - textOnly.EstimatedTokens
 	want := int64(payloadBytes / documentBytesPerToken) // 15000
 	if diff < want/2 || diff > 2*want {

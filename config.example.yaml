@@ -165,7 +165,10 @@ listen: 127.0.0.1:8800
 
 # Real model defaults: capabilities and context window ceiling for upstream
 # models, shared across all virtual models. Omit entirely if unneeded
-# (unspecified models are unconstrained).
+# (unspecified models are unconstrained). image, tools and thinking gate
+# routing: a request needing one goes only to endpoints that declare it (or
+# declare nothing) and is refused when there is none — Claude Code turns
+# thinking on for every request. audio/video are accepted but not checked yet.
 model_defaults:
   "*":                          # optional wildcard fallback
     capabilities: [text, tools]

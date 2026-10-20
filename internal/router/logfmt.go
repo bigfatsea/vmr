@@ -82,6 +82,9 @@ func capField(f core.RequestFacts) string {
 	if f.HasTools {
 		caps = append(caps, "tools")
 	}
+	if f.WantsThinking {
+		caps = append(caps, "thinking")
+	}
 	return strings.Join(caps, "|")
 }
 
