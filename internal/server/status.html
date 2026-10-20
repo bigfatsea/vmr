@@ -424,7 +424,9 @@ function stallAge(e, nowMs) {
 }
 
 function liveWho(e) {
-  return `<span class="who" title="${esc((e.client_key_tag || '—') + ' → ' + e.vmodel)}"><span class="seq">#${e.seq}</span> ${esc(e.client_key_tag || '—')} <span class="dim">→</span> <b>${esc(e.vmodel)}</b></span>`;
+  const ep = e.provider ? `${e.provider}:${e.model || '—'}` : '';
+  const tip = (e.client_key_tag || '—') + ' → ' + e.vmodel + (ep ? ' (' + ep + ')' : '');
+  return `<span class="who" title="${esc(tip)}"><span class="seq">#${e.seq}</span> ${esc(e.client_key_tag || '—')} <span class="dim">→</span> <b>${esc(e.vmodel)}</b>${ep ? ` <span class="dim">(${esc(ep)})</span>` : ''}</span>`;
 }
 
 function liveLinesHTML(inflight, ended, waiting, nowMs) {

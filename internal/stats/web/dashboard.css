@@ -33,11 +33,11 @@
 .d-kpi-top .v-label{margin:0}
 .d-kpi-v{font-family:var(--font-mono);font-size:26px;font-weight:700;color:var(--text-bright);line-height:1.25;margin-top:3px;font-variant-numeric:tabular-nums}
 .d-kpi-v small{font-size:var(--fs-md);color:var(--text-muted);font-weight:400}
-.d-kpi-lines{margin-top:6px;display:grid;gap:2px;font-size:var(--fs-sm)}
+.d-kpi-lines{margin-top:6px;margin-bottom:10px;display:grid;gap:2px;font-size:var(--fs-sm)}
 .d-kpi-lines>div{display:flex;justify-content:space-between;gap:8px;white-space:nowrap}
 .d-kpi-lines>div>span:first-child{color:var(--text-muted);overflow:hidden;text-overflow:ellipsis}
 .d-kpi-lines>div>span:last-child{font-family:var(--font-mono);color:var(--text)}
-.d-spark{display:block;width:calc(100% + 30px);height:38px;margin:10px -15px 0}
+.d-spark{display:block;width:calc(100% + 30px);height:38px;margin:auto -15px 0}
 .d-compbar{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:8px;background:var(--surface-2)}
 .d-compbar i{display:block;height:100%;min-width:1px}
 .d-delta{font-family:var(--font-mono);font-size:var(--fs-xs);padding:1px 6px;border-radius:4px;white-space:nowrap}
