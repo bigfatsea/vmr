@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -300,6 +301,48 @@ func (c *Config) validateEndpointGroup(ctx, protocol string, eg EndpointGroup) e
 	for j, mn := range eg.Models {
 		if mn == "" {
 			return fmt.Errorf("%s: models[%d]: empty", ctx, j)
+		}
+	}
+	return nil
+}
+
+// validateManifestMeta checks the descriptive fields published by GET /manifest:
+// public_base_url must be a bare http(s) origin, meta.roles must stay inside
+// the closed vocabulary (a typo would silently hide a model from role lookups),
+// and at most one model may claim a role per ingress protocol. The last one is a
+// load error rather than a Check() issue because the manifest is an external
+// contract: a client that finds two models for one (protocol, role) rejects the
+// whole document, so a config that could publish one must never go into service
+// (startup refuses it, a hot reload keeps the previous config).
+func (c *Config) validateManifestMeta() error {
+	if c.PublicBaseURL != "" {
+		u, err := url.Parse(c.PublicBaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			return fmt.Errorf("public_base_url %q: must be scheme://host[:port] with no path (http or https)", c.PublicBaseURL)
+		}
+	}
+	claimed := map[string]string{} // protocol + "\x00" + role -> model
+	for _, name := range fmtutil.SortedKeys(c.Models) {
+		m := c.Models[name]
+		if m.Meta == nil {
+			continue
+		}
+		seen := map[string]bool{}
+		for _, r := range m.Meta.Roles {
+			if !slices.Contains(ManifestRoles, r) {
+				return fmt.Errorf("model %q: meta.roles: unknown role %q (valid: %s)", name, r, strings.Join(ManifestRoles, ", "))
+			}
+			if seen[r] {
+				return fmt.Errorf("model %q: meta.roles: role %q listed twice", name, r)
+			}
+			seen[r] = true
+			for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+				key := protocol + "\x00" + r
+				if prev, dup := claimed[key]; dup {
+					return fmt.Errorf("models %q and %q both claim manifest role %q on %s — a client could not tell which to use", prev, name, r, protocol)
+				}
+				claimed[key] = name
+			}
 		}
 	}
 	return nil

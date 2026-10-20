@@ -50,6 +50,10 @@
 # `vmr check` 会在某个 fallback 协议 key 匹配不到任何虚拟模型时告警——这样的桶永远不可能生效。
 
 listen: 127.0.0.1:8800
+# public_base_url: https://vmr.example.com   # 客户端应使用的地址，随 GET /manifest 发布
+                                                # （scheme://host[:port]，不带路径）；缺省 -> 取请求自身的
+                                                # scheme 与 Host。放在终止 TLS 的反向代理后面时必须设置：
+                                                # 刻意不信任 X-Forwarded-*
 # api_keys:                      # 可选：给路由器加一层保护（Bearer 或 x-api-key）。每个 key 的
 #                                # 尾部同时也是它调用方的标签：`vmr analyze` 会把这个标签记为每条
 #                                # 请求在 requests/index.json 里的 client_key，于是 request-browser.html
@@ -345,6 +349,13 @@ providers:
 
 models:
   coding:
+    # meta（可选，纯描述，不影响路由）：随 GET /manifest 发布，供 ACM 等配置工具
+    # 为各 Agent 的槽位挑模型。roles 是封闭词表：default / reasoning / fast /
+    # subagent / review。同一协议上每个 role 只能由一个模型声明（冲突是配置加载错误）。
+    # meta:
+    #   display_name: Coding
+    #   description: Main coding model
+    #   roles: [default]
     # 端点按 priority 顺序尝试；除此之外没有别的配置旋钮能改排序方式
     # （见 docs/UserGuide.zh.md"端点尝试顺序 priority"一节）。
     # 下面这些端点都没有显式写 priority——都缺省是 0，打平的情况下按本文件里

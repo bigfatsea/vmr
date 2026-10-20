@@ -120,6 +120,23 @@ type VirtualModel struct {
 	// defaults to true (same polarity as Sticky above). Explicit false opts
 	// out entirely — no partial opt-out of individual entries.
 	Fallback *bool `yaml:"fallback"`
+
+	// Meta is descriptive only: it is published in GET /manifest so clients
+	// (ACM, agent extensions) can pick this model for a role. It never
+	// influences routing — see ManifestRoles.
+	Meta *ModelMeta `yaml:"meta"`
+}
+
+// ManifestRoles is the closed role vocabulary of the published manifest.
+// Each role names a slot that real coding agents have in their own
+// configuration; the gateway never routes by role.
+var ManifestRoles = []string{"default", "reasoning", "fast", "subagent", "review"}
+
+// ModelMeta is the purely descriptive part of a virtual model (GET /manifest).
+type ModelMeta struct {
+	DisplayName string   `yaml:"display_name"`
+	Description string   `yaml:"description"`
+	Roles       []string `yaml:"roles"`
 }
 
 // Duration accepts Go duration strings ("90s", "2m") in YAML.
@@ -313,6 +330,10 @@ type ModelDefaultEntry struct {
 // "register an adapter" — no schema change here.
 type Config struct {
 	Listen string `yaml:"listen"`
+	// PublicBaseURL is the address clients should use (scheme://host[:port],
+	// no path), published in GET /manifest. Optional: absent, the manifest
+	// derives it from the request's own scheme and Host.
+	PublicBaseURL string `yaml:"public_base_url"`
 	// APIKeys is the list of credentials vmr itself accepts (empty = auth
 	// disabled). Each entry gets tagged in the audit trail via audit.KeyTag
 	// (the key's own tail, not a separately configured name) so `vmr analyze`
@@ -517,6 +538,9 @@ func (c *Config) validate() error {
 		return err
 	}
 	if err := c.validateModels(); err != nil {
+		return err
+	}
+	if err := c.validateManifestMeta(); err != nil {
 		return err
 	}
 	if err := c.validateFallbackEndpoints(); err != nil {

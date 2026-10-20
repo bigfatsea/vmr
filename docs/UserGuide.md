@@ -25,6 +25,7 @@ Full configuration reference, protocol behavior, and CLI details. If you just wa
   - [Condition-based routing](#condition-based-routing)
   - [Sticky Model (session affinity)](#sticky-model-session-affinity)
   - [Quota-Aware Routing](#quota-aware-routing)
+  - [Model manifest (GET /manifest)](#model-manifest-get-manifest)
   - [Direct routing (provider:model)](#direct-routing-providermodel)
 - [Built-in console and request statistics](#built-in-console-and-request-statistics)
   - [The console pages](#the-console-pages)
@@ -521,6 +522,26 @@ An alias resolves in exactly one hop — pointing one at another alias, or at a 
 `vmr analyze`'s $ estimates resolve these same two layers independently at report-generation time from whatever `config.yaml` is reachable via its `-c` flag (default `./config.yaml`) — no config.yaml in reach degrades gracefully to standard-list-price-only. See [Cost estimate and pricing](#cost-estimate-and-pricing) below for the display-currency option, independent of each account's `pricing.currency` write-in annotation above.
 
 Full design: `docs/VirtualModelRouter_Design_v4_Quota.md`.
+
+### Model manifest (`GET /manifest`)
+
+`GET /manifest` returns the gateway's self-description for tools that configure coding agents (such as ACM) — same auth as `/status`. It lists the base URL per ingress protocol, whether auth is required, and every virtual model with the protocols it answers on, its optional `display_name` / `description` / `roles`, and the capabilities its candidate endpoints declare (`limit.context`, `modalities`, `tool_call`, `reasoning`; `guarantee` holds only what every candidate declares). Fields nobody declared are omitted, not `false`. The document is computed from the live routing table (a hot reload changes it) and carries a content `ETag`; send `If-None-Match` to get `304`.
+
+Optional config, purely descriptive — it never affects routing:
+
+```yaml
+public_base_url: https://vmr.example.com   # scheme://host[:port], no path; absent -> derived from the request
+models:
+  coding:
+    meta:
+      display_name: Coding
+      description: Main coding model
+      roles: [default]    # default / reasoning / fast / subagent / review
+```
+
+Two models claiming the same role on one protocol is a config load error (the manifest is an external contract and a client cannot choose between them): startup refuses the file, a hot reload keeps the previous config. `vmr check` warns when a served protocol has no `default` role. A protocol whose providers are all disabled is not published, nor listed on its models.
+
+**Behind a reverse proxy, set `public_base_url`.** Without it the endpoints are built from the scheme and `Host` vmr itself saw, so behind a TLS-terminating proxy they come out as `http://`. `X-Forwarded-Proto`/`X-Forwarded-Host` are deliberately not trusted (vmr has no trusted-proxy notion, and a forged header would point clients — and their keys — at another host); vmr logs one `WARN` when it sees them while `public_base_url` is unset. Direct-routing names are not listed. `GET /v1/models` entries also carry `vmr_protocols`, `display_name` and `description`.
 
 ### Direct routing (`provider:model`)
 

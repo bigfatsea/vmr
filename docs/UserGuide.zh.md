@@ -25,6 +25,7 @@
   - [条件路由](#条件路由)
   - [Sticky Model 会话亲和](#sticky-model-会话亲和)
   - [额度感知路由 Quota-Aware Routing](#额度感知路由-quota-aware-routing)
+  - [模型清单（GET /manifest）](#模型清单get-manifest)
   - [直连寻址（provider:model）](#直连寻址providermodel)
 - [内置控制台与请求统计](#内置控制台与请求统计)
   - [控制台页面](#控制台页面)
@@ -514,6 +515,26 @@ providers:
 `vmr analyze` 的 $ 估算在生成报表时独立解析这同样两层——从 `-c` 指定的 config.yaml（默认 `./config.yaml`）读取，找不到时优雅降级为只用标准列表价。展示币种选项（与每个账号自己的 `pricing.currency` 书写标注相互独立）见下文[成本估算与定价](#成本估算与定价)。
 
 完整设计：`docs/VirtualModelRouter_Design_v4_Quota.md`。
+
+### 模型清单（`GET /manifest`）
+
+`GET /manifest` 返回网关的自我描述，供 ACM 这类为编码 Agent 写配置的工具使用——鉴权与 `/status` 相同。内容：每个入口协议的 base URL、是否需要鉴权，以及每个虚拟模型的可用协议、可选的 `display_name` / `description` / `roles`，和候选端点声明的能力（`limit.context`、`modalities`、`tool_call`、`reasoning`；`guarantee` 只含**所有**候选都声明的部分）。没人声明的字段直接省略，不写 `false`。清单每次从当前路由表现算（热重载后随之变化），带内容 `ETag`；带 `If-None-Match` 命中时返回 `304`。
+
+可选配置，纯描述、从不影响路由：
+
+```yaml
+public_base_url: https://vmr.example.com   # scheme://host[:port]，不带路径；缺省 -> 取请求自身
+models:
+  coding:
+    meta:
+      display_name: Coding
+      description: Main coding model
+      roles: [default]    # default / reasoning / fast / subagent / review
+```
+
+同一协议上两个模型声明同一个 role 是配置加载错误（清单是对外契约，客户端无法在两者之间选择）：启动时直接拒绝，热重载时保留旧配置。已服务的协议没有 `default` role 时 `vmr check` 给出告警。某协议下的 provider 全部被禁用时，该协议不会发布，也不会出现在模型的协议列表里。
+
+**放在反向代理后面时，请设置 `public_base_url`。** 未设置时端点由 vmr 自己看到的 scheme 与 `Host` 拼出，所以经终止 TLS 的代理后会得到 `http://`。`X-Forwarded-Proto` / `X-Forwarded-Host` 刻意不信任（vmr 没有「可信代理」的概念，伪造的头会把客户端及其 key 指向别的主机）；`public_base_url` 未设置而又看到这些头时，vmr 打印一条 `WARN`。直连名（`provider:model`）不列入清单；`GET /v1/models` 的条目另带 `vmr_protocols`、`display_name`、`description`。
 
 ### 直连寻址（`provider:model`）
 

@@ -87,6 +87,7 @@ func (c *Config) Check() []Issue {
 	issues = append(issues, c.checkModels()...)
 	issues = append(issues, c.checkFallbackReachability()...)
 	issues = append(issues, c.checkModelDefaultsCapabilities()...)
+	issues = append(issues, c.checkManifestRoles()...)
 	return issues
 }
 
@@ -414,6 +415,42 @@ func (c *Config) checkFallbackReachability() []Issue {
 		if !reachable[protocol] {
 			issues = append(issues, Issue{Field: "fallback", Severity: SeverityWarning, Message: fmt.Sprintf(
 				"fallback protocol %q matches no virtual model — it will never be used", protocol)})
+		}
+	}
+	return issues
+}
+
+// checkManifestRoles warns about a protocol that serves models but offers no "default"
+// role, which leaves clients on that protocol without a main model. Two models claiming
+// one role on a protocol is not reported here: validateManifestMeta rejects it at load.
+func (c *Config) checkManifestRoles() []Issue {
+	var issues []Issue
+	claimed := map[string]map[string]bool{} // protocol -> role
+	served := map[string]bool{}
+	anyRoles := false
+	for _, name := range fmtutil.SortedKeys(c.Models) {
+		m := c.Models[name]
+		for _, protocol := range fmtutil.SortedKeys(m.Endpoints) {
+			served[protocol] = true
+			if m.Meta == nil {
+				continue
+			}
+			for _, r := range m.Meta.Roles {
+				anyRoles = true
+				if claimed[protocol] == nil {
+					claimed[protocol] = map[string]bool{}
+				}
+				claimed[protocol][r] = true
+			}
+		}
+	}
+	if !anyRoles {
+		return issues
+	}
+	for _, protocol := range fmtutil.SortedKeys(served) {
+		if !claimed[protocol]["default"] {
+			issues = append(issues, Issue{Field: "meta", Severity: SeverityWarning, Message: fmt.Sprintf(
+				"no model has manifest role \"default\" on %s — agents that speak %s cannot pick a main model from GET /manifest", protocol, protocol)})
 		}
 	}
 	return issues

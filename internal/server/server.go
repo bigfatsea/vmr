@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"vmr/internal/adapter"
@@ -62,6 +63,10 @@ type Server struct {
 	// tests tighten it to keep slow-body scenarios fast; production leaves
 	// it zero and gets the default.
 	bodyReadTimeout time.Duration
+
+	// fwdWarned makes the "forwarded headers but no public_base_url" notice
+	// of GET /manifest fire once per process, not once per fetch.
+	fwdWarned atomic.Bool
 }
 
 func New(rt *router.Router, auditLog *audit.Logger) *Server {
@@ -74,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/messages", s.chatHandler(core.ProtocolAnthropicMessages))
 	mux.HandleFunc("POST /v1/responses", s.chatHandler(core.ProtocolOpenAIResponses))
 	mux.HandleFunc("GET /v1/models", s.auth(s.models))
+	mux.HandleFunc("GET /manifest", s.auth(s.manifest))
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /status", s.auth(s.adminStatus))
 	mux.HandleFunc("GET /status.html", s.statusPage)
@@ -477,6 +483,32 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 		Type     string `json:"type"`
 		OwnedBy  string `json:"owned_by"`
 		Protocol string `json:"vmr_protocol"`
+		// Protocols lists every ingress protocol the name answers on (Protocol keeps
+		// only the first, for older clients); DisplayName/Description come from meta.
+		Protocols   []string `json:"vmr_protocols"`
+		DisplayName string   `json:"display_name,omitempty"`
+		Description string   `json:"description,omitempty"`
+	}
+	protocolsOf := map[string][]string{}
+	for _, protocol := range fmtutil.SortedKeys(snap.Models) {
+		for name := range snap.Models[protocol] {
+			protocolsOf[name] = append(protocolsOf[name], protocol)
+		}
+	}
+	for _, protocol := range fmtutil.SortedKeys(snap.Direct) {
+		for name := range snap.Direct[protocol] {
+			protocolsOf[name] = append(protocolsOf[name], protocol)
+		}
+	}
+	for _, ps := range protocolsOf {
+		sort.Strings(ps)
+	}
+	describe := func(m model) model {
+		m.Protocols = protocolsOf[m.ID]
+		if meta := snap.Cfg.Models[m.ID].Meta; meta != nil {
+			m.DisplayName, m.Description = meta.DisplayName, meta.Description
+		}
+		return m
 	}
 	// A virtual model name can be registered under more than one ingress
 	// protocol at once (one openai-completions endpoint group and one
@@ -496,7 +528,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 				continue
 			}
 			seen[name] = true
-			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: protocol})
+			list = append(list, describe(model{ID: name, Object: "model", Type: "model", OwnedBy: "vmr", Protocol: protocol}))
 		}
 	}
 	// Direct routing names (empty unless direct_routing is on): owned_by
@@ -508,7 +540,7 @@ func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
 			}
 			seen[name] = true
 			prov, _, _ := strings.Cut(name, ":")
-			list = append(list, model{ID: name, Object: "model", Type: "model", OwnedBy: prov, Protocol: protocol})
+			list = append(list, describe(model{ID: name, Object: "model", Type: "model", OwnedBy: prov, Protocol: protocol}))
 		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })

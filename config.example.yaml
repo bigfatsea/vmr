@@ -64,6 +64,10 @@
 # matches no virtual model at all — such a bucket could never fire.
 
 listen: 127.0.0.1:8800
+# public_base_url: https://vmr.example.com   # address clients should use, published in GET /manifest
+                                                # (scheme://host[:port], no path); absent -> derived from the request's
+                                                # own scheme and Host. Behind a TLS-terminating proxy, set it:
+                                                # X-Forwarded-* is deliberately not trusted
 # api_keys:                      # optional: protect the router (Bearer or x-api-key). Each key's
 #                                # tail also tags its caller: `vmr analyze` records that tag as each
 #                                # request's client_key in requests/index.json, so request-browser.html
@@ -411,6 +415,14 @@ providers:
 
 models:
   coding:
+    # meta (optional, descriptive only — published in GET /manifest for config
+    # tools such as ACM; it never affects routing). roles is a closed set:
+    # default / reasoning / fast / subagent / review. Each role may be claimed
+    # by one model per protocol (a conflict is a config load error).
+    # meta:
+    #   display_name: Coding
+    #   description: Main coding model
+    #   roles: [default]
     # Endpoints try in priority order; there's no config knob to change
     # ordering beyond that (see docs/UserGuide.md's "Endpoint try-order").
     # Endpoints below have no explicit priority — ties (everyone defaults
