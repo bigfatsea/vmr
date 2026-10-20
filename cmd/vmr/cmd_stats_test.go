@@ -58,6 +58,9 @@ func TestStatsRebuild(t *testing.T) {
 	if !stats.DayFileExists(statsDir, day) || stats.DayFileExists(statsDir, now.Format("2006-01-02")) {
 		t.Fatalf("rebuild must write yesterday and never today:\n%s", out.String())
 	}
+	if !strings.Contains(out.String(), "left alone") || !strings.Contains(out.String(), "-today") {
+		t.Errorf("skipping today must be said out loud, with the way to include it:\n%s", out.String())
+	}
 	if _, err := os.Stat(filepath.Join(statsDir, day+".jsonl.zst")); err != nil {
 		t.Fatalf("closed day must be compressed: %v", err)
 	}

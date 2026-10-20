@@ -73,7 +73,7 @@ type rebuildDay struct {
 func runStatsRebuild(paths []string, o rebuildOpts, out io.Writer) error {
 	today := o.now.In(time.Local).Format("2006-01-02")
 	days := map[string]*rebuildDay{}
-	var total, parseErrs, skipped, undated int
+	var total, parseErrs, skipped, undated, todaySkipped int
 	for _, p := range paths {
 		rc, err := audit.OpenLogFile(p)
 		if err != nil {
@@ -91,6 +91,9 @@ func runStatsRebuild(paths []string, o rebuildOpts, out io.Writer) error {
 				return
 			}
 			day := stats.DayOf(e)
+			if day == today && !o.today && ok {
+				todaySkipped++
+			}
 			if day > today || (day == today && !o.today) || (o.from != "" && day < o.from) || (o.to != "" && day > o.to) {
 				return
 			}
@@ -146,6 +149,9 @@ func runStatsRebuild(paths []string, o rebuildOpts, out io.Writer) error {
 	}
 	tw.Flush()
 	fmt.Fprintf(out, "\n%d audit records read from %d file(s); %d day(s) written, %d kept; statistics directory %s\n", total, len(paths), written, kept, o.dir)
+	if todaySkipped > 0 {
+		fmt.Fprintf(out, "%d record(s) from today (%s) were left alone: a running vmr owns today's file. Stop vmr and add -today (with -force if the file exists) to rebuild today too.\n", todaySkipped, today)
+	}
 	if parseErrs > 0 || skipped > 0 || undated > 0 {
 		fmt.Fprintf(out, "%d unparseable line(s), %d oversized line(s), %d line(s) without a timestamp skipped\n", parseErrs, skipped, undated)
 	}
