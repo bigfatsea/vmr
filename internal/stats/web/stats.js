@@ -85,6 +85,19 @@ const VMRStats = (() => {
     return hueCache.get(name);
   }
 
+  // endpointParts splits a "provider:model" endpoint value at the first colon.
+  function endpointParts(v) {
+    const i = v.indexOf(':');
+    return i >= 0 ? [v.slice(0, i), v.slice(i + 1)] : ['', v];
+  }
+
+  // dimHue is the colour a dimension value shares with its model name on every
+  // other panel, or '' when the dimension carries no model.
+  function dimHue(dim, v, other) {
+    if (v === other || !v || (dim !== 'endpoint' && dim !== 'model')) return '';
+    return modelHue(dim === 'endpoint' ? endpointParts(v)[1] : v);
+  }
+
   // dimValue renders one dimension value; '' means "absent" (an endpoint
   // that was never routed, a request without a caller tag, ...).
   function dimValue(dim, v, other) {
@@ -93,9 +106,7 @@ const VMRStats = (() => {
       return dim === 'endpoint' ? '<span class="dim" title="No upstream attempt was made">(unrouted)</span>' : '<span class="dim">(none)</span>';
     }
     if (dim === 'endpoint' || dim === 'model') {
-      const i = dim === 'endpoint' ? v.indexOf(':') : -1;
-      const prov = i >= 0 ? v.slice(0, i) : '';
-      const model = i >= 0 ? v.slice(i + 1) : v;
+      const [prov, model] = dim === 'endpoint' ? endpointParts(v) : ['', v];
       return `<span class="ep" title="${attr(v)}">${prov ? esc(prov) + ':' : ''}<span style="color:${modelHue(model)}">${esc(model)}</span></span>`;
     }
     return esc(v);
@@ -244,6 +255,12 @@ const VMRStats = (() => {
   for (let p = 1; p <= 1e12; p *= 10) INT_INCRS.push(p, 2 * p, 5 * p);
   const wholeKind = k => k === 'count' || k === 'tokens';
 
+  // groupHue colours a series grouped by exactly one model-bearing dimension
+  // with its model's colour; '' for every other grouping.
+  function groupHue(s) {
+    return s.group.length === 1 ? dimHue(s.dims[0], s.group[0], null) : '';
+  }
+
   function cssVar(name, fallback) {
     try {
       const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -296,7 +313,7 @@ const VMRStats = (() => {
     groups.forEach((gv, gi) => {
       mIdx.forEach(mi => {
         const ys = new Array(xs.length).fill(null);
-        series.push({ group: gv, metric: cols[mi].name, kind: cols[mi].kind, ys, gi });
+        series.push({ group: gv, metric: cols[mi].name, kind: cols[mi].kind, ys, gi, mk: mIdx.indexOf(mi), dims: dimIdx.map(i => cols[i].name) });
       });
     });
     (res.rows || []).forEach(r => {
@@ -346,7 +363,10 @@ const VMRStats = (() => {
       series: [{ value: (u, ts) => ts == null ? '' : bucketLabel(new Date(ts * 1000).toISOString(), o.step) }].concat(series.map((s, i) => ({
         label: s.label,
         scale: axisFor(s.kind),
-        stroke: cssVar(!s.group.length && METRIC_COLOR[s.metric] ? METRIC_COLOR[s.metric] : PALETTE[i % PALETTE.length], '#58a6ff'),
+        stroke: groupHue(s) || cssVar(!s.group.length && METRIC_COLOR[s.metric] ? METRIC_COLOR[s.metric] : PALETTE[i % PALETTE.length], '#58a6ff'),
+        // A group coloured by its model keeps one colour across metrics, so
+        // the second and later metrics are told apart by dash instead.
+        dash: groupHue(s) && s.mk ? [[], [6, 4], [2, 3]][s.mk % 3] : undefined,
         width: 1.6,
         // Percentiles and ratios are null wherever a bucket has no sample, so
         // their lines break into isolated points: always draw the points.
@@ -394,5 +414,5 @@ const VMRStats = (() => {
   // link builds a /stats.html URL that opens the given state.
   function link(st) { return '/stats.html#' + encodeState(st); }
 
-  return { api, attr, qs, value, escWhere, splitWhere, dimValue, bucketLabel, fmtMS, table, eventsTable, seriesOf, chart, encodeState, decodeState, link, wallSeconds };
+  return { api, attr, qs, value, escWhere, splitWhere, dimValue, dimHue, bucketLabel, fmtMS, table, eventsTable, seriesOf, chart, encodeState, decodeState, link, wallSeconds };
 })();

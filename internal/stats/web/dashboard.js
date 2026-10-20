@@ -358,7 +358,7 @@ const VMRDash = (() => {
     // no token record, in the token view) stays out of the legend.
     return { buckets: pv.buckets, dim: st.split, faults: st.act === 'req' && d.outcome ? faultsOf(d) : undefined,
       ser: pv.groups.filter(([, vals]) => sum(vals) > 0).map(([name, vals], i) => ({ key: name, label: name === other ? 'other' : (name || (st.split === 'endpoint' ? '(unrouted)' : '(none)')),
-        color: v(name === other ? OTHER_COLOR : CAT[i % CAT.length]), vals })) };
+        color: name === other ? v(OTHER_COLOR) : VMRStats.dimHue(st.split, name, other) || v(CAT[i % CAT.length]), vals })) };
   }
 
   function renderActivity(d, st, other, width) {
